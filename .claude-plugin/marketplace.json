@@ -1,0 +1,21 @@
+{
+  "name": "ultraship",
+  "owner": { "name": "Miguel Rasero" },
+  "metadata": {
+    "description": "How to ship with Claude Code: a model-pinned review pipeline and a multi-lane coordinator."
+  },
+  "plugins": [
+    {
+      "name": "ship",
+      "source": "./plugins/ship",
+      "description": "Ship a task through planned slices, frozen-SHA reviews, cross-model panels, one fix batch, Better Review babysitting, and a ledger-backed completion gate.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "chief",
+      "source": "./plugins/chief",
+      "description": "Coordinate multi-lane engineering work from the main session: ship drivers and writers per lane, a persistent board, verified pull requests, and guarded worktree teardown.",
+      "version": "1.0.0"
+    }
+  ]
+}

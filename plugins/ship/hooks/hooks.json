@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Task|Bash|Edit|Write|NotebookEdit|Read|Grep|Glob|LSP|WebFetch|WebSearch|mcp__fff__.*",
+        "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py\" pre" }]
+      }
+    ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py\" subagent-stop" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py\" stop" }] }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py\" compact" }]
+      }
+    ]
+  }
+}

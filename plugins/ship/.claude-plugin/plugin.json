@@ -1,0 +1,9 @@
+{
+  "name": "ship",
+  "description": "Ship a task through planned slices, frozen-SHA reviews, cross-model panels, one fix batch, Better Review babysitting, and a ledger-backed completion gate.",
+  "version": "1.0.0",
+  "author": { "name": "Miguel Rasero" },
+  "repository": "https://github.com/miguelrisero/ultraship",
+  "license": "MIT",
+  "keywords": ["shipping", "review", "panel", "pull-request", "agents"]
+}
