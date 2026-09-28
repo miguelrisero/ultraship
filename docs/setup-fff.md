@@ -11,7 +11,7 @@ Use one of these methods.
 ### Install script (Linux and macOS)
 
 ```bash
-curl -L https://dmtrkovalenko.dev/install-fff-mcp.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dmtrKovalenko/fff/main/install-mcp.sh | bash
 ```
 
 The script puts the binary in `~/.local/bin/fff-mcp`.
