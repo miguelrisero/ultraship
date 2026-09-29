@@ -63,10 +63,10 @@ with tempfile.TemporaryDirectory() as tmp:
 
     session = {'session_id': 's1', 'cwd': str(repo)}
     assert 'Open ship run: run-1' in hook('compact', session, env)
-    hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol-xhigh'}, env)
+    hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol'}, env)
     hook('subagent-stop', {**session, 'agent_type': 'ship:writer--sol'}, env)
     blocked = hook('stop', session, env)
-    assert blocked['decision'] == 'block' and 'reviewer--sol-xhigh' in blocked['reason']
+    assert blocked['decision'] == 'block' and 'reviewer--sol' in blocked['reason']
     assert hook('stop', session, env) == ''
 
     hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--opus'}, env)

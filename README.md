@@ -23,7 +23,7 @@ Then set up the tools the agents use:
   └─ plan (ship:planner--sol) → freeze lanes → panel
   └─ per lane: ship:driver runs /ship:ship light
        ├─ ship:writer--sol writes each slice
-       ├─ ship:reviewer--sol-xhigh reviews each slice
+       ├─ ship:reviewer--sol reviews each slice
        ├─ /ship:review simplify + /ship:review (Opus)
        ├─ one fix batch, one fix read
        ├─ push, PR, /ship:babysit (CI + Better Review)
@@ -37,17 +37,16 @@ Use `/ship:ship <task>` alone for one task. Full mode adds a plan, a high panel,
 
 | Role | Model | Effort | Fallback |
 |---|---|---|---|
-| Planner | `gpt-6-sol` | xhigh | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
-| Writer | `gpt-6-sol` | max | `claude-sonnet-5-5` (high), `cf-glm-5.3` (high) |
-| Slice review, selection, fix read | `gpt-6-sol` | xhigh | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
-| Closing pass, final panel lead | `gpt-5.6-sol` | max | `gpt-6-sol`, `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
+| Planner | `gpt-6.1-sol` | high | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
+| Writer | `gpt-6.1-sol` | high | `claude-sonnet-5-5` (high), `cf-glm-5.3` (high) |
+| Slice review, selection, fix read, high and final panels, closing pass | `gpt-6.1-sol` | high | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
 | Deep review, simplify | `claude-opus-5-5` | xhigh | `claude-sonnet-5-5` |
 | Required panel seat, billing and authorization verifier | `claude-fable-5-1` | xhigh | `gpt-6-astra` (xhigh) |
-| Babysit triage | `cf-glm-5.3` | high | `gpt-6-sol`, `claude-sonnet-5-5` |
+| Babysit triage | `cf-glm-5.3` | high | `gpt-6.1-sol`, `claude-sonnet-5-5` |
 | Research | `cf-deepseek-v4-flash` | medium | `cf-glm-5.3-flash`, `gpt-6-luna`, `claude-sonnet-5-5` |
 | Chief, driver | session model | — | — |
 
-Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effort max. The full roster, with panels, is in [`plugins/ship/skills/ship/references/roster.md`](plugins/ship/skills/ship/references/roster.md).
+Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effort max. Sol runs at effort high. The full roster, with panels, is in [`plugins/ship/skills/ship/references/roster.md`](plugins/ship/skills/ship/references/roster.md).
 
 ## Panels
 
@@ -55,8 +54,8 @@ Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effo
 |---|---|---|
 | `light` | DeepSeek Flash, GLM Flash, Luna | Cheap checks |
 | `design` | Astra, Fable, GLM, DeepSeek Pro | Design and architecture |
-| `high` | Sol max, GLM, DeepSeek Pro | Plan refutation and branch review |
-| `final` | Sol 5.6 max, Fable, GLM, DeepSeek Pro, Kimi | Final review before push |
+| `high` | Sol, GLM, DeepSeek Pro | Plan refutation and branch review |
+| `final` | Sol, Fable, GLM, DeepSeek Pro, Kimi | Final review before push |
 
 ## Rules the plugins enforce
 

@@ -37,7 +37,7 @@ When `gh pr view --json mergeStateStatus` reports `BEHIND` or `DIRTY`, merge cur
 
 ## Breaker
 
-- At round 5, or when the same failure signature repeats twice, dispatch `ship:reviewer--sol56-max` on the failures, the threads, and the fix history. Follow its root-cause plan in the next round.
+- At round 5, or when the same failure signature repeats twice, dispatch `ship:reviewer--sol` on the failures, the threads, and the fix history. Follow its root-cause plan in the next round.
 - At round 10, stop. Report the open failures and threads, each with its link, and the next action.
 
 ## Done

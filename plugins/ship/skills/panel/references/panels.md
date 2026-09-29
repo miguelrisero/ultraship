@@ -6,12 +6,12 @@
 |---|---|---|
 | `light` | `reviewer--deepseek-flash`, `reviewer--glm-flash`, `reviewer--luna` | Cheap checks |
 | `design` | `reviewer--astra`, `reviewer--fable`, `reviewer--glm`, `reviewer--deepseek` | Design and architecture |
-| `high` (default) | `reviewer--sol-max`, `reviewer--glm`, `reviewer--deepseek` | Plan refutation and branch review |
-| `final` | `reviewer--sol56-max`, `reviewer--fable`, `reviewer--glm`, `reviewer--deepseek`, `reviewer--kimi` | Final review before push |
+| `high` (default) | `reviewer--sol`, `reviewer--glm`, `reviewer--deepseek` | Plan refutation and branch review |
+| `final` | `reviewer--sol`, `reviewer--fable`, `reviewer--glm`, `reviewer--deepseek`, `reviewer--kimi` | Final review before push |
 
 `reviewer--fable` is a required seat in `design` and `final`. When it is unavailable, `reviewer--astra` takes the seat; in `design`, where Astra already sits, the panel counts one Astra seat and is incomplete. `reviewer--kimi` is a trial seat until 2026-10-09; its absence does not make the panel incomplete.
 
-Model families for vote counting: OpenAI (`sol`, `sol56`, `astra`, `luna`), Anthropic (`fable`, `opus`, `sonnet`), GLM, DeepSeek, Kimi.
+Model families for vote counting: OpenAI (`sol`, `astra`, `luna`), Anthropic (`fable`, `opus`, `sonnet`), GLM, DeepSeek, Kimi.
 
 ## Challenge lenses
 

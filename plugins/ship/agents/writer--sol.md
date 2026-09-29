@@ -1,8 +1,8 @@
 ---
 name: writer--sol
 description: Write code for one assigned slice in an assigned worktree. Default writer.
-model: gpt-6-sol
-effort: max
+model: gpt-6.1-sol
+effort: high
 disallowedTools: Agent
 ---
 
