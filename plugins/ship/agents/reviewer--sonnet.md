@@ -1,7 +1,7 @@
 ---
 name: reviewer--sonnet
 description: Last-resort reviewer. Use only when the fallback chain for a seat is exhausted.
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 effort: high
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
 ---

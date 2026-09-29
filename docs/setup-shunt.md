@@ -6,7 +6,7 @@ The other models reach Claude Code through [Better Shunt](https://github.com/mig
 
 | Model ID | Provider | Path |
 |---|---|---|
-| `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-sonnet-5-5` | Anthropic | shunt passthrough |
+| `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5-5` | Anthropic | shunt passthrough |
 | `gpt-6-sol`, `gpt-5.6-sol`, `gpt-6-luna`, `gpt-6-astra` | ChatGPT login (Codex) | shunt `responses` adapter |
 | `cf-glm-5.3`, `cf-glm-5.3-flash`, `cf-deepseek-v4-pro`, `cf-deepseek-v4-flash` | Cloudflare Workers AI | shunt, then CCR |
 | `kimi-k3` | Kimi coding API | shunt `anthropic` adapter |
@@ -234,7 +234,7 @@ Use these IDs in the Claude Code picker:
 |---|---|
 | `claude-fable-5-1[1m]` | Claude Fable 5.1 (1M) |
 | `claude-opus-5-5[1m]` | Claude Opus 5.5 (1M) |
-| `claude-sonnet-5[1m]` | Claude Sonnet 5 (1M) |
+| `claude-sonnet-5-5[1m]` | Claude Sonnet 5.5 (1M) |
 | `haiku` | Claude Haiku (200k) |
 | `gpt-6-astra[1m]` | GPT-6 Astra (1M) |
 | `gpt-6-sol[1m]` | GPT-6 Sol (1M) |
@@ -260,7 +260,7 @@ The upstream window can be smaller:
 - The Cloudflare deployments above advertise 1,048,576 tokens.
 - Kimi gives 1M on some plan tiers only.
 
-> Verify: `claude-sonnet-5[1m]` gets a 1M window on your Anthropic plan.
+> Verify: `claude-sonnet-5-5[1m]` gets a 1M window on your Anthropic plan.
 
 ## The CCR layer
 
@@ -412,7 +412,7 @@ Run both processes under a supervisor for daily use, for example a systemd user 
        "options": [
          { "model": "claude-fable-5-1[1m]", "label": "Claude Fable 5.1 (1M)" },
          { "model": "claude-opus-5-5[1m]", "label": "Claude Opus 5.5 (1M)" },
-         { "model": "claude-sonnet-5[1m]", "label": "Claude Sonnet 5 (1M)" },
+         { "model": "claude-sonnet-5-5[1m]", "label": "Claude Sonnet 5.5 (1M)" },
          { "model": "haiku", "label": "Claude Haiku (200k)" },
          { "model": "gpt-6-astra[1m]", "label": "GPT-6 Astra (1M)" },
          { "model": "gpt-6-sol[1m]", "label": "GPT-6 Sol (1M)" },

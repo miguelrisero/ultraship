@@ -1,7 +1,7 @@
 ---
 name: researcher--sonnet
 description: Last-resort researcher. Use only when every other researcher is unavailable.
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 effort: high
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
 ---
