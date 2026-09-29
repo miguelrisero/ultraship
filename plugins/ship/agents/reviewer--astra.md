@@ -1,8 +1,8 @@
 ---
 name: reviewer--astra
-description: Panel seat for the design panel.
+description: Panel seat for the design panel, and the fallback for ship:reviewer--fable.
 model: gpt-6-astra
-effort: high
+effort: xhigh
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
 ---
 

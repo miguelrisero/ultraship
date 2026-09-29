@@ -6,7 +6,7 @@ The other models reach Claude Code through [Better Shunt](https://github.com/mig
 
 | Model ID | Provider | Path |
 |---|---|---|
-| `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5` | Anthropic | shunt passthrough |
+| `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-sonnet-5-5` | Anthropic | shunt passthrough |
 | `gpt-6-sol`, `gpt-5.6-sol`, `gpt-6-luna`, `gpt-6-astra` | ChatGPT login (Codex) | shunt `responses` adapter |
 | `cf-glm-5.3`, `cf-glm-5.3-flash`, `cf-deepseek-v4-pro`, `cf-deepseek-v4-flash` | Cloudflare Workers AI | shunt, then CCR |
 | `kimi-k3` | Kimi coding API | shunt `anthropic` adapter |

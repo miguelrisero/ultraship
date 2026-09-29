@@ -2,7 +2,7 @@
 name: planner--opus
 description: Fallback planner. Use only when ship:planner--sol is unavailable.
 model: claude-opus-5-5
-effort: max
+effort: xhigh
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
 ---
 

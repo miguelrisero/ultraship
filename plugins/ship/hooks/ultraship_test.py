@@ -26,7 +26,7 @@ def denied(result):
 
 with tempfile.TemporaryDirectory() as tmp:
     env = {**os.environ, 'XDG_STATE_HOME': tmp, 'HOME': tmp}
-    writer = {'agent_type': 'ship:writer--opus', 'agent_id': 'w1', 'tool_name': 'Bash'}
+    writer = {'agent_type': 'ship:writer--sol', 'agent_id': 'w1', 'tool_name': 'Bash'}
 
     assert denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--glm', 'model': 'opus'}}, env))
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--glm'}}, env))
@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory() as tmp:
     session = {'session_id': 's1', 'cwd': str(repo)}
     assert 'Open ship run: run-1' in hook('compact', session, env)
     hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol-xhigh'}, env)
-    hook('subagent-stop', {**session, 'agent_type': 'ship:writer--opus'}, env)
+    hook('subagent-stop', {**session, 'agent_type': 'ship:writer--sol'}, env)
     blocked = hook('stop', session, env)
     assert blocked['decision'] == 'block' and 'reviewer--sol-xhigh' in blocked['reason']
     assert hook('stop', session, env) == ''

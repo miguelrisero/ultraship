@@ -1,8 +1,8 @@
 ---
-name: writer--opus
-description: Write code for one assigned slice in an assigned worktree. Default writer.
-model: claude-opus-5-5
-effort: max
+name: writer--glm
+description: Last-resort writer. Use only when ship:writer--sol and ship:writer--sonnet are unavailable.
+model: cf-glm-5.3
+effort: high
 disallowedTools: Agent
 ---
 

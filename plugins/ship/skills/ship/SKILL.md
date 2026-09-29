@@ -27,7 +27,7 @@ The session that runs this skill is the driver. It plans, dispatches, records, a
 
 - Read [roster](references/roster.md) before the first dispatch. Use each scoped `ship:*` agent and leave the Agent `model` field unset. A hook denies overrides.
 - On an unavailable agent, dispatch the next agent in its fallback chain and record the substitution in the ledger note.
-- Code goes to `ship:writer--opus`, one slice at a time, in the assigned worktree. Continue an existing writer with SendMessage for fixes on its slice.
+- Code goes to `ship:writer--sol`, one slice at a time, in the assigned worktree. Continue an existing writer with SendMessage for fixes on its slice.
 - Writers cannot push, merge, deploy, or publish. The driver does these steps within the granted authority.
 - Important planning goes to `ship:planner--sol`. Broad research goes to `ship:researcher--flash`.
 - Freeze one subject SHA per review step. Give every seat the same brief and keep sibling verdicts out of it.
