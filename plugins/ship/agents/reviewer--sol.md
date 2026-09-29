@@ -1,8 +1,8 @@
 ---
-name: reviewer--sol-max
-description: Panel seat for the high panel at a frozen SHA.
-model: gpt-6-sol
-effort: max
+name: reviewer--sol
+description: Slice review, finding selection, fix read, high and final panel seat, closing pass, and babysit breaker review at a frozen SHA.
+model: gpt-6.1-sol
+effort: high
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
 ---
 

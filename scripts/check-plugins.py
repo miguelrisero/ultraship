@@ -8,7 +8,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = {
-    'gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol', 'gpt-6-luna', 'cf-glm-5.3',
+    'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna', 'cf-glm-5.3',
     'cf-glm-5.3-flash', 'cf-deepseek-v4-pro', 'cf-deepseek-v4-flash',
     'kimi-k3', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5',
     'inherit',
@@ -58,6 +58,8 @@ def inspect_text(text, path):
             errors.append('unsupported effort: ' + fields['effort'])
         if fields.get('model') == 'claude-opus-5-5' and fields.get('effort') == 'max':
             errors.append('opus agents run at xhigh, never max')
+        if fields.get('model') == 'gpt-6.1-sol' and fields.get('effort', 'high') != 'high':
+            errors.append('sol agents run at high')
         if fields['name'].startswith('writer--') and 'Agent' not in fields.get('disallowedTools', ''):
             errors.append('writers must disallow Agent')
     if '${SKILL_DIR}' in text:
@@ -141,6 +143,8 @@ def self_test():
     assert inspect_text(text.replace('gpt-6-astra', 'claude-opus-5-5').replace('model:', 'effort: max\nmodel:'), Path('agents/test.md'))
     assert not inspect_text(text.replace('gpt-6-astra', 'claude-opus-5-5').replace('model:', 'effort: xhigh\nmodel:'), Path('agents/test.md'))
     assert not inspect_text(text.replace('name: test', 'name: writer--x\ndisallowedTools: Agent'), Path('agents/test.md'))
+    assert inspect_text(text.replace('gpt-6-astra', 'gpt-6.1-sol').replace('model:', 'effort: xhigh\nmodel:'), Path('agents/test.md'))
+    assert not inspect_text(text.replace('gpt-6-astra', 'gpt-6.1-sol').replace('model:', 'effort: high\nmodel:'), Path('agents/test.md'))
     assert inspect_text('prefix\n' + text, Path('SKILL.md'))
     assert frontmatter('---\nname: test\ndescription: >\n  A narrow\n  trigger.\n---\n')['description'] == 'A narrow trigger.'
     assert version_error('1.0.1', '1.0.0')

@@ -31,10 +31,10 @@ Light mode runs steps 1, 3, 5, 7, 9, 10, and 12. Detail: [`skills/ship/reference
 
 ## Agents
 
-The plugin defines 26 model-pinned agents. [`skills/ship/references/roster.md`](skills/ship/references/roster.md) lists each model, effort, use, and fallback chain.
+The plugin defines 24 model-pinned agents. [`skills/ship/references/roster.md`](skills/ship/references/roster.md) lists each model, effort, use, and fallback chain.
 
-- Writers: `gpt-6-sol` at max effort, with `claude-sonnet-5-5` (high) and `cf-glm-5.3` (high) as fallbacks.
-- Reviewers: `gpt-6-sol`, `gpt-5.6-sol`, `claude-opus-5-5`, `claude-fable-5-1`, `gpt-6-astra`, `cf-glm-5.3`, `cf-deepseek-v4-pro`, and `kimi-k3`.
+- Writers: `gpt-6.1-sol` at high effort, with `claude-sonnet-5-5` (high) and `cf-glm-5.3` (high) as fallbacks.
+- Reviewers: `gpt-6.1-sol`, `claude-opus-5-5`, `claude-fable-5-1`, `gpt-6-astra`, `cf-glm-5.3`, `cf-deepseek-v4-pro`, and `kimi-k3`.
 - Read-only agents get read, LSP, fff, and web tools only.
 
 Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-shunt.md).

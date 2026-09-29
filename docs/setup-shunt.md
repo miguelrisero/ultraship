@@ -7,7 +7,7 @@ The other models reach Claude Code through [Better Shunt](https://github.com/mig
 | Model ID | Provider | Path |
 |---|---|---|
 | `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5-5` | Anthropic | shunt passthrough |
-| `gpt-6-sol`, `gpt-5.6-sol`, `gpt-6-luna`, `gpt-6-astra` | ChatGPT login (Codex) | shunt `responses` adapter |
+| `gpt-6.1-sol`, `gpt-6-luna`, `gpt-6-astra` | ChatGPT login (Codex) | shunt `responses` adapter |
 | `cf-glm-5.3`, `cf-glm-5.3-flash`, `cf-deepseek-v4-pro`, `cf-deepseek-v4-flash` | Cloudflare Workers AI | shunt, then CCR |
 | `kimi-k3` | Kimi coding API | shunt `anthropic` adapter |
 
@@ -171,14 +171,9 @@ provider = "codex"
 upstream_model = "gpt-6-astra"
 
 [[routes]]
-model = "gpt-6-sol"
+model = "gpt-6.1-sol"
 provider = "codex"
-upstream_model = "gpt-6-sol"
-
-[[routes]]
-model = "gpt-5.6-sol"
-provider = "codex"
-upstream_model = "gpt-5.6-sol"
+upstream_model = "gpt-6.1-sol"
 
 [[routes]]
 model = "gpt-6-luna"
@@ -211,7 +206,7 @@ provider = "kimi_subscription"
 upstream_model = "k3"
 ```
 
-> Verify: `gpt-5.6-sol` needs a ChatGPT plan that includes it. Remove the route if the test in [Verification](#verification) fails.
+> Verify: `gpt-6.1-sol` needs a ChatGPT plan that includes it. Run the test in [Verification](#verification) before you use the Sol agents.
 
 Check the file:
 
@@ -237,8 +232,7 @@ Use these IDs in the Claude Code picker:
 | `claude-sonnet-5-5[1m]` | Claude Sonnet 5.5 (1M) |
 | `haiku` | Claude Haiku (200k) |
 | `gpt-6-astra[1m]` | GPT-6 Astra (1M) |
-| `gpt-6-sol[1m]` | GPT-6 Sol (1M) |
-| `gpt-5.6-sol[1m]` | GPT-5.6 Sol (1M) |
+| `gpt-6.1-sol[1m]` | GPT-6.1 Sol (1M) |
 | `gpt-6-luna[1m]` | GPT-6 Luna (1M) |
 | `cf-glm-5.3[1m]` | CF GLM-5.3 (1M) |
 | `cf-glm-5.3-flash[1m]` | CF GLM-5.3 Flash (1M) |
@@ -415,8 +409,7 @@ Run both processes under a supervisor for daily use, for example a systemd user 
          { "model": "claude-sonnet-5-5[1m]", "label": "Claude Sonnet 5.5 (1M)" },
          { "model": "haiku", "label": "Claude Haiku (200k)" },
          { "model": "gpt-6-astra[1m]", "label": "GPT-6 Astra (1M)" },
-         { "model": "gpt-6-sol[1m]", "label": "GPT-6 Sol (1M)" },
-         { "model": "gpt-5.6-sol[1m]", "label": "GPT-5.6 Sol (1M)" },
+         { "model": "gpt-6.1-sol[1m]", "label": "GPT-6.1 Sol (1M)" },
          { "model": "gpt-6-luna[1m]", "label": "GPT-6 Luna (1M)" },
          { "model": "cf-glm-5.3[1m]", "label": "CF GLM-5.3 (1M)" },
          { "model": "cf-glm-5.3-flash[1m]", "label": "CF GLM-5.3 Flash (1M)" },
@@ -427,8 +420,7 @@ Run both processes under a supervisor for daily use, for example a systemd user 
      },
      "modelSettings": {
        "gpt-6-astra": { "effortLevel": "high" },
-       "gpt-6-sol": { "effortLevel": "high" },
-       "gpt-5.6-sol": { "effortLevel": "high" },
+       "gpt-6.1-sol": { "effortLevel": "high" },
        "gpt-6-luna": { "effortLevel": "high" },
        "cf-glm-5.3": { "effortLevel": "high" },
        "cf-glm-5.3-flash": { "effortLevel": "high" },
@@ -472,7 +464,7 @@ Do not give a per-call `model` override.
 2. Send one request per routed model:
 
    ```bash
-   for m in gpt-6-astra gpt-6-sol gpt-5.6-sol gpt-6-luna cf-glm-5.3 cf-glm-5.3-flash cf-deepseek-v4-pro cf-deepseek-v4-flash kimi-k3; do printf '%s: ' "$m"; curl -s -D - -o /dev/null -X POST http://127.0.0.1:3001/v1/messages -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$m\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" | grep -iE '^(HTTP|x-gateway-upstream)' | tr -d '\r' | tr '\n' ' '; echo; done
+   for m in gpt-6-astra gpt-6.1-sol gpt-6-luna cf-glm-5.3 cf-glm-5.3-flash cf-deepseek-v4-pro cf-deepseek-v4-flash kimi-k3; do printf '%s: ' "$m"; curl -s -D - -o /dev/null -X POST http://127.0.0.1:3001/v1/messages -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$m\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" | grep -iE '^(HTTP|x-gateway-upstream)' | tr -d '\r' | tr '\n' ' '; echo; done
    ```
 
    Each line must show HTTP status 200 and an `x-gateway-upstream` header.
@@ -480,7 +472,7 @@ Do not give a per-call `model` override.
 3. Test one route through Claude Code:
 
    ```bash
-   claude -p --model gpt-6-sol 'Reply with the word ok.'
+   claude -p --model gpt-6.1-sol 'Reply with the word ok.'
    ```
 
 4. Test a native model:

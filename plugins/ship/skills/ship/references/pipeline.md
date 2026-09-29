@@ -6,15 +6,15 @@ Each step names its ledger `step`. Light mode runs steps 1, 3, 5, 7, 9, 10, and 
 |---|---|---|---|
 | 1 | Guard the branch, open the run | `run-start` | driver |
 | 2 | Plan and premises | `plan` | `planner--sol` |
-| 3 | Slices | `slices` | `writer--sol`, `reviewer--sol-xhigh` |
+| 3 | Slices | `slices` | `writer--sol`, `reviewer--sol` |
 | 4 | High panel on the frozen branch | `panel-high` | `ship:panel high` |
 | 5 | Simplify and deep review, in parallel | `simplify`, `deep-review` | `ship:review simplify`, `ship:review` |
-| 6 | Select findings | `select` | `reviewer--sol-xhigh` |
-| 7 | One fix batch and one fix read | `fix-read` | `writer--sol`, `reviewer--sol-xhigh` |
+| 6 | Select findings | `select` | `reviewer--sol` |
+| 7 | One fix batch and one fix read | `fix-read` | `writer--sol`, `reviewer--sol` |
 | 8 | Final panel | `panel-final` | `ship:panel final` |
 | 9 | Push, PR, merge main, full checks | `pr` | driver |
 | 10 | Babysit to green | `babysit` | `ship:babysit` |
-| 11 | Closing pass | `closing` | `reviewer--sol56-max` |
+| 11 | Closing pass | `closing` | `reviewer--sol` |
 | 12 | Completion gate | `gate` | driver |
 | 13 | Handoff | — | driver |
 
@@ -40,7 +40,7 @@ For each slice, in order:
 
 1. Dispatch `writer--sol` with the slice, worktree, base SHA, tests, and commit authority.
 2. Confirm the tests pass on the writer's head.
-3. Dispatch `reviewer--sol-xhigh` on the slice diff at that SHA.
+3. Dispatch `reviewer--sol` on the slice diff at that SHA.
 4. Send real P0 and P1 findings back to the same writer. Commit the fixed slice.
 
 Append one `slices` row when the last slice is committed. Note the slice count and SHAs.
@@ -55,12 +55,12 @@ Freeze the branch head. Run `ship:review simplify` and `ship:review` on the same
 
 ## 6. Select findings
 
-Give `reviewer--sol-xhigh` every finding from steps 4 and 5 with its evidence. It returns the accepted list, each with a reason, and the rejected list, each with the refuting evidence.
+Give `reviewer--sol` every finding from steps 4 and 5 with its evidence. It returns the accepted list, each with a reason, and the rejected list, each with the refuting evidence.
 
 ## 7. One fix batch and one fix read
 
 1. Send the accepted list to `writer--sol` as one batch. It returns one fix commit.
-2. Dispatch `reviewer--sol-xhigh` once on the fix diff: did each fix land, and did it break anything?
+2. Dispatch `reviewer--sol` once on the fix diff: did each fix land, and did it break anything?
 3. A new P0 or P1 from the fix read gets one more fix commit and one more read. After that, stop and report.
 
 ## 8. Final panel
@@ -79,7 +79,7 @@ Run `ship:babysit` on the PR until required CI is green and zero threads are unr
 
 ## 11. Closing pass
 
-Dispatch `reviewer--sol56-max` on the first-parent commits since the last reviewed SHA: `git log --first-parent <last-reviewed>..HEAD`. A real finding goes back to step 7, then step 10.
+Dispatch `reviewer--sol` on the first-parent commits since the last reviewed SHA: `git log --first-parent <last-reviewed>..HEAD`. A real finding goes back to step 7, then step 10.
 
 ## 12. Completion gate
 
