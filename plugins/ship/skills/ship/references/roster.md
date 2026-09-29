@@ -26,7 +26,7 @@ Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable
 | `ship:verifier--fable` | `claude-fable-5-1` | xhigh | Billing and authorization | `verifier--astra` |
 | `ship:verifier--astra` | `gpt-6-astra` | xhigh | Billing and authorization, fallback | none |
 
-`claude-sonnet-5` at effort high is the last entry of every planner, reviewer, and researcher chain that has one. The writer chain ends at `writer--glm`. Opus agents never run at effort max.
+`claude-sonnet-5-5` at effort high is the last entry of every planner, reviewer, and researcher chain that has one. The writer chain ends at `writer--glm`. Opus agents never run at effort max.
 
 ## Tools
 

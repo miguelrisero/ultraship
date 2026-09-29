@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MODELS = {
     'gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol', 'gpt-6-luna', 'cf-glm-5.3',
     'cf-glm-5.3-flash', 'cf-deepseek-v4-pro', 'cf-deepseek-v4-flash',
-    'kimi-k3', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5', 'claude-sonnet-5-5',
+    'kimi-k3', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5',
     'inherit',
 }
 EFFORTS = {'low', 'medium', 'high', 'xhigh', 'max'}
