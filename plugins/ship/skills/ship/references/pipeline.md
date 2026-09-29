@@ -6,11 +6,11 @@ Each step names its ledger `step`. Light mode runs steps 1, 3, 5, 7, 9, 10, and 
 |---|---|---|---|
 | 1 | Guard the branch, open the run | `run-start` | driver |
 | 2 | Plan and premises | `plan` | `planner--sol` |
-| 3 | Slices | `slices` | `writer--opus`, `reviewer--sol-xhigh` |
+| 3 | Slices | `slices` | `writer--sol`, `reviewer--sol-xhigh` |
 | 4 | High panel on the frozen branch | `panel-high` | `ship:panel high` |
 | 5 | Simplify and deep review, in parallel | `simplify`, `deep-review` | `ship:review simplify`, `ship:review` |
 | 6 | Select findings | `select` | `reviewer--sol-xhigh` |
-| 7 | One fix batch and one fix read | `fix-read` | `writer--opus`, `reviewer--sol-xhigh` |
+| 7 | One fix batch and one fix read | `fix-read` | `writer--sol`, `reviewer--sol-xhigh` |
 | 8 | Final panel | `panel-final` | `ship:panel final` |
 | 9 | Push, PR, merge main, full checks | `pr` | driver |
 | 10 | Babysit to green | `babysit` | `ship:babysit` |
@@ -38,7 +38,7 @@ For design-heavy work, run `ship:panel design` on the plan before step 3.
 
 For each slice, in order:
 
-1. Dispatch `writer--opus` with the slice, worktree, base SHA, tests, and commit authority.
+1. Dispatch `writer--sol` with the slice, worktree, base SHA, tests, and commit authority.
 2. Confirm the tests pass on the writer's head.
 3. Dispatch `reviewer--sol-xhigh` on the slice diff at that SHA.
 4. Send real P0 and P1 findings back to the same writer. Commit the fixed slice.
@@ -59,7 +59,7 @@ Give `reviewer--sol-xhigh` every finding from steps 4 and 5 with its evidence. I
 
 ## 7. One fix batch and one fix read
 
-1. Send the accepted list to `writer--opus` as one batch. It returns one fix commit.
+1. Send the accepted list to `writer--sol` as one batch. It returns one fix commit.
 2. Dispatch `reviewer--sol-xhigh` once on the fix diff: did each fix land, and did it break anything?
 3. A new P0 or P1 from the fix read gets one more fix commit and one more read. After that, stop and report.
 

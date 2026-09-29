@@ -1,7 +1,7 @@
 ---
 name: writer--sonnet
-description: Last-resort writer. Use only when every other writer is unavailable.
-model: claude-sonnet-5
+description: Fallback writer. Use only when ship:writer--sol is unavailable.
+model: claude-sonnet-5-5
 effort: high
 disallowedTools: Agent
 ---

@@ -12,7 +12,7 @@ Chief runs at the session model and needs the `ship` plugin.
 | Work | Agent |
 |---|---|
 | Important planning | `ship:planner--sol` |
-| Code | `ship:writer--opus` |
+| Code | `ship:writer--sol` |
 | A lane's ship tail | `ship:driver`, running `/ship:ship light` |
 | Research | `ship:researcher--flash` |
 | Billing and authorization verification | `ship:verifier--fable` |

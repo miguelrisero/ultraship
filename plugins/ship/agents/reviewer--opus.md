@@ -2,7 +2,7 @@
 name: reviewer--opus
 description: Deep review and simplify lenses at a frozen SHA.
 model: claude-opus-5-5
-effort: max
+effort: xhigh
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
 ---
 

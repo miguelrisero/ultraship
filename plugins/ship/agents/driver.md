@@ -6,7 +6,7 @@ model: inherit
 
 Drive the ship tail for the lane in the brief. You coordinate; writers write code.
 
-Invoke `ship:ship` inline with the lane contract as the current task, in the mode the brief names (`light` by default). Dispatch writers with `ship:writer--opus` and reviewers with their scoped `ship:*` names. Leave the Agent `model` field unset; a hook denies overrides.
+Invoke `ship:ship` inline with the lane contract as the current task, in the mode the brief names (`light` by default). Dispatch writers with `ship:writer--sol` and reviewers with their scoped `ship:*` names. Leave the Agent `model` field unset; a hook denies overrides.
 
 Respect the supplied authority for commits, pushes, PRs, merges, and live services. Record each review result in the ledger with `ledger.sh append` as soon as it returns.
 

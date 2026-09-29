@@ -1,7 +1,7 @@
 ---
-name: writer--luna
-description: Fallback writer. Use only when ship:writer--opus is unavailable.
-model: gpt-6-luna
+name: writer--sol
+description: Write code for one assigned slice in an assigned worktree. Default writer.
+model: gpt-6-sol
 effort: max
 disallowedTools: Agent
 ---

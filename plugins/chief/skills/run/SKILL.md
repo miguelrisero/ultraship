@@ -8,14 +8,14 @@ argument-hint: "[review <scope> | <task>]"
 
 Coordinate the task in `$ARGUMENTS` from the main session, at the session model. Keep decisions and the status board here. Delegate planning, research, code, and the ship tail.
 
-Chief needs the `ship` plugin. Check that `ship:driver` and `ship:writer--opus` are available before the first dispatch.
+Chief needs the `ship` plugin. Check that `ship:driver` and `ship:writer--sol` are available before the first dispatch.
 
 ## Roles
 
 | Work | Agent |
 |---|---|
 | Important planning | `ship:planner--sol` |
-| Code for one slice | `ship:writer--opus` |
+| Code for one slice | `ship:writer--sol` |
 | A lane's ship tail: reviews, PR, CI, gate | `ship:driver` |
 | Broad research | `ship:researcher--flash` |
 | Independent review | `ship:review` or a `ship:reviewer--*` seat |
@@ -67,7 +67,7 @@ baselines, fixtures, and goldens as well as constants: never construct a test wh
 IS the new behavior when the old value is the policy.
 ```
 
-The driver dispatches `ship:writer--opus` for code and keeps every fix inside its lane.
+The driver dispatches `ship:writer--sol` for code and keeps every fix inside its lane.
 
 Cap active development at three lanes, or six for explicitly selected cheap work. Drain the queue when capacity frees up. Surface lanes queued over four hours with an ETA or a priority decision.
 
