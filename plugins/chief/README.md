@@ -17,7 +17,7 @@ Chief runs at the session model and needs the `ship` plugin.
 | Research | `ship:researcher--flash` |
 | Billing and authorization verification | `ship:verifier--fable` |
 
-- Lanes: at most three active, or six for explicitly selected cheap work.
+- Lanes: no cap; when cap risk is flagged, the recovery rules apply ([`skills/run/SKILL.md`](skills/run/SKILL.md)).
 - Board and recovery: [`skills/run/references/state.md`](skills/run/references/state.md).
 - Dispatch check and brief template: [`skills/run/references/dispatch.md`](skills/run/references/dispatch.md).
 - Landing and live verification: [`skills/run/references/landing.md`](skills/run/references/landing.md).

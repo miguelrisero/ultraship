@@ -69,7 +69,7 @@ IS the new behavior when the old value is the policy.
 
 The driver dispatches `ship:writer--sol` for code and keeps every fix inside its lane.
 
-Cap active development at three lanes, or six for explicitly selected cheap work. Drain the queue when capacity frees up. Surface lanes queued over four hours with an ETA or a priority decision.
+There is no lane cap (owner, 2026-10-22, until new notice). Run as many lanes as the work needs. When cap risk is flagged, follow [state and recovery](references/state.md). Surface lanes queued over four hours with an ETA or a priority decision.
 
 Use native completion notifications. Persist the awaited run identity and next action for external CI and deploy waits. Check state before you resume a lane. Continue other eligible work during a model outage or an owner blocker.
 
