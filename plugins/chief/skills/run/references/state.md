@@ -18,7 +18,7 @@ Persist these sections after each transition:
 
 Use `planned` for dependencies, `queued` for eligible work, and `implementing`, `in-review`, `babysitting-CI`, or `e2e` for active work. Use `stood-down` for an external wait, `parked` for rate limits, and `BLOCKED` for an owner/external blocker. `reported` closes a read-only investigation.
 
-Count only active development against the lane cap. Release capacity once per active-to-inactive transition; reserve capacity again before resuming. Post-merge verification has its own state and consumes no development slot.
+There is no lane cap while quota runway holds (owner rule, 2026-10-22, until new notice). Apply capacity bookkeeping only when runway is short. Count only active development against available capacity. Release capacity once per active-to-inactive transition; reserve capacity again before resuming. Post-merge verification has its own state and consumes no development slot.
 
 ## Continuation and waits
 

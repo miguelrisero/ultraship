@@ -17,7 +17,7 @@ Chief runs at the session model and needs the `ship` plugin.
 | Research | `ship:researcher--flash` |
 | Billing and authorization verification | `ship:verifier--fable` |
 
-- Lanes: at most three active, or six for explicitly selected cheap work.
+- Lanes: no cap while quota runway holds (owner rule, 2026-10-22, until new notice). Run as many lanes as the work needs. For provider cap risk, rate limits, or a quota outage, stop new heavy dispatch and queue work per the recovery rules.
 - Board and recovery: [`skills/run/references/state.md`](skills/run/references/state.md).
 - Dispatch check and brief template: [`skills/run/references/dispatch.md`](skills/run/references/dispatch.md).
 - Landing and live verification: [`skills/run/references/landing.md`](skills/run/references/landing.md).
