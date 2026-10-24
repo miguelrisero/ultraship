@@ -28,8 +28,8 @@ with tempfile.TemporaryDirectory() as tmp:
     env = {**os.environ, 'XDG_STATE_HOME': tmp, 'HOME': tmp}
     writer = {'agent_type': 'ship:writer--sol', 'agent_id': 'w1', 'tool_name': 'Bash'}
 
-    assert denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--glm', 'model': 'opus'}}, env))
-    assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--glm'}}, env))
+    assert denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol', 'model': 'opus'}}, env))
+    assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol'}}, env))
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'Explore', 'model': 'haiku'}}, env))
 
     for cmd in ['git push origin HEAD', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert denied(hook('pre', {**writer, 'tool_name': 'Edit', 'tool_input': {'file_path': f'{tmp}/.claude/CLAUDE.md'}}, env))
     assert not denied(hook('pre', {**writer, 'tool_name': 'Edit', 'tool_input': {'file_path': '/r/src/app.py'}}, env))
 
-    researcher = {'agent_type': 'ship:researcher--flash', 'agent_id': 'r1', 'tool_name': 'mcp__fff__grep', 'tool_input': {}}
+    researcher = {'agent_type': 'ship:researcher--luna', 'agent_id': 'r1', 'tool_name': 'mcp__fff__grep', 'tool_input': {}}
     for _ in range(40):
         assert not denied(hook('pre', researcher, env))
     assert denied(hook('pre', researcher, env))

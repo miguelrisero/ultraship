@@ -8,7 +8,6 @@ The other models reach Claude Code through [Better Shunt](https://github.com/mig
 |---|---|---|
 | `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5-5` | Anthropic | shunt passthrough |
 | `gpt-6.1-sol`, `gpt-6-luna`, `gpt-6-astra` | ChatGPT login (Codex) | shunt `responses` adapter |
-| `cf-glm-5.3`, `cf-glm-5.3-flash`, `cf-deepseek-v4-pro`, `cf-deepseek-v4-flash` | Cloudflare Workers AI | shunt, then CCR |
 | `kimi-k3` | Kimi coding API | shunt `anthropic` adapter |
 
 shunt selects the route from the `model` field of each request.
@@ -22,10 +21,8 @@ This guide gives the manual procedure.
 
 - Claude Code. The `resolvedModel` check in [Verification](#verification) needs version 2.1.174 or later.
 - The Codex CLI (`codex`), for the ChatGPT login.
-- Node.js 22 or later and `npm`, for CCR.
 - `curl` and `jq`, for the tests.
 - A ChatGPT plan that includes the GPT models you route.
-- A Cloudflare account with Workers AI, for the `cf-*` routes.
 - A Kimi coding plan and API key, for `kimi-k3`.
 - For a source build: `git` and a Rust toolchain.
 
@@ -91,13 +88,6 @@ Do not put a secret in `shunt.toml`, in a URL, or in a shell history.
 
 shunt reads this login for every route with `auth = "chatgpt_oauth"`.
 
-### Cloudflare Workers AI
-
-1. Find your 32-character account ID in the Cloudflare dashboard.
-2. Create an API token with Workers AI access.
-
-> Verify: the exact token permission name in your Cloudflare dashboard.
-
 ### Kimi
 
 1. Create an API key for the Kimi coding API.
@@ -114,18 +104,9 @@ Refer to the [Kimi model page](https://www.kimi.com/code/docs/en/kimi-code/model
    install -m 0600 /dev/null ~/.config/ultraship/env
    ```
 
-2. Generate a local key for CCR:
+2. Put these lines in `~/.config/ultraship/env` with an editor:
 
    ```bash
-   python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
-   ```
-
-3. Put these lines in `~/.config/ultraship/env` with an editor:
-
-   ```bash
-   CLOUDFLARE_ACCOUNT_ID=<32-hex account ID>
-   CLOUDFLARE_API_TOKEN=<Cloudflare API token>
-   CCR_API_KEY=<generated key>
    KIMI_CODING_API_KEY=<Kimi API key>
    ```
 
@@ -151,13 +132,6 @@ kind = "responses"
 base_url = "https://chatgpt.com/backend-api"
 auth = "chatgpt_oauth"
 
-[providers.ccr]
-kind = "anthropic"
-base_url = "http://127.0.0.1:3456"
-auth = "api_key"
-api_key_env = "CCR_API_KEY"
-api_key_header = "bearer"
-
 [providers.kimi_subscription]
 kind = "anthropic"
 base_url = "https://api.kimi.com/coding"
@@ -179,26 +153,6 @@ upstream_model = "gpt-6.1-sol"
 model = "gpt-6-luna"
 provider = "codex"
 upstream_model = "gpt-6-luna"
-
-[[routes]]
-model = "cf-glm-5.3"
-provider = "ccr"
-upstream_model = "cloudflare/@cf/zai-org/glm-5.3"
-
-[[routes]]
-model = "cf-glm-5.3-flash"
-provider = "ccr"
-upstream_model = "cloudflare/@cf/zai-org/glm-5.3-flash"
-
-[[routes]]
-model = "cf-deepseek-v4-pro"
-provider = "ccr"
-upstream_model = "cloudflare/@cf/deepseek-ai/deepseek-v4-pro-0813"
-
-[[routes]]
-model = "cf-deepseek-v4-flash"
-provider = "ccr"
-upstream_model = "cloudflare/@cf/deepseek-ai/deepseek-v4-flash-0731"
 
 [[routes]]
 model = "kimi-k3"
@@ -234,10 +188,6 @@ Use these IDs in the Claude Code picker:
 | `gpt-6-astra[1m]` | GPT-6 Astra (1M) |
 | `gpt-6.1-sol[1m]` | GPT-6.1 Sol (1M) |
 | `gpt-6-luna[1m]` | GPT-6 Luna (1M) |
-| `cf-glm-5.3[1m]` | CF GLM-5.3 (1M) |
-| `cf-glm-5.3-flash[1m]` | CF GLM-5.3 Flash (1M) |
-| `cf-deepseek-v4-pro[1m]` | CF DeepSeek V4 Pro (1M) |
-| `cf-deepseek-v4-flash[1m]` | CF DeepSeek V4 Flash (1M) |
 | `kimi-k3[1m]` | Kimi K3 (1M) |
 
 Obey these rules:
@@ -251,118 +201,19 @@ A `[1m]` label sets the client budget only.
 The upstream window can be smaller:
 
 - The ChatGPT subscription advertises a 272K default and an 872K maximum.
-- The Cloudflare deployments above advertise 1,048,576 tokens.
 - Kimi gives 1M on some plan tiers only.
 
 > Verify: `claude-sonnet-5-5[1m]` gets a 1M window on your Anthropic plan.
 
-## The CCR layer
-
-[claude-code-router](https://github.com/musistudio/claude-code-router) (CCR) is a second local gateway.
-shunt has no adapter for OpenAI Chat Completions.
-Cloudflare Workers AI serves models on `/ai/v1/chat/completions`.
-CCR accepts Anthropic Messages from shunt and translates them to Chat Completions for Cloudflare.
-
-You need CCR only for the `cf-*` routes.
-The Codex and Kimi routes go direct from shunt to the provider.
-
-1. Install CCR:
-
-   ```bash
-   npm install --global --prefix ~/.local @musistudio/claude-code-router@3.1.0
-   ```
-
-2. Create the configuration directory:
-
-   ```bash
-   mkdir -p ~/.claude-code-router
-   install -m 0600 /dev/null ~/.claude-code-router/config.json
-   ```
-
-3. Write `~/.claude-code-router/config.json`. Replace each `<...>` value with the value from your environment file:
-
-   ```json
-   {
-     "HOST": "127.0.0.1",
-     "PORT": 3456,
-     "APIKEY": "<CCR_API_KEY>",
-     "profile": { "enabled": false, "profiles": [] },
-     "Providers": [
-       {
-         "name": "cloudflare",
-         "api_base_url": "https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/ai/v1",
-         "api_key": "<CLOUDFLARE_API_TOKEN>",
-         "models": [
-           "@cf/zai-org/glm-5.3",
-           "@cf/zai-org/glm-5.3-flash",
-           "@cf/deepseek-ai/deepseek-v4-pro-0813",
-           "@cf/deepseek-ai/deepseek-v4-flash-0731"
-         ],
-         "protocolDetectionMode": "manual",
-         "capabilities": [
-           {
-             "type": "openai_chat_completions",
-             "baseUrl": "https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/ai/v1"
-           }
-         ]
-       }
-     ],
-     "Router": { "default": "cloudflare/@cf/zai-org/glm-5.3-flash" },
-     "providerPlugins": []
-   }
-   ```
-
-4. Add the effort plugins to `providerPlugins`. See [Effort](#effort).
-
-Keep `profile.enabled` at `false` and `profiles` empty.
-An active profile can change your Claude Code and Codex configuration.
-
-CCR imports `config.json` into `config.sqlite` in the same directory at the first start.
-
-> Verify: CCR 3.1.0 imports `config.json` at the first start only. After a later edit, check the running configuration in the CCR management UI.
-
-> WARNING: Bind CCR to `127.0.0.1` only. The gateway accepts any request that carries the key.
-
-### Effort
+## Effort
 
 The Claude Code `/effort` command sends `output_config.effort`.
 shunt maps it to `reasoning.effort` on the Codex routes.
 The value `max` passes through on the `gpt-5.6` and `gpt-6` families.
 
-For the Cloudflare routes, CCR must copy the value into `reasoning_effort`.
-Add one plugin per model to `providerPlugins`:
-
-```json
-{
-  "key": "effort-glm-5.3",
-  "enabled": true,
-  "providerName": "cloudflare",
-  "models": ["@cf/zai-org/glm-5.3"],
-  "sourceAdapters": ["anthropic_messages"],
-  "when": { "from": "request.body.output_config.effort", "exists": true },
-  "request": { "bodySet": { "reasoning_effort": "{{ request.body.output_config.effort }}" } }
-}
-```
-
-GLM-5.3 and DeepSeek V4 Pro accept `max` where Claude Code sends `xhigh`.
-Add a second plugin for each of these two models:
-
-```json
-{
-  "key": "effort-glm-5.3-xhigh",
-  "enabled": true,
-  "providerName": "cloudflare",
-  "models": ["@cf/zai-org/glm-5.3"],
-  "sourceAdapters": ["anthropic_messages"],
-  "when": { "from": "request.body.output_config.effort", "equals": "xhigh" },
-  "request": { "bodySet": { "reasoning_effort": "max" } }
-}
-```
-
-The Flash models keep `xhigh`.
 The Kimi documentation maps `medium` to high and `xhigh` to max.
 
-### Start the gateways
+## Start the gateway
 
 1. Load the secrets into the shell:
 
@@ -371,21 +222,13 @@ The Kimi documentation maps `medium` to high and `xhigh` to max.
    export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}"
    ```
 
-2. Start CCR:
-
-   ```bash
-   ccr serve --no-open --host 127.0.0.1 --port 3458
-   ```
-
-3. In a second shell with the same environment, start shunt:
+2. Start shunt:
 
    ```bash
    RUST_LOG=shunt=info shunt run --config ~/.config/shunt/shunt.toml
    ```
 
-CCR serves management on port 3458 and the Messages gateway on port 3456.
-Start CCR before shunt.
-Run both processes under a supervisor for daily use, for example a systemd user unit or launchd agent.
+Run shunt under a supervisor for daily use, for example a systemd user unit or launchd agent.
 
 ## Point Claude Code at the gateway
 
@@ -411,10 +254,6 @@ Run both processes under a supervisor for daily use, for example a systemd user 
          { "model": "gpt-6-astra[1m]", "label": "GPT-6 Astra (1M)" },
          { "model": "gpt-6.1-sol[1m]", "label": "GPT-6.1 Sol (1M)" },
          { "model": "gpt-6-luna[1m]", "label": "GPT-6 Luna (1M)" },
-         { "model": "cf-glm-5.3[1m]", "label": "CF GLM-5.3 (1M)" },
-         { "model": "cf-glm-5.3-flash[1m]", "label": "CF GLM-5.3 Flash (1M)" },
-         { "model": "cf-deepseek-v4-pro[1m]", "label": "CF DeepSeek V4 Pro (1M)" },
-         { "model": "cf-deepseek-v4-flash[1m]", "label": "CF DeepSeek V4 Flash (1M)" },
          { "model": "kimi-k3[1m]", "label": "Kimi K3 (1M)" }
        ]
      },
@@ -422,10 +261,6 @@ Run both processes under a supervisor for daily use, for example a systemd user 
        "gpt-6-astra": { "effortLevel": "high" },
        "gpt-6.1-sol": { "effortLevel": "high" },
        "gpt-6-luna": { "effortLevel": "high" },
-       "cf-glm-5.3": { "effortLevel": "high" },
-       "cf-glm-5.3-flash": { "effortLevel": "high" },
-       "cf-deepseek-v4-pro": { "effortLevel": "high" },
-       "cf-deepseek-v4-flash": { "effortLevel": "high" },
        "kimi-k3": { "effortLevel": "high" }
      }
    }
@@ -464,7 +299,7 @@ Do not give a per-call `model` override.
 2. Send one request per routed model:
 
    ```bash
-   for m in gpt-6-astra gpt-6.1-sol gpt-6-luna cf-glm-5.3 cf-glm-5.3-flash cf-deepseek-v4-pro cf-deepseek-v4-flash kimi-k3; do printf '%s: ' "$m"; curl -s -D - -o /dev/null -X POST http://127.0.0.1:3001/v1/messages -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$m\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" | grep -iE '^(HTTP|x-gateway-upstream)' | tr -d '\r' | tr '\n' ' '; echo; done
+   for m in gpt-6-astra gpt-6.1-sol gpt-6-luna kimi-k3; do printf '%s: ' "$m"; curl -s -D - -o /dev/null -X POST http://127.0.0.1:3001/v1/messages -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$m\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" | grep -iE '^(HTTP|x-gateway-upstream)' | tr -d '\r' | tr '\n' ' '; echo; done
    ```
 
    Each line must show HTTP status 200 and an `x-gateway-upstream` header.
@@ -494,13 +329,11 @@ Do not give a per-call `model` override.
 | Symptom | Cause | Action |
 |---|---|---|
 | `ChatGPT auth not found; run codex login` | shunt cannot read the ChatGPT login. | Run `codex login`, then retry. |
-| HTTP 401 or 403 on a `cf-*` route | The Cloudflare token or account ID is wrong. | Check the env file and the CCR `config.json`. |
 | HTTP 401 on `kimi-k3` | The Kimi key is missing or wrong. | Load the env file before `shunt run`. |
 | HTTP 429 with `rate_limit_kind` | The provider quota is used up. | Read `rate_limit_kind`. Wait for the reset, or select a different model. |
 | `config check failed` at start | `shunt.toml` has an error. | Run `shunt check --config ~/.config/shunt/shunt.toml`. |
 | Tool search is inactive | Claude Code turns it off behind a custom base URL. | Set `ENABLE_TOOL_SEARCH=true` in `settings.json`. |
 | Effort stays at `medium` | The model has no effort setting. | Set `modelSettings.<bare ID>.effortLevel`, or run `/effort`. |
-| `xhigh` fails on GLM-5.3 or DeepSeek V4 Pro | The CCR `xhigh` plugin is missing. | Add the plugin from [Effort](#effort). |
 | A native model shows a 200K window | The ID has no `[1m]` suffix. | Select `claude-opus-5-5[1m]` or `claude-fable-5-1[1m]`. |
 | A routed model goes to Anthropic | The ID has no route. | Compare the ID with `GET /routes`. |
 
@@ -516,8 +349,5 @@ The [shunt documentation](https://shunt.sh) has more troubleshooting cases.
 5. Run the tests in [Verification](#verification).
 
 For a source build, run `git pull` and repeat the build steps.
-
-To update CCR, install the new version with `npm install --global --prefix ~/.local`.
-Then restart CCR and run the `cf-*` tests.
 
 Keep the old shunt binary until the tests pass.

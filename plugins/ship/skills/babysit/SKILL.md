@@ -14,7 +14,7 @@ Bring the PR in `$ARGUMENTS`, or the current branch's PR, to green required CI a
 1. **Wait for Better Review.** In a repository with `.github/workflows/better-review.yml`, read the latest `better-review/review` check run on the head. While it is `in_progress` and younger than 25 minutes, do not push or merge main. A push during a run discards that run.
 2. **Wait for CI.** Run `bash "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/watch-checks.sh" <PR>` in the background. An empty required-check list means CI did not start.
 3. **Collect.** Get failed logs with `gh run view <run-id> --log-failed`. List threads with `bash "${CLAUDE_SKILL_DIR}/scripts/threads.sh" <PR>`.
-4. **Triage.** Give the failures and threads to `ship:triage--glm`. It returns `real`, `false-positive`, `duplicate`, or `already-fixed` for each item, with evidence.
+4. **Triage.** Give the failures and threads to `ship:triage--sol`. It returns `real`, `false-positive`, `duplicate`, or `already-fixed` for each item, with evidence.
 5. **Fix.** Send all `real` items to `ship:writer--sol` as one batch. Rerun the affected tests. Push once for the round.
 6. **Answer every thread.** Reply with the fix commit or the refuting evidence, then resolve the thread:
 

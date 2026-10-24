@@ -12,7 +12,7 @@ How I ship code with Claude Code: a model-pinned review pipeline (`ship`) and a 
 
 Then set up the tools the agents use:
 
-1. [Better Shunt](docs/setup-shunt.md): a local gateway that routes GPT, GLM, DeepSeek, and Kimi model IDs.
+1. [Better Shunt](docs/setup-shunt.md): a local gateway that routes GPT and Kimi model IDs.
 2. [fff](docs/setup-fff.md): an indexed file and content search MCP server.
 3. [BetterCoding](docs/setup-bettercoding.md): isolated workspaces for agent sessions. Optional.
 
@@ -38,12 +38,12 @@ Use `/ship:ship <task>` alone for one task. Full mode adds a plan, a high panel,
 | Role | Model | Effort | Fallback |
 |---|---|---|---|
 | Planner | `gpt-6.1-sol` | high | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
-| Writer | `gpt-6.1-sol` | high | `claude-sonnet-5-5` (high), `cf-glm-5.3` (high) |
+| Writer | `gpt-6.1-sol` | high | `claude-sonnet-5-5` (high) |
 | Slice review, selection, fix read, high and final panels, closing pass | `gpt-6.1-sol` | high | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
 | Deep review, simplify | `claude-opus-5-5` | xhigh | `claude-sonnet-5-5` |
 | Required panel seat, billing and authorization verifier | `claude-fable-5-1` | xhigh | `gpt-6-astra` (xhigh) |
-| Babysit triage | `cf-glm-5.3` | high | `gpt-6.1-sol`, `claude-sonnet-5-5` |
-| Research | `cf-deepseek-v4-flash` | medium | `cf-glm-5.3-flash`, `gpt-6-luna`, `claude-sonnet-5-5` |
+| Babysit triage | `gpt-6.1-sol` | high | `gpt-6.1-sol` (reviewer), `claude-sonnet-5-5` (reviewer) |
+| Research | `gpt-6-luna` | medium | `claude-sonnet-5-5` |
 | Chief, driver | session model | — | — |
 
 Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effort max. Sol runs at effort high. The full roster, with panels, is in [`plugins/ship/skills/ship/references/roster.md`](plugins/ship/skills/ship/references/roster.md).
@@ -52,10 +52,10 @@ Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effo
 
 | Panel | Seats | Use |
 |---|---|---|
-| `light` | DeepSeek Flash, GLM Flash, Luna | Cheap checks |
-| `design` | Astra, Fable, GLM, DeepSeek Pro | Design and architecture |
-| `high` | Sol, GLM, DeepSeek Pro | Plan refutation and branch review |
-| `final` | Sol, Fable, GLM, DeepSeek Pro, Kimi | Final review before push |
+| `light` | Luna, Astra, Sol | Cheap checks |
+| `design` | Astra, Fable | Design and architecture |
+| `high` | Sol | Plan refutation and branch review |
+| `final` | Sol, Fable, Kimi | Final review before push |
 
 ## Rules the plugins enforce
 

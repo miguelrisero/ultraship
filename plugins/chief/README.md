@@ -14,7 +14,7 @@ Chief runs at the session model and needs the `ship` plugin.
 | Important planning | `ship:planner--sol` |
 | Code | `ship:writer--sol` |
 | A lane's ship tail | `ship:driver`, running `/ship:ship light` |
-| Research | `ship:researcher--flash` |
+| Research | `ship:researcher--luna` |
 | Billing and authorization verification | `ship:verifier--fable` |
 
 - Lanes: no cap; when cap risk is flagged, the recovery rules apply ([`skills/run/SKILL.md`](skills/run/SKILL.md)).

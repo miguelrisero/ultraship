@@ -38,7 +38,7 @@ HEAD alone cannot identify uncommitted work.
 
 ## Dispatch
 
-- For broad discovery, use `ship:researcher--flash`.
+- For broad discovery, use `ship:researcher--luna`.
 - Split the diff into bounded slices. Give each slice to a `ship:reviewer--opus` seat with the scope, SHA, evidence, reference path, and read-only boundary. Cover every applicable lens; combine related lenses.
 - Leave the Agent `model` field unset. On an unavailable seat, use the fallback chain in `${CLAUDE_PLUGIN_ROOT}/skills/ship/references/roster.md`.
 - Send all candidates, with their evidence, to one `ship:reviewer--sol` verification pass. It returns `CONFIRMED`, `PLAUSIBLE`, or `REFUTED` for each, per the verification rules in the reference.
