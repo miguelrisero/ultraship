@@ -39,7 +39,7 @@ For design-heavy work, run `ship:panel design` on the plan before step 3.
 For each slice, in order:
 
 1. Dispatch `writer--sol` with the slice, worktree, base SHA, tests, and commit authority.
-2. Confirm the tests pass on the writer's head.
+2. Confirm the tests pass on the writer's head. When the brief bans local test execution, the writer runs no tests and CI or the coordinator's gated run proves them instead.
 3. Dispatch `reviewer--sol` on the slice diff at that SHA.
 4. Send real P0 and P1 findings back to the same writer. Commit the fixed slice.
 

@@ -61,6 +61,7 @@ Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effo
 
 - Every review runs at a frozen SHA, and every result gets a ledger row.
 - Writers do not push, merge, deploy, or publish. A hook denies these commands.
+- Writers follow the brief's verification rule. When the brief bans tests, writers run no test runner and never bypass Git hooks.
 - Agents keep their pinned model. A hook denies per-call overrides.
 - Researchers get 40 discovery calls per assignment.
 - Nobody relaxes a limit, validator, fixture, or golden to make a check pass.
