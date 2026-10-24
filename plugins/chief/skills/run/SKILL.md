@@ -17,7 +17,7 @@ Chief needs the `ship` plugin. Check that `ship:driver` and `ship:writer--sol` a
 | Important planning | `ship:planner--sol` |
 | Code for one slice | `ship:writer--sol` |
 | A lane's ship tail: reviews, PR, CI, gate | `ship:driver` |
-| Broad research | `ship:researcher--flash` |
+| Broad research | `ship:researcher--luna` |
 | Independent review | `ship:review` or a `ship:reviewer--*` seat |
 | Billing and authorization verification | `ship:verifier--fable` |
 

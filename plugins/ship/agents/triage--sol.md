@@ -1,7 +1,7 @@
 ---
-name: triage--glm
+name: triage--sol
 description: Classify CI failures and review-bot threads during babysit.
-model: cf-glm-5.3
+model: gpt-6.1-sol
 effort: high
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
 ---

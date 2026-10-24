@@ -1,6 +1,6 @@
 ---
 name: researcher--luna
-description: Fallback researcher. Use only when the flash researchers are unavailable.
+description: Research scoped questions with a 40-call discovery budget.
 model: gpt-6-luna
 effort: medium
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
