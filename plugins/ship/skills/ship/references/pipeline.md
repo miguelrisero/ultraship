@@ -2,6 +2,8 @@
 
 Each step names its ledger `step`. Light mode runs steps 1, 3, 5, 7, 9, 10, and 12.
 
+At any owner-dependent step, apply [owner decisions](owner-decisions.md). Record the Input and blocked scope on the board. Continue independent work without claiming the dependent step passes. Keep external CI/deploy waits tied to their run identities.
+
 | # | Step | Ledger step | Agents |
 |---|---|---|---|
 | 1 | Guard the branch, open the run | `run-start` | driver |

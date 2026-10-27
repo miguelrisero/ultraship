@@ -2,6 +2,7 @@
 """Self-check for hooks/ultraship.py and skills/ship/scripts/ledger.py. Run with a workspace-local TMPDIR."""
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -40,6 +41,16 @@ with tempfile.TemporaryDirectory() as tmp:
     assert denied(hook('pre', {**writer, 'tool_name': 'Write', 'tool_input': {'file_path': '/r/.claude/settings.local.json'}}, env))
     assert denied(hook('pre', {**writer, 'tool_name': 'Edit', 'tool_input': {'file_path': f'{tmp}/.claude/CLAUDE.md'}}, env))
     assert not denied(hook('pre', {**writer, 'tool_name': 'Edit', 'tool_input': {'file_path': '/r/src/app.py'}}, env))
+
+    matcher = json.loads(HOOK.with_name('hooks.json').read_text())['hooks']['PreToolUse'][0]['matcher']
+    for action in ['create_input', 'update_input', 'set_input_status']:
+        tool = f'mcp__bettercoding__{action}'
+        assert re.fullmatch(matcher, tool), tool
+        for agent in ['ship:writer--sol', 'ship:writer--sonnet']:
+            assert denied(hook('pre', {'agent_type': agent, 'tool_name': tool}, env)), (agent, tool)
+        assert not denied(hook('pre', {'agent_type': 'ship:driver', 'tool_name': tool}, env)), tool
+    for action in ['get_input', 'list_inputs', 'get_input_events']:
+        assert not denied(hook('pre', {**writer, 'tool_name': f'mcp__bettercoding__{action}'}, env)), action
 
     researcher = {'agent_type': 'ship:researcher--luna', 'agent_id': 'r1', 'tool_name': 'mcp__fff__grep', 'tool_input': {}}
     for _ in range(40):

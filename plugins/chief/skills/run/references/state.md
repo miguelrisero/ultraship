@@ -12,7 +12,7 @@ Persist these sections after each transition:
 | In-flight lanes | Task, status, dependencies, worktree, branch, base/head/reviewed SHA, agent/transcript ID, requested and observed model, PR URL, next action |
 | Next tasks | Ordered eligible queue and queued-at timestamps |
 | Done ledger | Ready, merged, live-verified, dark, reported, or abandoned; PR URL, evidence, timestamp, worktree disposition |
-| Owner-blocked topics | Current verified decisions, exact action and link; resolved items retained separately |
+| Owner-blocked topics | Decision driver, stable external key, Input ID/version, event cursor, blocked scope, next action and link; pending actions keyed by answer event ID; completion evidence retained |
 | Foreign merges observed | SHA, PR URL, attribution, main CI state, affected lanes |
 | Engine status | Model health, failure evidence, last attempt, next retry |
 
@@ -21,6 +21,8 @@ Use `planned` for dependencies, `queued` for eligible work, and `implementing`, 
 Post-merge verification has its own state.
 
 ## Continuation and waits
+
+Use the shared owner-decision contract in the installed ship plugin at `skills/ship/references/owner-decisions.md`. Resume pending answer actions before consuming further events. Keep only the dependent scope blocked and continue eligible work.
 
 Rehydrate the board before new dispatch. Reconcile worktrees, branch heads, PR state, and native agent liveness. Continue each existing agent with its native ID when the session supports it. If an ID cannot resume across sessions, first preserve WIP and recover the frozen contract, files, and completed evidence before creating a replacement. Record that replacement explicitly.
 
