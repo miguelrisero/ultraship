@@ -25,6 +25,8 @@ Empty input asks for a task. Freeze scope and success checks before any code is 
 
 The session that runs this skill is the driver. It plans, dispatches, records, and ships. Writers write code.
 
+Read [owner decisions](references/owner-decisions.md) before dispatch. Register material owner decisions as Inputs and continue independent work.
+
 - Read [roster](references/roster.md) before the first dispatch. Use each scoped `ship:*` agent and leave the Agent `model` field unset. A hook denies overrides.
 - On an unavailable agent, dispatch the next agent in its fallback chain and record the substitution in the ledger note.
 - Code goes to `ship:writer--sol`, one slice at a time, in the assigned worktree. Continue an existing writer with SendMessage for fixes on its slice.

@@ -48,6 +48,9 @@ def pre(data):
         deny('ship agents pin their own model. Remove the `model` field and call the scoped agent '
              'or the next agent in its fallback chain.')
     if role(data, 'writer'):
+        if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
+                    'mcp__bettercoding__set_input_status'):
+            deny('Writers return owner decision needs to the driver. Only the driver maintains Inputs.')
         if tool == 'Bash' and WRITER_BASH.search(tin.get('command', '')):
             deny('Writers do not push, merge, deploy, publish, or release. Report back; the driver ships.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''

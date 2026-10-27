@@ -10,6 +10,8 @@ Coordinate the task in `$ARGUMENTS` from the main session, at the session model.
 
 Chief needs the `ship` plugin. Check that `ship:driver` and `ship:writer--sol` are available before the first dispatch.
 
+Read the shared owner-decision contract at `skills/ship/references/owner-decisions.md` in the installed ship plugin. Apply it to every material owner decision.
+
 ## Roles
 
 | Work | Agent |
@@ -28,7 +30,7 @@ Nesting: chief → driver → writers and reviewers. Keep ship, panel, and revie
 ## Entry points
 
 - `review <scope>`: gather the diff and base and head SHAs. Run `ship:review` read-only. Return verified findings. Take no shipping action.
-- `<task>`: establish scope, acceptance criteria, repository, and delivery authority. Ask only for a decision that blocks progress.
+- `<task>`: establish scope, acceptance criteria, repository, and delivery authority. Register material owner decisions through the shared contract; continue independent work.
 - Empty arguments during an active run: continue its next incomplete action.
 - Empty arguments without an active run: ask for the task.
 
