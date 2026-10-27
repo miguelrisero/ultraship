@@ -41,7 +41,7 @@ Use `/ship:ship <task>` alone for one task. Full mode adds a plan, a high panel,
 | Writer | `gpt-6.1-sol` | high | `claude-sonnet-5-5` (high) |
 | Slice review, selection, fix read, high and final panels, closing pass | `gpt-6.1-sol` | high | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
 | Deep review, simplify | `claude-opus-5-5` | xhigh | `claude-sonnet-5-5` |
-| Required panel seat, billing and authorization verifier | `claude-fable-5-1` | xhigh | `gpt-6-astra` (xhigh) |
+| Required panel seat, billing and authorization verifier | `claude-opus-5-5` | xhigh | `gpt-6-astra` (xhigh) |
 | Babysit triage | `gpt-6.1-sol` | high | `gpt-6.1-sol` (reviewer), `claude-sonnet-5-5` (reviewer) |
 | Research | `gpt-6-luna` | medium | `claude-sonnet-5-5` |
 | Chief, driver | session model | — | — |
@@ -53,9 +53,9 @@ Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effo
 | Panel | Seats | Use |
 |---|---|---|
 | `light` | Luna, Astra, Sol | Cheap checks |
-| `design` | Astra, Fable | Design and architecture |
+| `design` | Astra, Opus | Design and architecture |
 | `high` | Sol | Plan refutation and branch review |
-| `final` | Sol, Fable, Kimi | Final review before push |
+| `final` | Sol, Opus, Kimi | Final review before push |
 
 ## Rules the plugins enforce
 
@@ -71,6 +71,7 @@ Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effo
 
 ```bash
 python3 scripts/check-plugins.py
+TMPDIR="$PWD/.scratch" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p test_model_routing.py -v
 TMPDIR="$PWD/.scratch" python3 plugins/ship/hooks/ultraship_test.py
 TMPDIR="$PWD/.scratch" bash plugins/chief/skills/run/scripts/lane-teardown.test.sh
 ```
