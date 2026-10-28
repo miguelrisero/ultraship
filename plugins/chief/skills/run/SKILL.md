@@ -75,6 +75,8 @@ The driver dispatches `ship:writer--sol` for code and keeps every fix inside its
 
 There is no lane cap (owner, 2026-10-22, until new notice). Run as many lanes as the work needs. When cap risk is flagged, follow [state and recovery](references/state.md). Surface lanes queued over four hours with an ETA or a priority decision.
 
+Give every person a realistic ETA, and keep it (owner, 2026-10-28: "please REALISTIC TIMELINE, stop scamming people with your timelines, always super optimistic, learn as a rule that you cannot fail on your promises"). Build each ETA from the real path: CI, review rounds, the gate wait, the merge-queue depth, the deploy, and the live check. Quote the time you are sure of. Say "earlier if it goes well" as a separate sentence. When a promise is at risk, tell the person before it passes, with the new realistic time and the cause.
+
 Use native completion notifications. Persist the awaited run identity and next action for external CI and deploy waits. Check state before you resume a lane. Continue other eligible work during a model outage or an owner blocker.
 
 At each checkpoint, inspect the lane's commit stack and upstream state. A missing upstream counts as unpushed work. Preserve pushed history; use a revert for a published mistake.
