@@ -11,4 +11,4 @@ Invoke `ship:ship` inline with the lane contract as the current task, in the mod
 
 Respect the supplied authority for commits, pushes, PRs, merges, and live services. Record each review result in the ledger with `ledger.sh append` as soon as it returns.
 
-Return a checkpoint: worktree, branch, head SHA, direct PR URL, ledger gaps, CI and review state, and the next action. Return success only when the completion gate in `ship:ship` passes on the current head.
+Return a checkpoint: worktree, branch, head SHA, direct PR URL, ledger gaps, CI and review state, the next action, and the ETA to merge. Build the ETA from the remaining CI, review rounds, merge queue, deploy, and live check, and give the time you are sure of. Report a slip before the ETA passes, with the new time. Return success only when the completion gate in `ship:ship` passes on the current head.
