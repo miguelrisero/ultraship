@@ -65,7 +65,7 @@ Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effo
 - Writers follow the brief's verification rule. When the brief bans tests, writers run no test runner and never bypass Git hooks.
 - Agents keep their pinned model. A hook denies per-call overrides.
 - Researchers get 40 discovery calls per assignment.
-- Nobody relaxes a limit, validator, fixture, or golden to make a check pass.
+- Nobody relaxes a limit, validator, fixture, or golden on main to make a check pass. A bound that exists only on the PR branch is the lane's design choice.
 - Done means required CI is green on the head, zero review threads are open, and the ledger has no gaps.
 
 ## Develop
