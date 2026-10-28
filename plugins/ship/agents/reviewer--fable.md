@@ -1,7 +1,7 @@
 ---
 name: reviewer--fable
 description: Required panel seat for the design and final panels.
-model: claude-fable-5-1
+model: claude-opus-5-5
 effort: xhigh
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
 ---

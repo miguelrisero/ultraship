@@ -279,7 +279,7 @@ These settings have these effects:
 To resume a session on a 1M native model, use the full ID:
 
 ```bash
-claude --continue --model 'claude-fable-5-1[1m]'
+claude --continue --model 'claude-opus-5-5[1m]'
 ```
 
 ### Per-agent routing
