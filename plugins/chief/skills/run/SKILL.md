@@ -51,7 +51,9 @@ Before each dispatch, answer the five questions in [dispatch](references/dispatc
 
 Each lane gets a branch and a linked worktree based on current remote main, inside the permitted workspace. Serialize overlapping file ownership.
 
-Dispatch `ship:driver` for each lane with:
+Dispatch `ship:driver` for each lane. Drivers run `claude-opus-5-5`. Dispatch `ship:driver--sol` only when the Claude quota is low, and record the current quota reading on the board first.
+
+Each driver brief has:
 
 - The frozen task, worktree, branch, base SHA, dependencies, and success checks.
 - The board path and the chief run ID.

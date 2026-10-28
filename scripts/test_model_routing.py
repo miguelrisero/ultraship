@@ -29,4 +29,11 @@ class ModelRoutingTests(unittest.TestCase):
             self.assertNotIn('claude-fable-', checks.frontmatter(path.read_text()).get('model', ''))
         sol = checks.frontmatter((ROOT / 'plugins/ship/agents/reviewer--sol.md').read_text())
         self.assertEqual((sol['model'], sol['effort']), ('gpt-6.1-sol', 'high'))
+        driver = checks.frontmatter((ROOT / 'plugins/ship/agents/driver.md').read_text())
+        self.assertEqual((driver['model'], driver['effort']), ('claude-opus-5-5', 'xhigh'))
+        low = checks.frontmatter((ROOT / 'plugins/ship/agents/driver--sol.md').read_text())
+        self.assertEqual((low['model'], low['effort']), ('gpt-6.1-sol', 'high'))
+        self.assertIn('low', low['description'])
+        for path in (ROOT / 'plugins/ship/agents').glob('*.md'):
+            self.assertNotEqual(checks.frontmatter(path.read_text()).get('model', 'inherit'), 'inherit', path.name)
         self.assertEqual(checks.check('HEAD'), [])

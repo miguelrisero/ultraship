@@ -44,7 +44,8 @@ Use `/ship:ship <task>` alone for one task. Full mode adds a plan, a high panel,
 | Required panel seat, billing and authorization verifier | `claude-opus-5-5` | xhigh | `gpt-6-astra` (xhigh) |
 | Babysit triage | `gpt-6.1-sol` | high | `gpt-6.1-sol` (reviewer), `claude-sonnet-5-5` (reviewer) |
 | Research | `gpt-6-luna` | medium | `claude-sonnet-5-5` |
-| Chief, driver | session model | — | — |
+| Chief | session model (`claude-opus-5-5`) | — | — |
+| Driver | `claude-opus-5-5` | xhigh | `gpt-6.1-sol` (high), at low Claude quota only |
 
 Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effort max. Sol runs at effort high. The full roster, with panels, is in [`plugins/ship/skills/ship/references/roster.md`](plugins/ship/skills/ship/references/roster.md).
 
