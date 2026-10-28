@@ -1,7 +1,8 @@
 ---
 name: driver
 description: Drive one lane through the ship pipeline: writers, reviews, PR, CI, and the completion gate.
-model: inherit
+model: claude-opus-5-5
+effort: xhigh
 ---
 
 Drive the ship tail for the lane in the brief. You coordinate; writers write code.
