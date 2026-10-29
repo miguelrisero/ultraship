@@ -78,7 +78,13 @@ diff (`git diff origin/main...HEAD`) for the same invariant, including replaceme
 duplicates, validators, test baselines, fixtures, and goldens. A missing path on main is not
 enough evidence. When main has no such bound, change or remove it without an owner question,
 and record the reason and the main SHA in the PR body. Every bound already on main keeps
-this rule, also when the branch moves, renames, replaces, or changes it.
+this rule, also when the branch moves, renames, replaces, or changes it. Exception: a test,
+fixture, mutation row, census or register edit is allowed without an owner question after
+one council round (no Fable or cf-* models) agrees that the guard keeps its guarantee (owner
+grant 2026-10-26: "ok I give you from now onwards full power to change tests, no need to
+check with me, just do one council round to analyze it makes sense and is appropiate, and do
+it."). Weakening a test to hide a real regression stays forbidden. Record the council
+verdict and the owner words in the PR body.
 ```
 
 The driver dispatches `ship:writer--sol` for code and keeps every fix inside its lane.

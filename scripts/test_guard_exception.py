@@ -1,4 +1,4 @@
-"""Every guard copy allows branch-only bounds without an owner question."""
+"""Every guard copy allows branch-only bounds and council-approved test edits."""
 from pathlib import Path
 import unittest
 
@@ -31,6 +31,10 @@ class GuardExceptionTests(unittest.TestCase):
                     'record the reason and the main SHA in the PR body',
                     'git fetch origin main',
                     'A missing path on main is not enough evidence',
+                    'after one council round (no Fable or cf-* models) agrees that the guard keeps its guarantee',
+                    'full power to change tests',
+                    'Weakening a test to hide a real regression stays forbidden',
+                    'Record the council verdict and the owner words in the PR body',
                 ):
                     self.assertIn(phrase, text)
                 self.assertNotIn('the brief says so', text)
