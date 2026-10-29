@@ -69,15 +69,16 @@ are policy, not obstacles. If a bound blocks the implementation, STOP and report
 blocking bound and what exceeded it. Fixes go on the consumer side. This applies to test
 baselines, fixtures, and goldens as well as constants: never construct a test whose baseline
 IS the new behavior when the old value is the policy.
-Exception: a bound that exists only on the PR branch, and not on main, is the lane's design
-choice. Run `git fetch origin main` first and record the `origin/main` SHA; when the fetch
-fails, the exception does not apply. Compare the behavior the bound constrains, not its path
-or name: search main's whole tree and the branch diff (`git diff origin/main...HEAD`) for the
-same invariant, including replacements, duplicates, validators, test baselines, fixtures, and
-goldens. A missing path on main is not enough evidence. When main has no such bound and the
-brief says so, remove or change it, and state the reason and the main SHA in the PR body.
-Every bound already on main keeps this rule, also when the branch moves, renames, replaces,
-or changes it.
+This rule covers limits that exist on origin/main. Exception: a limit, cap, timeout, budget,
+or bound that only this PR branch added is the lane's design choice (owner rule, Input
+6e43dda9-a1b8-4b0e-a8c8-f3525a67a5e9). Run `git fetch origin main` first and record the
+`origin/main` SHA; when the fetch fails, the exception does not apply. Compare the behavior
+the bound constrains, not its path or name: `git grep` main's whole tree and read the branch
+diff (`git diff origin/main...HEAD`) for the same invariant, including replacements,
+duplicates, validators, test baselines, fixtures, and goldens. A missing path on main is not
+enough evidence. When main has no such bound, change or remove it without an owner question,
+and record the reason and the main SHA in the PR body. Every bound already on main keeps
+this rule, also when the branch moves, renames, replaces, or changes it.
 ```
 
 The driver dispatches `ship:writer--sol` for code and keeps every fix inside its lane.
