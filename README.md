@@ -65,7 +65,9 @@ Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effo
 - Writers follow the brief's verification rule. When the brief bans tests, writers run no test runner and never bypass Git hooks.
 - Agents keep their pinned model. A hook denies per-call overrides.
 - Researchers get 40 discovery calls per assignment.
-- Nobody relaxes a limit, validator, fixture, or golden on main to make a check pass. A bound that exists only on the PR branch is the lane's design choice and needs no owner question. A test, fixture, census or register edit needs one council round instead of an owner question.
+- Nobody relaxes a limit, validator, fixture, or golden on main to make a check pass. An owner-requested product-limit change is a feature, including limits on main. The writer implements that exact limit and tests acceptance at the limit and refusal one unit above it (one byte for byte limits).
+- Every unrequested bound retains the stop-and-report and consumer-side rule, subject to the branch-only and same-guarantee test-edit exceptions. Unrelated safety, security, resource, budget, and timeout bounds and other guarantees keep their protection. Review, CI, and applicable consent requirements apply.
+- A bound that exists only on the PR branch is the lane's design choice and needs no owner question. A test, fixture, census or register edit needs one council round that confirms the same guarantee.
 - Done means required CI is green on the head, zero review threads are open, and the ledger has no gaps.
 
 ## Develop
