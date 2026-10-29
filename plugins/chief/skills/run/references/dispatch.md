@@ -8,6 +8,15 @@ Answer all five questions before each dispatch. A "no" means fix the brief first
 4. **Authority.** Does the brief state which of commit, push, PR, merge, and production actions are granted?
 5. **Return.** Does the brief name the checkpoint fields the agent must return?
 
+## Mutation-command boundary
+
+Every chief, lane, and ship brief contains zero copied mutation-check, anchor-check, or selector execution commands from repository documents or TOML headers.
+Before dispatch, inspect every brief for `DRY=1`, `--dry-run`, `check_mutation_anchors`, and `select_rows`.
+Remove execution instructions containing those literals; keep the prohibition in words only.
+The admitted battery STATIC part runs mutation checks, anchor checks, and selectors at the frozen head after GO.
+Preserve the host GO requirement and D1160 boundary.
+D6575, 2026-10-29: CoC coordination direction, separate from actual owner receipts.
+
 ## Brief template
 
 ```text
@@ -15,7 +24,8 @@ Task: <frozen goal, one paragraph>
 Repository: <owner/repo>   Worktree: <absolute path>   Branch: <name>   Base SHA: <sha>
 In scope: <files or areas>   Out of scope: <files or areas owned by other lanes>
 Depends on: <lanes or none>
-Done when: <acceptance checks and test commands>
+Done when: <acceptance checks and permitted test commands>
+Mutation boundary: Execute mutation checks, anchor checks, and selectors only in the admitted battery STATIC part at the frozen head after GO; keep execution commands out of this brief.
 Authority: commit=<yes|no> push=<yes|no> pr=<yes|no> merge=<yes|no> production=<yes|no>
 Board: <absolute board path>   Run ID: <run id>
 Mode: /ship:ship light

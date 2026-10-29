@@ -34,6 +34,15 @@ Read [owner decisions](references/owner-decisions.md) before dispatch. Register 
 - Important planning goes to `ship:planner--sol`. Broad research goes to `ship:researcher--luna`.
 - Freeze one subject SHA per review step. Give every seat the same brief and keep sibling verdicts out of it.
 
+## Dispatch boundary
+
+Every chief, lane, and ship brief contains zero copied mutation-check, anchor-check, or selector execution commands from repository documents or TOML headers.
+Before dispatch, inspect every brief for `DRY=1`, `--dry-run`, `check_mutation_anchors`, and `select_rows`.
+Remove execution instructions containing those literals; keep the prohibition in words only.
+The admitted battery STATIC part runs mutation checks, anchor checks, and selectors at the frozen head after GO.
+Preserve the host GO requirement and D1160 boundary.
+D6575, 2026-10-29: CoC coordination direction, separate from actual owner receipts.
+
 ## Ledger
 
 Every run keeps a ledger with `${CLAUDE_SKILL_DIR}/scripts/ledger.py`:
