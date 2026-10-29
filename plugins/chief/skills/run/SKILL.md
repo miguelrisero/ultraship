@@ -49,6 +49,13 @@ Answer small questions and one-line edits directly. Open lanes for work that nee
 
 Before each dispatch, answer the five questions in [dispatch](references/dispatch.md). Use its brief template.
 
+Every chief, lane, and ship brief contains zero copied mutation-check, anchor-check, or selector execution commands from repository documents or TOML headers.
+Before dispatch, inspect every brief for `DRY=1`, `--dry-run`, `check_mutation_anchors`, and `select_rows`.
+Remove execution instructions containing those literals; keep the prohibition in words only.
+The admitted battery STATIC part runs mutation checks, anchor checks, and selectors at the frozen head after GO.
+Preserve the host GO requirement and D1160 boundary.
+D6575, 2026-10-29: CoC coordination direction, separate from actual owner receipts.
+
 Each lane gets a branch and a linked worktree based on current remote main, inside the permitted workspace. Serialize overlapping file ownership.
 
 Dispatch `ship:driver` for each lane. Drivers run `claude-opus-5-5`. Dispatch `ship:driver--sol` only when the Claude quota is low, and record the current quota reading on the board first.

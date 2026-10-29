@@ -60,6 +60,9 @@ Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effo
 
 ## Rules the plugins enforce
 
+The mutation-command brief boundary ships in ship `1.4.8` and chief `1.3.7`.
+Dispatch briefs keep mutation-check, anchor-check, and selector execution commands in the admitted battery STATIC part at the frozen head.
+
 - Every review runs at a frozen SHA, and every result gets a ledger row.
 - Writers do not push, merge, deploy, or publish. A hook denies these commands.
 - Writers follow the brief's verification rule. When the brief bans tests, writers run no test runner and never bypass Git hooks.
