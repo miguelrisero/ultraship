@@ -27,6 +27,7 @@ Depends on: <lanes or none>
 Done when: <acceptance checks and permitted test commands>
 Mutation boundary: Execute mutation checks, anchor checks, and selectors only in the admitted battery STATIC part at the frozen head after GO; keep execution commands out of this brief.
 Authority: commit=<yes|no> push=<yes|no> pr=<yes|no> merge=<yes|no> production=<yes|no>
+Push boundary: Before the first push, run `git branch --show-current`; verify the lane's named feature branch and actual default branch through supported repository metadata. Block detached HEAD and default-branch identity. Run `git rev-parse --abbrev-ref @{u}`; for `main`, `origin/main`, or the actual default branch locally or remotely, block the push and establish feature tracking, then repeat the check. A missing upstream permits the explicit first feature push only after the nondefault branch identity check passes. Every authorized push uses only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted. Never use an abbreviated or default push. Never target a default branch. Preserve existing push authority, approval holds, merge holds, and verification gates; writers retain zero push authority.
 Board: <absolute board path>   Run ID: <run id>
 Mode: /ship:ship light
 Return: agent ID, head SHA, PR URL, ledger gaps, CI and review state, next action, blockers with evidence

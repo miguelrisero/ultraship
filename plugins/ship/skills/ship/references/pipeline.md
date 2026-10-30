@@ -73,7 +73,15 @@ Freeze the branch head. Run `ship:panel final`. A P0 returns to step 7 with that
 
 1. Merge current remote main into the branch. Resolve conflicts and rerun affected tests.
 2. Run the full lint and test suite locally.
-3. Push. Open one PR, or update the open PR. Put scope, behavior, verification steps, and risks in the body.
+3. Before the first push, run `git branch --show-current` and confirm the named feature branch matches the lane brief.
+   Block detached HEAD and the actual default branch; confirm the default through supported repository metadata and never guess it.
+   Run `git rev-parse --abbrev-ref @{u}`. If it names `main`, `origin/main`, or the actual default branch locally or remotely,
+   block the push and establish feature tracking, then repeat the check.
+   A missing upstream permits the explicit first feature push only after the nondefault branch identity check passes.
+   For every authorized lane push, use only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted.
+   Never use an abbreviated or default push. Never target a default branch.
+   Preserve existing push authority, approval holds, merge holds, and verification gates; writers retain zero push authority.
+4. Open one PR, or update the open PR. Put scope, behavior, verification steps, and risks in the body.
 
 ## 10. Babysit
 
