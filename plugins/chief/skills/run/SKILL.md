@@ -103,7 +103,11 @@ one council round (no Fable or cf-* models) agrees that the guard keeps its guar
 grant 2026-10-26: "ok I give you from now onwards full power to change tests, no need to
 check with me, just do one council round to analyze it makes sense and is appropiate, and do
 it."). Weakening a test to hide a real regression stays forbidden. Record the council
-verdict and the owner words in the PR body.
+verdict and the owner words in the PR body. Exception: no step waits for a human to apply
+an edit. When the executor is certain and its Chief or the CoC checked the change, that
+check replaces the council round, and an agent applies it (owner order 2026-10-30: "if
+agent is certain that its ok and he checked with his CoC or Chief ALL GOOD remove that
+blocker everywhere"). Record that check in the PR body.
 ```
 
 The driver dispatches `ship:writer--sol` for code and keeps every fix inside its lane.
