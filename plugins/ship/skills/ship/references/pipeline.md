@@ -85,7 +85,7 @@ Freeze the branch head. Run `ship:panel final`. A P0 returns to step 7 with that
      Refuse a missing or ambiguous symbolic default, metadata disagreement, and a feature branch equal to the actual default branch.
    - Run `git rev-parse --abbrev-ref @{u}`. If it names `main`, `origin/main`, or the actual default branch locally or remotely,
      block the push and establish feature tracking, then repeat the check.
-     A missing upstream permits the explicit first feature push only after the nondefault branch identity check passes.
+     A missing upstream permits every explicit feature push only after the complete resolved destination preflight passes for that push attempt.
      Inherited upstream and `push.default` are risk context, not resolved destination evidence.
    - Substitute the verified literal feature branch into `HEAD:refs/heads/<feature-branch>`.
      Run only the permitted `git push --dry-run --porcelain origin HEAD:refs/heads/<feature-branch>` as the destination probe.

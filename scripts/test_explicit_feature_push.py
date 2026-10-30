@@ -28,7 +28,7 @@ class ExplicitFeaturePushTests(unittest.TestCase):
             'git rev-parse --abbrev-ref @{u}',
             '`main`, `origin/main`',
             'block the push and establish feature tracking',
-            'A missing upstream permits the explicit first feature push',
+            'A missing upstream permits every explicit feature push only after the complete resolved destination preflight passes for that push attempt.',
             'Inherited upstream and `push.default` are risk context, not resolved destination evidence',
             '`pushurl`, `insteadOf`, and `pushInsteadOf` resolution',
             'Inspect every `To` endpoint and every porcelain status row',
@@ -46,7 +46,25 @@ class ExplicitFeaturePushTests(unittest.TestCase):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, push)
         self.assertNotIn('Before the first push', push)
+        self.assertNotIn('explicit first feature push', push)
         self.assertNotIn('3. Push. Open one PR', push)
+
+    def test_standalone_babysit_covers_every_push_with_the_shared_preflight(self):
+        text = (ROOT / 'plugins/ship/skills/babysit/SKILL.md').read_text()
+        boundary = text.split('## Push boundary\n', 1)[1].split('\n## ', 1)[0]
+        for requirement in (
+            'Before every authorized feature push',
+            'including direct invocation, retries, round fixes, and main merges',
+            '[resolved destination preflight](../ship/references/pipeline.md#9-push-and-pr)',
+            PUSH,
+            'verified literal feature branch substituted',
+            'Writers prepare evidence only',
+            'the authorized driver executes the preflight and push',
+            'writers retain zero push authority, including push dry-runs',
+            'Preserve existing push authority, approval holds, merge holds, and verification gates',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, boundary)
 
     def test_chief_template_carries_the_same_push_boundary(self):
         text = (ROOT / 'plugins/chief/skills/run/references/dispatch.md').read_text()
