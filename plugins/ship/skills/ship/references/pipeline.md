@@ -77,8 +77,13 @@ Freeze the branch head. Run `ship:panel final`. A P0 returns to step 7 with that
    Writers prepare repository, branch, and command evidence only; the authorized driver executes the preflight and push.
    Preserve existing push authority, approval holds, merge holds, and verification gates; writers retain zero push authority, including push dry-runs.
 
+   - Before recording or capturing any resolved push URL, require supported, permitted credential-safe inspection of the resolved endpoint.
+     The inspection must report credential presence and repository identity without exposing raw credential values to tool output, logs, or evidence.
+     Refuse credential-bearing HTTPS push URLs, including credentials in userinfo or query parameters, before URL output or a network probe.
+     Block if credential-safe inspection is denied, unavailable, or inconclusive; never print a raw URL to discover whether it contains credentials.
+     Writers and drivers must keep credential values out of commands, briefs, boards, and evidence.
    - Confirm the repository with `git rev-parse --show-toplevel` and the lane's repository identity through supported repository metadata.
-     Record `git rev-parse HEAD`, `git branch --show-current`, and `git remote get-url --push --all origin`.
+     Only after the credential-safe gate passes, record `git rev-parse HEAD`, `git branch --show-current`, and `git remote get-url --push --all origin`.
      Require the brief's named feature branch and intended repository at the resolved push URL. Refuse detached HEAD and `main`.
      Require exactly one approved push URL after `pushurl`, `insteadOf`, and `pushInsteadOf` resolution; refuse additional or ambiguous endpoints.
      Confirm the actual default branch with `git ls-remote --symref <push-url> HEAD` for that endpoint and supported repository metadata.
@@ -88,6 +93,8 @@ Freeze the branch head. Run `ship:panel final`. A P0 returns to step 7 with that
      A missing upstream permits every explicit feature push only after the complete resolved destination preflight passes for that push attempt.
      Inherited upstream and `push.default` are risk context, not resolved destination evidence.
    - Substitute the verified literal feature branch into `HEAD:refs/heads/<feature-branch>`.
+     The dry-run runs the pre-push hook; block if its workload lacks admission under the current brief.
+     Preserve hooks; never use `--no-verify` to obtain destination evidence.
      Run only the permitted `git push --dry-run --porcelain origin HEAD:refs/heads/<feature-branch>` as the destination probe.
      Use the same repository, HEAD SHA, current branch, remote, and literal refspec for the authorized push.
      Set `LC_ALL=C` for parseable Git output and retain stdout, stderr, exit status, and the exact command as evidence.

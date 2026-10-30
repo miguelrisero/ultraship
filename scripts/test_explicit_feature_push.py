@@ -49,6 +49,49 @@ class ExplicitFeaturePushTests(unittest.TestCase):
         self.assertNotIn('explicit first feature push', push)
         self.assertNotIn('3. Push. Open one PR', push)
 
+    def test_credential_gate_precedes_url_capture_and_hook_workload_requires_admission(self):
+        text = (ROOT / 'plugins/ship/skills/ship/references/pipeline.md').read_text()
+        push = text.split('## 9. Push and PR\n', 1)[1].split('\n## ', 1)[0]
+        for requirement in (
+            'Before recording or capturing any resolved push URL',
+            'supported, permitted credential-safe inspection',
+            'without exposing raw credential values to tool output, logs, or evidence',
+            'Refuse credential-bearing HTTPS push URLs',
+            'credentials in userinfo or query parameters',
+            'before URL output or a network probe',
+            'credential-safe inspection is denied, unavailable, or inconclusive',
+            'Writers and drivers must keep credential values out of commands, briefs, boards, and evidence',
+            'Only after the credential-safe gate passes',
+            'The dry-run runs the pre-push hook; block if its workload lacks admission under the current brief.',
+            'Preserve hooks; never use `--no-verify` to obtain destination evidence.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, push)
+        gate = push.index('Before recording or capturing any resolved push URL')
+        self.assertLess(gate, push.index('git remote get-url --push --all origin'))
+        self.assertLess(gate, push.index(PREFLIGHT))
+        self.assertLess(push.index('block if its workload lacks admission'), push.index(PREFLIGHT))
+
+    def test_chief_checkpoint_requires_exact_intended_destination_evidence(self):
+        text = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text()
+        checkpoint = text.split('At each checkpoint,', 1)[1].split('\n\n', 1)[0]
+        for requirement in (
+            "inspect the lane's commit stack and upstream state",
+            'Retain all existing tracking checks',
+            'A missing upstream alone establishes neither publication nor unpushed work',
+            'Within existing read permission',
+            "intended feature destination's repository identity",
+            'exact `refs/heads/<feature-branch>` remote head OID',
+            "credential-safe gate before capturing any resolved URL or remote evidence",
+            'fresh evidence from that verified destination with an OID equal to HEAD',
+            'Arbitrary remote containment of HEAD supplies insufficient evidence',
+            'absent, stale, unavailable, or inconclusive destination evidence as unknown and hold dependent actions',
+            'Preserve pushed history; use a revert for a published mistake',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, checkpoint)
+        self.assertNotIn('A missing upstream counts as unpushed work', text)
+
     def test_standalone_babysit_covers_every_push_with_the_shared_preflight(self):
         text = (ROOT / 'plugins/ship/skills/babysit/SKILL.md').read_text()
         boundary = text.split('## Push boundary\n', 1)[1].split('\n## ', 1)[0]
