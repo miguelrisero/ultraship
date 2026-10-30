@@ -1,7 +1,7 @@
 {
   "name": "chief",
   "description": "Coordinate multi-lane engineering work from the main session: ship drivers and writers per lane, a persistent board, verified pull requests, and guarded worktree teardown.",
-  "version": "1.3.9",
+  "version": "1.3.11",
   "author": { "name": "Miguel Rasero" },
   "repository": "https://github.com/miguelrisero/ultraship",
   "license": "MIT",

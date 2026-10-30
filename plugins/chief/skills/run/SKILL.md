@@ -118,7 +118,7 @@ Give every person a realistic ETA, and keep it (owner, 2026-10-28: "please REALI
 
 Use native completion notifications. Persist the awaited run identity and next action for external CI and deploy waits. Check state before you resume a lane. Continue other eligible work during a model outage or an owner blocker.
 
-At each checkpoint, inspect the lane's commit stack and upstream state. A missing upstream counts as unpushed work. Preserve pushed history; use a revert for a published mistake.
+At each checkpoint, inspect the lane's commit stack and upstream state. Retain all existing tracking checks. A missing upstream alone establishes neither publication nor unpushed work. Within existing read permission, verify the intended feature destination's repository identity and exact `refs/heads/<feature-branch>` remote head OID against the lane's current HEAD. Apply the ship pipeline's credential-safe gate before capturing any resolved URL or remote evidence. Require fresh evidence from that verified destination with an OID equal to HEAD to establish current-head publication. Arbitrary remote containment of HEAD supplies insufficient evidence. Treat absent, stale, unavailable, or inconclusive destination evidence as unknown and hold dependent actions. Preserve pushed history; use a revert for a published mistake.
 
 ## Verify and finish
 

@@ -73,14 +73,41 @@ Freeze the branch head. Run `ship:panel final`. A P0 returns to step 7 with that
 
 1. Merge current remote main into the branch. Resolve conflicts and rerun affected tests.
 2. Run the full lint and test suite locally.
-3. Before the first push, run `git branch --show-current` and confirm the named feature branch matches the lane brief.
-   Block detached HEAD and the actual default branch; confirm the default through supported repository metadata and never guess it.
-   Run `git rev-parse --abbrev-ref @{u}`. If it names `main`, `origin/main`, or the actual default branch locally or remotely,
-   block the push and establish feature tracking, then repeat the check.
-   A missing upstream permits the explicit first feature push only after the nondefault branch identity check passes.
-   For every authorized lane push, use only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted.
-   Never use an abbreviated or default push. Never target a default branch.
-   Preserve existing push authority, approval holds, merge holds, and verification gates; writers retain zero push authority.
+3. Before every authorized feature push, including retries and later pushes, the driver performs this resolved destination preflight in the lane worktree.
+   Writers prepare repository, branch, and command evidence only; the authorized driver executes the preflight and push.
+   Preserve existing push authority, approval holds, merge holds, and verification gates; writers retain zero push authority, including push dry-runs.
+
+   - Before recording or capturing any resolved push URL, require supported, permitted credential-safe inspection of the resolved endpoint.
+     The inspection must report credential presence and repository identity without exposing raw credential values to tool output, logs, or evidence.
+     Refuse credential-bearing HTTPS push URLs, including credentials in userinfo or query parameters, before URL output or a network probe.
+     Block if credential-safe inspection is denied, unavailable, or inconclusive; never print a raw URL to discover whether it contains credentials.
+     Writers and drivers must keep credential values out of commands, briefs, boards, and evidence.
+   - Confirm the repository with `git rev-parse --show-toplevel` and the lane's repository identity through supported repository metadata.
+     Only after the credential-safe gate passes, record `git rev-parse HEAD`, `git branch --show-current`, and `git remote get-url --push --all origin`.
+     Require the brief's named feature branch and intended repository at the resolved push URL. Refuse detached HEAD and `main`.
+     Require exactly one approved push URL after `pushurl`, `insteadOf`, and `pushInsteadOf` resolution; refuse additional or ambiguous endpoints.
+     Confirm the actual default branch with `git ls-remote --symref <push-url> HEAD` for that endpoint and supported repository metadata.
+     Refuse a missing or ambiguous symbolic default, metadata disagreement, and a feature branch equal to the actual default branch.
+   - Run `git rev-parse --abbrev-ref @{u}`. If it names `main`, `origin/main`, or the actual default branch locally or remotely,
+     block the push and establish feature tracking, then repeat the check.
+     A missing upstream permits every explicit feature push only after the complete resolved destination preflight passes for that push attempt.
+     Inherited upstream and `push.default` are risk context, not resolved destination evidence.
+   - Substitute the verified literal feature branch into `HEAD:refs/heads/<feature-branch>`.
+     The dry-run runs the pre-push hook; block if its workload lacks admission under the current brief.
+     Preserve hooks; never use `--no-verify` to obtain destination evidence.
+     Run only the permitted `git push --dry-run --porcelain origin HEAD:refs/heads/<feature-branch>` as the destination probe.
+     Use the same repository, HEAD SHA, current branch, remote, and literal refspec for the authorized push.
+     Set `LC_ALL=C` for parseable Git output and retain stdout, stderr, exit status, and the exact command as evidence.
+   - Inspect every `To` endpoint and every porcelain status row, including up-to-date refs.
+     Match the dry-run's resolved push URL to the approved repository identity; the remote name `origin` alone proves no identity.
+     Require the sole approved endpoint and exactly one destination row with source `HEAD` and destination `refs/heads/<feature-branch>`.
+     Accept only a normal update, new branch, or up-to-date status (` `, `*`, or `=`).
+     Refuse `main`, the actual default branch, extra refs, tags, deletions, forced updates, and rejected refs anywhere in the output.
+     Block when evidence is denied, unavailable, unsuccessful, empty, or unparseable. Never infer success from the command text alone.
+   - Recheck the recorded repository, HEAD SHA, branch, push URL, default branch, and command before execution.
+     Repeat the complete preflight after any change; evidence applies only to this push attempt.
+     To execute, remove only `--dry-run --porcelain`: use `git push origin HEAD:refs/heads/<feature-branch>`.
+     Never use an abbreviated or default push. Never target a default branch.
 4. Open one PR, or update the open PR. Put scope, behavior, verification steps, and risks in the body.
 
 ## 10. Babysit

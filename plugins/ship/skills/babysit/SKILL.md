@@ -9,6 +9,10 @@ allowed-tools: Read, Grep, Glob, LSP, Edit, Write, Agent, SendMessage, Bash
 
 Bring the PR in `$ARGUMENTS`, or the current branch's PR, to green required CI and zero unresolved threads on the current head.
 
+## Push boundary
+
+Before every authorized feature push, including direct invocation, retries, round fixes, and main merges, apply the [resolved destination preflight](../ship/references/pipeline.md#9-push-and-pr). Use only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted. Writers prepare evidence only; the authorized driver executes the preflight and push; writers retain zero push authority, including push dry-runs. Preserve existing push authority, approval holds, merge holds, and verification gates.
+
 ## One round
 
 1. **Wait for Better Review.** In a repository with `.github/workflows/better-review.yml`, read the latest `better-review/review` check run on the head. While it is `in_progress` and younger than 25 minutes, do not push or merge main. A push during a run discards that run.
