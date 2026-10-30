@@ -51,6 +51,8 @@ Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-s
 
 Hook state lives in `${XDG_STATE_HOME:-~/.local/state}/ultraship`. The ledger lives in `$(git rev-parse --git-common-dir)/ship/ledger/<branch>.tsv`.
 
+Set `SHIP_LEDGER_DIR` to an absolute directory to store ledger files there, for example `export SHIP_LEDGER_DIR="$PWD/.scratch/ship-ledgers"`. Export it for ledger commands and hooks. Branch filenames replace `/` with `__`. Empty and relative values raise an error. An unset variable uses the common Git directory.
+
 ## Test
 
 ```bash
