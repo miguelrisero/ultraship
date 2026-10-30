@@ -103,9 +103,17 @@ def account(ledger, cwd, notifications, receipts, session):
     home = ledger.ledger_path(cwd).resolve()
     history = ledger.rows(home)
     starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
+    occurrences = {}
     for owed in notifications:
         epoch, agent, _ = owed[:3]
-        result = json.loads(owed[3]) if len(owed) == 4 else {'id': str(uuid.uuid4())}
+        if len(owed) == 4:
+            result = json.loads(owed[3])
+        else:
+            line = '\t'.join(owed)
+            ordinal = occurrences.get(line, 0)
+            occurrences[line] = ordinal + 1
+            result = {'id': 'legacy:' + hashlib.sha256(
+                json.dumps([session, line, ordinal]).encode()).hexdigest()}
         result_id = json.dumps([session, cwd, result['id']])
         if 'ledger' in result:
             if result['ledger'] != str(home):

@@ -265,9 +265,36 @@ class LedgerDirTests(unittest.TestCase):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
         owed = self.base / 'state/ultraship/owed/s1.tsv'
         owed.write_text('\t'.join(owed.read_text().rstrip('\n').split('\t')[:3]) + '\n')
+        evidence = owed.read_bytes()
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
         self.finish_run()
         self.assertEqual(self.hook('stop'), '')
+        receipts = self.base / 'state/ultraship/accounted.json'
+        committed = receipts.read_bytes()
+        self.assertEqual(len(json.loads(committed)), 1)
+        owed.write_bytes(evidence)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(receipts.read_bytes(), committed)
+        self.assertEqual(owed.read_bytes(), b'')
+
+    def test_duplicate_legacy_lines_have_distinct_stable_receipts(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        line = '\t'.join(owed.read_text().rstrip('\n').split('\t')[:3]) + '\n'
+        owed.write_text(line * 2)
+        evidence = owed.read_bytes()
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(owed.read_bytes(), evidence)
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        self.assertEqual(self.hook('stop'), '')
+        receipts = self.base / 'state/ultraship/accounted.json'
+        committed = receipts.read_bytes()
+        self.assertEqual(len(json.loads(committed)), 2)
+        owed.write_bytes(evidence)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(receipts.read_bytes(), committed)
+        self.assertEqual(owed.read_bytes(), b'')
 
     def test_actual_hooks_retain_exact_evidence_until_accounted(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
