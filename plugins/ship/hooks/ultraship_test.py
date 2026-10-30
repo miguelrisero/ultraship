@@ -78,6 +78,8 @@ with tempfile.TemporaryDirectory() as tmp:
     hook('subagent-stop', {**session, 'agent_type': 'ship:writer--sol'}, env)
     blocked = hook('stop', session, env)
     assert blocked['decision'] == 'block' and 'reviewer--sol' in blocked['reason']
+    assert hook('stop', session, env)['decision'] == 'block'
+    assert ledger('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode == 0
     assert hook('stop', session, env) == ''
 
     hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--opus'}, env)

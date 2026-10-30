@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Ultraship hooks. Usage: ultraship.py pre|subagent-stop|stop|compact < hook-input.json"""
+import fcntl
 import importlib.util
 import json
 import os
@@ -76,33 +77,49 @@ def subagent_stop(data):
         path = owed_file(data)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('a') as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
             fh.write(f"{int(time.time())}\t{data['agent_type']}\t{data.get('cwd') or os.getcwd()}\n")
 
 
 def stop(data):
     path = owed_file(data)
-    if data.get('stop_hook_active') or not path.exists():
+    if data.get('stop_hook_active'):
         return
-    owed = [line.split('\t') for line in path.read_text().splitlines() if line]
-    path.unlink()
-    ledger = load_ledger()
-    missing = []
-    for cwd in {o[2] for o in owed}:
+    try:
         try:
-            run = ledger.open_run(ledger.ledger_path(cwd))
-        except Exception:
-            continue
-        if not run:
-            continue
-        mine = [o for o in owed if o[2] == cwd]
-        since = min(int(o[0]) for o in mine)
-        recorded = sum(1 for r in run[1] if int(r[0]) >= since - 5)
-        if recorded < len(mine):
-            missing += [o[1] for o in mine[recorded:]]
-    if missing:
+            path.stat()
+        except FileNotFoundError:
+            return
+        with path.open('r+') as pending:
+            fcntl.flock(pending, fcntl.LOCK_EX)
+            owed = [line.split('\t') for line in pending.read().splitlines() if line]
+            if not owed:
+                return
+            ledger = load_ledger()
+            missing = []
+            for cwd in {o[2] for o in owed}:
+                run = ledger.open_run(ledger.ledger_path(cwd))
+                if not run:
+                    raise ValueError(f'No open ship run in {cwd}; restore or start the intended run')
+                available = list(run[1])
+                for epoch, agent, _ in (o for o in owed if o[2] == cwd):
+                    match = next((r for r in available if int(r[0]) >= int(epoch) - 5
+                                  and r[2] == agent and r[4] != 'owed'), None)
+                    if match is None:
+                        missing.append(agent)
+                    else:
+                        available.remove(match)
+            if missing:
+                raise ValueError('Review results have no ledger row: ' + ', '.join(missing))
+            # Clear only after every result has a successful accounting row.
+            # Keep this inode so concurrent SubagentStop writers share the lock.
+            pending.seek(0)
+            pending.truncate()
+    except Exception as exc:
         print(json.dumps({'decision': 'block', 'reason':
-              'Review results have no ledger row: ' + ', '.join(missing) +
-              '. Record each with `ledger.py append <step> <agent> <sha> <verdict> [note]`, then continue.'}))
+              f'Pending review evidence retained at {path}: {exc}. '
+              'Resolve ledger access (set SHIP_LEDGER_DIR to an absolute permitted directory if needed). '
+              'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]`, then continue.'}))
 
 
 def compact(data):
@@ -112,7 +129,9 @@ def compact(data):
         ledger = load_ledger()
         path = ledger.ledger_path(data.get('cwd') or '.')
         run = ledger.open_run(path)
-    except Exception:
+    except Exception as exc:
+        lines.append(f'Ledger resolution failed: {exc}. Pending review evidence remains at {owed_file(data)}. '
+                     'Restore ledger access or set SHIP_LEDGER_DIR to an absolute permitted directory before continuing.')
         run = None
     if run:
         lines.append(f'Open ship run: {run[0][5]} (mode {run[0][2]}). Ledger: {path}. '
