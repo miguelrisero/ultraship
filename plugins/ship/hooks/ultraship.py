@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Ultraship hooks. Usage: ultraship.py pre|subagent-stop|stop|compact < hook-input.json"""
+import fcntl
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import sys
+import tempfile
 import time
+import uuid
 from pathlib import Path
 
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
@@ -71,38 +75,129 @@ def owed_file(data):
     return STATE / 'owed' / (re.sub(r'[^\w.-]', '_', data.get('session_id') or 'unknown') + '.tsv')
 
 
+def run_identity(index, row):
+    return [index, hashlib.sha256(json.dumps(row).encode()).hexdigest()]
+
+
 def subagent_stop(data):
     if LEDGER_ROLES.match(data.get('agent_type') or ''):
         path = owed_file(data)
         path.parent.mkdir(parents=True, exist_ok=True)
+        cwd = data.get('cwd') or os.getcwd()
+        result = {'id': str(uuid.uuid4())}
+        try:
+            ledger = load_ledger()
+            home = ledger.ledger_path(cwd).resolve()
+            history = ledger.rows(home)
+            starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
+            result.update(ledger=str(home), run=run_identity(starts[-1], history[starts[-1]]) if starts else None)
+        except Exception:
+            # Always retain the notification, including when ledger access fails.
+            pass
         with path.open('a') as fh:
-            fh.write(f"{int(time.time())}\t{data['agent_type']}\t{data.get('cwd') or os.getcwd()}\n")
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            fh.write(f"{int(time.time())}\t{data['agent_type']}\t{cwd}\t{json.dumps(result)}\n")
+
+
+def account(ledger, cwd, notifications, receipts, session):
+    home = ledger.ledger_path(cwd).resolve()
+    history = ledger.rows(home)
+    starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
+    occurrences = {}
+    for owed in notifications:
+        epoch, agent, _ = owed[:3]
+        if len(owed) == 4:
+            result = json.loads(owed[3])
+        else:
+            line = '\t'.join(owed)
+            ordinal = occurrences.get(line, 0)
+            occurrences[line] = ordinal + 1
+            result = {'id': 'legacy:' + hashlib.sha256(
+                json.dumps([session, line, ordinal]).encode()).hexdigest()}
+        result_id = json.dumps([session, cwd, result['id']])
+        if 'ledger' in result:
+            if result['ledger'] != str(home):
+                raise ValueError(f'Ledger home differs for pending result {result["id"]}; restore {result["ledger"]}')
+            candidates = [i for i in starts if run_identity(i, history[i]) == result['run']]
+        else:
+            # Legacy notifications have no run identity: accept only one time-containing run.
+            candidates = []
+            for pos, start in enumerate(starts):
+                end = starts[pos + 1] if pos + 1 < len(starts) else len(history)
+                closed = next((r for r in history[start + 1:end] if r[1] == 'run-end'), None)
+                if int(history[start][0]) <= int(epoch) and (closed is None or int(epoch) <= int(closed[0])):
+                    candidates.append(start)
+        if len(candidates) != 1:
+            raise ValueError(f'No unambiguous ship run in {cwd} for pending result {result["id"]}; restore the intended run')
+        start = candidates[0]
+        end = next((i for i in starts if i > start), len(history))
+        end = next((i for i in range(start + 1, end) if history[i][1] == 'run-end'), end)
+        if result_id in receipts:
+            saved = receipts[result_id]
+            if saved[0] != str(home) or saved[1] != run_identity(start, history[start]):
+                raise ValueError('Accounting receipt names a different ledger or run')
+            index = saved[2][0]
+            if not start < index < end or saved[2] != run_identity(index, history[index]):
+                raise ValueError('Accounting receipt row is missing or differs; restore the ledger evidence')
+            continue
+        used = {json.dumps(value) for value in receipts.values()}
+        for i in range(start + 1, end):
+            row = history[i]
+            identity = [str(home), run_identity(start, history[start]), run_identity(i, row)]
+            if (row[1] not in ('run-start', 'run-end') and row[2] == agent and row[4] != 'owed'
+                    and int(row[0]) >= int(epoch) - 5 and json.dumps(identity) not in used):
+                receipts[result_id] = identity
+                break
+        else:
+            raise ValueError(f'Review results have no unused ledger row: {agent}')
 
 
 def stop(data):
     path = owed_file(data)
-    if data.get('stop_hook_active') or not path.exists():
+    if data.get('stop_hook_active'):
         return
-    owed = [line.split('\t') for line in path.read_text().splitlines() if line]
-    path.unlink()
-    ledger = load_ledger()
-    missing = []
-    for cwd in {o[2] for o in owed}:
+    try:
         try:
-            run = ledger.open_run(ledger.ledger_path(cwd))
-        except Exception:
-            continue
-        if not run:
-            continue
-        mine = [o for o in owed if o[2] == cwd]
-        since = min(int(o[0]) for o in mine)
-        recorded = sum(1 for r in run[1] if int(r[0]) >= since - 5)
-        if recorded < len(mine):
-            missing += [o[1] for o in mine[recorded:]]
-    if missing:
+            path.stat()
+        except FileNotFoundError:
+            return
+        with path.open('r+') as pending:
+            fcntl.flock(pending, fcntl.LOCK_EX)
+            owed = [line.split('\t') for line in pending.read().splitlines() if line]
+            if not owed:
+                return
+            ledger = load_ledger()
+            receipt_path = STATE / 'accounted.json'
+            # ponytail: one hook-state receipt lock serializes Stops; shard by ledger
+            # if concurrent Stop throughput matters. This never locks a legacy home.
+            with (STATE / 'accounted.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                try:
+                    receipts = json.loads(receipt_path.read_text())
+                except FileNotFoundError:
+                    receipts = {}
+                for cwd in {o[2] for o in owed}:
+                    account(ledger, cwd, [o for o in owed if o[2] == cwd], receipts, str(path))
+                with tempfile.NamedTemporaryFile(mode='w', dir=STATE, prefix='accounted.',
+                                                 delete=False) as saved:
+                    json.dump(receipts, saved)
+                    saved.flush()
+                    os.fsync(saved.fileno())
+                os.replace(saved.name, receipt_path)
+                directory = os.open(STATE, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+            # Clear only after every result has a successful accounting row.
+            # Keep this inode so concurrent SubagentStop writers share the lock.
+            pending.seek(0)
+            pending.truncate()
+    except Exception as exc:
         print(json.dumps({'decision': 'block', 'reason':
-              'Review results have no ledger row: ' + ', '.join(missing) +
-              '. Record each with `ledger.py append <step> <agent> <sha> <verdict> [note]`, then continue.'}))
+              f'Pending review evidence retained at {path}: {exc}. '
+              'Resolve ledger access (set SHIP_LEDGER_DIR to an absolute permitted directory if needed). '
+              'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]`, then continue.'}))
 
 
 def compact(data):
@@ -112,7 +207,9 @@ def compact(data):
         ledger = load_ledger()
         path = ledger.ledger_path(data.get('cwd') or '.')
         run = ledger.open_run(path)
-    except Exception:
+    except Exception as exc:
+        lines.append(f'Ledger resolution failed: {exc}. Pending review evidence remains at {owed_file(data)}. '
+                     'Restore ledger access or set SHIP_LEDGER_DIR to an absolute permitted directory before continuing.')
         run = None
     if run:
         lines.append(f'Open ship run: {run[0][5]} (mode {run[0][2]}). Ledger: {path}. '

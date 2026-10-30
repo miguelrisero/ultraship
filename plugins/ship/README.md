@@ -46,12 +46,18 @@ Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-s
 | Model guard | PreToolUse `Agent` | Denies a `model` override on a `ship:*` agent |
 | Role guard | PreToolUse `Bash`, `Edit`, `Write` | Denies push, merge, deploy, publish, and harness-config edits for writers |
 | Research budget | PreToolUse discovery tools | Denies the 41st discovery call of a researcher |
-| Ledger owed | SubagentStop, Stop | Blocks the stop once when a reviewer result has no ledger row |
+| Ledger owed | SubagentStop, Stop | Retains pending evidence and blocks until each reviewer result has a ledger row |
 | Compact handoff | SessionStart `compact` | Prints the re-read instruction and the open ledger run |
 
-Hook state lives in `${XDG_STATE_HOME:-~/.local/state}/ultraship`. The ledger lives in `$(git rev-parse --git-common-dir)/ship/ledger/<branch>.tsv`.
+Hook state lives in `${XDG_STATE_HOME:-~/.local/state}/ultraship`.
 
-Set `SHIP_LEDGER_DIR` to an absolute directory to store ledger files there, for example `export SHIP_LEDGER_DIR="$PWD/.scratch/ship-ledgers"`. Export it for ledger commands and hooks. Branch filenames replace `/` with `__`. Empty and relative values raise an error. An unset variable uses the common Git directory.
+A checkout with its Git directory inside the checkout uses `<common-git-dir>/ship/ledger/<branch>.tsv`. An existing parent `.scratch` identifies the workspace for a direct-child linked checkout. A common Git directory inside that workspace also uses the common-directory default. An external common Git directory selects `<workspace>/.scratch/ship-ledgers/<canonical-checkout-sha256>/<branch>.tsv`. The resolver canonicalizes roots and rejects symlink escapes. Ambiguous layouts require an absolute `SHIP_LEDGER_DIR`.
+
+The first local resolution imports the same-branch legacy TSV byte-for-byte, including its open run and all evidence. A sidecar `.import.json` records the canonical legacy path and SHA256. Cooperating first users share an exclusive local import lock. Readers and writers then use the local ledger exclusively. The legacy ledger remains frozen history. Import errors preserve the source and require resolution.
+
+The sole driver must hold run custody and retire old legacy writers before import. Old writers can race the snapshot read. Local locking covers cooperating importers only. Import requires legacy read permission and local directory write permission. It grants zero legacy write permission. CLI commands, completion checks, Stop, and compact share the resolver. Stop retains exact pending evidence through access failures, missing runs, and failed appends. Notifications bind to the ledger path and run-start identity when ledger access succeeds. Stop accepts accounting from that run after successful closure. Persistent hook-state receipts consume each accounting row once across Stop cycles and sessions. Each notification has a fresh ID, including repeat notifications from the same agent. Receipt publication precedes pending-evidence clearing. Legacy notifications require one unambiguous time-containing run; ambiguous evidence stays pending.
+
+Set `SHIP_LEDGER_DIR` to an absolute permitted directory for an explicit home, for example `export SHIP_LEDGER_DIR="$PWD/../.scratch/ship-ledgers"`. Export it for ledger commands and hooks. The directory directly contains the branch TSV; branch filenames replace `/` with `__`. Empty and relative values raise an error. The override selects its home without legacy import.
 
 ## Test
 
