@@ -188,6 +188,87 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(len(snapshots), 1)
         self.assertEqual(snapshots[0].read_bytes(), self.history)
 
+    def finish_run(self):
+        for step in ledger.REQUIRED['light']:
+            self.assertEqual(self.cli('append', step, 'driver', 'sha', 'pass').returncode, 0)
+        self.assertEqual(self.cli('run-end').returncode, 0)
+
+    def test_stop_accounts_closed_run_and_refuses_next_run_evidence(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        self.finish_run()
+        self.assertEqual(self.hook('stop'), '')
+        self.hook('subagent-stop', agent_type='ship:reviewer--opus')
+        # The notification names the closed first run, even after another run starts.
+        self.assertEqual(self.cli('run-start', 'light', 'run-2').returncode, 0)
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--opus', 'sha', 'pass').returncode, 0)
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        evidence = owed.read_bytes()
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(owed.read_bytes(), evidence)
+
+    def test_stop_accounts_original_closed_run_with_new_run_open(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        self.finish_run()
+        self.assertEqual(self.cli('run-start', 'light', 'run-2').returncode, 0)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertIn('run-2', self.cli('status').stdout)
+
+    def test_stop_cycles_consume_distinct_rows_and_preserve_repeat_notifications(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='same-agent')
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        self.assertEqual(self.hook('stop'), '')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        receipts = self.base / 'state/ultraship/accounted.json'
+        committed = receipts.read_bytes()
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='same-agent')
+        fields = owed.read_text().rstrip('\n').split('\t')
+        # Keep the historical five-second tolerance in play across separate Stops.
+        row_epoch = next(r[0] for r in ledger.rows(self.resolve()) if r[2] == 'ship:reviewer--sol')
+        fields[0] = str(int(row_epoch) + 4)
+        owed.write_text('\t'.join(fields) + '\n')
+        evidence = owed.read_bytes()
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(owed.read_bytes(), evidence)
+        self.assertEqual(receipts.read_bytes(), committed)
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(len(json.loads(receipts.read_bytes())), 2)
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='same-agent')
+        evidence = owed.read_bytes()
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(owed.read_bytes(), evidence)
+
+    def test_receipt_publication_failure_retains_pending_and_retry_consumes_once(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        evidence = owed.read_bytes()
+        receipts = self.base / 'state/ultraship/accounted.json'
+        receipts.mkdir()
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(owed.read_bytes(), evidence)
+        receipts.rename(receipts.with_name('retained-receipt-obstruction'))
+        self.assertEqual(self.hook('stop'), '')
+        # Replaying an already accounted notification also models a crash before clearing.
+        owed.write_bytes(evidence)
+        committed = receipts.read_bytes()
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(receipts.read_bytes(), committed)
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        evidence = owed.read_bytes()
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(owed.read_bytes(), evidence)
+
+    def test_legacy_notification_uses_unambiguous_closed_run(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        owed.write_text('\t'.join(owed.read_text().rstrip('\n').split('\t')[:3]) + '\n')
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        self.finish_run()
+        self.assertEqual(self.hook('stop'), '')
+
     def test_actual_hooks_retain_exact_evidence_until_accounted(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
@@ -203,7 +284,7 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(self.hook('stop', env=bad_env, stop_hook_active=True), '')
         self.assertEqual(owed.read_bytes(), evidence)
         empty_env = {**self.env, 'SHIP_LEDGER_DIR': str(self.base / 'empty')}
-        self.assertIn('No open ship run', json.loads(self.hook('stop', env=empty_env))['reason'])
+        self.assertIn('Ledger home differs', json.loads(self.hook('stop', env=empty_env))['reason'])
         self.assertEqual(owed.read_bytes(), evidence)
         # A failed CLI append leaves the pending evidence intact.
         obstruction = self.base / 'file-not-directory'
