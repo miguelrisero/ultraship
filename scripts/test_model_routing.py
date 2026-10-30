@@ -10,6 +10,16 @@ spec.loader.exec_module(checks)
 
 
 class ModelRoutingTests(unittest.TestCase):
+    def test_astra_and_luna_reviewer_names_pin_their_declared_models(self):
+        for seat, model in (('reviewer--astra', 'gpt-6-astra'),
+                            ('reviewer--luna', 'gpt-6-luna')):
+            with self.subTest(seat=seat):
+                path = ROOT / 'plugins/ship/agents' / (seat + '.md')
+                fields = checks.frontmatter(path.read_text())
+                self.assertEqual(fields['name'], seat)
+                self.assertEqual(fields['model'], model)
+                self.assertEqual(checks.inspect_text(path.read_text(), path), [])
+
     def test_required_seats_keep_read_only_tools_effort_and_fallbacks(self):
         for seat in ('reviewer--fable', 'verifier--fable'):
             path = ROOT / 'plugins/ship/agents' / (seat + '.md')
