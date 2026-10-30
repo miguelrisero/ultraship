@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Ship run ledger: one TSV per branch under the repository's common Git dir.
+"""Ship run ledger: one branch TSV in SHIP_LEDGER_DIR or the common Git dir.
 
 Row: epoch<TAB>step<TAB>agent<TAB>sha<TAB>verdict<TAB>note
 """
+import os
 import subprocess
 import sys
 import time
@@ -24,9 +25,13 @@ def git(cwd, *args):
 
 
 def ledger_path(cwd='.'):
+    override = os.environ.get('SHIP_LEDGER_DIR')
+    if override is not None and not Path(override).is_absolute():
+        raise ValueError('SHIP_LEDGER_DIR must be an absolute path')
     common = Path(cwd, git(cwd, 'rev-parse', '--git-common-dir')).resolve()
     branch = git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD').replace('/', '__')
-    return common / 'ship' / 'ledger' / f'{branch}.tsv'
+    directory = Path(override) if override is not None else common / 'ship' / 'ledger'
+    return directory / f'{branch}.tsv'
 
 
 def rows(path):
