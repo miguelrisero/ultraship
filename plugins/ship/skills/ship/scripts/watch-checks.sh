@@ -7,7 +7,7 @@ set -euo pipefail
 pr="${1:?usage: watch-checks.sh <PR> [start-timeout] [timeout]}"
 start_timeout="${2:-600}"
 timeout="${3:-5400}"
-interval=30
+interval=300
 waited=0
 
 while :; do
@@ -19,7 +19,7 @@ while :; do
       exit 2
     fi
   elif ! grep -qx pending <<<"$buckets"; then
-    gh pr checks "$pr" --required || true
+    printf '%s\n' "$buckets"
     if grep -qxE 'fail|cancel' <<<"$buckets"; then exit 1; fi
     exit 0
   fi

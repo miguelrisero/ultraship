@@ -34,9 +34,17 @@ with tempfile.TemporaryDirectory() as tmp:
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'Explore', 'model': 'haiku'}}, env))
 
     for agent in ['ship:writer--sol', 'ship:writer--sonnet']:
-        for cmd in ['git push origin HEAD', 'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
+        for cmd in ['git push origin HEAD', 'git -C /w push origin HEAD', 'git -c core.x=y push',
+                    'git --git-dir=/w/.git push', 'cd /w && git -C /w push',
+                    'git -C "/a b" -c core.x=y --no-pager push', 'git --git-dir /w/.git push',
+                    'git --no-pager push', 'git -C/w -ccore.x=y push',
+                    'git commit -m "echo git push"',
+                    'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
-        for cmd in ['git merge origin/main', 'git fetch origin main && git merge origin/main', 'git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status']:
+        for cmd in ['git merge origin/main', 'git fetch origin main && git merge origin/main',
+                    'git -C /w status', 'git -C /w merge origin/main',
+                    'git -C /w commit -m "no push here"', 'git commit -m "push"', 'git log --grep push',
+                    'git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status']:
             assert not denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
     assert not denied(hook('pre', {'agent_type': 'ship:driver', 'tool_name': 'Bash', 'tool_input': {'command': 'git push'}}, env))
     assert denied(hook('pre', {**writer, 'tool_name': 'Write', 'tool_input': {'file_path': '/r/.claude/settings.local.json'}}, env))

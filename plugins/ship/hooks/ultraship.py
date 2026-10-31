@@ -17,8 +17,14 @@ RESEARCH_BUDGET = 40
 DISCOVERY = re.compile(r'^(Read|Grep|Glob|LSP|WebFetch|WebSearch|mcp__fff__\w+)$')
 # ponytail: a command-string match, so a writer can still reach these through a script it writes.
 # Upgrade path: run writers in a sandbox without push credentials.
+# Quoted commit messages containing `echo git push` also match; this guard scans raw text.
 WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
-    git\s+push |
+    git\s+(?:
+        (?:-[Cc]|--(?:git-dir|work-tree|namespace|config-env|super-prefix))\s+
+            (?:"[^"\n]*"|'[^'\n]*'|[^\s;&|`'"]+)\s+ |
+        (?:--[\w-]+(?:=(?:"[^"\n]*"|'[^'\n]*'|[^\s;&|`'"]+))?|
+            -[Cc][^\s;&|`'"]+|-[a-zA-Z]+)\s+
+    )*push |
     gh\s+(pr\s+(create|merge|ready|close|edit|comment|review)|release|workflow\s+run|repo\s+(create|delete|edit)) |
     (npm|pnpm|yarn|bun)\s+publish | cargo\s+publish | twine\s+upload | gem\s+push |
     terraform\s+(apply|destroy) | kubectl\s+(apply|delete|rollout) | helm\s+(install|upgrade|uninstall) |
