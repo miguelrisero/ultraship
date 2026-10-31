@@ -47,6 +47,7 @@ def git_push(command):
             continue
         expect_subcommand = False
         skip_value = False
+        depth, inner = 0, []
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
@@ -54,14 +55,24 @@ def git_push(command):
                 skip_value = False
                 continue
             if expect_subcommand:
-                if token in values:
-                    skip_value = True
+                # A `$(...)` option value: rescan its body, keep waiting for the subcommand.
+                if token.startswith('(') or depth:
+                    if not set(token) - set('();<>|&`'):
+                        depth = max(0, depth + token.count('(') - token.count(')'))
+                    if depth:
+                        inner.append(token)
+                    else:
+                        pending.append(' '.join(inner[1:]))
+                        inner = []
                     continue
-                if token.startswith('-'):
+                if token in values or (set(token) <= set('<>&') and set(token) & set('<>')):
+                    skip_value = True
                     continue
                 if token == 'push':
                     return True
-                expect_subcommand = False
+                # Options, redirection fds, and `$` stay pending; a plain word is the subcommand.
+                if re.fullmatch(r'[a-z][a-z0-9-]*', token):
+                    expect_subcommand = False
             if os.path.basename(token) == 'git':
                 expect_subcommand = True
     return False
