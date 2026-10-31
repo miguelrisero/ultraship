@@ -47,24 +47,20 @@ def git_push(command):
             continue
         expect_subcommand = False
         skip_value = False
-        depth, inner = 0, []
+        has_push = re.search(r'\bpush\b', text) is not None
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
+            # ponytail: a substitution before the subcommand hides it, so any `push` word denies.
+            # A rare false denial; the writer rephrases. Its body is still scanned below.
+            if expect_subcommand and (set(token) & set('(`') or token.endswith('$')):
+                if has_push:
+                    return True
+                expect_subcommand = skip_value = False
             if skip_value:
                 skip_value = False
                 continue
             if expect_subcommand:
-                # A `$(...)` option value: rescan its body, keep waiting for the subcommand.
-                if token.startswith('(') or depth:
-                    if not set(token) - set('();<>|&`'):
-                        depth = max(0, depth + token.count('(') - token.count(')'))
-                    if depth:
-                        inner.append(token)
-                    else:
-                        pending.append(' '.join(inner[1:]))
-                        inner = []
-                    continue
                 if token in values or (set(token) <= set('<>&') and set(token) & set('<>')):
                     skip_value = True
                     continue

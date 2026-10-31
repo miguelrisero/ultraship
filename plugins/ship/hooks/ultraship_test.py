@@ -58,6 +58,7 @@ with tempfile.TemporaryDirectory() as tmp:
                     'git 2>/dev/null push origin HEAD', 'git >log 2>&1 push', 'git &>/dev/null push',
                     'git -C $(pwd) push origin HEAD', 'git -C $(dirname $(pwd))/w push',
                     'git -C $(git push) status', 'git; /usr/bin/git push',
+                    'git -C $(git -C $(git push)) status', 'git -C `pwd` push', 'git -C "$(pwd)" push',
                     'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
         for cmd in ['git merge origin/main', 'git fetch origin main && git merge origin/main',
