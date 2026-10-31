@@ -35,9 +35,12 @@ def git_push(command):
               '--config-env', '--super-prefix', '--attr-source'}
     pending = [command]
     while pending:
-        text = pending.pop()
+        text = pending.pop().replace('\\' + '\n', '')
         try:
-            tokens = list(shlex.shlex(text, posix=True, punctuation_chars=True))
+            lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+            lexer.whitespace_split = True
+            lexer.commenters = ''
+            tokens = list(lexer)
         except ValueError:
             if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text):
                 return True

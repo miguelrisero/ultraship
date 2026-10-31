@@ -14,6 +14,7 @@ Read a merge queue from its own `/mq/queue` endpoint where the repository has on
 
 Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/lock-idle.py" <lock-file>` in the guard's PID namespace.
 The probe reads `/proc/locks` and `/proc/[0-9]*/fdinfo/*` and reports holder and waiter PIDs.
+The probe skips unreadable fdinfo for other users because the guard and its children share one UID.
 Launch a repository's flaky-pattern guard only when the probe reports zero holders and zero waiters.
 For Patricia, check `/var/ops/CoC/gate/locks/flaky-guard.lock` before `make test-flaky-patterns`; keep the guard's own bound unchanged.
 When the lock is busy, re-probe every 60 seconds for up to 10 minutes.
