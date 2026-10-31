@@ -12,7 +12,7 @@ Persist these sections after each transition:
 | In-flight lanes | Task, status, dependencies, worktree, branch, base/head/reviewed SHA, agent/transcript ID, requested and observed model, PR URL, next action |
 | Next tasks | Ordered eligible queue and queued-at timestamps |
 | Done ledger | Ready, merged, live-verified, dark, reported, or abandoned; PR URL, evidence, timestamp, worktree disposition |
-| Owner-blocked topics | Decision driver, stable external key, Input ID/version, event cursor, blocked scope, next action and link; pending actions keyed by answer event ID; completion evidence retained |
+| Owner-blocked topics | CoC publisher identity and verified liveness, pending native handoff, critical hold, stable external key, canonical CoC Input ID/version, exact owner answer event and cursor, continuing driver and acceptance, blocked scope, next scheduled handoff action, result Input receipt with ID/version/owner URL, completion evidence |
 | Foreign merges observed | SHA, PR URL, attribution, main CI state, affected lanes |
 | Engine status | Model health, failure evidence, last attempt, next retry |
 
@@ -22,7 +22,16 @@ Post-merge verification has its own state.
 
 ## Continuation and waits
 
-Use the shared owner-decision contract in the installed ship plugin at `skills/ship/references/owner-decisions.md`. Resume pending answer actions before consuming further events. Keep only the dependent scope blocked and continue eligible work.
+Use the [native peer routing contract](dispatch.md#native-peer-routing-contract) and the shared owner-decision contract in the installed ship plugin at `skills/ship/references/owner-decisions.md`.
+Copy the routing contract into every timer, recovery, and replacement child brief before resuming work.
+Use native `SendMessage` or the native agent channel; a child without the tool returns reports to its parent for relay.
+Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simulated user input for peer coordination.
+Batch actionable and terminal reports; keep unchanged routine reports silent.
+Only the CoC publishes canonical owner decisions and results in CoC workspace Inputs; chief-local Inputs never satisfy delivery.
+Verify CoC liveness with its recorded identity. If unavailable, retain the pending decision and critical hold and retry through existing scheduling.
+Create zero additional pollers or duplicate Inputs. Reconcile the canonical CoC Input ID before any publication request.
+Preserve actual owner Input event delivery and the exact owner answer event → continuing driver → result Input receipt across handoff and restart.
+Resume pending answer actions before consuming further events. Keep only the dependent scope blocked and continue eligible work.
 
 Rehydrate the board before new dispatch. Reconcile worktrees, branch heads, PR state, and native agent liveness. Continue each existing agent with its native ID when the session supports it. If an ID cannot resume across sessions, first preserve WIP and recover the frozen contract, files, and completed evidence before creating a replacement. Record that replacement explicitly.
 

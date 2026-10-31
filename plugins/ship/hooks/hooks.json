@@ -4,6 +4,10 @@
       {
         "matcher": "Agent|Task|Bash|Edit|Write|NotebookEdit|Read|Grep|Glob|LSP|WebFetch|WebSearch|mcp__fff__.*|mcp__bettercoding__(create_input|update_input|set_input_status)",
         "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py\" pre" }]
+      },
+      {
+        "matcher": "SendMessage|mcp__bettercoding__(create_input|update_input)",
+        "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/text_lint.py\" hook" }]
       }
     ],
     "SubagentStop": [
