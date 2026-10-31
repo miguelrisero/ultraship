@@ -25,7 +25,14 @@ Empty input asks for a task. Freeze scope and success checks before any code is 
 
 The session that runs this skill is the driver. It plans, dispatches, records, and ships. Writers write code.
 
-Read [owner decisions](references/owner-decisions.md) before dispatch. Register material owner decisions as Inputs and continue independent work.
+Read [owner decisions](references/owner-decisions.md) before dispatch. Apply its chief-managed CoC delivery contract when a chief owns the run.
+Copy that contract into every child, timer, and recovery brief, including retries and replacements.
+Use native `SendMessage` or the native agent channel for peers; a child without the tool returns reports to its parent for relay.
+Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simulated user input for peer coordination.
+Batch actionable and terminal reports; keep unchanged routine reports silent.
+For chief-managed work, only the CoC publishes canonical owner decisions and results in CoC workspace Inputs; chief-local Inputs never satisfy delivery.
+Preserve actual owner Input event delivery and the canonical CoC Input ID → exact owner answer event → continuing driver → result Input receipt.
+Continue independent work within existing authority.
 
 - Read [roster](references/roster.md) before the first dispatch. Use each scoped `ship:*` agent and leave the Agent `model` field unset. A hook denies overrides.
 - On an unavailable agent, dispatch the next agent in its fallback chain and record the substitution in the ledger note.

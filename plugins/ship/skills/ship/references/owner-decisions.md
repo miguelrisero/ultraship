@@ -2,10 +2,40 @@
 
 Apply this contract in chief and ship whenever progress needs a material owner decision.
 
+## Chief-managed CoC delivery
+
+For chief-managed work, apply the chief's native peer routing and model-independent output contracts to every child, timer, and recovery brief.
+Separate words with spaces. Use full sentences of at most 25 words; prohibit glued-word shorthand.
+Lead peer bodies with the outcome and meaning, then `Facts`, `Decision`, and `Next` with an accountable owner and dated UTC time.
+Decision Inputs state `What is wrong`, `Why now`, `Options` A–C with effects, `Recommendation`, and `If no answer`.
+Preserve informational result Inputs without artificial choices and preserve existing published choice IDs during retries.
+Classify create and update HTML with exactly one `<meta name="output-kind" content="decision">` or `<meta name="output-kind" content="result">`.
+Free-text owner decisions use `decision`; informational deliverables with feedback choices use `result`. Missing classification blocks publication.
+Preserve the server payload schema and actual owner-answer validation.
+The bundled `hooks/text_lint.py` source hook checks outgoing `SendMessage` and Input prose; native completions retain instruction-only enforcement.
+Use native `SendMessage` or the native agent channel for peer coordination; a child without the tool returns reports to its parent for relay.
+Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simulated user input for peer coordination, including fallback delivery.
+Batch actionable and terminal reports; keep unchanged routine reports silent and CoC peer events out of per-peer user-chat replies.
+Chiefs send decision context, options, and a recommendation through the native channel to the CoC.
+Verify CoC liveness with its existing recorded identity. Only the CoC publishes canonical owner decisions and results in CoC workspace Inputs.
+For chief-managed work, chief-local Inputs never satisfy delivery. Reuse the canonical CoC Input ID and avoid duplicate Inputs.
+If CoC is unavailable, preserve the pending decision and critical hold; retry native handoff through existing scheduling with zero additional pollers.
+Publish zero Inputs elsewhere during that wait. Continue independent work within existing authority.
+
+Preserve actual owner Input event delivery and all answer-verification steps below.
+Keep the canonical CoC Input ID/version, exact owner answer event, continuing driver and acceptance, and result Input receipt on the existing board.
+Retain the result Input ID/version, owner URL, publication receipt, and completion evidence across handoff and restart before closure.
+Writers return decision needs to their driver. The driver retains execution custody; CoC retains canonical Input publication custody.
+The register and consume steps below use the CoC as publisher for chief-managed work; standalone ship retains its assigned decision driver.
+Agent messages grant zero owner consent or approval; verify the actual owner event before action.
+Actual owner-event delivery may use user input only when that route is required, with the verified event and exact owner words.
+Keep authorized lifecycle commands separate from peer reports. Preserve actual permission denials and every approval, deploy, GO, and installation hold.
+
 ## Register and continue
 
 - Assign one driver to each independently answerable decision. Writers return decision needs, context, options, and blocked scope to their driver.
-- Let only that driver create or maintain the Input. Chief reuses a lane driver's Input; it keeps the same ID on its board.
+- Let only the designated publisher create or maintain the Input: CoC for chief-managed work, the decision driver for standalone ship.
+- Chief retains the canonical CoC Input ID on its board and requests publication through native handoff.
 - Reconcile the board and `list_inputs` before creation. Persist a stable workspace-scoped `external_key` before calling BetterCoding MCP `create_input`.
 - Supply `content.title`, `content.html`, and `content.contract` with `choices` as IDs and labels, `allow_text`, and `allow_no_answer_yet=true`.
 - Put context first in the HTML: background, what each option changes, a recommendation, and the consequence of no answer.
