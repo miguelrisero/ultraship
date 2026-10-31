@@ -13,23 +13,12 @@ Bring the PR in `$ARGUMENTS`, or the current branch's PR, to green required CI a
 
 Before every authorized feature push, including direct invocation, retries, round fixes, and main merges, apply the [resolved destination preflight](../ship/references/pipeline.md#9-push-and-pr). Use only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted. Writers prepare evidence only; the authorized driver executes the preflight and push; writers retain zero push authority, including push dry-runs. Preserve existing push authority, approval holds, merge holds, and verification gates.
 
-## GitHub quota
-
-Read CI only through GraphQL `gh pr checks` or `gh pr view`, at most once every 5 minutes per PR.
-Coordinate all readers, including `watch-checks.sh`, within that shared cadence.
-Never use `gh run watch`, a check-runs loop, job polling, or repeated status comments.
-Read one failed log once per failure with `gh run view <run-id> --log-failed`.
-Read a merge queue from its own `/mq/queue` endpoint where the repository has one.
-
-## Flaky guard lock
-
-Launch a repository's flaky-pattern guard only when `lock-idle.sh <lock-file>` reads `/proc/locks` and reports zero holders and zero waiters.
-For Patricia, run `bash "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/lock-idle.sh" /var/ops/CoC/gate/locks/flaky-guard.lock` before `make test-flaky-patterns`; keep the guard's own bound unchanged.
+Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) during polling and guard execution.
 
 ## One round
 
 1. **Wait for Better Review.** For `.github/workflows/better-review.yml`, read the latest `better-review/review` check through `gh pr checks` or `gh pr view --json statusCheckRollup`.
-   Apply the shared 5-minute cadence to reads on the head. While it is `in_progress` and younger than 25 minutes, do not push or merge main. A push during a run discards that run.
+   Apply the 5-minute polling cadence, and finish this reader before starting the CI reader. While it is `in_progress` and younger than 25 minutes, do not push or merge main. A push during a run discards that run.
 2. **Wait for CI.** Run `bash "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/watch-checks.sh" <PR>` in the background. An empty required-check list means CI did not start.
 3. **Collect.** Read one failed log once per failure with `gh run view <run-id> --log-failed`. List threads with `bash "${CLAUDE_SKILL_DIR}/scripts/threads.sh" <PR>`.
 4. **Triage.** Give the failures and threads to `ship:triage--sol`. It returns `real`, `false-positive`, `duplicate`, or `already-fixed` for each item, with evidence.
