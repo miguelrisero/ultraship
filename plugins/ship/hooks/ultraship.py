@@ -37,7 +37,7 @@ def git_push(command):
     while pending:
         text = pending.pop().replace('\\' + '\n', '')
         try:
-            lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+            lexer = shlex.shlex(text, posix=True, punctuation_chars='();<>|&`')
             lexer.whitespace_split = True
             lexer.commenters = ''
             tokens = list(lexer)

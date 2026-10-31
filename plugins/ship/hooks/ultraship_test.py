@@ -52,6 +52,7 @@ with tempfile.TemporaryDirectory() as tmp:
                     'git -c core.sshCommand="ssh -F /dev/null" push',
                     'git -c user.name=A+B push', 'git -c user.name=A#B push',
                     'git -C /w#x push', 'git ' + '\\' + '\n' + 'push',
+                    'echo `git push`', 'x=`git -C /w push`', '"`git push`"',
                     "bash -lc 'git -C /w push'", '/usr/bin/git push',
                     "sh -c 'git --attr-source HEAD push'", 'git push "',
                     'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
