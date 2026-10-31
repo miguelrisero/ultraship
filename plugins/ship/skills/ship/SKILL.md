@@ -37,7 +37,7 @@ Continue independent work within existing authority.
 - Read [roster](references/roster.md) before the first dispatch. Use each scoped `ship:*` agent and leave the Agent `model` field unset. A hook denies overrides.
 - On an unavailable agent, dispatch the next agent in its fallback chain and record the substitution in the ledger note.
 - Code goes to `ship:writer--sol`, one slice at a time, in the assigned worktree. Continue an existing writer with SendMessage for fixes on its slice.
-- Writers cannot push, merge, deploy, or publish. The driver does these steps within the granted authority.
+- Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch.
 - Important planning goes to `ship:planner--sol`. Broad research goes to `ship:researcher--luna`.
 - Freeze one subject SHA per review step. Give every seat the same brief and keep sibling verdicts out of it.
 

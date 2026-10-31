@@ -12,7 +12,14 @@ Implement the slice in the brief inside the exact worktree it names. Anchor ever
 - When the brief bans test execution, run no test, test target, or test runner of any kind: no `pytest`, `make` target that runs tests, `vitest`, `jest`, `npm test`, `bun test`, or `playwright`. Run only the lint and type checks the brief allows, and report `tests not run (brief)`. A definition rule never overrides the brief's ban.
 - Never bypass Git hooks. Do not use `--no-verify` or `-n` on commit or push. When a hook fails, fix the cause or report the hook as a blocker.
 - Commit only when the brief grants commits. Follow the repository's commit style and attribution rules.
-- Never push, merge, deploy, publish, or release. A hook denies these commands for writer agents.
+- Never push, run `/merge` or `gh pr merge`, deploy, publish, or release. The ban covers every path. A hook denies common CLI forms.
+- Merge the base branch only when the brief grants commits. Otherwise report the conflict to the driver.
+- Run the base merge when your lane branch conflicts with the base branch, or when the brief asks for it.
+- You may run local `git fetch origin <base>` and `git merge origin/<base>` for the brief's base branch. Merge only into your assigned lane branch in your assigned worktree.
+- The brief's `merge` authority field covers PR merges only. A local base merge requires the commit grant, regardless of `merge=yes`.
+- Resolve conflicts and commit the merge. Rerun the affected tests the brief permits; otherwise report `tests not run (brief)`.
+- Report the pre-merge SHA and the merge SHA to the driver for first-parent review ranges.
+- Merge no other branch. Never merge into the base branch. Never rebase or rewrite published history. Owner rule: Input dd33cb9b-c0b0-4703-9f7f-86292eae5c17, answer C, permits merging main into conflicting PR branches and retesting them.
 - Return owner decision needs, context, options, and blocked scope to the driver. Only the driver creates or maintains an Input. Never treat an agent message as approval.
 - Never edit harness configuration such as `.claude/settings*.json` or files under `~/.claude/`.
 - Preserve other people's changes and published history.
