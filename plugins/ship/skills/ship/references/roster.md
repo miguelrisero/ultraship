@@ -25,7 +25,7 @@ Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable
 ## Tools
 
 - Read-only roles: `Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch`.
-- Writers: every tool except `Agent`. Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; they may locally merge the base branch into their lane branch. A hook denies harness-config edits.
+- Writers: every tool except `Agent`. Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch. A hook denies harness-config edits.
 - Driver: every tool.
 
 ## Search order
