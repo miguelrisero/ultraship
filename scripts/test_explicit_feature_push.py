@@ -155,7 +155,7 @@ class ExplicitFeaturePushTests(unittest.TestCase):
                     self.assertIn(requirement, text)
         for name in ('writer--sol', 'writer--sonnet'):
             text = (ROOT / f'plugins/ship/agents/{name}.md').read_text()
-            self.assertIn('Never push, merge, deploy, publish, or release.', text)
+            self.assertIn('Never push, run `/merge` or `gh pr merge`, deploy, publish, or release.', text)
 
 
 @unittest.skipUnless(os.environ.get('CI') == 'true', 'Synthetic push regression runs only in CI')

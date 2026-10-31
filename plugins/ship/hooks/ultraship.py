@@ -56,7 +56,8 @@ def pre(data):
                     'mcp__bettercoding__set_input_status'):
             deny('Writers return owner decision needs to the driver. Only the driver maintains Inputs.')
         if tool == 'Bash' and WRITER_BASH.search(tin.get('command', '')):
-            deny('Writers do not push, merge, deploy, publish, or release. Report back; the driver ships.')
+            deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
+                 'they may locally merge the base branch into their lane branch. Report back; the driver ships.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''
         if tool in ('Edit', 'Write', 'NotebookEdit') and (
                 HARNESS_PATH.search(target) or target.startswith(str(Path.home() / '.claude') + '/')):

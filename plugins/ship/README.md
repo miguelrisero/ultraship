@@ -44,7 +44,7 @@ Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-s
 | Hook | Event | Effect |
 |---|---|---|
 | Model guard | PreToolUse `Agent` | Denies a `model` override on a `ship:*` agent |
-| Role guard | PreToolUse `Bash`, `Edit`, `Write` | Denies push, merge, deploy, publish, and harness-config edits for writers |
+| Role guard | PreToolUse `Bash`, `Edit`, `Write` | Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; they may locally merge the base branch into their lane branch. The hook also denies harness-config edits. |
 | Research budget | PreToolUse discovery tools | Denies the 41st discovery call of a researcher |
 | Ledger owed | SubagentStop, Stop | Retains pending evidence and blocks until each reviewer result has a ledger row |
 | Compact handoff | SessionStart `compact` | Prints the re-read instruction and the open ledger run |

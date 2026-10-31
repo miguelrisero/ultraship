@@ -64,7 +64,7 @@ The mutation-command brief boundary ships in ship `1.4.8` and chief `1.3.7`.
 Dispatch briefs keep mutation-check, anchor-check, and selector execution commands in the admitted battery STATIC part at the frozen head.
 
 - Every review runs at a frozen SHA, and every result gets a ledger row.
-- Writers do not push, merge, deploy, or publish. A hook denies these commands.
+- Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; they may locally merge the base branch into their lane branch.
 - Writers follow the brief's verification rule. When the brief bans tests, writers run no test runner and never bypass Git hooks.
 - Agents keep their pinned model. A hook denies per-call overrides.
 - Researchers get 40 discovery calls per assignment.

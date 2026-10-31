@@ -33,10 +33,11 @@ with tempfile.TemporaryDirectory() as tmp:
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol'}}, env))
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'Explore', 'model': 'haiku'}}, env))
 
-    for cmd in ['git push origin HEAD', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
-        assert denied(hook('pre', {**writer, 'tool_input': {'command': cmd}}, env)), cmd
-    for cmd in ['git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status']:
-        assert not denied(hook('pre', {**writer, 'tool_input': {'command': cmd}}, env)), cmd
+    for agent in ['ship:writer--sol', 'ship:writer--sonnet']:
+        for cmd in ['git push origin HEAD', 'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
+            assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
+        for cmd in ['git merge origin/main', 'git fetch origin main && git merge origin/main', 'git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status']:
+            assert not denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
     assert not denied(hook('pre', {'agent_type': 'ship:driver', 'tool_name': 'Bash', 'tool_input': {'command': 'git push'}}, env))
     assert denied(hook('pre', {**writer, 'tool_name': 'Write', 'tool_input': {'file_path': '/r/.claude/settings.local.json'}}, env))
     assert denied(hook('pre', {**writer, 'tool_name': 'Edit', 'tool_input': {'file_path': f'{tmp}/.claude/CLAUDE.md'}}, env))
