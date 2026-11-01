@@ -45,21 +45,23 @@ def git_push(command):
             if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text):
                 return True
             continue
-        expect_subcommand = skip_value = skip_target = False
+        expect_subcommand = skip_value = False
+        skip_target = ''
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
+            if skip_target:
+                # A spaced `<<- EOF` lexes as `<<`, `-`, `EOF`: the delimiter follows the dash.
+                skip_target = '<<-' if skip_target.endswith('<<') and token == '-' else ''
+                continue
             if expect_subcommand:
                 # A substitution before the subcommand can assemble any word, so it denies.
                 # Writers use `git -C .` or `cd` instead of `git -C $(...)`.
                 if set(token) & set('(`') or token.endswith('$'):
                     return True
                 if set(token) <= set('<>&|') and set(token) & set('<>'):
-                    skip_target = True
+                    skip_target = token
                     continue
-            if skip_target:
-                skip_target = False
-                continue
             if skip_value:
                 skip_value = False
                 continue
