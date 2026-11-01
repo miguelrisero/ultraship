@@ -45,9 +45,11 @@ def git_push(command):
             if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text):
                 return True
             continue
-        # An expansion or glob can assemble the executable (`$'git' push`), so with a bare
-        # `push` word it denies. A rare false denial, for example `echo $X; git stash push`.
-        if 'push' in tokens and any(set(token) & set('$`*?[{') for token in tokens):
+        # An expansion or glob can assemble the executable (`$'git' $'push'`), so with any
+        # `push` spelling it denies. A rare false denial, for example `echo $X; git stash push`.
+        expansion = str.maketrans('', '', '$`*?[]{},')
+        if (any(set(token) & set('$`*?[{') for token in tokens)
+                and any('push' in token.translate(expansion) for token in tokens)):
             return True
         expect_subcommand = skip_value = False
         for token in tokens:
