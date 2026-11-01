@@ -1,6 +1,6 @@
 ---
 name: babysit
-description: Drive an open pull request to green required CI and zero unresolved review threads, with Better Review triage, main merges, and a 10-round breaker. Use for an explicit babysit request or step 10 of the ship pipeline.
+description: Drive an open pull request to green required CI and zero unresolved review threads, with Better Review triage, main merges, one fix batch per round, and a round-5 chief review. Use for an explicit babysit request or step 10 of the ship pipeline.
 argument-hint: "[<PR URL or number>]"
 allowed-tools: Read, Grep, Glob, LSP, Edit, Write, Agent, SendMessage, Bash
 ---
@@ -22,7 +22,7 @@ Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) durin
 2. **Wait for CI.** Run `bash "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/watch-checks.sh" <PR>` in the background. An empty required-check list means CI did not start.
 3. **Collect.** Read one failed log once per failure with `gh run view <run-id> --log-failed`. List threads with `bash "${CLAUDE_SKILL_DIR}/scripts/threads.sh" <PR>`.
 4. **Triage.** Give the failures and threads to `ship:triage--sol`. It returns `real`, `false-positive`, `duplicate`, or `already-fixed` for each item, with evidence.
-5. **Fix.** Send all `real` items to `ship:writer--sol` as one batch. Rerun the affected tests, unless the brief bans local test execution; then CI reruns them. Push once for the round.
+5. **Fix.** Collect every failing check and every unresolved thread before the fix. Send all `real` items to `ship:writer--sol` as one batch. Rerun the affected tests, unless the brief bans local test execution; then CI reruns them. Push once for the round. Never push a partial batch.
 6. **Answer every thread.** Reply with the fix commit or the refuting evidence, then resolve the thread:
 
    ```bash
@@ -44,8 +44,9 @@ When `gh pr view --json mergeStateStatus` reports `BEHIND` or `DIRTY`, merge cur
 
 ## Breaker
 
-- At round 5, or when the same failure signature repeats twice, dispatch `ship:reviewer--sol` on the failures, the threads, and the fix history. Follow its root-cause plan in the next round.
-- At round 10, stop. Report the open failures and threads, each with its link, and the next action.
+- Target 6 pushes or fewer per PR.
+- When the same failure signature repeats twice, dispatch `ship:reviewer--sol` on the failures, the threads, and the fix history. Follow its root-cause plan in the next round.
+- At round 5, stop for a chief review. Send the chief, or the user when no chief runs, the open failures and threads, each with its link, the fix history, and the next action. Resume only with the chief's plan.
 
 ## Done
 
