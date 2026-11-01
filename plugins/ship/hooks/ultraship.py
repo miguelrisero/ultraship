@@ -54,7 +54,7 @@ def git_push(command):
                 # Writers use `git -C .` or `cd` instead of `git -C $(...)`.
                 if set(token) & set('(`') or token.endswith('$'):
                     return True
-                if set(token) <= set('<>&') and set(token) & set('<>'):
+                if set(token) <= set('<>&|') and set(token) & set('<>'):
                     skip_target = True
                     continue
             if skip_target:
