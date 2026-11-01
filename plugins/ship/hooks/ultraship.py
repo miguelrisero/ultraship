@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import sys
 import tempfile
 import time
@@ -15,10 +16,11 @@ from pathlib import Path
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
 RESEARCH_BUDGET = 40
 DISCOVERY = re.compile(r'^(Read|Grep|Glob|LSP|WebFetch|WebSearch|mcp__fff__\w+)$')
-# ponytail: a command-string match, so a writer can still reach these through a script it writes.
+# ponytail: a command-string match, so a writer can still reach these through a script it writes,
+# an alias or function, `eval`, or encoded text such as `$'\x70ush'` or base64.
 # Upgrade path: run writers in a sandbox without push credentials.
+# Quoted commit messages containing `git push` are denied by the nested token scan.
 WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
-    git\s+push |
     gh\s+(pr\s+(create|merge|ready|close|edit|comment|review)|release|workflow\s+run|repo\s+(create|delete|edit)) |
     (npm|pnpm|yarn|bun)\s+publish | cargo\s+publish | twine\s+upload | gem\s+push |
     terraform\s+(apply|destroy) | kubectl\s+(apply|delete|rollout) | helm\s+(install|upgrade|uninstall) |
@@ -26,6 +28,53 @@ WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
 )\b""", re.X)
 HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
 LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
+
+
+def git_push(command):
+    """Scan Git commands and shell-wrapper strings without regex backtracking."""
+    values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
+              '--config-env', '--super-prefix', '--attr-source'}
+    pending = [command]
+    while pending:
+        text = pending.pop().replace('\\' + '\n', '')
+        try:
+            lexer = shlex.shlex(text, posix=True, punctuation_chars='();<>|&`')
+            lexer.whitespace_split = True
+            lexer.commenters = ''
+            tokens = list(lexer)
+        except ValueError:
+            if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text):
+                return True
+            continue
+        # An expansion or glob can assemble the executable (`$'git' $'push'`), so with any
+        # `push` spelling it denies. A rare false denial, for example `echo $X; git stash push`.
+        expansion = str.maketrans('', '', '$`*?[]{},')
+        if (any(set(token) & set('$`*?[{') for token in tokens)
+                and any('push' in token.translate(expansion) for token in tokens)):
+            return True
+        expect_subcommand = skip_value = False
+        for token in tokens:
+            if any(char.isspace() for char in token):
+                pending.append(token)
+            # An expansion, glob, quoting form, or redirection before the subcommand can hide it,
+            # so it denies. Writers write `git -C . status 2>&1`, never `git $'push'` or `git {push,}`.
+            if expect_subcommand and set(token) & set('(`<>${*?['):
+                return True
+            if skip_value:
+                skip_value = False
+                continue
+            if expect_subcommand:
+                if token in values:
+                    skip_value = True
+                    continue
+                if token == 'push':
+                    return True
+                # Options and other non-word tokens stay pending; a plain word is the subcommand.
+                if re.fullmatch(r'[a-z][a-z0-9-]*', token):
+                    expect_subcommand = False
+            if os.path.basename(token) == 'git':
+                expect_subcommand = True
+    return False
 
 
 def role(data, name):
@@ -55,7 +104,8 @@ def pre(data):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
                     'mcp__bettercoding__set_input_status'):
             deny('Writers return owner decision needs to the driver. Only the driver maintains Inputs.')
-        if tool == 'Bash' and WRITER_BASH.search(tin.get('command', '')):
+        if tool == 'Bash' and (git_push(tin.get('command', ''))
+                               or WRITER_BASH.search(tin.get('command', ''))):
             deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                  'commit grants permit local base-branch merges into their own lane branch.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''

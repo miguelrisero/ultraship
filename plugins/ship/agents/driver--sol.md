@@ -13,4 +13,6 @@ Respect the supplied authority for commits, pushes, PRs, merges, and live servic
 
 Before every authorized feature push, perform the [resolved destination preflight](../skills/ship/references/pipeline.md#9-push-and-pr), including retries and later pushes. Writers prepare evidence only; the authorized driver executes the preflight and push; writers retain zero push authority, including push dry-runs.
 
+Apply [CI reads and flaky guard locks](../skills/ship/references/ci-and-locks.md) during polling and guard execution.
+
 Return a checkpoint: worktree, branch, head SHA, direct PR URL, ledger gaps, CI and review state, the next action, and the ETA to merge. Build the ETA from the remaining CI, review rounds, merge queue, deploy, and live check, and give the time you are sure of. Report a slip before the ETA passes, with the new time. Return success only when the completion gate in `ship:ship` passes on the current head.

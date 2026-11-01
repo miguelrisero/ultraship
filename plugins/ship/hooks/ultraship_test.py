@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Self-check for hooks/ultraship.py and skills/ship/scripts/ledger.py. Run with a workspace-local TMPDIR."""
+import importlib.util
 import json
+import time
 import os
 import re
 import subprocess
@@ -25,6 +27,14 @@ def denied(result):
     return isinstance(result, dict) and result['hookSpecificOutput']['permissionDecision'] == 'deny'
 
 
+spec = importlib.util.spec_from_file_location('ultraship', HOOK)
+ultraship = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ultraship)
+started = time.monotonic()
+assert not ultraship.git_push('git ' + '-Cc ' * 200 + 'status')
+assert ultraship.git_push('git ' + '-Cc ' * 200 + 'push')
+assert time.monotonic() - started < 0.1
+
 with tempfile.TemporaryDirectory() as tmp:
     env = {**os.environ, 'XDG_STATE_HOME': tmp, 'HOME': tmp}
     writer = {'agent_type': 'ship:writer--sol', 'agent_id': 'w1', 'tool_name': 'Bash'}
@@ -34,9 +44,31 @@ with tempfile.TemporaryDirectory() as tmp:
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'Explore', 'model': 'haiku'}}, env))
 
     for agent in ['ship:writer--sol', 'ship:writer--sonnet']:
-        for cmd in ['git push origin HEAD', 'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
+        for cmd in ['git push origin HEAD', 'git -C /w push origin HEAD', 'git -c core.x=y push',
+                    'git --git-dir=/w/.git push', 'cd /w && git -C /w push',
+                    'git -C "/a b" -c core.x=y --no-pager push', 'git --git-dir /w/.git push',
+                    'git --no-pager push', 'git -C/w -ccore.x=y push',
+                    'git commit -m "echo git push"', 'git commit -m "git push"',
+                    'git -c core.sshCommand="ssh -F /dev/null" push',
+                    'git -c user.name=A+B push', 'git -c user.name=A#B push',
+                    'git -C /w#x push', 'git ' + '\\' + '\n' + 'push',
+                    'echo `git push`', 'x=`git -C /w push`', '"`git push`"',
+                    "bash -lc 'git -C /w push'", '/usr/bin/git push',
+                    "sh -c 'git --attr-source HEAD push'", 'git push "',
+                    'git 2>/dev/null push origin HEAD', 'git >log 2>&1 push', 'git &>/dev/null push',
+                    'git -C $(pwd) push origin HEAD', 'git -C $(dirname $(pwd))/w push',
+                    'git -C $(git push) status', 'git; /usr/bin/git push',
+                    'git -C $(git -C $(git push)) status', 'git -C `pwd` push', 'git -C "$(pwd)" push',
+                    'git -C >log . push origin HEAD', 'git >|log push origin HEAD', 'git <<<x push', 'git <<- log push origin HEAD\nlog', "git >'>' push origin HEAD", 'git <<- - push', 'git >&- push', 'git > `printf log` push origin HEAD', 'git >"$(x)" push', 'git <<< - push', "git $'push' origin HEAD", 'git $"push"', 'git -C "$PWD" push', 'git {push,} origin HEAD', "$'git' push origin HEAD", '$"git" push', 'g?t push', '/usr/bin/gi[t] push', '"$G" push', "$'git' $'push'", "$'git' p{u,}sh", 'git pu?h', 'git -C ~/w push', 'git -C $(pwd) pu""sh', 'git -C . pu""sh',
+                    'git -C $(pwd) status',
+                    'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
-        for cmd in ['git merge origin/main', 'git fetch origin main && git merge origin/main', 'git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status']:
+        for cmd in ['git merge origin/main', 'git fetch origin main && git merge origin/main',
+                    'git -C /w status', 'git -C /w merge origin/main',
+                    'git -c push.default=current status', 'git -C push-service status',
+                    'git -C . status 2>&1', 'git log --grep push 2>/dev/null', 'git log >push',
+                    'git -C /w commit -m "no push here"', 'git commit -m "push"', 'git log --grep push',
+                    'git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status']:
             assert not denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
     assert not denied(hook('pre', {'agent_type': 'ship:driver', 'tool_name': 'Bash', 'tool_input': {'command': 'git push'}}, env))
     assert denied(hook('pre', {**writer, 'tool_name': 'Write', 'tool_input': {'file_path': '/r/.claude/settings.local.json'}}, env))

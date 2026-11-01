@@ -7,19 +7,20 @@ set -euo pipefail
 pr="${1:?usage: watch-checks.sh <PR> [start-timeout] [timeout]}"
 start_timeout="${2:-600}"
 timeout="${3:-5400}"
-interval=30
+interval=300
 waited=0
 
 while :; do
   # An empty list means CI has not started, not that CI is green.
-  buckets="$(gh pr checks "$pr" --required --json bucket --jq '.[].bucket' 2>/dev/null || true)"
+  rows="$(gh pr checks "$pr" --required --json bucket,name,link --jq '.[] | [.bucket, .name, .link] | @tsv' 2>/dev/null || true)"
+  buckets="$(cut -f1 <<<"$rows")"
   if [ -z "$buckets" ]; then
     if [ "$waited" -ge "$start_timeout" ]; then
       echo "no required checks started after ${waited}s"
       exit 2
     fi
   elif ! grep -qx pending <<<"$buckets"; then
-    gh pr checks "$pr" --required || true
+    printf '%s\n' "$rows"
     if grep -qxE 'fail|cancel' <<<"$buckets"; then exit 1; fi
     exit 0
   fi

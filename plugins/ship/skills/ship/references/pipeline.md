@@ -38,6 +38,8 @@ For design-heavy work, run `ship:panel design` on the plan before step 3.
 
 ## 3. Slices
 
+Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into every writer brief that can run the flaky-pattern guard.
+
 For each slice, in order:
 
 1. Dispatch `writer--sol` with the slice, worktree, base SHA, tests, and commit authority.
@@ -70,6 +72,8 @@ Give `reviewer--sol` every finding from steps 4 and 5 with its evidence. It retu
 Freeze the branch head. Run `ship:panel final`. A P0 returns to step 7 with that finding only.
 
 ## 9. Push and PR
+
+Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into every writer brief that can run the flaky-pattern guard.
 
 1. Merge current remote main into the branch. Resolve conflicts and rerun affected tests.
 2. Run the full lint and test suite locally.
