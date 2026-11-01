@@ -46,22 +46,13 @@ def git_push(command):
                 return True
             continue
         expect_subcommand = skip_value = False
-        skip_target = ''
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
-            if skip_target:
-                # A spaced `<<- EOF` lexes as `<<`, `-`, `EOF`: the delimiter follows the dash.
-                skip_target = '<<-' if skip_target.endswith('<<') and token == '-' else ''
-                continue
-            if expect_subcommand:
-                # A substitution before the subcommand can assemble any word, so it denies.
-                # Writers use `git -C .` or `cd` instead of `git -C $(...)`.
-                if set(token) & set('(`') or token.endswith('$'):
-                    return True
-                if set(token) <= set('<>&|') and set(token) & set('<>'):
-                    skip_target = token
-                    continue
+            # A substitution or redirection before the subcommand can hide it, so it denies.
+            # Writers write `git -C . status 2>&1`, never `git 2>&1 -C $(pwd) status`.
+            if expect_subcommand and (set(token) & set('(`<>') or token.endswith('$')):
+                return True
             if skip_value:
                 skip_value = False
                 continue
@@ -71,7 +62,7 @@ def git_push(command):
                     continue
                 if token == 'push':
                     return True
-                # Options, redirection fds, and `$` stay pending; a plain word is the subcommand.
+                # Options and other non-word tokens stay pending; a plain word is the subcommand.
                 if re.fullmatch(r'[a-z][a-z0-9-]*', token):
                     expect_subcommand = False
             if os.path.basename(token) == 'git':
