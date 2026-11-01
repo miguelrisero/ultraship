@@ -59,12 +59,14 @@ with tempfile.TemporaryDirectory() as tmp:
                     'git -C $(pwd) push origin HEAD', 'git -C $(dirname $(pwd))/w push',
                     'git -C $(git push) status', 'git; /usr/bin/git push',
                     'git -C $(git -C $(git push)) status', 'git -C `pwd` push', 'git -C "$(pwd)" push',
+                    'git -C >log . push origin HEAD', 'git -C $(pwd) pu""sh', 'git -C . pu""sh',
+                    'git -C $(pwd) status',
                     'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
         for cmd in ['git merge origin/main', 'git fetch origin main && git merge origin/main',
                     'git -C /w status', 'git -C /w merge origin/main',
                     'git -c push.default=current status', 'git -C push-service status',
-                    'git -C $(pwd) status 2>&1', 'git 2>/dev/null log --grep push', 'git log >push',
+                    'git -C . status 2>&1', 'git 2>/dev/null log --grep push', 'git log >push',
                     'git -C /w commit -m "no push here"', 'git commit -m "push"', 'git log --grep push',
                     'git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status']:
             assert not denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)

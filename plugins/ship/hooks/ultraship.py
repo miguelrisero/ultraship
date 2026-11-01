@@ -45,23 +45,26 @@ def git_push(command):
             if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text):
                 return True
             continue
-        expect_subcommand = False
-        skip_value = False
-        has_push = re.search(r'\bpush\b', text) is not None
+        expect_subcommand = skip_value = skip_target = False
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
-            # ponytail: a substitution before the subcommand hides it, so any `push` word denies.
-            # A rare false denial; the writer rephrases. Its body is still scanned below.
-            if expect_subcommand and (set(token) & set('(`') or token.endswith('$')):
-                if has_push:
+            if expect_subcommand:
+                # A substitution before the subcommand can assemble any word, so it denies.
+                # Writers use `git -C .` or `cd` instead of `git -C $(...)`.
+                if set(token) & set('(`') or token.endswith('$'):
                     return True
-                expect_subcommand = skip_value = False
+                if set(token) <= set('<>&') and set(token) & set('<>'):
+                    skip_target = True
+                    continue
+            if skip_target:
+                skip_target = False
+                continue
             if skip_value:
                 skip_value = False
                 continue
             if expect_subcommand:
-                if token in values or (set(token) <= set('<>&') and set(token) & set('<>')):
+                if token in values:
                     skip_value = True
                     continue
                 if token == 'push':
