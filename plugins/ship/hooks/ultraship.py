@@ -16,7 +16,8 @@ from pathlib import Path
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
 RESEARCH_BUDGET = 40
 DISCOVERY = re.compile(r'^(Read|Grep|Glob|LSP|WebFetch|WebSearch|mcp__fff__\w+)$')
-# ponytail: a command-string match, so a writer can still reach these through a script it writes.
+# ponytail: a command-string match, so a writer can still reach these through a script it writes,
+# an alias or function, `eval`, or encoded text such as `$'\x70ush'` or base64.
 # Upgrade path: run writers in a sandbox without push credentials.
 # Quoted commit messages containing `git push` are denied by the nested token scan.
 WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
