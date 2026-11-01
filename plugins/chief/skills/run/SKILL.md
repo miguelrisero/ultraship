@@ -135,7 +135,7 @@ At each checkpoint, inspect the lane's commit stack and upstream state. Retain a
 
 ## Verify and finish
 
-Require the ship completion gate before a lane reaches ready-for-review. Recheck GitHub state yourself: head SHA, required CI, unresolved threads, mergeability, and branch freshness. Check the file list for scratch artifacts. Compare changed guards and fixtures with the base policy. Prove merge-critical guards catch a deliberately broken case in an isolated test.
+Require the ship completion gate before a lane reaches ready-for-review. Recheck GitHub state yourself: head SHA, required CI, unresolved threads, mergeability, and branch freshness. Check the file list for scratch artifacts. Compare changed guards and fixtures with the base policy. After the merge, prove merge-critical guards catch a deliberately broken case in an isolated test at the merge commit.
 
 Apply the ship skill's proof-after-merge rule: green required CI, an independent review, and every thread dispositioned gate the merge, and the merge goes out within 2 hours of green CI. The mutation proof runs at the merge commit after the merge.
 
