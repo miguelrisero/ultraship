@@ -112,7 +112,7 @@ Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into 
      Repeat the complete preflight after any change; evidence applies only to this push attempt.
      To execute, remove only `--dry-run --porcelain`: use `git push origin HEAD:refs/heads/<feature-branch>`.
      Never use an abbreviated or default push. Never target a default branch.
-4. Open one PR, or update the open PR. Put scope, behavior, verification steps, and risks in the body.
+4. Open one PR at the first push, or update the open PR. Open it before any proof work: mutation batteries and live checks run after the PR exists. Put scope, behavior, verification steps, and risks in the body.
 
 ## 10. Babysit
 
