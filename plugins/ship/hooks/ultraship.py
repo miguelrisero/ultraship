@@ -49,9 +49,9 @@ def git_push(command):
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
-            # An expansion, quoting form, or redirection before the subcommand can hide it, so it denies.
-            # Writers write `git -C . status 2>&1`, never `git 2>&1 -C $(pwd) status` or `git $'push'`.
-            if expect_subcommand and set(token) & set('(`<>$'):
+            # An expansion, glob, quoting form, or redirection before the subcommand can hide it,
+            # so it denies. Writers write `git -C . status 2>&1`, never `git $'push'` or `git {push,}`.
+            if expect_subcommand and set(token) & set('(`<>${*?['):
                 return True
             if skip_value:
                 skip_value = False
