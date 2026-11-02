@@ -196,9 +196,9 @@ class LedgerDirTests(unittest.TestCase):
     def test_stop_accounts_closed_run_and_refuses_next_run_evidence(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
-        self.finish_run()
         self.assertEqual(self.hook('stop'), '')
         self.hook('subagent-stop', agent_type='ship:reviewer--opus')
+        self.finish_run()
         # The notification names the closed first run, even after another run starts.
         self.assertEqual(self.cli('run-start', 'light', 'run-2').returncode, 0)
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--opus', 'sha', 'pass').returncode, 0)
