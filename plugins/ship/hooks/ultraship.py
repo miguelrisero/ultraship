@@ -139,11 +139,12 @@ def subagent_stop(data):
         try:
             ledger = load_ledger()
             home = ledger.ledger_path(cwd).resolve()
-            if ledger.open_run(home) is None:
-                return
             history = ledger.rows(home)
-            starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
-            result.update(ledger=str(home), run=run_identity(starts[-1], history[starts[-1]]))
+            # Read the ledger once, so the open-run check and the run identity share one snapshot.
+            marks = [i for i, row in enumerate(history) if row[1] in ('run-start', 'run-end')]
+            if not marks or history[marks[-1]][1] != 'run-start':
+                return
+            result.update(ledger=str(home), run=run_identity(marks[-1], history[marks[-1]]))
         except Exception:
             # Always retain the notification, including when ledger access fails.
             pass
