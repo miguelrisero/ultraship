@@ -139,9 +139,11 @@ def subagent_stop(data):
         try:
             ledger = load_ledger()
             home = ledger.ledger_path(cwd).resolve()
+            if ledger.open_run(home) is None:
+                return
             history = ledger.rows(home)
             starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
-            result.update(ledger=str(home), run=run_identity(starts[-1], history[starts[-1]]) if starts else None)
+            result.update(ledger=str(home), run=run_identity(starts[-1], history[starts[-1]]))
         except Exception:
             # Always retain the notification, including when ledger access fails.
             pass
@@ -167,6 +169,8 @@ def account(ledger, cwd, notifications, receipts, session):
                 json.dumps([session, line, ordinal]).encode()).hexdigest()}
         result_id = json.dumps([session, cwd, result['id']])
         if 'ledger' in result:
+            if result['run'] is None:
+                continue
             if result['ledger'] != str(home):
                 raise ValueError(f'Ledger home differs for pending result {result["id"]}; restore {result["ledger"]}')
             candidates = [i for i in starts if run_identity(i, history[i]) == result['run']]

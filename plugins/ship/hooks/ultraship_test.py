@@ -99,15 +99,27 @@ with tempfile.TemporaryDirectory() as tmp:
     ledger = lambda *a: run(['python3', str(LEDGER), *a], cwd=repo)
 
     assert 'ship/ledger/feat__x.tsv' in ledger('path').stdout
+    session = {'session_id': 's1', 'cwd': str(repo)}
+    owed = Path(tmp, 'ultraship/owed/s1.tsv')
+    hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol'}, env)
+    assert not owed.exists() or owed.read_text() == ''
+    assert hook('stop', session, env) == ''
+
+    result = {'id': 'no-run', 'ledger': ledger('path').stdout.strip(), 'run': None}
+    owed.parent.mkdir(parents=True, exist_ok=True)
+    owed.write_text(f'{int(time.time())}\tship:reviewer--sol\t{repo}\t{json.dumps(result)}\n')
+    assert hook('stop', session, env) == ''
+    assert owed.read_text() == ''
+
     assert ledger('append', 'slices', 'a', 'sha', 'pass').returncode != 0
     assert ledger('run-start', 'light', 'run-1', '/b/board.md').returncode == 0
     assert ledger('run-start', 'light', 'run-2').returncode != 0
     assert ledger('gaps').returncode == 1
     assert 'refusing' in ledger('run-end').stderr
 
-    session = {'session_id': 's1', 'cwd': str(repo)}
     assert 'Open ship run: run-1' in hook('compact', session, env)
     hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol'}, env)
+    assert json.loads(owed.read_text().split('\t')[3])['run'] is not None
     hook('subagent-stop', {**session, 'agent_type': 'ship:writer--sol'}, env)
     blocked = hook('stop', session, env)
     assert blocked['decision'] == 'block' and 'reviewer--sol' in blocked['reason']
@@ -123,5 +135,8 @@ with tempfile.TemporaryDirectory() as tmp:
     assert ledger('run-end').returncode == 0
     assert 'no open run' in ledger('status').stdout
     assert 'Open ship run' not in hook('compact', session, env)
+    hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol'}, env)
+    assert owed.read_text() == ''
+    assert hook('stop', session, env) == ''
 
 print('ultraship hooks: ok')
