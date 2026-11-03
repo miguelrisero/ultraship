@@ -22,6 +22,12 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Record the approver, the exact edit, and the Input ID in the PR body.',
                 'Never loosen an assertion, widen a bound, or delete a check',
                 'zero writer push authority',
+                'Verify the owner event yourself when you have a `get_input` tool',
+                'Verifier fallback: when you have no `get_input` tool, or the call fails with an auth or tool error, the driver or the CoC runs `get_input`',
+                'the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name',
+                'Check that the recorded Input UUID, workspace UUID, event id, and choice id equal the values quoted in this definition',
+                'On a match, apply the exact approved edit.',
+                'Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.',
             ):
                 with self.subTest(path=name, phrase=phrase):
                     self.assertIn(phrase, text)
@@ -43,6 +49,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Outside the exceptions in the writer guard paragraph, never ask a writer for a test, pin, census, register, or bound edit that the CoC or the topic Chief did not approve.',
                 'the exact edit and file, the approver and the approval time, the owner rule citation, the Input ID, and the workspace ID',
                 'Loosened assertions, widened bounds, and deleted checks stay forbidden.',
+                'A writer without a `get_input` tool depends on your record',
+                'the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name',
+                'Record only values read from a `get_input` result.',
             ):
                 with self.subTest(path=name, phrase=phrase):
                     self.assertIn(phrase, text)
@@ -50,6 +59,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
     def test_skill_cites_owner_rule(self):
         text = (ROOT / 'plugins/ship/skills/ship/SKILL.md').read_text()
         self.assertIn(INPUT_ID, text)
+        self.assertIn('the writer stops on any mismatch with its definition', text)
 
 
 if __name__ == '__main__':
