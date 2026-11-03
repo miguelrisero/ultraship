@@ -14,7 +14,12 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             text = (ROOT / 'plugins/ship/agents' / name).read_text()
             for phrase in (
                 INPUT_ID, WORKSPACE_ID, EVENT_ID, 'get_input', 'owner_ui',
-                'answer_submitted', 'plugin_rule', 'on your own initiative',
+                'Outside the exceptions in the guard paragraph above, never make a test, pin, census, register, or bound edit on your own initiative.',
+                'approved that exact edit and cites this owner rule',
+                'Then apply the edit with no council round and no owner question.',
+                'stop and report to the driver',
+                '`answer_submitted`', 'choice `plugin_rule`',
+                'Record the approver, the exact edit, and the Input ID in the PR body.',
                 'Never loosen an assertion, widen a bound, or delete a check',
                 'zero writer push authority',
             ):
@@ -33,7 +38,12 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
     def test_drivers_supply_owner_event_coordinates(self):
         for name in ('driver.md', 'driver--sol.md'):
             text = (ROOT / 'plugins/ship/agents' / name).read_text()
-            for phrase in (INPUT_ID, WORKSPACE_ID, 'get_input'):
+            for phrase in (
+                INPUT_ID, WORKSPACE_ID, EVENT_ID, 'get_input',
+                'Outside the exceptions in the writer guard paragraph, never ask a writer for a test, pin, census, register, or bound edit that the CoC or the topic Chief did not approve.',
+                'the exact edit and file, the approver and the approval time, the owner rule citation, the Input ID, and the workspace ID',
+                'Loosened assertions, widened bounds, and deleted checks stay forbidden.',
+            ):
                 with self.subTest(path=name, phrase=phrase):
                     self.assertIn(phrase, text)
 
