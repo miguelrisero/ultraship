@@ -117,6 +117,32 @@ Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into 
 ## 10. Babysit
 
 Run `ship:babysit` on the PR until required CI is green and zero threads are unresolved. Append one row per round, and a final `babysit` row with verdict `pass`.
+Complete the applicable [UI browser gate](#ui-browser-gate) before the completion gate or any merge command.
+
+### UI browser gate
+
+Apply this gate to every UI PR, including dashboard `frontend/app/**` and UI-affecting frontend design-package changes.
+Use the existing Vercel preview route for marketing `frontend/website/**` UI changes.
+The driver owns this check within existing browser, login, seed, posting, and merge authority.
+This instruction grants zero additional permission and requires no simultaneous CoC plugin installation.
+
+1. Record the current pushed head and verify that the selected PR preview deploy serves that exact head.
+2. Refuse unsafe data isolation before login, seed, interaction, or capture. Use only an owned synthetic preview fixture.
+   A preview containing production-copy data requires a safely isolated synthetic fixture; an unqualified boundary blocks the check.
+3. Use only the existing authorized preview authentication and seed path, including `/preview login` when applicable and permitted.
+   Obtain the Vercel share preview through the existing authorized tool. Keep credentials and session tokens out of evidence.
+4. Sign in with `agent-browser` as the preview admin when the changed screen requires authentication.
+   Create an owned synthetic sample dashboard or record only when the changed screen needs one and seed authority permits it.
+5. Open the changed screen and exercise the changed interaction in the matching preview.
+6. Capture the changed screen. Inspect the image, URL, and accompanying text for sensitive data before publication.
+   Exclude credentials, customer or production data, session tokens, and sensitive browser state from screenshots, URLs, and logs.
+   Redact or recapture unsafe evidence. Publish only a safe screenshot or access-restricted evidence link on the PR.
+7. Record the checked head, matching preview, interaction result, and safe screenshot or restricted link on the PR.
+   Recheck the pushed head after verification. A relevant head or preview change reopens this gate.
+
+Missing or failed browser proof blocks merge. CI, code review, and post-merge mutation proof supply zero substitute evidence.
+If permission or safe isolation is unavailable, report the gap to the driver and retain the merge hold.
+Treat this as an instruction gate; source-contract checks establish zero actual browser execution.
 
 ## 11. Closing pass
 

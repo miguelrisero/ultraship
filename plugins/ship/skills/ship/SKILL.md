@@ -82,14 +82,18 @@ All conditions must hold:
 4. Better Review and human threads are resolved: zero unresolved threads.
 5. End-to-end evidence covers that head at the deepest safe level.
 6. `ledger.py gaps` reports none, and `run-end` succeeds.
+7. Every UI PR passes the [real-browser premerge gate](references/pipeline.md#ui-browser-gate) at its current pushed head and matching preview.
+   This includes dashboard `frontend/app/**`, UI-affecting frontend design-package changes, and marketing UI through its existing Vercel preview route.
+   Missing or failed browser evidence blocks merge. CI and review supply zero substitute browser evidence.
 
 Re-read `headRefOid` after verification. A changed head reopens the affected steps. Finish with the direct PR URL. Merge and production actions need their own authority.
 
 ## Proof after merge
 
-A mutation battery or other proof run never holds a merge (owner decision, 2026-10-31: merge on green CI and review; the mutation proof runs after the merge).
+Mutation proof runs after merge (owner decision, 2026-10-31: merge on green CI and review; the mutation proof runs after the merge).
+The required real-browser UI check runs before merge and remains a merge gate.
 
-- The merge gate is green required CI on the head, an independent review, and every review thread dispositioned.
+- The merge gate requires green CI on the head, an independent review, every review thread dispositioned, and applicable real-browser UI proof.
 - Send the merge within 2 hours of green required CI.
 - Run the proof once at the merge commit within 24 hours of the merge. Post its record on the merged PR.
 - A survivor's fix ships in a follow-up PR.
