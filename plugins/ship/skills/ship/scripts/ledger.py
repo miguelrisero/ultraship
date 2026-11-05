@@ -163,7 +163,7 @@ def account(pending, identifier, step, agent, sha, verdict, evidence):
     if (not all((step, agent, sha, verdict, evidence.strip())) or verdict == 'owed'
             or any('\t' in f or '\n' in f or '\r' in f for f in (step, agent, sha, verdict))):
         raise ValueError('completed result needs single-line step, agent, sha, verdict and evidence')
-    pending = Path(pending).resolve()
+    pending = Path(pending).absolute()  # Keep the hook's path spelling, including a symlinked XDG_STATE_HOME.
     matches = []
     for line in pending.read_text().splitlines():
         fields = line.split('\t')

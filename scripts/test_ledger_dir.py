@@ -451,3 +451,46 @@ class LedgerDirTests(unittest.TestCase):
         self.assertNotEqual(recorded.returncode, 0)
         self.assertIn('recorded run is missing or differs', recorded.stderr)
         self.assertEqual(home.read_bytes(), changed)
+
+
+    def test_exact_result_record_keeps_the_ordinary_row_for_its_sibling(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        pending = owed.read_bytes()
+        first = json.loads(pending.decode().splitlines()[0].split('\t')[3])
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        self.finish_run()
+        recorded = self.cli('account', str(owed), first['id'], 'deep-review', 'ship:reviewer--sol',
+                            'sha', 'pass', 'First result report.md')
+        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+        self.assertEqual(self.hook('stop'), '')
+        receipts = json.loads((self.base / 'state/ultraship/accounted.json').read_text())
+        self.assertEqual(len(receipts), 2)
+        history = ledger.rows(self.resolve())
+        first_receipt = next(v for k, v in receipts.items() if json.loads(k)[2] == first['id'])
+        self.assertEqual(history[first_receipt[2][0]][1], 'account-result')
+        owed.write_bytes(pending)
+        self.assertEqual(self.hook('stop'), '')
+
+    def test_explicit_accounting_keeps_symlinked_state_path_receipt_identity(self):
+        real = self.base / 'state-real'
+        real.mkdir()
+        link = self.base / 'state-link'
+        link.symlink_to(real, target_is_directory=True)
+        self.env['XDG_STATE_HOME'] = str(link)
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        owed = link / 'ultraship/owed/s1.tsv'
+        pending = owed.read_bytes()
+        result = json.loads(pending.decode().splitlines()[0].split('\t')[3])
+        self.finish_run()
+        recorded = self.cli('account', str(owed), result['id'], 'deep-review', 'ship:reviewer--sol',
+                            'sha', 'pass', 'Completed report.md')
+        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+        self.assertEqual(self.hook('stop'), '')
+        receipt_path = link / 'ultraship/accounted.json'
+        receipts = receipt_path.read_bytes()
+        self.assertEqual(json.loads(next(iter(json.loads(receipts))))[0], str(owed))
+        owed.write_bytes(pending)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(receipt_path.read_bytes(), receipts)

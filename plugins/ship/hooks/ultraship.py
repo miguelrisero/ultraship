@@ -202,7 +202,10 @@ def account(ledger, cwd, notifications, receipts, session):
                 raise ValueError('Accounting receipt row belongs to another run')
             continue
         used = {json.dumps(value) for value in receipts.values()}
-        for i in range(start + 1, len(history)):
+        # Reserve an exact-result record before consuming an interchangeable ordinary review row.
+        candidates = sorted(range(start + 1, len(history)), key=lambda i:
+                            not ledger.accounting_row(history[i], result_id, run_identity(start, history[start])))
+        for i in candidates:
             row = history[i]
             identity = [str(home), run_identity(start, history[start]), run_identity(i, row)]
             explicit = ledger.accounting_row(row, result_id, run_identity(start, history[start]))
