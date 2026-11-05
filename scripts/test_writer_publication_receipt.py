@@ -28,9 +28,11 @@ PY"""
         self.assertEqual(self.admission(command), {})
 
     def test_real_remote_operations_remain_denied_beside_a_local_receipt(self):
-        for command in ('git push origin HEAD', 'git -C "$PWD" push origin HEAD',
+        for command in ('{git,push} origin HEAD', "$'git' {status,push} origin HEAD",
+                        'git p{ush,ull} origin HEAD', 'git push{ed,} origin HEAD',
+                        'git push origin HEAD', 'git -C "$PWD" push origin HEAD',
                         "$'git' p{u,}sh origin HEAD", 'gh pr merge 3 --squash',
                         'python3 -c "receipt = {\'pushed\': False}"; git push origin HEAD'):
             with self.subTest(command=command):
                 result = self.admission(command)
-                self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+                self.assertEqual(result.get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
