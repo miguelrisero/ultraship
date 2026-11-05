@@ -154,10 +154,7 @@ def subagent_stop(data):
 
 
 def account(ledger, cwd, notifications, receipts, session):
-    home = ledger.ledger_path(cwd).resolve()
-    history = ledger.rows(home)
-    starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
-    occurrences = {}
+    histories, occurrences = {}, {}
     for owed in notifications:
         epoch, agent, _ = owed[:3]
         if len(owed) == 4:
@@ -169,11 +166,17 @@ def account(ledger, cwd, notifications, receipts, session):
             result = {'id': 'legacy:' + hashlib.sha256(
                 json.dumps([session, line, ordinal]).encode()).hexdigest()}
         result_id = json.dumps([session, cwd, result['id']])
+        if 'ledger' in result and result['run'] is None:
+            continue
+        # Recorded results keep their ledger across branch changes. Only legacy results resolve the current branch.
+        home = Path(result['ledger']) if 'ledger' in result else ledger.ledger_path(cwd).resolve()
+        if not home.is_absolute() or home.resolve() != home:
+            raise ValueError('Recorded ledger must be an absolute path without symlinks')
+        if home not in histories:
+            histories[home] = ledger.rows(home)
+        history = histories[home]
+        starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
         if 'ledger' in result:
-            if result['run'] is None:
-                continue
-            if result['ledger'] != str(home):
-                raise ValueError(f'Ledger home differs for pending result {result["id"]}; restore {result["ledger"]}')
             candidates = [i for i in starts if run_identity(i, history[i]) == result['run']]
         else:
             # Legacy notifications have no run identity: accept only one time-containing run.
@@ -193,14 +196,18 @@ def account(ledger, cwd, notifications, receipts, session):
             if saved[0] != str(home) or saved[1] != run_identity(start, history[start]):
                 raise ValueError('Accounting receipt names a different ledger or run')
             index = saved[2][0]
-            if not start < index < end or saved[2] != run_identity(index, history[index]):
+            if not 0 <= index < len(history) or saved[2] != run_identity(index, history[index]):
                 raise ValueError('Accounting receipt row is missing or differs; restore the ledger evidence')
+            if not start < index < end and not ledger.accounting_row(history[index], result_id, result['run']):
+                raise ValueError('Accounting receipt row belongs to another run')
             continue
         used = {json.dumps(value) for value in receipts.values()}
-        for i in range(start + 1, end):
+        for i in range(start + 1, len(history)):
             row = history[i]
             identity = [str(home), run_identity(start, history[start]), run_identity(i, row)]
-            if (row[1] not in ('run-start', 'run-end') and row[2] == agent and row[4] != 'owed'
+            explicit = ledger.accounting_row(row, result_id, run_identity(start, history[start]))
+            regular = i < end and row[1] not in ('run-start', 'run-end', 'account-result')
+            if ((explicit or regular) and row[2] == agent and row[4] != 'owed'
                     and int(row[0]) >= int(epoch) - 5 and json.dumps(identity) not in used):
                 receipts[result_id] = identity
                 break
@@ -253,7 +260,10 @@ def stop(data):
         print(json.dumps({'decision': 'block', 'reason':
               f'Pending review evidence retained at {path}: {exc}. '
               'Resolve ledger access (set SHIP_LEDGER_DIR to an absolute permitted directory if needed). '
-              'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]`, then continue.'}))
+              'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]` in its open run. '
+              'For a recorded result in a closed or earlier-branch run, use '
+              f'`ledger.py account {path} <result-id> <step> <agent> <sha> <verdict> <evidence>`; '
+              'this appends bookkeeping without reopening the run. Never invent review evidence.'}))
 
 
 def compact(data):

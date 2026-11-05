@@ -20,7 +20,8 @@ REQUIRED = {
 }
 USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py run-start <full|light> <run-id> [board-path]
-       ledger.py append <step> <agent> <sha> <verdict> [note]"""
+       ledger.py append <step> <agent> <sha> <verdict> [note]
+       ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>"""
 
 
 def git(cwd, *args):
@@ -144,10 +145,73 @@ def append(path, *fields):
         fh.write(('\t'.join([str(int(time.time())), *clean]) + '\n').encode('utf-8'))
 
 
+
+def run_identity(index, row):
+    return [index, hashlib.sha256(json.dumps(row).encode()).hexdigest()]
+
+
+def accounting_row(row, result_id, run):
+    """An explicit accounting row binds one pending result to its original run, even after run-end."""
+    if row[1] != 'account-result':
+        return False
+    value = json.loads(row[5])
+    return value['result'] == result_id and value['run'] == run
+
+
+def account(pending, identifier, step, agent, sha, verdict, evidence):
+    """Append bookkeeping for a completed result; preserve the bound run's historical rows and closure."""
+    if (not all((step, agent, sha, verdict, evidence.strip())) or verdict == 'owed'
+            or any('\t' in f or '\n' in f or '\r' in f for f in (step, agent, sha, verdict))):
+        raise ValueError('completed result needs single-line step, agent, sha, verdict and evidence')
+    pending = Path(pending).resolve()
+    matches = []
+    for line in pending.read_text().splitlines():
+        fields = line.split('\t')
+        if len(fields) == 4 and json.loads(fields[3]).get('id') == identifier:
+            matches.append(fields)
+    if len(matches) != 1:
+        raise ValueError('pending result ID must match exactly one notification')
+    epoch, expected_agent, cwd, raw = matches[0]
+    result = json.loads(raw)
+    if agent != expected_agent or not result.get('run') or not result.get('ledger'):
+        raise ValueError('pending result needs its recorded agent, ledger and run')
+    home = Path(result['ledger'])
+    if not home.is_absolute() or home.resolve() != home:
+        raise ValueError('recorded ledger must be an absolute path without symlinks')
+    result_id = json.dumps([str(pending), cwd, identifier])
+    note = {'result': result_id, 'run': result['run'], 'step': step, 'evidence': evidence}
+    row = ['account-result', agent, sha, verdict, json.dumps(note)]
+    with home.open('r+b') as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        history = [line.split('\t') for line in fh.read().decode().splitlines() if line]
+        starts = [i for i, r in enumerate(history) if r[1] == 'run-start' and run_identity(i, r) == result['run']]
+        if len(starts) != 1 or int(epoch) < int(history[starts[0]][0]):
+            raise ValueError('recorded run is missing or differs')
+        for saved in history:
+            if accounting_row(saved, result_id, result['run']):
+                if saved[1:] != row:
+                    raise ValueError('result already has a different accounting record')
+                return home
+        fh.seek(0, os.SEEK_END)
+        if fh.tell():
+            fh.seek(-1, os.SEEK_END)
+            if fh.read(1) != b'\n':
+                fh.write(b'\n')
+        fh.write(('\t'.join([str(int(time.time())), *row]) + '\n').encode())
+        fh.flush()
+        os.fsync(fh.fileno())
+    return home
+
+
 def main(argv):
     if not argv:
         sys.exit(USAGE)
     cmd, args = argv[0], argv[1:]
+    if cmd == 'account':
+        if len(args) != 7:
+            sys.exit(USAGE)
+        print(account(*args))
+        return
     path = ledger_path()
     run = open_run(path)
     if cmd == 'path':
