@@ -53,8 +53,9 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
   3. Replace a literal timeout with the repository race helper, such as `asyncio.wait_for` to `tests.race_helpers.wait_for_task`.
   4. Change a setup-only fixture with no assertion change.
   5. Refresh paired `old` and `new` anchor strings only in exact approved PR-owned rows.
-     Category 5 requires written CoC approval supplying both exact replacement strings for each CI-named approved row.
-     Category 5 approval supplies exact current and replacement bytes for both `old` and `new` fields in each approved row.
+     Category 5 uses exactly one route below, named in the brief.
+     Every requirement of the named route applies; route-specific sentences bind only that route.
+     Pairs from a private derivation stay in the private-proposal route.
      Category 5 requires separate applicable loaded edit/access authority before any writer edit; missing authority blocks editing.
      Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
      The PR author product diff supplies supporting evidence only at the CI-named subject file.
@@ -62,8 +63,6 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
      Each approved row has an exact committed row-file path, unique row ID, and CI-named subject file.
      PR ownership requires the recorded base/head diff and exact approved row allowlist; a subject name alone is insufficient.
      Evidence binds the repository, PR, base SHA, author head SHA, tested merge SHA/tree, CI run ID, attempt, and job ID/name.
-     Evidence includes the quoted job log line and the job log URL where supplied.
-     Existing CI identifiers and quoted evidence suffice; this adaptation requires no producer, artifact, or digest.
      The tested merge must contain the recorded base and author head; changed evidence invalidates the approval and applicable GO.
      Dry-run proof and CI at the new head require separate admission; this adaptation authorizes no mutation command execution.
      Only the exact approved paired `old` and `new` fields may change under category 5.
@@ -71,13 +70,55 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
      Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
      Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
      This adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.
-     Apply category 5 only after verifying the exact written CoC approval, approved pair, and bound CI evidence.
-     Send the driver the quoted authority clause, exact approval, and evidence before applying the scoped edit.
-     Verify separate applicable loaded edit/access authority and both exact current/replacement field pairs before applying category 5; otherwise stop.
 - Never loosen an assertion, widen a bound, or delete a check under this rule.
 - Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.
 - Record the approver, the exact edit, and the Input ID in the PR body.
 - Every other control stays: no SIGKILL, no D1160 commands, no mutation TOML search, the protected-path rules, and zero writer push authority.
+
+#### Explicit-pair route
+
+Category 5 requires written CoC approval supplying both exact replacement strings for each CI-named approved row.
+Category 5 approval supplies exact current and replacement bytes for both `old` and `new` fields in each approved row.
+Existing CI identifiers and quoted evidence suffice; this adaptation requires no producer, artifact, or digest.
+Evidence includes the quoted job log line and the job log URL where supplied.
+Apply category 5 only after verifying the exact written CoC approval, approved pair, and bound CI evidence.
+Send the driver the quoted authority clause, exact approval, and evidence before applying the scoped edit.
+Verify separate applicable loaded edit/access authority and both exact current/replacement field pairs before applying category 5; otherwise stop.
+
+#### Private-proposal route
+
+Use the private-proposal route only with separately authorized and admitted derivation before any protected access.
+Freeze exact current/replacement pairs privately with source identity and the exact approved row scope.
+Written CoC approval binds the exact private proposal identity and SHA256, derivation launcher identity and receipt, source, rows, and CI evidence.
+Require independent in-gate review of the same-operation, same-claim evidence and exact approved scope.
+The reviewer differs from the PR author, the derivation operator, and the applying writer.
+Complete semantic review before written CoC approval in a separately authorized and admitted review context.
+A derivation admission supplies zero independent review authority.
+A lawful non-content review receipt binds reviewer identity, verdict, review admission identity, reviewed proposal SHA256, source identity, and exact scope.
+Written CoC approval binds that semantic review receipt, including its reviewer, verdict, review admission, reviewed proposal SHA256, source identity, and exact scope.
+A success receipt without bound semantic review remains insufficient for approval or application.
+Application refuses any mismatch between reviewed, approved, and applied proposal SHA256 values, source identities, or exact scopes.
+Application verifies the bound semantic review receipt and its approving verdict before any edit.
+Private CI evidence outside admission contains only content-free FAIL or WARN summaries and metadata, including the job log URL where supplied.
+Never open or quote anchor-bearing job log lines outside separately authorized and admitted access.
+A digest proves identity only; derivation success and a checksum cannot replace semantic review or authority.
+Approvers review lawful non-content evidence without opening the protected proposal.
+On this route, the brief and PR body identify the exact edit by proposal SHA256, row-file paths, row IDs, and fields.
+The brief and PR body contain zero pair bytes.
+Application requires separate applicable loaded edit/access authority and fresh admission.
+Application admission binds the stage-two launcher identity, exact approved proposal, and permitted checker scope.
+A derivation GO supplies zero application authority.
+Identify each derivation, review, and application gate by name and SHA256, never by an executable command line.
+Keep every brief command-free under the existing dispatch boundary.
+Inside the admitted application gate, verify proposal SHA256, exact current bytes, source identity, and approved scope before any edit.
+Apply only the approved paired fields and preserve every unrelated field.
+Run only the separately permitted checker inside its admitted scope.
+Refuse stale source, an altered proposal, ambiguity, missing evidence, or missing authority.
+Keep protected bytes inside admitted gates; emit zero raw pair bytes outside those gates.
+Approved proposal or launcher digests never override effective denials, protected holds, or higher-priority instructions.
+This instruction grants zero derivation, protected access, application, checker execution, or writer publication authority.
+Send the driver the quoted authority clause, lawful non-content approval evidence, and exact approved scope before application; disclose zero protected bytes.
+Verify lawful non-content approval evidence; inspect and apply private pairs only inside separately authorized and admitted gates.
 
 ### Same-strength adaptations
 
