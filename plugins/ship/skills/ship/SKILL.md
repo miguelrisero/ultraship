@@ -112,7 +112,49 @@ Never widen, raise, or relax a limit, cap, timeout, budget, bound, or guard cons
 
 The fixed-event comparator in the following paragraph applies only to the standing owner-rule branch.
 
-Approved test adaptations follow the writer contract (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379`, workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`): a writer applies a register classification, a census re-pin from CI output after a reviewed body PASS, a race-helper timeout replacement, or a setup-only fixture change when the CoC or the topic Chief approved that exact edit. The driver puts the Input ID and workspace ID in the writer brief. For a writer without a `get_input` tool, the driver or the CoC runs `get_input` and the brief also records the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name; the writer stops on any mismatch with its definition. Loosened assertions, widened bounds, and deleted checks stay forbidden.
+Approved test adaptations follow the writer contract (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379`, workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`): five standing test adaptations cover register classification, a census re-pin from CI output after a reviewed body PASS, a race-helper timeout replacement, a setup-only fixture change, and the exact paired-anchor category below. The driver puts the Input ID and workspace ID in the writer brief. For a writer without a `get_input` tool, the driver or the CoC runs `get_input` and the brief also records the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name; the writer stops on any mismatch with its definition. Loosened assertions, widened bounds, and deleted checks stay forbidden.
+
+### Fifth standing adaptation
+
+Refresh paired `old` and `new` anchor strings only in exact approved PR-owned rows.
+Category 5 requires written CoC approval supplying both exact replacement strings for each CI-named approved row.
+Category 5 approval supplies exact current and replacement bytes for both `old` and `new` fields in each approved row.
+Category 5 requires separate applicable loaded edit/access authority before any writer edit; missing authority blocks editing.
+Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
+The PR author product diff supplies supporting evidence only at the CI-named subject file.
+The CoC reviews the same-operation, same-claim reason; product diff text alone cannot establish equivalent mutant semantics.
+Each approved row has an exact committed row-file path, unique row ID, and CI-named subject file.
+PR ownership requires the recorded base/head diff and exact approved row allowlist; a subject name alone is insufficient.
+Evidence binds the repository, PR, base SHA, author head SHA, tested merge SHA/tree, CI run ID, attempt, and job ID/name.
+Evidence includes the quoted job log line and the job log URL where supplied.
+Existing CI identifiers and quoted evidence suffice; this adaptation requires no producer, artifact, or digest.
+The tested merge must contain the recorded base and author head; changed evidence invalidates the approval and applicable GO.
+Dry-run proof and CI at the new head require separate admission; this adaptation authorizes no mutation command execution.
+Only the exact approved paired `old` and `new` fields may change under category 5.
+Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.
+Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
+Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
+This adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.
+Drivers prepare category 5 evidence; writers verify it and apply only separately permitted exact edits.
+Drivers document separate applicable loaded edit/access authority and both current/replacement pairs; writers verify them before any category 5 edit.
+
+### Same-strength adaptations
+
+Categories 1–4 retain their existing CoC-or-Chief approval routes and owner-event verification requirements.
+The same-strength route requires exact written CoC approval citing an already applicable verified owner-authority route.
+This same-strength route excludes mutation-row anchor refreshes; it cannot replace category 5 requirements.
+Existing independent council/Chief same-guarantee routes and owner-event grants remain unchanged and independently usable.
+Owner provenance follows the applicable loaded route; a CoC message alone supplies zero owner consent.
+For the same-strength route, approval names the exact files, rows or entries, permitted fields, replacement bytes, reason, approver, approval time, and evidence identity.
+For the same-strength route, the CoC reviews evidence that the adaptation preserves or strengthens the same guarantee; missing or changed evidence blocks the edit.
+Preserve assertions, behavioral bounds, and security/resource policy; the exact approved category 3 race-helper timeout replacement remains permitted.
+Preserve designated tests, pins, operators, and unrelated fields outside the exact approved permitted fields.
+Higher-priority instructions, owner provenance, effective refusals, protected holds, and tool denials remain binding; this rule overrides none of them.
+This rule grants zero protected reads, TOML search/parse, anchor extraction, execution, or writer publication authority.
+Dry-run proof and new-head CI remain under separate applicable admission.
+Drivers prepare same-strength evidence; writers verify it before any separately permitted exact edit.
+
+### General routes and boundaries
 
 Prepare evidence and exact scope under [Task-specific test adaptations](references/owner-decisions.md#task-specific-test-adaptations); designate that owner-event route explicitly.
 Apply [Loaded instructions and refusals](references/owner-decisions.md#loaded-instructions-and-refusals); preserve applicable higher-priority instructions and existing holds.

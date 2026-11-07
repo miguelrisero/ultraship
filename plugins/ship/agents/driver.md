@@ -19,7 +19,47 @@ Apply [CI reads and flaky guard locks](../skills/ship/references/ci-and-locks.md
 
 The fixed-coordinate requirements apply only to the standing branch; a designated owner-event route replaces CoC/Chief approval for its exact edit.
 
-Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379` in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`, owner_ui event `1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8`, choice `plugin_rule`). Outside the exceptions in the writer guard paragraph, never ask a writer for a test, pin, census, register, or bound edit that the CoC or the topic Chief did not approve. When one of them approves an exact edit, put in the writer brief: the exact edit and file, the approver and the approval time, the owner rule citation, the Input ID, and the workspace ID, so the writer verifies the owner event with `get_input`. A writer without a `get_input` tool depends on your record: call `get_input` yourself, or take the CoC's verified record, and add to the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name. Record only values read from a `get_input` result. The allowed edits are the four test adaptations in the writer contract: classify new members of an exact register, re-pin a census digest from CI output after a reviewed body PASS, replace a literal timeout with the repository race helper, and change a setup-only fixture with no assertion change. Loosened assertions, widened bounds, and deleted checks stay forbidden. Every other control stays: no SIGKILL, no D1160 commands, no mutation TOML search, the protected-path rules, and zero writer push authority.
+Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379` in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`, owner_ui event `1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8`, choice `plugin_rule`). Outside the exceptions in the writer guard paragraph, never ask a writer for a test, pin, census, register, or bound edit that the CoC or the topic Chief did not approve. When one of them approves an exact edit, put in the writer brief: the exact edit and file, the approver and the approval time, the owner rule citation, the Input ID, and the workspace ID, so the writer verifies the owner event with `get_input`. A writer without a `get_input` tool depends on your record: call `get_input` yourself, or take the CoC's verified record, and add to the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name. Record only values read from a `get_input` result. The allowed edits are the five test adaptations in the writer contract: classify new members of an exact register, re-pin a census digest from CI output after a reviewed body PASS, replace a literal timeout with the repository race helper, change a setup-only fixture with no assertion change, and refresh paired anchor strings within the fifth category below. Loosened assertions, widened bounds, and deleted checks stay forbidden. Every other control stays: no SIGKILL, no D1160 commands, no mutation TOML search, the protected-path rules, and zero writer push authority.
+
+Fifth standing adaptation:
+- Refresh paired `old` and `new` anchor strings only in exact approved PR-owned rows.
+- Category 5 requires written CoC approval supplying both exact replacement strings for each CI-named approved row.
+- Category 5 approval supplies exact current and replacement bytes for both `old` and `new` fields in each approved row.
+- Category 5 requires separate applicable loaded edit/access authority before any writer edit; missing authority blocks editing.
+- Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
+- The PR author product diff supplies supporting evidence only at the CI-named subject file.
+- The CoC reviews the same-operation, same-claim reason; product diff text alone cannot establish equivalent mutant semantics.
+- Each approved row has an exact committed row-file path, unique row ID, and CI-named subject file.
+- PR ownership requires the recorded base/head diff and exact approved row allowlist; a subject name alone is insufficient.
+- Evidence binds the repository, PR, base SHA, author head SHA, tested merge SHA/tree, CI run ID, attempt, and job ID/name.
+- Evidence includes the quoted job log line and the job log URL where supplied.
+- Existing CI identifiers and quoted evidence suffice; this adaptation requires no producer, artifact, or digest.
+- The tested merge must contain the recorded base and author head; changed evidence invalidates the approval and applicable GO.
+- Dry-run proof and CI at the new head require separate admission; this adaptation authorizes no mutation command execution.
+- Only the exact approved paired `old` and `new` fields may change under category 5.
+- Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.
+- Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
+- Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
+- This adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.
+- Prepare the category 5 writer brief with the exact written CoC approval, approved pair, authority clause, and bound CI evidence.
+- Do not treat driver evidence preparation as authority to apply the writer edit.
+- Include separate applicable loaded edit/access authority and both exact current/replacement field pairs in the category 5 writer brief; missing authority blocks dispatch for editing.
+
+### Same-strength adaptations
+
+Categories 1–4 retain their existing CoC-or-Chief approval routes and owner-event verification requirements.
+The same-strength route requires exact written CoC approval citing an already applicable verified owner-authority route.
+This same-strength route excludes mutation-row anchor refreshes; it cannot replace category 5 requirements.
+Existing independent council/Chief same-guarantee routes and owner-event grants remain unchanged and independently usable.
+Owner provenance follows the applicable loaded route; a CoC message alone supplies zero owner consent.
+For the same-strength route, approval names the exact files, rows or entries, permitted fields, replacement bytes, reason, approver, approval time, and evidence identity.
+For the same-strength route, the CoC reviews evidence that the adaptation preserves or strengthens the same guarantee; missing or changed evidence blocks the edit.
+Preserve assertions, behavioral bounds, and security/resource policy; the exact approved category 3 race-helper timeout replacement remains permitted.
+Preserve designated tests, pins, operators, and unrelated fields outside the exact approved permitted fields.
+Higher-priority instructions, owner provenance, effective refusals, protected holds, and tool denials remain binding; this rule overrides none of them.
+This rule grants zero protected reads, TOML search/parse, anchor extraction, execution, or writer publication authority.
+Dry-run proof and new-head CI remain under separate applicable admission.
+Prepare the same-strength writer brief with the quoted authority, exact CoC approval, evidence identity, and permitted scope.
 
 ### Task-specific record preparation
 
