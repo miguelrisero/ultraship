@@ -4,6 +4,9 @@ Each step names its ledger `step`. Light mode runs steps 1, 3, 5, 7, 9, 10, and 
 
 At any owner-dependent step, apply [owner decisions](owner-decisions.md). Record the Input and blocked scope on the board. Continue independent work without claiming the dependent step passes. Keep external CI/deploy waits tied to their run identities.
 
+Require flaky-risk findings or explicit none with inspected scope in all direct, fallback, closing, babysit, delegated, and replacement review briefs.
+Code findings identify file, line, and mechanism; plan findings identify relevant evidence locations.
+
 | # | Step | Ledger step | Agents |
 |---|---|---|---|
 | 1 | Guard the branch, open the run | `run-start` | driver |
@@ -39,6 +42,11 @@ For design-heavy work, run `ship:panel design` on the plan before step 3.
 ## 3. Slices
 
 Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into every writer brief that can run the flaky-pattern guard.
+
+Prepare verified event evidence and exact scope under [Task-specific test adaptations](owner-decisions.md#task-specific-test-adaptations) for an explicitly designated owner-event route.
+Apply [Loaded instructions and refusals](owner-decisions.md#loaded-instructions-and-refusals).
+Keep operative rules in the writer's loaded definition.
+When a main merge changes migration files or the brief names migration scope, prepare graph, migration revision-head, Git merge-head, and target-parent evidence.
 
 For each slice, in order:
 

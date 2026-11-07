@@ -66,3 +66,51 @@ Resume pending actions after restart. Reconcile the result before a retry, inclu
 ## Capability gap
 
 When Inputs tools are unavailable or fail, keep the decision, options, blocked scope, and next action on the board. Report the capability gap once. Continue independent work, retry when capability returns, and never fabricate approval.
+
+## Task-specific test adaptations
+
+Use the owner-event route only when the brief designates a current owner decision as authority for an exact same-guarantee adaptation.
+The owner answer authorizes the edit; the driver or CoC serves as provenance verifier, without an additional Chief approval.
+Keep the standing fixed-event comparator scoped to its branch and the existing council/Chief route independently usable.
+A stale or missing citation supplies zero authority; record complete applicable authority and a reason before using an independent route.
+Preserve every effective denial or hold.
+
+Prepare the verified record for the self-contained writer contract in [writer--sol](../../../agents/writer--sol.md) or [writer--sonnet](../../../agents/writer--sonnet.md).
+Send the complete verified record and exact scope in every owner-event brief, including briefs for tool-capable writers.
+Keep operative writer rules in the loaded writer definition.
+Read `get_input` and reconcile answer events through `get_input_events` when needed.
+Bind the full Input/workspace UUIDs, current version, event id/hash, choice, actual owner answer, and exact files/edit.
+Include `event_type`, `actor_kind`, `payload.no_answer_yet`, verifier name, verification time, and the authoritative result evidence.
+Confirm that the current owner answer authorizes the exact same-guarantee adaptation before recording it.
+Recheck current version, status, and answer provenance before dispatch or retry under the consume contract above.
+Retain that record for the fallback when the writer lacks the tool or its call fails with an auth or tool error.
+Preserve a direct authoritative mismatch as blocked; the fallback supplies verified provenance, never a substitute owner approval.
+Record the accepted evidence and exact scope in the brief and PR body.
+
+## Structural migration parent example
+
+When a main merge changes migration files or the brief names migration scope, prepare merged-tree graph and target-parent evidence.
+Record migration revision heads separately from Git merge heads and bind both to the inspected tree.
+For example, a re-chained `down_revision` can require the matching exact parent-pin `==` adaptation under its applicable same-guarantee route.
+Supply merge/edit authority, the selected parent, and evidence that equality, other assertions, migration behavior, and single-head guarantees remain intact.
+The writer may verify the actual tree directly; the evidence requirement concerns the source, not a second person.
+
+## Exact register classification example
+
+For register scope, prepare the owning predicate, proposed entry/reason, and unchanged assertion evidence.
+For example, an exact census may separately classify a new test file that names a marker without applying the detected unit-test mark.
+Supply its applicable standing, council/Chief, or owner-event route and evidence for exact census equality and stale-entry rejection.
+Include the unchanged mark-detection, marked-file equality, and routing assertions in that evidence.
+Identify whether the entry classifies a token mention or skips a required check or widens security, authorization, or resource policy.
+For a policy change, supply its applicable dedicated authority; a register label supplies zero authority by itself.
+
+## Loaded instructions and refusals
+
+An explicit owner refusal blocks all routes for that edit until applicable owner authority resolves it.
+Apply your own loaded definition; a checkout, cache entry, or version supplies zero additional authority.
+When diagnosing a contract mismatch, report the loaded identity evidence available and identify unknown fields without inference.
+Preserve applicable higher-priority prohibitions, tool and hook denials, protected paths, and approval, GO, installation, and publication holds.
+A refusal can lift only when its cause is actually fixed or applicable authority resolves it.
+Repairing missing verification evidence resolves only that evidence gap; it cannot override a binding prohibition or tool denial.
+A version, restart, or new session alone lifts nothing; never substitute an executor to bypass a still-effective refusal.
+Keep prospective source changes separate from runtime adoption and action authority.

@@ -1,4 +1,4 @@
-"""Ship writers apply exact approved test adaptations after verifying the owner event."""
+"""Static instruction contracts only; these checks do not execute agent behavior."""
 from pathlib import Path
 import unittest
 
