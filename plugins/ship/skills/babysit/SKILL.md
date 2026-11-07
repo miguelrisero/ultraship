@@ -46,6 +46,7 @@ When `gh pr view --json mergeStateStatus` reports `BEHIND` or `DIRTY`, merge cur
 
 - Target 6 pushes or fewer per PR.
 - When the same failure signature repeats twice, dispatch `ship:reviewer--sol` on the failures, the threads, and the fix history. Follow its root-cause plan in the next round.
+  Require flaky-risk findings with file, line, and mechanism, or explicit none with inspected scope, in this review brief and every fallback.
 - At round 5, stop for a chief review. Send the chief, or the user when no chief runs, the open failures and threads, each with its link, the fix history, and the next action. Resume only with the chief's plan.
 
 ## Done

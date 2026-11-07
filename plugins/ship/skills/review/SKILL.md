@@ -43,6 +43,7 @@ HEAD alone cannot identify uncommitted work.
 - Leave the Agent `model` field unset. On an unavailable seat, use the fallback chain in `${CLAUDE_PLUGIN_ROOT}/skills/ship/references/roster.md`.
 - Send all candidates, with their evidence, to one `ship:reviewer--sol` verification pass. It returns `CONFIRMED`, `PLAUSIBLE`, or `REFUTED` for each, per the verification rules in the reference.
 - Record requested agents, substitutions, and unavailable seats.
+- Require flaky-risk findings with file, line, and mechanism, or explicit none with inspected scope, in each seat and verification brief.
 
 Consolidate duplicate mechanisms. Before reporting, confirm that the reviewed SHA and diff fingerprint still match. Refresh affected evidence when they differ.
 
@@ -66,6 +67,7 @@ Explain how an unchanged line or caller enters scope. Cite the exact rule for co
 Discover `ReportFindings` if deferred. If unavailable, state the reporting blocker; never claim the tool accepted a report.
 The tool call is the findings report. Do not duplicate findings in chat or publish a review artifact.
 Report scope, coverage, or routing blockers briefly outside findings; a missing reviewer is never a defect in the code.
+Report flaky-risk findings through the existing schema; state explicit none with inspected scope outside findings when the review identifies none.
 
 ## Fix mode
 

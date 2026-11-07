@@ -22,6 +22,8 @@ Return one verdict from independent model seats that review the same frozen subj
 2. Read the selected `${CLAUDE_SKILL_DIR}/personas/<name>.md` files and `personas/_format.md`.
 3. Freeze the subject. For code, record the base SHA, head SHA, and diff. All seats get the same SHA.
 4. Build one self-contained brief: subject, type, lenses, constraints, required decision, absolute paths, SHAs, and the diff. Leave out your own conclusions and any other seat's output.
+   Require flaky-risk findings with file, line, and mechanism for code subjects; use relevant evidence locations for plan subjects.
+   Require explicit none with inspected scope when a seat finds no flaky risk.
 5. Launch one Agent call per seat, together in one message. Use the scoped `ship:reviewer--*` names and leave `model` unset.
 6. On an unavailable seat, dispatch the next agent in its fallback chain from `${CLAUDE_PLUGIN_ROOT}/skills/ship/references/roster.md`. Seats with no fallback stay missing.
 
@@ -29,6 +31,8 @@ Return one verdict from independent model seats that review the same frozen subj
 
 Read `${CLAUDE_SKILL_DIR}/references/synthesis.md` and return its report contract.
 
+- Include flaky-risk findings with file, line, and mechanism for code subjects, or relevant evidence locations for plan subjects.
+- State explicit none with inspected scope when the panel finds no flaky risk.
 - Count one vote per model family. Two seats from one family count as one vote.
 - A failed, empty, or refused seat is missing. A missing required seat makes the verdict `provisional`.
 - Never invent a missing response or claim a full panel when a seat is missing.
