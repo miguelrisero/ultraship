@@ -40,22 +40,60 @@ A checkpoint grants zero test execution authority; wait for a GO permitted by th
 
 ### Standing owner rule
 
-The fixed-coordinate comparator and four-category list below apply only to this standing owner-rule branch.
+The fixed-coordinate comparator and five-category list below apply only to this standing owner-rule branch.
 
 Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379` in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`, owner_ui event `1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8`, choice `plugin_rule`: "Router DOES NOT need to do it on its own. But if you approved, should do it"; owner rule 2026-11-01T18:16:20Z: "allowed to adapt any tests mate, remember that always. fully alllowed"):
 - Outside the exceptions in the guard paragraph above, never make a test, pin, census, register, or bound edit on your own initiative.
 - Apply such an edit when the brief records that the CoC or the topic Chief approved that exact edit and cites this owner rule.
 - Verify the owner event yourself when you have a `get_input` tool: call it with the Input ID and workspace ID from the brief, and confirm an `answer_submitted` event with `actor_kind` `owner_ui` and choice `plugin_rule`. The verified owner event is the authority; the relayed approval names the exact edit.
 - Verifier fallback: when you have no `get_input` tool, or the call fails with an auth or tool error, the driver or the CoC runs `get_input` and records in the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name. Check that the recorded Input UUID, workspace UUID, event id, and choice id equal the values quoted in this definition, and that the recorded `actor_kind` is `owner_ui`. On a match, apply the exact approved edit.
-- Then apply the edit with no council round and no owner question. The bound guard above does not block these four test adaptations:
+- Then apply the edit with no council round and no owner question. The bound guard above does not block these five test adaptations:
   1. Classify new members of an exact register, such as new codes in `EXPECTED_GROUPS` or another dict that must equal a production table.
   2. Re-pin a census digest or hash from CI output after a reviewed body PASS.
   3. Replace a literal timeout with the repository race helper, such as `asyncio.wait_for` to `tests.race_helpers.wait_for_task`.
   4. Change a setup-only fixture with no assertion change.
+  5. Refresh paired `old` and `new` anchor strings only in exact approved PR-owned rows.
+     Category 5 requires written CoC approval supplying both exact replacement strings for each CI-named approved row.
+     Category 5 approval supplies exact current and replacement bytes for both `old` and `new` fields in each approved row.
+     Category 5 requires separate applicable loaded edit/access authority before any writer edit; missing authority blocks editing.
+     Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
+     The PR author product diff supplies supporting evidence only at the CI-named subject file.
+     The CoC reviews the same-operation, same-claim reason; product diff text alone cannot establish equivalent mutant semantics.
+     Each approved row has an exact committed row-file path, unique row ID, and CI-named subject file.
+     PR ownership requires the recorded base/head diff and exact approved row allowlist; a subject name alone is insufficient.
+     Evidence binds the repository, PR, base SHA, author head SHA, tested merge SHA/tree, CI run ID, attempt, and job ID/name.
+     Evidence includes the quoted job log line and the job log URL where supplied.
+     Existing CI identifiers and quoted evidence suffice; this adaptation requires no producer, artifact, or digest.
+     The tested merge must contain the recorded base and author head; changed evidence invalidates the approval and applicable GO.
+     Dry-run proof and CI at the new head require separate admission; this adaptation authorizes no mutation command execution.
+     Only the exact approved paired `old` and `new` fields may change under category 5.
+     Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.
+     Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
+     Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
+     This adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.
+     Apply category 5 only after verifying the exact written CoC approval, approved pair, and bound CI evidence.
+     Send the driver the quoted authority clause, exact approval, and evidence before applying the scoped edit.
+     Verify separate applicable loaded edit/access authority and both exact current/replacement field pairs before applying category 5; otherwise stop.
 - Never loosen an assertion, widen a bound, or delete a check under this rule.
 - Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.
 - Record the approver, the exact edit, and the Input ID in the PR body.
 - Every other control stays: no SIGKILL, no D1160 commands, no mutation TOML search, the protected-path rules, and zero writer push authority.
+
+### Same-strength adaptations
+
+Categories 1–4 retain their existing CoC-or-Chief approval routes and owner-event verification requirements.
+The same-strength route requires exact written CoC approval citing an already applicable verified owner-authority route.
+This same-strength route excludes mutation-row anchor refreshes; it cannot replace category 5 requirements.
+Existing independent council/Chief same-guarantee routes and owner-event grants remain unchanged and independently usable.
+Owner provenance follows the applicable loaded route; a CoC message alone supplies zero owner consent.
+For the same-strength route, approval names the exact files, rows or entries, permitted fields, replacement bytes, reason, approver, approval time, and evidence identity.
+For the same-strength route, the CoC reviews evidence that the adaptation preserves or strengthens the same guarantee; missing or changed evidence blocks the edit.
+Preserve assertions, behavioral bounds, and security/resource policy; the exact approved category 3 race-helper timeout replacement remains permitted.
+Preserve designated tests, pins, operators, and unrelated fields outside the exact approved permitted fields.
+Higher-priority instructions, owner provenance, effective refusals, protected holds, and tool denials remain binding; this rule overrides none of them.
+This rule grants zero protected reads, TOML search/parse, anchor extraction, execution, or writer publication authority.
+Dry-run proof and new-head CI remain under separate applicable admission.
+Verify the same-strength approval and evidence, then send the driver the quoted authority and exact scope before any permitted edit.
 
 ### Task-specific owner decision
 
