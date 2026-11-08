@@ -48,6 +48,12 @@ class WriterHeredocTests(unittest.TestCase):
             "python3 - <<EOF\n`git push`\nEOF\n",
             "python3 - <<EOF\nprint(1)\nE\\\nOF\ngit push origin HEAD\nEOF\n",
             "bash <<'EOF'\ngit push\nEOF\n",
+            "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'push'])\nEOF\n",
+            "python3 - <<'EOF'\nimport os\nos.system('git push')\nEOF\n",
+            "python3 - <<'EOF'\nimport os\nos.system('git pu\\\nsh')\nEOF\n",
+            "python3 - <<'EOF'\nimport os\nos.environ['X'] = 'u'\nos.system('git p${X}sh origin HEAD')\nEOF\n",
+            "python3 - <<'EOF'\nimport os\nos.system('git p{u,}sh origin HEAD')\nEOF\n",
+            "python3 - <<'EOF'\nimport os\nos.system('git pu\"\"sh')\nEOF\n",
             "python3 - <<'EOF'\nprint(1)\nEOF git push\n",
             "echo '<<EOF'; git push\n",
         )
