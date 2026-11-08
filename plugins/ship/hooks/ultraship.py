@@ -30,8 +30,30 @@ HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
 LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
 
 
+def python_heredoc_shell(command):
+    # Only a literal Python stdin command establishes a non-shell script body.
+    # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
+    header = re.compile(r"^[ \t]*(?:python|python3(?:\.\d+)?) +- +<<(-?)[ \t]*"
+                        r"('[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
+                        r"[ \t]*\n$")
+    lines = command.splitlines(keepends=True)
+    match = header.fullmatch(lines[0]) if lines else None
+    if not match:
+        return command
+    delimiter = shlex.split(match[2])[0]
+    for end in range(1, len(lines)):
+        candidate = lines[end].lstrip('\t') if match[1] else lines[end]
+        if candidate.removesuffix('\n') == delimiter:
+            body = ''.join(lines[1:end])
+            if match[2] == delimiter and (any(c in body for c in '$`') or '\\\n' in body):
+                return command
+            return lines[0] + ''.join(lines[end + 1:])
+    return command
+
+
 def git_push(command):
     """Scan Git commands and shell-wrapper strings without regex backtracking."""
+    command = python_heredoc_shell(command)
     values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
               '--config-env', '--super-prefix', '--attr-source'}
     pending = [command]
