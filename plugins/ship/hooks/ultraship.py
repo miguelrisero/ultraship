@@ -66,8 +66,20 @@ def python_heredoc_shell(command):
     return command
 
 
+def literal_ps_awk_filter(command):
+    # Only a complete process-list filter with a bare print action supplies inert awk data.
+    pipeline = re.fullmatch(r"[ \t]*ps[ \t]+-eo[ \t]+pid,args[ \t]*\|[ \t]*awk[ \t]+'([^'\r\n]*)'[ \t]*", command)
+    if not pipeline:
+        return command
+    comparison = r'\$[0-9]+[ \t]*(?:==|!=|!~|~|>=|<=|>|<)[ \t]*(?:"[\w ./-]*"|/[\w .^$*+-]+/|[0-9]+)'
+    expression = rf'[() \t]*{comparison}(?:[() \t]*(?:&&|\|\|)[() \t]*{comparison})*[() \t]*\{{[ \t]*print[ \t]*\}}[ \t]*'
+    if 'push' in pipeline[1] or not re.fullmatch(expression, pipeline[1]):
+        return command
+    return command[:pipeline.start(1)] + 'awk_filter_data' + command[pipeline.end(1):]
+
+
 def git_push(command):
-    return shell_git_push(python_heredoc_shell(command))
+    return shell_git_push(literal_ps_awk_filter(python_heredoc_shell(command)))
 
 
 def shell_git_push(command):
