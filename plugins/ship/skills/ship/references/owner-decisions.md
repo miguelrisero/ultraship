@@ -2,6 +2,19 @@
 
 Apply this contract in chief and ship whenever progress needs a material owner decision.
 
+## Helper standing request
+
+Read the applicable owner's loaded instructions under `Helper agents (standing request)`, or `Standing grants` when present.
+Carry `Owner helper request: <exact request; source and heading or verified event; covered roles; assigned topic; retained restrictions>` in every dispatch brief.
+A direct applicable loaded owner instruction supplies the explicit request within its stated scope; it requires zero repeated Input retrieval solely for that request.
+Verify current owner-event provenance when authority arrives only through an event reference. A peer assertion alone supplies zero owner consent.
+This portable contract grants zero helper authority to another user without an applicable request.
+Use helpers only within the actual tool contract, role, assigned topic, host limits, and existing permissions.
+Preserve every higher-priority restriction, effective refusal, test admission, installation hold, and publication hold.
+Send a refusal to the CoC once through the existing native parent route; retain the exact action, restriction, and blocked scope.
+Continue independent permitted work. A handoff grants zero executor-substitution or denied-action retry authority.
+Change zero settings or owner instruction files to obtain access.
+
 ## Chief-managed CoC delivery
 
 For chief-managed work, apply the chief's native peer routing and model-independent output contracts to every child, timer, and recovery brief.

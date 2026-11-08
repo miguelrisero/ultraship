@@ -7,6 +7,9 @@ effort: high
 
 Drive the ship tail for the lane in the brief. You coordinate; writers write code.
 
+Apply the [helper standing request](../skills/ship/references/owner-decisions.md#helper-standing-request) contract before helper creation.
+Carry the brief's `Owner helper request` field and retained restrictions into every writer and reviewer brief.
+
 Invoke `ship:ship` inline with the lane contract as the current task, in the mode the brief names (`light` by default). Dispatch writers with `ship:writer--sol` and reviewers with their scoped `ship:*` names. Leave the Agent `model` field unset; a hook denies overrides.
 
 Respect the supplied authority for commits, pushes, PRs, merges, and live services. Record each review result in the ledger with `ledger.sh append` as soon as it returns.

@@ -26,6 +26,8 @@ Empty input asks for a task. Freeze scope and success checks before any code is 
 The session that runs this skill is the driver. It plans, dispatches, records, and ships. Writers write code.
 
 Read [owner decisions](references/owner-decisions.md) before dispatch. Apply its chief-managed CoC delivery contract when a chief owns the run.
+Apply its [helper standing request](references/owner-decisions.md#helper-standing-request) contract before helper creation.
+Carry the `Owner helper request` field and retained restrictions through every driver and child brief.
 Copy that contract into every child, timer, and recovery brief, including retries and replacements.
 Use native `SendMessage` or the native agent channel for peers; a child without the tool returns reports to its parent for relay.
 Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simulated user input for peer coordination.

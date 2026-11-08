@@ -12,6 +12,9 @@ Chief needs the `ship` plugin. Check that `ship:driver` and `ship:writer--sol` a
 
 Read the [native peer routing contract](references/dispatch.md#native-peer-routing-contract) and the shared owner-decision contract at `skills/ship/references/owner-decisions.md` in the installed ship plugin.
 Apply both contracts before dispatch and after every timer or recovery wake.
+Apply the shared owner-decision contract's `Helper standing request` section before helper creation.
+Carry its `Owner helper request` field and retained restrictions in every chief and lane brief.
+Resolve `Helper agents (standing request)` in the applicable loaded owner instructions, or `Standing grants` when present.
 Use native `SendMessage` or the native agent channel for peers; a child without the tool returns reports to its parent for relay.
 Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simulated user input for peer coordination.
 Batch actionable and terminal reports; keep unchanged routine reports silent and CoC peer events out of per-peer user-chat replies.
