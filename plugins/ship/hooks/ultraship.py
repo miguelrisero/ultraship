@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Ultraship hooks. Usage: ultraship.py pre|subagent-stop|stop|compact < hook-input.json"""
+import ast
 import fcntl
 import hashlib
 import importlib.util
@@ -30,7 +31,46 @@ HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
 LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
 
 
+def python_heredoc_shell(command):
+    # Only a literal Python stdin command establishes a non-shell script body.
+    # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
+    header = re.compile(r"^[ \t]*(?:python|python3(?:\.\d+)?) +- +<<(-?)[ \t]*"
+                        r"('[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
+                        r"[ \t]*\n$")
+    lines = command.splitlines(keepends=True)
+    match = header.fullmatch(lines[0]) if lines else None
+    if not match:
+        return command
+    delimiter = shlex.split(match[2])[0]
+    for end in range(1, len(lines)):
+        candidate = lines[end].lstrip('\t') if match[1] else lines[end]
+        if candidate.removesuffix('\n') == delimiter:
+            body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
+            if 'push' in body or '\\\n' in body:
+                return command
+            if any(c in body for c in '$`{}'):
+                return command
+            try:
+                tree = ast.parse(body)
+            except (SyntaxError, ValueError):
+                return command
+            body_lines = body.splitlines(keepends=True)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == 'git':
+                    line = body_lines[node.lineno - 1]
+                    body_lines[node.lineno - 1] = re.sub(r'^(\s*def )git(?=\s*\()',
+                                                       r'\1_git_helper', line, count=1)
+            if shell_git_push(''.join(body_lines)):
+                return command
+            return lines[0] + ''.join(lines[end + 1:])
+    return command
+
+
 def git_push(command):
+    return shell_git_push(python_heredoc_shell(command))
+
+
+def shell_git_push(command):
     """Scan Git commands and shell-wrapper strings without regex backtracking."""
     values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
               '--config-env', '--super-prefix', '--attr-source'}
