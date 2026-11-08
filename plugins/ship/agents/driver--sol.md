@@ -47,7 +47,41 @@ Fifth standing adaptation:
 - Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
 - Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
 - This adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.
+- For the narrow protected-read/edit exception, apply Owner-scoped protected row access below.
 - Do not treat driver evidence preparation as authority to apply the writer edit.
+
+#### Owner-scoped protected row access
+
+Owner authority: Input `31f787fe-1463-4447-82fa-6a5e21e17a87`, version 1, choice B, in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`.
+The `owner_ui` event is `aacba25c-5e99-438e-85c7-9bb128ecf4b8`, dated 2026-11-08T18:03:15.357469375Z.
+The event hash is `d56c4fd20ef712921654f06869818b5b2189a13e9b52249b32379ca5362468a8`.
+Owner-selected option B: "Each lane moves the protected rows its own PR breaks: same test, new line text, nothing weaker. An independent reviewer checks every row change, and the mutation proof still runs after merge."
+Input context: "Peral keeps CI runner and merge queue changes."
+
+Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair route.
+This clause overrides only blanket protected-read/edit restrictions for the exact scope below.
+Preserve higher-priority instructions, effective refusals, protected holds, and tool or hook denials.
+Require the driver's complete verified owner-event record and exact scope in the brief.
+Bind full Input/workspace UUIDs, current version, event id/hash, choice, actual owner answer, verifier name, and verification time.
+Record selected choice B and `payload.answer.text=null` separately; distinguish the selected option text from Input context.
+Require `event_type=answer_submitted`, `actor_kind=owner_ui`, and `payload.no_answer_yet=false` for this Input and current version.
+Apply the task-specific owner-event verification contract; keep its event comparator separate from the standing rule.
+Use `get_input` directly when available; accept the driver's or CoC's complete verified record only after tool absence or auth/tool error.
+An authoritative mismatch blocks access and cannot use fallback.
+Require CoC naming of exact row-file paths and unique row IDs from that PR's failing anchor CI log.
+Require the recorded base/head diff to show that the PR itself breaks each named row.
+Limit reads to those exact named files and rows; read no unrelated rows or whole protected files.
+Apply only CoC-approved exact current/replacement bytes for both paired `old` and `new` fields.
+Preserve all category 5 source identities, CI evidence, route requirements, and applicable execution admission.
+Require independent same-operation, same-claim review of every row change before CoC pair approval.
+Bind reviewer identity and approving verdict to the exact pairs, row scope, source identities, and CI evidence.
+Require the reviewer to differ from the PR author and applying writer.
+Preserve the same designated test and guarantee, equivalent mutant semantics, assertions, bounds, and every unrelated field.
+Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.
+Keep mutation proof after merge under separate applicable execution admission.
+Retain Peral's authority over CI runners and the merge queue.
+This clause grants zero TOML search/parse, anchor extraction, mutation or other execution, or writer publication authority.
+CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.
 
 #### Explicit-pair route
 
