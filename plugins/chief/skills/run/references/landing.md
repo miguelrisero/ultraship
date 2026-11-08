@@ -10,6 +10,18 @@ Billing and authorization require an independent adversarial verification lane, 
 
 Before landing, compare every changed bound, validator, fixture, and golden with the base branch. A green test encoding a relaxed policy cannot prove policy compliance. After the merge, run a negative control for merge-critical guards at the merge commit in an isolated environment, restore the source, and confirm the passing case. A checker that finds none of its expected patterns reports an error. A pattern-based drift instrument also needs a known-detecting negative control and a known-clean positive control, tuned to avoid false matches; preserve that evidence. Missing grep matches do not prove absent tests; use an isolated mutation check when practical, then restore and confirm green.
 
+## Canonical push and contact safeguards
+
+Forbid lane-made push gates, MAIN_DRIFT holds, and arbitrary contact pacing.
+Keep canonical repository and provider limits; honor GitHub rate limits and retry instructions.
+Use the installed ship plugin's `skills/ship/references/pipeline.md` step 9 before every authorized feature push.
+Preserve its credential-safe resolved destination preflight, permitted dry-run, explicit feature refspec, required local checks, and current-main integration requirements.
+Preserve canonical queued-branch stability, merge-train holds, queue rules, and Miguel Peral's approval and scheduling rules.
+Main advancement alone creates no lane-defined hold; apply canonical freshness and conflict requirements.
+Honor permission denials, hooks, publication authority, approval holds, customer safety, and zero writer push authority.
+Retain canonical review, CI, real-browser, and merge gates.
+A CoC GO grants zero additional publication authority.
+
 ## Concurrent lanes
 
 Check remote main against the board's last-seen SHA at actionable checkpoints. For each observed foreign merge, record SHA, URL, attribution, and whether main CI stayed green after that merge; unknown is not green. Notify overlapping or dependent lanes. Merge main into already-pushed lane branches and rerun affected evidence. Preserve published history unless the user explicitly authorizes a rewrite.
