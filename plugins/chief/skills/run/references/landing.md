@@ -12,7 +12,7 @@ Before landing, compare every changed bound, validator, fixture, and golden with
 
 ## Canonical push and contact safeguards
 
-Forbid lane-made push gates, MAIN_DRIFT holds, and arbitrary contact pacing.
+Forbid lane-made push, pacing, memory, disk, and time gates, including MAIN_DRIFT holds and arbitrary contact pacing. Require successful canonical `hostcheck.py admit` for resource admission within existing execution authority.
 Keep canonical repository and provider limits; honor GitHub rate limits and retry instructions.
 Use the installed ship plugin's `skills/ship/references/pipeline.md` step 9 before every authorized feature push.
 Preserve its credential-safe resolved destination preflight, permitted dry-run, explicit feature refspec, required local checks, and current-main integration requirements.

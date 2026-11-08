@@ -62,7 +62,8 @@ class ExecutionPolicyTests(unittest.TestCase):
         text = read('plugins/chief/skills/run/references/landing.md')
         policy = text.partition('## Canonical push and contact safeguards\n')[2].split('\n## ', 1)[0]
         for requirement in (
-            'Forbid lane-made push gates, MAIN_DRIFT holds, and arbitrary contact pacing.',
+            'Forbid lane-made push, pacing, memory, disk, and time gates, including MAIN_DRIFT holds and arbitrary contact pacing.',
+            'Require successful canonical `hostcheck.py admit` for resource admission within existing execution authority.',
             'Keep canonical repository and provider limits; honor GitHub rate limits and retry instructions.',
             "Use the installed ship plugin's `skills/ship/references/pipeline.md` step 9 before every authorized feature push.",
             'credential-safe resolved destination preflight, permitted dry-run, explicit feature refspec, required local checks, and current-main integration requirements',
