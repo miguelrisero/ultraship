@@ -133,6 +133,14 @@ Use native completion notifications. Persist the awaited run identity and next a
 
 At each checkpoint, inspect the lane's commit stack and upstream state. Retain all existing tracking checks. A missing upstream alone establishes neither publication nor unpushed work. Within existing read permission, verify the intended feature destination's repository identity and exact `refs/heads/<feature-branch>` remote head OID against the lane's current HEAD. Apply the ship pipeline's credential-safe gate before capturing any resolved URL or remote evidence. Require fresh evidence from that verified destination with an OID equal to HEAD to establish current-head publication. Arbitrary remote containment of HEAD supplies insufficient evidence. Treat absent, stale, unavailable, or inconclusive destination evidence as unknown and hold dependent actions. Preserve pushed history; use a revert for a published mistake.
 
+## Execution and publication safeguards
+
+Apply the installed ship plugin's `agents/writer--sol.md` execution admission and cleanup contract to every lane.
+Ordinary touched-file pytest and vitest use automatic slot admission without a per-run CoC GO.
+Keep mutation, timing, shared-database, and paid-run GOs, spending caps, host safeguards, and caller-owned TERM-grace cleanup.
+The CoC can always issue a GO within existing authority when a lane or chief is stuck.
+Follow [canonical push and contact safeguards](references/landing.md#canonical-push-and-contact-safeguards) for each authorized publication.
+
 ## Verify and finish
 
 Require the ship completion gate before a lane reaches ready-for-review. Recheck GitHub state yourself: head SHA, required CI, unresolved threads, mergeability, and branch freshness. Check the file list for scratch artifacts. Compare changed guards and fixtures with the base policy. After the merge, prove merge-critical guards catch a deliberately broken case in an isolated test at the merge commit.

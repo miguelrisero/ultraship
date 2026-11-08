@@ -26,17 +26,37 @@ Implement the slice in the brief inside the exact worktree it names. Anchor ever
 
 Never widen, raise, or relax a limit, cap, timeout, budget, bound, or guard constant — and never adjust a validator or test to accept a new value — to make a check pass. These bounds are policy, not obstacles. If a bound blocks the implementation, stop and report the blocking bound and what exceeded it. Fixes go on the consumer side. This applies to test baselines, fixtures, and goldens as well as constants. Exception: an owner-requested product-limit change is a feature (owner rule, Input 2b7e497e-a794-4ab2-a62c-0f1748396967, owner_ui event 485, a_allow). The writer implements only the specifically requested product limit, including when that limit exists on origin/main. Add boundary tests that accept the new limit and refuse the limit plus one unit; for byte limits, refuse one additional byte (for example, accept 536870912 bytes and refuse 536870913 bytes). For every bound the owner did not ask to change, preserve the stop-and-report rule and fix the consumer side, subject to the existing branch-only and same-guarantee test-edit exceptions below. This product-limit exception grants no authority to change unrelated safety, security, resource, budget, or timeout bounds or to weaken other guarantees. Preserve normal review, CI, and applicable consent requirements. Record the owner request and its exact scope in the brief and PR body. This product-limit exception applies independently of the two exceptions below. This rule covers limits that exist on origin/main. Exception: a limit, cap, timeout, budget, or bound that only this PR branch added is the lane's design choice (owner rule, Input 6e43dda9-a1b8-4b0e-a8c8-f3525a67a5e9). Run `git fetch origin main` first and record the `origin/main` SHA; when the fetch fails, the exception does not apply. Compare the behavior the bound constrains, not its path or name: `git grep` main's whole tree and read the branch diff (`git diff origin/main...HEAD`) for the same invariant, including replacements, duplicates, validators, test baselines, fixtures, and goldens. A missing path on main is not enough evidence. When main has no such bound, change or remove it without an owner question, and record the reason and the main SHA in the PR body. Every bound already on main keeps this rule, also when the branch moves, renames, replaces, or changes it. Exception: a test, fixture, mutation row, census or register edit is allowed without an owner question after one council round (no Fable or cf-* models) agrees that the guard keeps its guarantee (owner grant 2026-10-26: "ok I give you from now onwards full power to change tests, no need to check with me, just do one council round to analyze it makes sense and is appropiate, and do it."). Weakening a test to hide a real regression stays forbidden. Record the council verdict and the owner words in the PR body. Exception: no step waits for a human to apply an edit. When the executor is certain and its Chief or the CoC checked the change, that check replaces the council round, and an agent applies it (owner order 2026-10-30: "if agent is certain that its ok and he checked with his CoC or Chief ALL GOOD remove that blocker everywhere"). Record that check in the PR body.
 
+### Execution admission and cleanup
+
+Owner authority: Input `c20baa02-2a62-4a89-93c9-18b2efd44bbd`, version 1, choice A, in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`.
+The `owner_ui` answer event is `2adecd1d-fa79-4c29-9baa-2837ba17395c`, dated 2026-11-08T10:39:21Z.
+
+Run ordinary touched-file pytest or vitest without a per-run CoC GO or GO launcher-hash packet.
+Admit every run through the installed, checksum-pinned `slot_gate.sh` implementation and its recognized `battery*.sh` child.
+Preserve load, capacity, RAM, disk, runtime caps, timing exclusion, isolated stacks, and cleanup requirements.
+Require GO for mutation batteries, timing runs, and shared-database runs; retain paid-run GOs and spending caps.
+Honor a no-run brief and every effective permission denial.
+The CoC can always issue a GO to unblock a stuck lane or chief within existing authority.
+A GO overrides no permission denial, approval hold, publication rule, or customer safety rule.
+
+Verify the caller started each target process group and recheck its boot/start identity before every signal.
+Send TERM first. Allow the existing TERM grace period before SIGKILL to a surviving caller-owned process group.
+Never signal another caller's process or a reused PID/PGID.
+Apply this boundary to cleanup commands and repository process helpers; preserve their existing grace periods and runtime caps.
+Require actual ownership evidence in reviewed launcher cleanup; a command string supplies zero process-group ownership proof.
+Refuse unknown or unowned targets and raw `timeout -k` commands without that proof; preserve the command lint refusal.
+
 ### Source checkpoints
 
-You may return a frozen source checkpoint to request a test GO.
+You may return a frozen source checkpoint to request a GO for a run that requires GO.
 Report the exact worktree, branch, base/HEAD SHAs, changed paths, file hashes, and complete diff digest.
 Include staged, unstaged, and relevant untracked content in the path inventory, file hashes, and complete scoped content fingerprint.
 A tracked Git diff alone omits untracked content.
-Require a new checkpoint and fresh applicable GO after any source change.
+Require a new checkpoint and fresh applicable GO after any source change to a run that requires GO.
 List pending checks and identify every unexecuted proof.
 Make no final completion or pass claim in this intermediate request.
 Keep all applicable final test and check requirements binding.
-A checkpoint grants zero test execution authority; wait for a GO permitted by the brief and loaded instructions.
+A checkpoint grants zero test execution authority; apply the execution admission rules above and the brief.
 
 ### Standing owner rule
 
@@ -73,7 +93,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
 - Never loosen an assertion, widen a bound, or delete a check under this rule.
 - Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.
 - Record the approver, the exact edit, and the Input ID in the PR body.
-- Every other control stays: no SIGKILL, no D1160 commands, no mutation TOML search, the protected-path rules, and zero writer push authority.
+- Every other control stays: caller-owned TERM escalation only, no D1160 commands, no mutation TOML search, the protected-path rules, and zero writer push authority.
 
 #### Explicit-pair route
 

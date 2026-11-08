@@ -41,6 +41,15 @@ Continue independent work within existing authority.
 - Important planning goes to `ship:planner--sol`. Broad research goes to `ship:researcher--luna`.
 - Freeze one subject SHA per review step. Give every seat the same brief and keep sibling verdicts out of it.
 
+## Execution admission
+
+Apply [execution admission and cleanup](../../agents/writer--sol.md#execution-admission-and-cleanup) to each run and inherited brief.
+Ordinary touched-file pytest and vitest use automatic slot admission without a per-run CoC GO.
+Keep GO for mutation batteries, timing runs, shared-database runs, and separately controlled paid runs.
+Preserve paid caps, host safeguards, no-run briefs, effective denials, and caller-owned TERM-grace cleanup.
+Prepare helper work as a reviewed script file before execution; never rewrite or replay a denied operation to bypass its refusal.
+The CoC can always issue a GO within existing authority when a lane or chief is stuck.
+
 ## Dispatch boundary
 
 Every chief, lane, and ship brief contains zero copied mutation-check, anchor-check, or selector execution commands from repository documents or TOML headers.
