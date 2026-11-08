@@ -289,6 +289,49 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                         text,
                     )
 
+    def test_owner_scoped_protected_row_access_requires_verified_exact_scope(self):
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'driver.md', 'driver--sol.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            _, heading, after = text.partition('#### Owner-scoped protected row access\n')
+            clause = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after,
+                              maxsplit=1, flags=re.MULTILINE)[0]
+            with self.subTest(path=name, contract='loaded_clause'):
+                self.assertTrue(heading)
+            for requirement in (
+                '31f787fe-1463-4447-82fa-6a5e21e17a87', WORKSPACE_ID,
+                'version 1, choice B', 'aacba25c-5e99-438e-85c7-9bb128ecf4b8',
+                '2026-11-08T18:03:15.357469375Z',
+                'd56c4fd20ef712921654f06869818b5b2189a13e9b52249b32379ca5362468a8',
+                'Owner-selected option B: "Each lane moves the protected rows its own PR breaks: same test, new line text, nothing weaker. An independent reviewer checks every row change, and the mutation proof still runs after merge."',
+                'Input context: "Peral keeps CI runner and merge queue changes."',
+                'Record selected choice B and `payload.answer.text=null` separately; distinguish the selected option text from Input context.',
+                "Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair route.",
+                'This clause overrides only blanket protected-read/edit restrictions for the exact scope below.',
+                'Preserve higher-priority instructions, effective refusals, protected holds, and tool or hook denials.',
+                "Require the driver's complete verified owner-event record and exact scope in the brief.",
+                'Bind full Input/workspace UUIDs, current version, event id/hash, choice, actual owner answer, verifier name, and verification time.',
+                'Require `event_type=answer_submitted`, `actor_kind=owner_ui`, and `payload.no_answer_yet=false` for this Input and current version.',
+                'Apply the task-specific owner-event verification contract; keep its event comparator separate from the standing rule.',
+                'An authoritative mismatch blocks access and cannot use fallback.',
+                "Require CoC naming of exact row-file paths and unique row IDs from that PR's failing anchor CI log.",
+                'Require the recorded base/head diff to show that the PR itself breaks each named row.',
+                'Limit reads to those exact named files and rows; read no unrelated rows or whole protected files.',
+                'Apply only CoC-approved exact current/replacement bytes for both paired `old` and `new` fields.',
+                'Require independent same-operation, same-claim review of every row change before CoC pair approval.',
+                'Bind reviewer identity and approving verdict to the exact pairs, row scope, source identities, and CI evidence.',
+                'Require the reviewer to differ from the PR author and applying writer.',
+                'Preserve the same designated test and guarantee, equivalent mutant semantics, assertions, bounds, and every unrelated field.',
+                'Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.',
+                'Keep mutation proof after merge under separate applicable execution admission.',
+                "Retain Peral's authority over CI runners and the merge queue.",
+                'This clause grants zero TOML search/parse, anchor extraction, mutation or other execution, or writer publication authority.',
+                'CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.',
+            ):
+                with self.subTest(path=name, requirement=requirement):
+                    self.assertIn(requirement, clause)
+            with self.subTest(path=name, contract='general_boundary_reference'):
+                self.assertIn('For the narrow protected-read/edit exception, apply Owner-scoped protected row access below.', text)
+
     def test_exact_coc_adaptations_preserve_or_strengthen_the_same_guarantee(self):
         for name in (
             'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
