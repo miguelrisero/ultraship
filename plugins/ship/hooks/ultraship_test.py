@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 
 HOOK = Path(__file__).resolve().parent / 'ultraship.py'
@@ -118,14 +119,34 @@ with tempfile.TemporaryDirectory() as tmp:
     assert 'refusing' in ledger('run-end').stderr
 
     assert 'Open ship run: run-1' in hook('compact', session, env)
-    hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol'}, env)
-    assert json.loads(owed.read_text().split('\t')[3])['run'] is not None
+    provenance = {'agent_id': 'reviewer-terminal-1',
+                  'agent_transcript_path': str(Path(tmp, 'unopened-transcript.jsonl'))}
+    hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol', **provenance}, env)
+    result = json.loads(owed.read_text().split('\t')[3])
+    assert {key: result.get(key) for key in provenance} == provenance
+    assert uuid.UUID(result['id']).version == 4 and result['id'] != provenance['agent_id']
+    assert result['run'] is not None and result['ledger'] == ledger('path').stdout.strip()
+    assert set(result) == {'id', 'ledger', 'run', *provenance}
+    assert not Path(provenance['agent_transcript_path']).exists()
     hook('subagent-stop', {**session, 'agent_type': 'ship:writer--sol'}, env)
     blocked = hook('stop', session, env)
     assert blocked['decision'] == 'block' and 'reviewer--sol' in blocked['reason']
     assert hook('stop', session, env)['decision'] == 'block'
     assert ledger('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode == 0
     assert hook('stop', session, env) == ''
+
+    metadata_cases = [({}, {}), *[({key: value}, {key: value}) for key, value in provenance.items()]]
+    metadata_cases.extend(({'agent_id': value, 'agent_transcript_path': value}, {})
+                          for value in (None, '', ' \t\n', 7, False, [], {}))
+    for metadata, expected in metadata_cases:
+        hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol', **metadata}, env)
+        result = json.loads(owed.read_text().split('\t')[3])
+        assert {key: result[key] for key in provenance if key in result} == expected, metadata
+        assert set(result) == {'id', 'ledger', 'run', *expected}, metadata
+        assert result['run'] is not None
+        assert hook('stop', session, env)['decision'] == 'block'
+        assert ledger('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode == 0
+        assert hook('stop', session, env) == ''
 
     hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--opus'}, env)
     for step in ['slices', 'simplify', 'deep-review', 'fix-read', 'pr', 'babysit', 'gate']:

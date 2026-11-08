@@ -179,6 +179,10 @@ def subagent_stop(data):
         path.parent.mkdir(parents=True, exist_ok=True)
         cwd = data.get('cwd') or os.getcwd()
         result = {'id': str(uuid.uuid4())}
+        for key in ('agent_id', 'agent_transcript_path'):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                result[key] = value
         try:
             ledger = load_ledger()
             home = ledger.ledger_path(cwd).resolve()
