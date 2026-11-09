@@ -27,6 +27,9 @@ WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
     terraform\s+(apply|destroy) | kubectl\s+(apply|delete|rollout) | helm\s+(install|upgrade|uninstall) |
     vercel(\s+\S+)*\s+--prod | vercel\s+deploy | wrangler\s+(deploy|publish) | fly(ctl)?\s+deploy | docker\s+push
 )\b""", re.X)
+GH_WRITE_COMMAND = re.compile(r'(?:^|[\s;&|(`])(?:[\w./-]+/)?gh\s+(?:api|repo\s+sync)\b')
+GH_METHOD = re.compile(r'^(?:--method(?:=(.*))?|-[ip]*X(.*))$')
+GH_FIELD = re.compile(r'^(?:--(?:field|raw-field|input)(?:=.*)?|-[ip]*[fF].*)$')
 HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
 LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
 
@@ -437,6 +440,80 @@ def load_ledger():
     return module
 
 
+def writer_gh_denial(command):
+    command = command.replace('\\\n', '')
+    if not GH_WRITE_COMMAND.search(command):
+        return None
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return 'Writers cannot run a command with unclosed shell quoting.'
+    segments, segment = [], []
+    for token in tokens:
+        if token and all(char in ';&|\n()' for char in token):
+            segments.append(segment)
+            segment = []
+        else:
+            segment.append(token)
+    segments.append(segment)
+    for words in segments:
+        for index, word in enumerate(words):
+            if os.path.basename(word) != 'gh':
+                continue
+            arguments = words[index + 1:]
+            if arguments[:2] == ['repo', 'sync']:
+                return 'Writers cannot sync GitHub repositories.'
+            if not arguments or arguments[0] != 'api':
+                continue
+            methods, fields, endpoint = [], False, ''
+            cursor = 1
+            while cursor < len(arguments):
+                argument = arguments[cursor]
+                method = GH_METHOD.fullmatch(argument)
+                if method:
+                    value = method[1] if argument.startswith('--') else method[2]
+                    if value is None or value == '':
+                        cursor += 1
+                        value = arguments[cursor] if cursor < len(arguments) else ''
+                    methods.append(value.removeprefix('=').upper())
+                elif GH_FIELD.fullmatch(argument):
+                    fields = True
+                    if argument in ('-f', '-F', '--field', '--raw-field', '--input'):
+                        cursor += 1
+                elif argument in ('-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache'):
+                    cursor += 1
+                elif not argument.startswith('-') and not endpoint:
+                    endpoint = argument
+                cursor += 1
+            if fields and endpoint.strip('/') == 'graphql':
+                return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
+            if any(method not in ('GET', 'HEAD') for method in methods) or (
+                    fields and (not methods or any(method != 'GET' for method in methods))):
+                return 'Writers cannot send mutating GitHub API requests; use a REST GET.'
+    return None
+
+
+def writer_command(command):
+    # ponytail: env clearing, git -c, explicit pushurl, direct ssh, and writable-token HTTP bypass this; upgrade to an isolated read-only credential (owner Input a464c49b).
+    try:
+        count = int(os.environ.get('GIT_CONFIG_COUNT') or '0')
+        if count < 0:
+            raise ValueError
+    except ValueError:
+        deny('Writers require a valid inherited GIT_CONFIG_COUNT.')
+    settings = [('url.ultraship-denied://writer.invalid/.pushInsteadOf', prefix)
+                for prefix in ('https://', 'http://', 'ssh://', 'git://', 'git@')]
+    settings.append(('protocol.ultraship-denied.allow', 'never'))
+    exports = [f'GIT_CONFIG_COUNT={count + len(settings)}']
+    for index, (key, value) in enumerate(settings, count):
+        exports.extend((f'GIT_CONFIG_KEY_{index}={shlex.quote(key)}',
+                        f'GIT_CONFIG_VALUE_{index}={shlex.quote(value)}'))
+    return 'export ' + ' '.join(exports) + '\n' + command
+
+
 def pre(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
@@ -450,6 +527,14 @@ def pre(data):
                                or WRITER_BASH.search(tin.get('command', ''))):
             deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                  'commit grants permit local base-branch merges into their own lane branch.')
+        if tool == 'Bash':
+            reason = writer_gh_denial(tin.get('command', ''))
+            if reason:
+                deny(reason)
+            print(json.dumps({'hookSpecificOutput': {
+                'hookEventName': 'PreToolUse',
+                'updatedInput': {**tin, 'command': writer_command(tin.get('command', ''))}}}))
+            return
         target = tin.get('file_path') or tin.get('notebook_path') or ''
         if tool in ('Edit', 'Write', 'NotebookEdit') and (
                 HARNESS_PATH.search(target) or target.startswith(str(Path.home() / '.claude') + '/')):

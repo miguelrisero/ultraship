@@ -440,12 +440,11 @@ class WriterPushEnvironmentTests(unittest.TestCase):
         self.git('init', '-q')
         self.git('remote', 'add', 'origin', 'https://github.com/example/project.git')
         self.env.update(GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='user.name', GIT_CONFIG_VALUE_0='Inherited')
-        rewritten = self.rewritten('git config user.name; git remote get-url --push origin; '
-                                   "git config --get-regexp '^protocol\\..*\\.allow$'")
+        rewritten = self.rewritten('git config user.name; git remote get-url --push origin; git config --list')
         result = run(['bash', '-c', rewritten], cwd=self.repo, env=self.env, check=True)
         name, destination, *settings = result.stdout.splitlines()
         self.assertEqual(name, 'Inherited')
-        protocols = dict(line.split(None, 1) for line in settings)
+        protocols = dict(line.split('=', 1) for line in settings if line.startswith('protocol.'))
         self.assertEqual(protocols.get(f'protocol.{destination.split(":", 1)[0]}.allow'), 'never')
 
     def test_writer_gh_writes_remain_denied(self):

@@ -22,7 +22,7 @@ class WriterHeredocTests(unittest.TestCase):
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
-        return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
+        return bool(text and json.loads(text)['hookSpecificOutput'].get('permissionDecision') == 'deny')
 
     def test_python_helper_in_heredoc_is_data(self):
         body = "def git(*args):\n    return subprocess.check_output(['git', *args])\n"
