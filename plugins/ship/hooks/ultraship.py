@@ -82,41 +82,38 @@ def git_push(command):
     return shell_git_push(literal_ps_awk_filter(python_heredoc_shell(command)))
 
 
-def quoted_variable(text, token, *, outer=False):
-    """Whether every reference to the variable `token` names in `text` is a standalone `"$NAME"` word.
+# One left-to-right scan: a single-quoted span, a standalone `"$NAME"` word, or another double-quoted span.
+SHELL_QUOTES = re.compile(r'''(?<!\$)'[^']*'|(?<![^\s;&|()])"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})"(?![^\s;&|()])|"[^"]*"''')
 
-    With `outer`, references inside single quotes are literal text for a nested shell and are skipped,
-    and the text need not reference the variable at all.
+
+def quoted_variable(command, token):
+    """Whether `command` references the variable `token` names only as standalone `"$NAME"` words.
+
+    Other quotes must be inert literals, and the command must hold no escape, comment, heredoc or backtick, so shlex
+    and the shell split it the same way and no nested shell or `eval` can re-read the quoted value as code.
     """
-    # A double-quoted variable cannot word-split, so it can name a folder (`git -C "$W" status`).
-    # Any other reference (`$W`, `""$W""`, `x"$W"`, `"x $W"`) could split into `. push`, so it refuses.
-    # The scan tracks real quote state; a substring test would accept the `"$W"` inside `""$W""`.
+    # A double-quoted variable cannot word-split, so it can name a folder (`git -C "$W" status`). Any other
+    # reference (`$W`, `x"$W"`, `"x $W"`, `${W:-x}`, `'git -C "$W"'`) could split into `. push`, so it refuses.
     match = re.fullmatch(r'\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})', token)
     if not match:
         return False
-    name = re.escape(match.group(1) or match.group(2))
-    reference = re.compile(rf'\$(?:{name}\b|\{{{name}\}})')
-    edges = ' \t\n;&|()'
-    found, state, i = False, None, 0
-    while i < len(text):
-        char = text[i]
-        if state == "'":
-            state = None if char == "'" else state
-        elif char == '\\':
-            i += 1
-        elif char == "'" and state is None:
-            state = "'"
-        elif char == '"':
-            state = None if state == '"' else '"'
-        elif reference.match(text, i):
-            end = reference.match(text, i).end()
-            if not (state == '"' and text[i - 1] == '"' and text[end:end + 1] == '"'
-                    and (i < 2 or text[i - 2] in edges) and (end + 1 == len(text) or text[end + 1] in edges)):
-                return False
-            found, i = True, end
-            continue
-        i += 1
-    return found or outer
+    name = match.group(1) or match.group(2)
+    found = []
+
+    def plain(quoted):
+        variable = quoted.group(1) or quoted.group(2)
+        if variable:
+            found.append(variable)
+            return ' '
+        # A literal is inert when it holds no expansion and nothing shlex would read as a separator or an
+        # assignment once it drops the quotes (`';'`, `'X=1'`).
+        text = quoted.group(0)
+        unsafe = r'[$`";&|()=]' if text[0] == "'" else r'[$`\\\';&|()=]'
+        return '"' if re.search(unsafe, text[1:-1]) else '_'
+
+    rest = SHELL_QUOTES.sub(plain, command)
+    return (name in found and re.search(r'[\\`\'"#]|<<', rest) is None
+            and re.search(rf'\$(?:{name}\b|\{{{name}\b)', rest) is None)
 
 
 def shell_git_push(command):
@@ -125,9 +122,6 @@ def shell_git_push(command):
               '--config-env', '--super-prefix', '--attr-source', '--shallow-file'}
     folders = {'-C', '--git-dir', '--work-tree'}
     pending = [command]
-    # A nested shell string reaches its shell after the outer shell expands double-quoted variables, and an
-    # unquoted heredoc body expands too; either can turn a quoted outer value into inner code.
-    outer_heredoc = re.search(r'(?<!<)<<-?\s*[^\s\'"<]', command) is not None
     while pending:
         text = pending.pop().replace('\\' + '\n', '')
         try:
@@ -155,8 +149,7 @@ def shell_git_push(command):
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
-            if (folder_value and git_command and not outer_heredoc and quoted_variable(text, token)
-                    and quoted_variable(command, token, outer=True)):
+            if folder_value and git_command and quoted_variable(command, token):
                 skip_value = folder_value = False
                 continue
             # An expansion, glob, quoting form, or redirection before the subcommand can hide it,
@@ -179,7 +172,7 @@ def shell_git_push(command):
             if os.path.basename(token) == 'git':
                 expect_subcommand = True
                 git_command = command_start
-            command_start = (not token.strip(';&|(`') or command_start and re.match(r'[A-Za-z_]\w*=', token) is not None)
+            command_start = (not token.strip(';&|(') or command_start and re.match(r'[A-Za-z_]\w*=', token) is not None)
     return False
 
 

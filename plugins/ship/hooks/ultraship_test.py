@@ -71,7 +71,11 @@ with tempfile.TemporaryDirectory() as tmp:
                     'git -C ""$W"" status', 'git -C x"$W" status', 'git -C "$W" status # $W',
                     'eval git -C "$W"', 'watch git -C "$W" status', 'bash -c "git -C \\"$W\\""',
                     'bash <<EOF\ngit -C "$W"\nEOF', 'git --shallow-file -C "$W"', 'eval "git -C \\"$W\\" status"',
-                    "bash -lc 'git -C \"$W\" push'",
+                    "bash -lc 'git -C \"$W\" push'", "bash -lc 'git -C \"$W\" status'",
+                    'bash <<EOF\n:; git -C "$W"\nEOF', 'bash <\\\n<EOF\n:; git -C "$W"\nEOF', 'git -C "$W" "$CMD"',
+                    '''bash -c 'bash -c "git -C \\"$W\\""' ''', '''bash -c 'bash <''<EOF\n:; git -C "$W"\nEOF' ''',
+                    '`echo eval` git -C "$W"', "eval : ';' git -C \"$W\"", 'eval : \\; git -C "$W"',
+                    "# '\nbash -c \"git -C \\\"$W\\\"\"\n# '", "echo $'x'; git -C \"$W\" status",
                     'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
         for cmd in ['git merge origin/main', 'git fetch origin main && git merge origin/main',
@@ -81,7 +85,7 @@ with tempfile.TemporaryDirectory() as tmp:
                     'git -C /w commit -m "no push here"', 'git commit -m "push"', 'git log --grep push',
                     'git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status',
                     'git -C "$W" status', 'git -C "${W}" log --oneline -3', 'git --git-dir "$G" status',
-                    'git --work-tree "$W" diff --stat', "bash -lc 'git -C \"$W\" status'"]:
+                    'git --work-tree "$W" diff --stat', "printf 'HEAD %s\\n' x; git -C \"$W\" status"]:
             assert not denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
     assert not denied(hook('pre', {'agent_type': 'ship:driver', 'tool_name': 'Bash', 'tool_input': {'command': 'git push'}}, env))
     assert denied(hook('pre', {**writer, 'tool_name': 'Write', 'tool_input': {'file_path': '/r/.claude/settings.local.json'}}, env))

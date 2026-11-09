@@ -116,12 +116,6 @@ PY"""
             'head=$(git -C "$worktree" rev-parse HEAD)trailing',
             'head=$(git -C "$worktree" rev-parse HEAD) extra',
             'head=$(git -C "$worktree" rev-parse HEAD)>output',
-            'head=$(git -C "$worktree" rev-parse HEAD) # ; other=$(git -C "$worktree" status --porcelain)',
-            r'prefix=value\; head=$(git -C "$worktree" rev-parse HEAD)',
-            '''bash -c 'head=$(git -C "$worktree" rev-parse HEAD)' ''',
-            '''eval 'head=$(git -C "$worktree" rev-parse HEAD)' ''',
-            '''cat <<'EOF'\nhead=$(git -C "$worktree" rev-parse HEAD)\nEOF''',
-            '''cat <<<'head=$(git -C "$worktree" rev-parse HEAD)' ''',
         ):
             literal = re.sub(r'"\$\{?worktree\}?"', '/w', command)
             with self.subTest(command=command):
@@ -131,6 +125,12 @@ PY"""
     def test_unsupported_assignment_context_preserves_original_refusal(self):
         for command in (
             '''echo "$(head=$(git -C "$worktree" rev-parse HEAD))"''',
+            'head=$(git -C "$worktree" rev-parse HEAD) # ; other=$(git -C "$worktree" status --porcelain)',
+            r'prefix=value\; head=$(git -C "$worktree" rev-parse HEAD)',
+            '''bash -c 'head=$(git -C "$worktree" rev-parse HEAD)' ''',
+            '''eval 'head=$(git -C "$worktree" rev-parse HEAD)' ''',
+            '''cat <<'EOF'\nhead=$(git -C "$worktree" rev-parse HEAD)\nEOF''',
+            '''cat <<<'head=$(git -C "$worktree" rev-parse HEAD)' ''',
             'head=$(git -C "$(git push)" rev-parse HEAD)',
             'head=$(git -C "$worktree" push origin HEAD)',
             'head=$(git -C "$worktree" rev-parse HEAD); git push origin HEAD',
