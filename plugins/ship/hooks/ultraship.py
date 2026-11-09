@@ -51,6 +51,7 @@ INERT_ATTRIBUTES = {
     'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest',
 }
 READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true'}
+READ_ONLY_STARTS = {'cat', 'grep', 'head', 'tail', 'ls', 'wc', 'diff', 'cd', 'git'}
 REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
               'help', 'input'}
 
@@ -315,14 +316,15 @@ def shell_git_push(command):
         # Plain `$NAME` expansions under the default IFS cannot slice or split a word, so only a whole `push`
         # word can become the subcommand; `$S/prepush-results.txt` is a path.
         plain = ('IFS' not in text
-                 and not re.search(r'[`*?[{\\]|\$', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text))
-                 # These builtins assign a variable from their arguments, so `printf -v G %spush` can build a name.
-                 and not re.search(r'(?<![\w-])(?:printf|read|mapfile|readarray|declare|typeset|local|export|let|eval)'
-                                   r'(?![\w-])', text))
+                 and not re.search(r'[`*?[{\\]|\$', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text)))
         expansion = str.maketrans('', '', '$`*?[]{},')
+        # Delete each expansion and quote first, so `"$G"push` reads `push` while `$S/prepush` does not.
+        words = re.sub(r'["\']', '', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text))
+        # Many builtins assign a variable from their arguments (`printf -v`, zsh `print -v`), so the relaxation
+        # holds only when every command starts with a command that cannot assign one.
+        plain = plain and all(part.split()[0] in READ_ONLY_STARTS
+                              for part in re.split(r'[;&|\n]+', words) if part.strip())
         if plain:
-            # Delete each expansion and quote first, so `"$G"push` reads `push` while `$S/prepush` does not.
-            words = re.sub(r'["\']', '', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text))
             spelled = re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])',
                                 re.sub(r'(?<!\w)pushed(?=\s*:)', '', words))
         else:

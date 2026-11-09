@@ -172,7 +172,7 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertFalse(self.denied(command))
 
     def test_plain_expansion_beside_a_push_containing_path_is_admitted(self):
-        for command in ('sed -n 1,40p "$S"/prepush-results.txt', 'cat $S/prepush-results.txt && git status'):
+        for command in ('head -40 "$S"/prepush-results.txt', 'cat $S/prepush-results.txt && git status'):
             with self.subTest(command=command):
                 self.assertFalse(ultraship.git_push(command))
         for command in ('X=prepush; git ${X#pre}', 'X=prepush; git ${X:3}', 'IFS=e; X=.epush; git -C $X',
@@ -180,7 +180,10 @@ class WriterHeredocTests(unittest.TestCase):
                         'G=/usr/lib/git-core/git-; "$G"push origin HEAD', 'G=/usr/lib/git-core/git-; ${G}push origin HEAD',
                         'G=/usr/lib/git-core/git-; "$G"pu\\sh origin HEAD', 'G=/usr/lib/git-core/git-; ${G}p\\ush origin HEAD',
                         'printf -v G %spush /usr/lib/git-core/git-; "$G" origin HEAD',
-                        'read G <<< %spush; "$G" origin HEAD', 'declare G=x; "$G"push'):
+                        'read G <<< %spush; "$G" origin HEAD', 'declare G=x; "$G"push',
+                        "p''rintf -v G %spush /usr/lib/git-core/git-; \"$G\" origin HEAD",
+                        'pr"i"ntf -v G %spush /usr/lib/git-core/git-; $G origin HEAD',
+                        'print -v G -f %spush /usr/lib/git-core/git-; "$G" origin HEAD'):
             with self.subTest(command=command):
                 self.assertTrue(ultraship.git_push(command))
 
