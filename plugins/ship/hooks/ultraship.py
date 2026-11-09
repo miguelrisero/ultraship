@@ -51,7 +51,7 @@ INERT_ATTRIBUTES = {
     'items', 'keys', 'values', 'group', 'groups', 'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape',
     'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest',
 }
-READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'printf', 'echo', 'ls', 'true', 'test', '['}
+READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true'}
 REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
               'help', 'input'}
 
@@ -62,8 +62,16 @@ def inert_python(body):
         tree = ast.parse(body)
     except (SyntaxError, ValueError):
         return False
+    # Imports run before any statement can write a file, so the script never imports a module it wrote itself.
+    leading = set()
+    for statement in tree.body:
+        if not isinstance(statement, (ast.Import, ast.ImportFrom)):
+            break
+        leading.add(statement)
     modules = {}
     for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and node not in leading:
+            return False
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name not in INERT_MEMBERS:
@@ -181,18 +189,32 @@ def literal_ps_awk_filter(command):
 
     def data(pipeline):
         prefix = command[:pipeline.start()]
-        if any(marker in prefix for marker in ('#', '<<', "$'")):
+        if any(marker in prefix for marker in ('#', '<<', "$'", '`')):
             return pipeline[0]
-        quote, escaped = '', False
-        for char in prefix:
+        # A `$(` opens a fresh quoting context, as in the shell; the filter counts only at the top level.
+        quote, escaped, stack, i = '', False, [], 0
+        while i < len(prefix):
+            char = prefix[i]
             if escaped:
                 escaped = False
             elif char == '\\' and quote != "'":
                 escaped = True
+            elif quote != "'" and prefix[i:i + 2] == '$(':
+                stack.append(quote)
+                quote = ''
+                i += 1
+            elif char == '(' and stack and not quote:
+                stack.append(None)
+            elif char == ')' and stack and not quote:
+                outer = stack.pop()
+                quote = quote if outer is None else outer
             elif char == quote:
                 quote = ''
             elif not quote and char in '\'"':
                 quote = char
+            i += 1
+        if stack:
+            return pipeline[0]
         if quote or escaped or 'push' in pipeline[2] or not re.fullmatch(expression, pipeline[2]):
             return pipeline[0]
         return pipeline[1] + 'awk_filter_data'

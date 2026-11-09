@@ -112,7 +112,7 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertFalse(ultraship.read_only_shell(remainder))
                 self.assertTrue(self.denied(header + remainder))
         for remainder in ("sed -n '1,3p' x | head -3; grep -n x x", 'cat x\nwc x',
-                          "printf 'x\\n'; ls", 'test -e x && echo x', '[ -f x ] || true'):
+                          "echo x; ls", 'cat x && echo x', 'wc -l x || true'):
             with self.subTest(remainder=remainder):
                 self.assertTrue(ultraship.read_only_shell(remainder))
                 self.assertFalse(self.denied(header + remainder))
@@ -142,6 +142,20 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(execution=execution):
                 self.assertTrue(self.denied(command))
 
+    def test_imports_after_a_file_write_keep_the_scan(self):
+        for command in (
+            "python3 - <<'EOF'\nopen('difflib.py', 'w').write('import os' + chr(10) + 'os.system(\"git push origin HEAD\")' + chr(10))\nimport difflib\nEOF\n",
+            "cd /w && python3 - <<'EOF'\nopen('textwrap.py', 'w').write('import os; os.system(\"git push origin HEAD\")')\nfrom textwrap import dedent\nEOF\necho done\n",
+            "python3 - <<'EOF'\nif True:\n    import difflib\nopen('x', 'w').write('git push origin HEAD')\nEOF\n",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
+    def test_heredoc_remainder_refuses_subscript_evaluating_commands(self):
+        for remainder in ("printf -v a 1\n", "test -v a\n", "[ -v a ]\n"):
+            with self.subTest(remainder=remainder):
+                self.assertFalse(ultraship.read_only_shell(remainder))
+
     def test_teams_process_filter_with_prior_quoted_output_is_admitted(self):
         command = ("git status --porcelain; printf 'ACTIVE_GIT_WRITERS\\n'; "
                    '''ps -eo pid,ppid,comm,args | awk '$3 == "git" && $0 ~ / (merge|commit|apply|cherry-pick|rebase)( |$)/ {print}' ''')
@@ -153,6 +167,7 @@ class WriterHeredocTests(unittest.TestCase):
             '''echo "a;ps -eo pid,args | awk '$1 ~ /x;git pu${x}sh origin HEAD;/ {print}';echo "''',
             '''ps -eo pid,args | awk '$3 == "git" && $0 ~ / $(git pu${x}sh)/ {print}' ''',
             '''ps -eo pid,args | awk '$3 == "git" && $0 ~ / ${x:-git pu${x}sh}/ {print}' ''',
+            '''echo "$(echo ')";ps -eo pid,args | awk '$1 ~ /x| git p[u]sh origin HEAD|/ {print}';echo ')"''',
         ):
             with self.subTest(command=command):
                 self.assertTrue(ultraship.git_push(command))
