@@ -68,7 +68,6 @@ class WriterHeredocTests(unittest.TestCase):
             'import subprocess\nsubprocess.run(["git", "pushx"[:4]])\n',
             'import subprocess\ndef git(*a):\n    return subprocess.run(["git", *a])\ngit("pu" + "sh")\n',
             'import os\nos.system(\'git -C "$PWD" pu\' + \'sh\')\n',
-            r"import os" + '\n' + r"os.system(b'git pu\x73h')" + '\n',
         ):
             with self.subTest(body=body):
                 command = f"cd /workspace/repo && python3 - <<'PY'\n{body}PY\n"

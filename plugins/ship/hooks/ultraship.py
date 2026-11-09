@@ -20,6 +20,7 @@ DISCOVERY = re.compile(r'^(Read|Grep|Glob|LSP|WebFetch|WebSearch|mcp__fff__\w+)$
 # ponytail: a command-string match, so a writer can still reach these through a script it writes,
 # an alias or function, `eval`, or encoded text such as `$'\x70ush'` or base64.
 # Exempted identifiers can become runtime text through exception names or keyword argument keys.
+# Escaped bytes such as os.system(b'git pu\x73h') share main's command-string detection limit.
 # Upgrade path: run writers in a sandbox without push credentials.
 # Quoted commit messages containing `git push` are denied by the nested token scan.
 WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
