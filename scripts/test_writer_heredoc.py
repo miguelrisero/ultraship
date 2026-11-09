@@ -61,6 +61,20 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(ultraship.git_push(command))
                 self.assertTrue(self.denied(command))
 
+    def test_non_inert_python_runtime_push_assembly_is_denied(self):
+        # Process calls are classifier input only; the test never executes the heredoc.
+        for body in (
+            'import os\nos.system(f"git {\'pu\'}sh")\n',
+            'import subprocess\nsubprocess.run(["git", "pushx"[:4]])\n',
+            'import subprocess\ndef git(*a):\n    return subprocess.run(["git", *a])\ngit("pu" + "sh")\n',
+            'import os\nos.system(\'git -C "$PWD" pu\' + \'sh\')\n',
+            r"import os" + '\n' + r"os.system(b'git pu\x73h')" + '\n',
+        ):
+            with self.subTest(body=body):
+                command = f"cd /workspace/repo && python3 - <<'PY'\n{body}PY\n"
+                self.assertTrue(ultraship.git_push(command))
+                self.assertTrue(self.denied(command))
+
     def test_inert_python_file_edit_is_file_text(self):
         body = ("p = '.github/scripts/merge-queue-gate-status.test.mjs'\n"
                 "s = open(p).read()\n"

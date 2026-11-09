@@ -19,6 +19,7 @@ RESEARCH_BUDGET = 40
 DISCOVERY = re.compile(r'^(Read|Grep|Glob|LSP|WebFetch|WebSearch|mcp__fff__\w+)$')
 # ponytail: a command-string match, so a writer can still reach these through a script it writes,
 # an alias or function, `eval`, or encoded text such as `$'\x70ush'` or base64.
+# Exempted identifiers can become runtime text through exception names or keyword argument keys.
 # Upgrade path: run writers in a sandbox without push credentials.
 # Quoted commit messages containing `git push` are denied by the nested token scan.
 WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
@@ -189,16 +190,16 @@ def python_heredoc_shell(command):
             if match[2][0] in '\'"\\' and inert_python(body):
                 return lines[0] + ''.join(lines[end + 1:])
             if match[2][0] in '\'"\\':
-                if re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])', body) or '\\\n' in body:
-                    return command
                 try:
                     tree = ast.parse(body)
                 except (SyntaxError, ValueError):
                     return command
-                if any(shell_git_push(node.value) for node in ast.walk(tree)
-                       if isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                if (re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])', body) or '\\\n' in body
+                        or any(isinstance(n, ast.Constant) and isinstance(n.value, (str, bytes))
+                               and 'push' in str(n.value) for n in ast.walk(tree))):
                     return command
-                return lines[0] + ''.join(lines[end + 1:])
+                body = re.sub(r'\w*push\w*', '_', body)
+                command = lines[0] + body + ''.join(lines[end:])
             if 'push' in body or '\\\n' in body:
                 return command
             if any(c in body for c in '$`{}'):
