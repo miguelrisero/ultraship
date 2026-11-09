@@ -31,22 +31,31 @@ Record selected choice B and `payload.answer.text=null` separately; distinguish 
 Require `event_type=answer_submitted`, `actor_kind=owner_ui`, and `payload.no_answer_yet=false` for this Input and current version.
 Use `get_input` directly when available; accept the driver's or CoC's complete verified record only after tool absence or auth/tool error.
 An authoritative mismatch blocks access and cannot use fallback.
+Check the relayed record's internal consistency, answer, and exact scope; refuse stale, superseded, cancelled, inconsistent, or invented provenance.
 Block every protected read on a missing record, missing field, or mismatch.
 Require the CoC-approved exact allowlist of row-file paths and unique row IDs from the PR's own failing anchor CI evidence.
-Require the recorded base and head SHAs before any protected read.
-Require the recorded base/head diff to show that the PR's own subject change breaks each named row.
-Bind CI evidence to the repository, PR, base SHA, author head SHA, tested merge SHA/tree, run ID, attempt, and job ID/name.
-Require the tested merge to contain the recorded base and author head.
+Require the recorded base SHA and frozen SHA after the edit before any protected read.
+Require the brief to name two read-only trees: one at the base SHA and one at the frozen SHA after the edit.
+Read rows only inside those two trees.
+Require every supplied diff to leave out the row-file hunks.
+Require the recorded diff between the base SHA and frozen SHA after the edit to show that the PR's own subject change breaks each named row.
+Bind CI evidence to the repository, PR, base SHA, frozen SHA after the edit, tested merge SHA/tree, run ID, attempt, and job ID/name.
+Require the tested merge to contain the recorded base SHA and frozen SHA after the edit.
+Bind each row to its CI-named subject file.
 Refuse stale, ambiguous, unrelated, or unlawfully obtained scope or evidence before any protected read.
-Permit locating each named row by its row ID inside its named file at the recorded base and head.
-Read only that row's lines at base and head; permit no whole-file parse, unnamed-row read, or search outside the named files.
+Permit locating each named row by its row ID inside its named file in each named read-only tree.
+Read only that row's lines in the named trees at the base SHA and frozen SHA after the edit.
+Permit no whole-file parse, unnamed-row read, or search outside the named files.
 Require the reviewer to differ from the PR author and the applying writer.
 Confirm for every row the same row ID, claim, subject, designated test, pins, operator, assertions, bounds, and unrelated fields.
 Confirm that only the paired `old` and `new` fields changed.
+Confirm that each new `old` text matches the subject's new source text at the site the PR changed.
 Confirm the identical mutant transformation from `old` to `new` and nothing weaker for every row.
 Bind the verdict and receipt to reviewer identity, approving verdict, commit SHA, row-file paths, row IDs, and CI evidence.
+Bind the receipt's commit SHA to the frozen SHA after the edit.
 Require CoC approval of the review receipt before publication; changed source or evidence invalidates the receipt and approval.
 Identify rows in findings, verdicts, and receipts only by path, row ID, and field.
+For a row finding, give path, row ID, and field in place of `line`, and cite the rule, not the row text, as evidence.
 Include zero pair bytes and zero TOML text in findings, verdicts, and receipts.
 Grant zero edit, execution, mutation, or checker authority.
 Grant zero TOML search or anchor extraction authority outside these row-ID lookups and row-line reads.
