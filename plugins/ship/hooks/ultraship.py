@@ -89,7 +89,8 @@ SHELL_QUOTES = re.compile(r'''(?<!\$)'[^']*'|(?<![^\s;&|()])"\$(?:([A-Za-z_]\w*)
 def quoted_variable(command, token):
     """Whether `command` references the variable `token` names only as standalone `"$NAME"` words.
 
-    Other quotes must be inert literals, and the command must hold no escape, comment, heredoc or backtick, so shlex
+    Other quotes must be inert literals, and the command must hold no escape, comment, heredoc, backtick, `${`
+    expansion or array assignment, so shlex
     and the shell split it the same way and no nested shell or `eval` can re-read the quoted value as code.
     """
     # A double-quoted variable cannot word-split, so it can name a folder (`git -C "$W" status`). Any other
@@ -112,7 +113,8 @@ def quoted_variable(command, token):
         return '"' if re.search(unsafe, text[1:-1]) else '_'
 
     rest = SHELL_QUOTES.sub(plain, command)
-    return (name in found and re.search(r'[\\`\'"#]|<<', rest) is None
+    # `${E:-:;git ...}` and `a=(git ...)` hold a `;` or `(` that shlex reads as a command start and the shell does not.
+    return (name in found and re.search(r'[\\`\'"#]|<<|\$\{|=\(', rest) is None
             and re.search(rf'\$(?:{name}\b|\{{{name}\b)', rest) is None)
 
 
