@@ -242,7 +242,7 @@ def literal_ps_awk_filter(command):
 
 
 def cat_heredoc_data(command):
-    # ponytail: destination checks leave a time-of-check race; atomic filesystem enforcement needs a sandbox.
+    # ponytail: PATH or link aliases can reach the written file; sandbox execution to enforce filesystem identity.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
     path = r'[\w./-]+'
     header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
@@ -258,17 +258,18 @@ def cat_heredoc_data(command):
         candidate = lines[end].lstrip('\t') if strip_tabs else lines[end]
         if candidate.removesuffix('\n') == end_marker:
             remainder = ''.join(lines[end + 1:])
-            ruff = (r'(?:uv[ \t]+run(?P<uv_options>(?:[ \t]+(?:--(?:frozen|locked|offline|no-sync|quiet)|-q|'
-                    r'--(?:directory|project)[ \t]+[A-Za-z0-9./_][A-Za-z0-9./_\-]*))*)[ \t]+)?'
-                    r'ruff[ \t]+(?:check|format)(?:[ \t]+[A-Za-z0-9./_=\-]+)*')
+            ruff = (r'(?:ruff|/[\w./-]+/\.venv/bin/ruff)[ \t]+'
+                    r'(?:check|format)(?:[ \t]+[A-Za-z0-9./_=\-]+)*')
             segments = [part.strip() for part in re.split(r'&&|;|\n', remainder) if part.strip()]
             if not read_only_shell(remainder) and not all(
                     read_only_shell(segment) or re.fullmatch(ruff, segment) for segment in segments):
                 return command
             ruff_segments = [segment for segment in segments if re.fullmatch(ruff, segment)]
-            if any((options := re.fullmatch(ruff, segment)['uv_options']) is not None
-                   and '--no-sync' not in options.split() for segment in ruff_segments):
-                return command
+            for segment in ruff_segments:
+                executable = Path(segment.split()[0])
+                if executable.is_absolute() and (
+                        Path(os.path.realpath(executable)).parent != Path(os.path.realpath(executable.parent))):
+                    return command
             written = Path(re.search(r'>>?[ \t]*([\w./-]+)', lines[0])[1])
             folder = re.match(rf'^[ \t]*cd +({path}) +&& +', lines[0])
             if folder:

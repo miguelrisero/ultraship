@@ -46,6 +46,16 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     installed.mkdir()
     linked = Path(symlink_tmp, 'linked')
     linked.symlink_to(installed, target_is_directory=True)
+    tools = Path(symlink_tmp, 'tools')
+    tools.mkdir()
+    driver = tools / 'driver.py'
+    driver.write_text('')
+    aliased_ruff = Path(symlink_tmp, 'aliased/.venv/bin/ruff')
+    aliased_ruff.parent.mkdir(parents=True)
+    aliased_ruff.symlink_to(driver)
+    real_ruff = Path(symlink_tmp, 'real/.venv/bin/ruff')
+    real_ruff.parent.mkdir(parents=True)
+    real_ruff.write_text('')
     ruff_remainder = ('uv run --frozen --directory backend/api ruff check --fix tests/integration/test_approval_expiry.py'
                       ' && uv run --frozen --directory backend/api ruff format tests/integration/test_approval_expiry.py')
 
@@ -65,6 +75,9 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
             sync_write.format(path='x.py') + 'ruff check x.py',
             'cd /repo && ' + sync_write.format(path='sitecustomize/__init__.py') + 'uv run --no-sync ruff check',
             sync_write.format(path=linked / 'x.py') + 'ruff check x.py',
+            cat_append + ruff_remainder.replace('uv run ', 'uv run --no-sync '),
+            cat_append + '.venv/bin/ruff check backend/api/tests/integration/test_approval_expiry.py',
+            sync_write.format(path=driver) + f'{aliased_ruff} check {driver}',
         )
         decisions = [denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env))
                      for cmd in review_inputs]
@@ -150,7 +163,12 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
                     'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
         for cmd in [
-                    cat_append + ruff_remainder.replace('uv run ', 'uv run --no-sync '),
+                    cat_append + ('/workspace/repo/backend/api/.venv/bin/ruff check --fix '
+                                  'backend/api/tests/integration/test_approval_expiry.py && '
+                                  '/workspace/repo/backend/api/.venv/bin/ruff format '
+                                  'backend/api/tests/integration/test_approval_expiry.py'),
+                    cat_append + 'ruff check backend/api/tests/integration/test_approval_expiry.py',
+                    sync_write.format(path=driver) + f'{real_ruff} check {driver}',
                     cat_append + 'ruff format a.py && ruff check --fix a.py',
                     'cd /workspace/repo && ' + sync_write.format(path='tests/x.py') + 'ruff format tests/x.py',
                     'cat <<\'EOF\' > tests/test_queue.py\nimport redis\n\ndef test_push(r):\n    r.rpush("jobs", *[1, 2])\n    assert r.lrange("jobs", 0, -1) == [b"1", b"2"]\nEOF',
