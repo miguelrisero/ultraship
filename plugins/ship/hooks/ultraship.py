@@ -35,7 +35,6 @@ LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
 INERT_MEMBERS = {
     're': {'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape'},
     'json': {'loads', 'dumps', 'load', 'dump'},
-    'pathlib': {'Path'},
     'textwrap': {'dedent'},
     'difflib': {'unified_diff', 'SequenceMatcher'},
     'hashlib': {'sha256'},
@@ -100,6 +99,31 @@ def inert_python(body):
                 return False
         if isinstance(node, ast.Match):
             return False
+    # The interpreter imports modules from the current folder (Python 3.13 imports `traceback` on any uncaught
+    # error), so a write must name a literal path that Python cannot load.
+    literals = {}
+    for statement in tree.body:
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            name = statement.targets[0].id
+            value = statement.value
+            literals[name] = (value.value if name not in literals and isinstance(value, ast.Constant)
+                              and isinstance(value.value, str) else None)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'open':
+            if any(keyword.arg not in {'mode', 'encoding', 'newline', 'errors'} for keyword in node.keywords):
+                return False
+            modes = [*node.args[1:2], *(keyword.value for keyword in node.keywords if keyword.arg == 'mode')]
+            if not modes:
+                continue
+            if all(isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
+                   for mode in modes):
+                continue
+            target = node.args[0] if node.args else None
+            path = (target.value if isinstance(target, ast.Constant) else
+                    literals.get(target.id) if isinstance(target, ast.Name) else None)
+            if not isinstance(path, str) or re.search(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', path, re.I):
+                return False
     return True
 
 
@@ -189,32 +213,21 @@ def literal_ps_awk_filter(command):
 
     def data(pipeline):
         prefix = command[:pipeline.start()]
-        if any(marker in prefix for marker in ('#', '<<', "$'", '`')):
+        # Only plain words, quotes and quote-free `$(...)` may precede the filter; other shell grammar (nested
+        # quotes in `${...}`, `case` patterns, comments, heredocs) changes where quotes open.
+        plain = re.sub(r'\$\([^\'"()$`#<\\\n]*\)', '_', prefix)
+        if re.search(r"#|<<|\$'|`|\$\{|[()]|\bcase\b", plain):
             return pipeline[0]
-        # A `$(` opens a fresh quoting context, as in the shell; the filter counts only at the top level.
-        quote, escaped, stack, i = '', False, [], 0
-        while i < len(prefix):
-            char = prefix[i]
+        quote, escaped = '', False
+        for char in plain:
             if escaped:
                 escaped = False
             elif char == '\\' and quote != "'":
                 escaped = True
-            elif quote != "'" and prefix[i:i + 2] == '$(':
-                stack.append(quote)
-                quote = ''
-                i += 1
-            elif char == '(' and stack and not quote:
-                stack.append(None)
-            elif char == ')' and stack and not quote:
-                outer = stack.pop()
-                quote = quote if outer is None else outer
             elif char == quote:
                 quote = ''
             elif not quote and char in '\'"':
                 quote = char
-            i += 1
-        if stack:
-            return pipeline[0]
         if quote or escaped or 'push' in pipeline[2] or not re.fullmatch(expression, pipeline[2]):
             return pipeline[0]
         return pipeline[1] + 'awk_filter_data'
@@ -224,7 +237,13 @@ def literal_ps_awk_filter(command):
 
 
 def git_push(command):
-    return shell_git_push(literal_ps_awk_filter(python_heredoc_shell(command)))
+    reduced = literal_ps_awk_filter(python_heredoc_shell(command))
+    try:
+        shlex.split(reduced.replace('\\\n', ''), comments=False, posix=True)
+    except ValueError:
+        # A reduction that leaves unbalanced quotes misread the shell, so the original command is scanned.
+        reduced = command
+    return shell_git_push(reduced)
 
 
 # One left-to-right scan: a single-quoted span, a standalone `"$NAME"` word, or another double-quoted span.
@@ -289,9 +308,14 @@ def shell_git_push(command):
         # `push` spelling it denies. Exclude only the literal receipt key `pushed:` before
         # normalization; brace lists must retain the conservative substring check.
         # A rare false denial remains, for example `echo $X; git stash push`.
+        # Plain `$NAME` expansions under the default IFS cannot slice or split a word, so only a whole `push`
+        # word can become the subcommand; `$S/prepush-results.txt` is a path.
+        plain = ('IFS' not in text
+                 and not re.search(r'[`*?[{]|\$', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text)))
+        spelling = r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])' if plain else 'push'
         expansion = str.maketrans('', '', '$`*?[]{},')
         if (any(set(token) & set('$`*?[{') for token in tokens)
-                and any('push' in re.sub(r'(?<!\w)pushed(?=\s*:)', '', token).translate(expansion)
+                and any(re.search(spelling, re.sub(r'(?<!\w)pushed(?=\s*:)', '', token).translate(expansion))
                         for token in tokens)):
             return True
         expect_subcommand = skip_value = folder_value = False

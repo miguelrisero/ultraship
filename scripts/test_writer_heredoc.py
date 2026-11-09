@@ -41,7 +41,7 @@ class WriterHeredocTests(unittest.TestCase):
         for header in ("python3 - <<'EOF'", 'python3 - <<"EOF"', 'python3 - <<\\EOF', "python3 -I - <<'EOF'",
                        "cd /w/lane-1 && python3 - <<'EOF'"):
             with self.subTest(header=header):
-                self.assertFalse(self.denied(f'{header}\nimport re, json\nfrom pathlib import Path\n{body}EOF\n'))
+                self.assertFalse(self.denied(f'{header}\nimport re, json\n{body}EOF\n'))
 
     def test_python_that_can_reach_a_process_keeps_the_scan(self):
         for body in ("__import__('os').system('git push')", "import sys\nsys.modules['os'].system('git push')",
@@ -151,6 +151,32 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
 
+    def test_writes_to_loadable_or_computed_paths_keep_the_scan(self):
+        for body in (
+            "open('traceback.py', 'w').write('import os' + chr(10) + 'os.system(\"git push origin HEAD\")')\nopen('missing.txt').read()\n",
+            "open('traceb' + 'ack.py', 'w').write('git push origin HEAD')\n1 / 0\n",
+            "p = 'x.txt'\np = 'traceback.py'\nopen(p, 'w').write('git push origin HEAD')\n",
+            "open('lib/site.pth', 'a').write('git push origin HEAD')\n",
+            "from pathlib import Path\nPath('x.txt').write_text('git push origin HEAD')\nPath('x.txt').replace('traceback.py')\n",
+            "open('x.txt', 'w', opener=None).write('git push origin HEAD')\n",
+        ):
+            with self.subTest(body=body):
+                self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+
+    def test_literal_non_python_write_is_file_text(self):
+        command = ("python3 - <<'EOF'\np = 'notes.md'\ns = open(p).read()\n"
+                   "open(p, 'w').write(s.replace('git push', 'git status'))\nEOF\n")
+        self.assertFalse(self.denied(command))
+
+    def test_plain_expansion_beside_a_push_containing_path_is_admitted(self):
+        for command in ('sed -n 1,40p "$S"/prepush-results.txt', 'cat $S/prepush-results.txt && git status'):
+            with self.subTest(command=command):
+                self.assertFalse(ultraship.git_push(command))
+        for command in ('X=prepush; git ${X#pre}', 'X=prepush; git ${X:3}', 'IFS=e; X=.epush; git -C $X',
+                        'X=push; git $X', "git $'push'", 'git pus?', 'git {push,}', 'S=". push"; git -C $S'):
+            with self.subTest(command=command):
+                self.assertTrue(ultraship.git_push(command))
+
     def test_heredoc_remainder_refuses_subscript_evaluating_commands(self):
         for remainder in ("printf -v a 1\n", "test -v a\n", "[ -v a ]\n"):
             with self.subTest(remainder=remainder):
@@ -168,6 +194,7 @@ class WriterHeredocTests(unittest.TestCase):
             '''ps -eo pid,args | awk '$3 == "git" && $0 ~ / $(git pu${x}sh)/ {print}' ''',
             '''ps -eo pid,args | awk '$3 == "git" && $0 ~ / ${x:-git pu${x}sh}/ {print}' ''',
             '''echo "$(echo ')";ps -eo pid,args | awk '$1 ~ /x| git p[u]sh origin HEAD|/ {print}';echo ')"''',
+            ''': >push; echo "${x:-"'"}" 'a;ps -eo pid,args | awk '$1 ~ /x| git p[u]sh origin HEAD|/ {print}';echo ' ''',
         ):
             with self.subTest(command=command):
                 self.assertTrue(ultraship.git_push(command))
