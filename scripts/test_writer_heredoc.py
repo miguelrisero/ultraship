@@ -178,7 +178,9 @@ class WriterHeredocTests(unittest.TestCase):
         for command in ('X=prepush; git ${X#pre}', 'X=prepush; git ${X:3}', 'IFS=e; X=.epush; git -C $X',
                         'X=push; git $X', "git $'push'", 'git pus?', 'git {push,}', 'S=". push"; git -C $S',
                         'G=/usr/lib/git-core/git-; "$G"push origin HEAD', 'G=/usr/lib/git-core/git-; ${G}push origin HEAD',
-                        'G=/usr/lib/git-core/git-; "$G"pu\\sh origin HEAD', 'G=/usr/lib/git-core/git-; ${G}p\\ush origin HEAD'):
+                        'G=/usr/lib/git-core/git-; "$G"pu\\sh origin HEAD', 'G=/usr/lib/git-core/git-; ${G}p\\ush origin HEAD',
+                        'printf -v G %spush /usr/lib/git-core/git-; "$G" origin HEAD',
+                        'read G <<< %spush; "$G" origin HEAD', 'declare G=x; "$G"push'):
             with self.subTest(command=command):
                 self.assertTrue(ultraship.git_push(command))
 
