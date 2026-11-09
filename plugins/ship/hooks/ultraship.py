@@ -315,7 +315,7 @@ def shell_git_push(command):
         # Plain `$NAME` expansions under the default IFS cannot slice or split a word, so only a whole `push`
         # word can become the subcommand; `$S/prepush-results.txt` is a path.
         plain = ('IFS' not in text
-                 and not re.search(r'[`*?[{]|\$', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text)))
+                 and not re.search(r'[`*?[{\\]|\$', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text)))
         expansion = str.maketrans('', '', '$`*?[]{},')
         if plain:
             # Delete each expansion and quote first, so `"$G"push` reads `push` while `$S/prepush` does not.
