@@ -55,6 +55,72 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied("python3 - <<'EOF'\nprint('git push')\nEOF\ngit push origin HEAD\n"))
         self.assertTrue(self.denied("cd /w && git push && python3 - <<'EOF'\nprint(1)\nEOF\n"))
 
+    def test_reflection_and_write_then_execute_keep_push_denied(self):
+        header, end = "python3 - <<'EOF'\n", 'EOF\n'
+        # These process-launch strings are classifier input only; the test never executes them.
+        commands = (
+            header + "from pathlib import os\nos.system('git push origin HEAD')\n" + end,
+            header + "import pathlib\npathlib.os.system('git push origin HEAD')\n" + end,
+            'cd /w && python3 -I - <<"EOF"\nfrom json import codecs\n'
+            "codecs.sys.modules['os'].system('git push')\nEOF\n",
+            header + "import string\nf = string.Formatter().get_field('0.__globals__', (string.capwords,), {})[0]\n"
+            "f['_re'].enum.sys.modules['os'].system('git push origin HEAD')\n" + end,
+            header + "match object:\n    case type(__subclasses__=s):\n        for c in s():\n"
+            "            match c:\n                case object(__name__='_wrap_close', __init__=object(__globals__=g)):\n"
+            "                    g['system']('git push origin HEAD')\n" + end,
+            header + "open('.git/config', 'a').write('[core]\\n\\tfsmonitor = git push origin HEAD\\n')\n"
+            + end + 'git status\n',
+            header + "open('/tmp/x.sh','w').write('git push origin HEAD')\n" + end + 'sh /tmp/x.sh\n',
+            "echo 'a;ps -eo pid,args | awk '$1 ~ /x;git pu${x}sh origin HEAD;/ {print}';echo '",
+            "python3() { git push origin HEAD; }; python3 - <<'EOF'\nprint(1)\nEOF\n",
+            "alias python3='git push origin HEAD #'\n" + header + 'print(1)\n' + end,
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(ultraship.git_push(command))
+                self.assertTrue(self.denied(command))
+
+    def test_imported_members_and_formatting_keep_the_scan(self):
+        for body in (
+            "import pathlib as p\np.os.system('git push')",
+            "import pathlib\np = pathlib\np.os.system('git push')",
+            "from json import *\nprint('git push')",
+            "print('0.__globals__', 'git push')",
+            "f = '0.' + '_' * 2 + 'globals' + '_' * 2\nx.get_field(f, (), {})  # git push",
+            "f = '0.' + '_' * 2 + 'globals' + '_' * 2\nf.format(x)  # git push",
+            "f = '0.' + '_' * 2 + 'globals' + '_' * 2\nf.format_map(x)  # git push",
+            "match x:\n    case {'x': y}:\n        print('git push')",
+            "open('/w/.git', 'w').write('git push')",
+        ):
+            with self.subTest(body=body):
+                self.assertTrue(self.denied(f"python3 - <<'EOF'\n{body}\nEOF\n"))
+
+    def test_written_files_keep_the_scan_before_execution(self):
+        for execution in ('sh /tmp/x.sh', 'bash /tmp/x.sh', 'zsh /tmp/x.sh',
+                          'source /tmp/x.sh', '. /tmp/x.sh', 'exec /tmp/x.sh', './x.sh',
+                          'python /tmp/x.py', 'python3 /tmp/x.py', '/bin/sh /tmp/x.sh',
+                          "sh '/tmp/x.sh'", 'python3 -I /tmp/x.py',
+                          'true;sh /tmp/x.sh', 'true&&bash /tmp/x.sh', '$(sh /tmp/x.sh)'):
+            command = "python3 - <<'EOF'\nopen('x.sh','w').write('git push origin HEAD')\nEOF\n" + execution
+            with self.subTest(execution=execution):
+                self.assertTrue(self.denied(command))
+
+    def test_teams_process_filter_with_prior_quoted_output_is_admitted(self):
+        command = ("git status --porcelain; printf 'ACTIVE_GIT_WRITERS\\n'; "
+                   '''ps -eo pid,ppid,comm,args | awk '$3 == "git" && $0 ~ / (merge|commit|apply|cherry-pick|rebase)( |$)/ {print}' ''')
+        self.assertFalse(ultraship.git_push(command))
+        self.assertFalse(self.denied(command))
+
+    def test_awk_filter_quote_boundaries_and_expansions_keep_the_scan(self):
+        for command in (
+            '''echo "a;ps -eo pid,args | awk '$1 ~ /x;git pu${x}sh origin HEAD;/ {print}';echo "''',
+            '''ps -eo pid,args | awk '$3 == "git" && $0 ~ / $(git pu${x}sh)/ {print}' ''',
+            '''ps -eo pid,args | awk '$3 == "git" && $0 ~ / ${x:-git pu${x}sh}/ {print}' ''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(ultraship.git_push(command))
+                self.assertTrue(self.denied(command))
+
     def test_real_push_after_heredoc_is_denied(self):
         for operator, delimiter, indent in (('<<', "'EOF'", ''), ('<<', 'EOF', ''),
                                             ('<<-', 'EOF', '\t')):

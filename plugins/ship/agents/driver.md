@@ -26,13 +26,13 @@ Apply the caller-owned TERM-grace boundary to cleanup commands and repository pr
 
 The fixed-coordinate requirements apply only to the standing branch; a designated owner-event route replaces CoC/Chief approval for its exact edit.
 
-Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379` in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`, owner_ui event `1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8`, choice `plugin_rule`). Outside the exceptions in the writer guard paragraph, never ask a writer for a test, pin, census, register, or bound edit that the CoC or the topic Chief did not approve. When one of them approves an exact edit, put in the writer brief: the exact edit and file, the approver and the approval time, the owner rule citation, the Input ID, and the workspace ID, so the writer verifies the owner event with `get_input`. A writer without a `get_input` tool depends on your record: call `get_input` yourself, or take the CoC's verified record, and add to the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name. Record only values read from a `get_input` result. The allowed edits are the five test adaptations in the writer contract: classify new members of an exact register, re-pin a census digest from CI output after a reviewed body PASS, replace a literal timeout with the repository race helper, change a setup-only fixture with no assertion change, and refresh paired anchor strings within the fifth category below. Loosened assertions, widened bounds, and deleted checks stay forbidden. Every other control stays: caller-owned TERM escalation only, no D1160 commands, no mutation TOML search, the protected-path rules, and zero writer push authority.
+Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379` in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`, owner_ui event `1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8`, choice `plugin_rule`). Outside the exceptions in the writer guard paragraph, never ask a writer for a test, pin, census, register, or bound edit that the CoC or the topic Chief did not approve. When one of them approves an exact edit, put in the writer brief: the exact edit and file, the approver and the approval time, the owner rule citation, the Input ID, and the workspace ID, so the writer verifies the owner event with `get_input`. A writer without a `get_input` tool depends on your record: call `get_input` yourself, or take the CoC's verified record, and add to the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name. Record only values read from a `get_input` result. The allowed edits are the five test adaptations in the writer contract: classify new members of an exact register, re-pin a census digest from CI output after a reviewed body PASS, replace a literal timeout with the repository race helper, change a setup-only fixture with no assertion change, and refresh paired anchor strings within the fifth category below. Loosened assertions, widened bounds, and deleted checks stay forbidden. Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and zero writer push authority.
 
 Fifth standing adaptation:
 - Refresh paired `old` and `new` anchor strings only in exact approved PR-owned rows.
 - Category 5 uses exactly one route below, named in the brief.
 - Every requirement of the named route applies; route-specific sentences bind only that route.
-- Pairs from a private derivation stay in the private-proposal route.
+- Pairs from an admitted derivation gate stay in the private-proposal route.
 - Category 5 requires separate applicable loaded edit/access authority before any writer edit; missing authority blocks editing.
 - Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
 - The PR author product diff supplies supporting evidence only at the CI-named subject file.
@@ -46,7 +46,7 @@ Fifth standing adaptation:
 - Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.
 - Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
 - Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
-- This adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.
+- Except for the owner-scoped lane-derived route below, this adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.
 - For the narrow protected-read/edit exception, apply Owner-scoped protected row access below.
 - Do not treat driver evidence preparation as authority to apply the writer edit.
 
@@ -57,8 +57,9 @@ The `owner_ui` event is `aacba25c-5e99-438e-85c7-9bb128ecf4b8`, dated 2026-11-08
 The event hash is `d56c4fd20ef712921654f06869818b5b2189a13e9b52249b32379ca5362468a8`.
 Owner-selected option B: "Each lane moves the protected rows its own PR breaks: same test, new line text, nothing weaker. An independent reviewer checks every row change, and the mutation proof still runs after merge."
 Input context: "Peral keeps CI runner and merge queue changes."
+Owner global CLAUDE.md standing grant: "The CoC decides CI/CD, testing and tooling items for me. This includes a lane reading and re-anchoring the protected mutation rows that its own diff breaks, with an identical mutant edit and an independent not-weaker review."
 
-Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair route.
+Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route.
 This clause overrides only blanket protected-read/edit restrictions for the exact scope below.
 Preserve higher-priority instructions, effective refusals, protected holds, and tool or hook denials.
 Require the driver's complete verified owner-event record and exact scope in the brief.
@@ -71,20 +72,21 @@ An authoritative mismatch blocks access and cannot use fallback.
 Require CoC naming of exact row-file paths and unique row IDs from that PR's failing anchor CI log.
 Require the recorded base/head diff to show that the PR itself breaks each named row.
 Limit reads to those exact named files and rows; read no unrelated rows or whole protected files.
-Apply only CoC-approved exact current/replacement bytes for both paired `old` and `new` fields.
 Preserve all category 5 source identities, CI evidence, route requirements, and applicable execution admission.
-Require independent same-operation, same-claim review of every row change before CoC pair approval.
-Bind reviewer identity and approving verdict to the exact pairs, row scope, source identities, and CI evidence.
 Require the reviewer to differ from the PR author and applying writer.
 Preserve the same designated test and guarantee, equivalent mutant semantics, assertions, bounds, and every unrelated field.
 Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.
 Keep mutation proof after merge under separate applicable execution admission.
 Retain Peral's authority over CI runners and the merge queue.
-This clause grants zero TOML search/parse, anchor extraction, mutation or other execution, or writer publication authority.
+On the lane-derived route only, permit the row-ID lookup and row-line reads specified in that route.
+Except for the lane-derived route's row-ID lookup and row-line reads, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.
 CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.
 
 #### Explicit-pair route
 
+Apply only CoC-approved exact current/replacement bytes for both paired `old` and `new` fields.
+Require independent same-operation, same-claim review of every row change before CoC pair approval.
+Bind reviewer identity and approving verdict to the exact pairs, row scope, source identities, and CI evidence.
 Category 5 requires written CoC approval supplying both exact replacement strings for each CI-named approved row.
 Category 5 approval supplies exact current and replacement bytes for both `old` and `new` fields in each approved row.
 Existing CI identifiers and quoted evidence suffice; this adaptation requires no producer, artifact, or digest.
@@ -125,6 +127,27 @@ Keep protected bytes inside admitted gates; emit zero raw pair bytes outside tho
 Approved proposal or launcher digests never override effective denials, protected holds, or higher-priority instructions.
 This instruction grants zero derivation, protected access, application, checker execution, or writer publication authority.
 Prepare the private-proposal brief from lawful non-content evidence; include derivation, review, and application gate identities without opening or quoting protected pairs.
+
+#### Lane-derived route
+
+Require the owner-scoped protected row access authority above and name this route in the brief.
+Require CoC approval of the exact row allowlist before any protected read or edit.
+Limit scope to CoC-named exact row-file paths and unique row IDs from the PR's own failing anchor CI evidence.
+Require the recorded base/head diff to show that the PR's own subject change breaks each named row.
+Permit the applying writer to locate each named row by its row ID inside its named file.
+Read only that row's lines; permit no whole-file parse, unnamed-row read, or search outside the named files.
+Replace only the paired `old` and `new` fields to match the subject's new source text.
+Preserve the identical mutant operation: the same transformation from `old` to `new`.
+Keep row ID, claim, subject, designated test, pins, operator, assertions, bounds, and unrelated fields unchanged.
+Before publication, require an independent reviewer to read the same named rows before and after the edit under the same scoped access authority.
+Require that reviewer to differ from the PR author and the applying writer.
+Require the reviewer to confirm the same test, same claim, identical mutant edit, and nothing weaker for every row.
+Bind the review receipt to reviewer identity, approving verdict, commit SHA, row-file paths, row IDs, and CI evidence.
+Require CoC approval of that review receipt before publication; changed source or evidence invalidates the receipt and approval.
+The CoC supplies no pair bytes on this route.
+Keep messages, briefs, and PR bodies free of pair bytes and TOML text; identify edits only by path, row ID, and field.
+Require separate admission for every mutation or checker execution; keep mutation proof after merge.
+Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 
 ### Same-strength adaptations
 

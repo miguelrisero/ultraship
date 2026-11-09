@@ -89,9 +89,13 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             private = text[private_heading.end() + 1:] if private_heading else ''
             private = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)|^.+\n {0,3}(?:=+|-+)[ \t]*$',
                                private, maxsplit=1, flags=re.MULTILINE)[0]
+            lane_heading = re.search(r'^#### Lane-derived route$', text, flags=re.MULTILINE)
+            lane = text[lane_heading.end() + 1:] if lane_heading else ''
+            lane = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)|^.+\n {0,3}(?:=+|-+)[ \t]*$',
+                            lane, maxsplit=1, flags=re.MULTILINE)[0]
             shared = text
             for heading, body in sorted(
-                ((direct_heading, direct), (private_heading, private)),
+                ((direct_heading, direct), (private_heading, private), (lane_heading, lane)),
                 key=lambda route: route[0].start() if route[0] else -1,
                 reverse=True,
             ):
@@ -104,7 +108,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             route_selection_clauses = (
                 'Category 5 uses exactly one route below, named in the brief.',
                 'Every requirement of the named route applies; route-specific sentences bind only that route.',
-                'Pairs from a private derivation stay in the private-proposal route.',
+                'Pairs from an admitted derivation gate stay in the private-proposal route.',
             )
             for phrase in (
                 category,
@@ -123,18 +127,21 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.',
                 'Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.',
                 'Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.',
-                'This adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.',
+                'Except for the owner-scoped lane-derived route below, this adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.',
             ):
                 with self.subTest(path=name, shared_control=phrase):
                     self.assertIn(phrase, shared)
-                for route, body in (('explicit_pair', direct), ('private_proposal', private)):
+                for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane)):
                     with self.subTest(path=name, shared_control=phrase, outside_route=route):
                         self.assertNotIn(phrase, body)
             for phrase in route_selection_clauses:
-                for route, heading in (('explicit_pair', direct_heading), ('private_proposal', private_heading)):
+                for route, heading in (('explicit_pair', direct_heading), ('private_proposal', private_heading), ('lane_derived', lane_heading)):
                     with self.subTest(path=name, route_selection_before=route, phrase=phrase):
                         self.assertTrue(heading and 0 <= text.rfind(phrase) < heading.start())
             for phrase in (
+                'Apply only CoC-approved exact current/replacement bytes for both paired `old` and `new` fields.',
+                'Require independent same-operation, same-claim review of every row change before CoC pair approval.',
+                'Bind reviewer identity and approving verdict to the exact pairs, row scope, source identities, and CI evidence.',
                 'Category 5 requires written CoC approval supplying both exact replacement strings for each CI-named approved row.',
                 'Category 5 approval supplies exact current and replacement bytes for both `old` and `new` fields in each approved row.',
                 'Existing CI identifiers and quoted evidence suffice; this adaptation requires no producer, artifact, or digest.',
@@ -143,7 +150,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 with self.subTest(path=name, route='explicit_pair', phrase=phrase):
                     self.assertIn(phrase, direct)
                 with self.subTest(path=name, route='explicit_pair_only', phrase=phrase):
-                    self.assertNotIn(phrase, shared + '\n' + private)
+                    self.assertNotIn(phrase, shared + '\n' + private + '\n' + lane)
             for phrase in (
                 'Use the private-proposal route only with separately authorized and admitted derivation before any protected access.',
                 'Freeze exact current/replacement pairs privately with source identity and the exact approved row scope.',
@@ -183,7 +190,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The brief and PR body contain zero pair bytes.',
             ):
                 with self.subTest(path=name, route='private_proposal_only', phrase=phrase):
-                    self.assertNotIn(phrase, shared + '\n' + direct)
+                    self.assertNotIn(phrase, shared + '\n' + direct + '\n' + lane)
             if Path(name).name.startswith('writer--'):
                 with self.subTest(path=name, route='private_proposal', report_before_application=True):
                     self.assertIn(
@@ -207,7 +214,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     '- Never loosen an assertion, widen a bound, or delete a check under this rule.',
                     '- Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.',
                     '- Record the approver, the exact edit, and the Input ID in the PR body.',
-                    '- Every other control stays: caller-owned TERM escalation only, no D1160 commands, no mutation TOML search, the protected-path rules, and zero writer push authority.',
+                    '- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and zero writer push authority.',
                 )
                 _, _, standing = text.partition('### Standing owner rule\n')
                 standing = re.split(r'^ {0,3}#{1,3}(?:[ \t]+|$)|^.+\n {0,3}(?:=+|-+)[ \t]*$',
@@ -218,10 +225,10 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 for phrase in standing_controls:
                     with self.subTest(path=name, standing_control=phrase):
                         self.assertIn(phrase, shared)
-                    for route, body in (('explicit_pair', direct), ('private_proposal', private)):
+                    for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane)):
                         with self.subTest(path=name, standing_control=phrase, outside_route=route):
                             self.assertNotIn(phrase, body)
-                for route, heading in (('explicit_pair', direct_heading), ('private_proposal', private_heading)):
+                for route, heading in (('explicit_pair', direct_heading), ('private_proposal', private_heading), ('lane_derived', lane_heading)):
                     with self.subTest(path=name, standing_route_placement=route):
                         self.assertTrue(
                             heading
@@ -238,14 +245,14 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                         self.assertIn(phrase, text if phrase == 'five-category list' else direct)
                     if phrase != 'five-category list':
                         with self.subTest(path=name, route='explicit_pair_only', phrase=phrase):
-                            self.assertNotIn(phrase, shared + '\n' + private)
+                            self.assertNotIn(phrase, shared + '\n' + private + '\n' + lane)
                 with self.subTest(path=name, category=5):
                     self.assertIn('  5. ' + category, text.splitlines())
             elif Path(name).name.startswith('driver'):
                 phrase = 'Do not treat driver evidence preparation as authority to apply the writer edit.'
                 with self.subTest(path=name, shared_role=phrase):
                     self.assertIn(phrase, shared)
-                for route, body in (('explicit_pair', direct), ('private_proposal', private)):
+                for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane)):
                     with self.subTest(path=name, shared_role=phrase, outside_route=route):
                         self.assertNotIn(phrase, body)
                 for phrase in (
@@ -257,14 +264,14 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                         self.assertIn(phrase, text if phrase == 'five test adaptations' else direct)
                     if phrase != 'five test adaptations':
                         with self.subTest(path=name, route='explicit_pair_only', phrase=phrase):
-                            self.assertNotIn(phrase, shared + '\n' + private)
+                            self.assertNotIn(phrase, shared + '\n' + private + '\n' + lane)
             else:
                 with self.subTest(path=name, skill_contract='category_count'):
                     self.assertIn('five standing test adaptations', text)
                 phrase = 'Drivers prepare category 5 evidence; writers verify it and apply only separately permitted exact edits.'
                 with self.subTest(path=name, skill_contract='category_roles'):
                     self.assertIn(phrase, shared)
-                for route, body in (('explicit_pair', direct), ('private_proposal', private)):
+                for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane)):
                     with self.subTest(path=name, skill_contract='shared_category_roles', outside_route=route):
                         self.assertNotIn(phrase, body)
                 with self.subTest(path=name, skill_contract='command_free_brief'):
@@ -280,7 +287,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 with self.subTest(path=name, skill_contract='explicit_pair_only'):
                     self.assertNotIn(
                         'Drivers document separate applicable loaded edit/access authority and both current/replacement pairs; writers verify them before any category 5 edit.',
-                        shared + '\n' + private,
+                        shared + '\n' + private + '\n' + lane,
                     )
                 with self.subTest(path=name, skill_contract='obsolete_closed_list'):
                     self.assertNotIn(
@@ -290,8 +297,12 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     )
 
     def test_owner_scoped_protected_row_access_requires_verified_exact_scope(self):
-        for name in ('writer--sol.md', 'writer--sonnet.md', 'driver.md', 'driver--sol.md'):
-            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+        for name in (
+            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/driver.md', 'plugins/ship/agents/driver--sol.md',
+            'plugins/ship/skills/ship/SKILL.md',
+        ):
+            text = (ROOT / name).read_text()
             _, heading, after = text.partition('#### Owner-scoped protected row access\n')
             clause = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after,
                               maxsplit=1, flags=re.MULTILINE)[0]
@@ -305,7 +316,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Owner-selected option B: "Each lane moves the protected rows its own PR breaks: same test, new line text, nothing weaker. An independent reviewer checks every row change, and the mutation proof still runs after merge."',
                 'Input context: "Peral keeps CI runner and merge queue changes."',
                 'Record selected choice B and `payload.answer.text=null` separately; distinguish the selected option text from Input context.',
-                "Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair route.",
+                "Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route.",
                 'This clause overrides only blanket protected-read/edit restrictions for the exact scope below.',
                 'Preserve higher-priority instructions, effective refusals, protected holds, and tool or hook denials.',
                 "Require the driver's complete verified owner-event record and exact scope in the brief.",
@@ -316,21 +327,58 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 "Require CoC naming of exact row-file paths and unique row IDs from that PR's failing anchor CI log.",
                 'Require the recorded base/head diff to show that the PR itself breaks each named row.',
                 'Limit reads to those exact named files and rows; read no unrelated rows or whole protected files.',
-                'Apply only CoC-approved exact current/replacement bytes for both paired `old` and `new` fields.',
-                'Require independent same-operation, same-claim review of every row change before CoC pair approval.',
-                'Bind reviewer identity and approving verdict to the exact pairs, row scope, source identities, and CI evidence.',
                 'Require the reviewer to differ from the PR author and applying writer.',
                 'Preserve the same designated test and guarantee, equivalent mutant semantics, assertions, bounds, and every unrelated field.',
                 'Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.',
                 'Keep mutation proof after merge under separate applicable execution admission.',
                 "Retain Peral's authority over CI runners and the merge queue.",
-                'This clause grants zero TOML search/parse, anchor extraction, mutation or other execution, or writer publication authority.',
+                'On the lane-derived route only, permit the row-ID lookup and row-line reads specified in that route.',
+                'Except for the lane-derived route\'s row-ID lookup and row-line reads, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.',
                 'CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.',
             ):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, clause)
             with self.subTest(path=name, contract='general_boundary_reference'):
                 self.assertIn('For the narrow protected-read/edit exception, apply Owner-scoped protected row access below.', text)
+
+    def test_lane_derived_route_requires_identical_mutant_edit_and_independent_review(self):
+        for name in (
+            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/driver.md', 'plugins/ship/agents/driver--sol.md',
+            'plugins/ship/skills/ship/SKILL.md',
+        ):
+            text = (ROOT / name).read_text()
+            _, heading, after = text.partition('#### Lane-derived route\n')
+            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after,
+                             maxsplit=1, flags=re.MULTILINE)[0]
+            with self.subTest(path=name, contract='lane_route'):
+                self.assertTrue(heading)
+                self.assertLess(text.index('Category 5 uses exactly one route below, named in the brief.'),
+                                text.index(heading))
+            for requirement in (
+                'Require the owner-scoped protected row access authority above and name this route in the brief.',
+                'Require CoC approval of the exact row allowlist before any protected read or edit.',
+                "Limit scope to CoC-named exact row-file paths and unique row IDs from the PR's own failing anchor CI evidence.",
+                "Require the recorded base/head diff to show that the PR's own subject change breaks each named row.",
+                'Permit the applying writer to locate each named row by its row ID inside its named file.',
+                "Read only that row's lines; permit no whole-file parse, unnamed-row read, or search outside the named files.",
+                "Replace only the paired `old` and `new` fields to match the subject's new source text.",
+                'Preserve the identical mutant operation: the same transformation from `old` to `new`.',
+                'Keep row ID, claim, subject, designated test, pins, operator, assertions, bounds, and unrelated fields unchanged.',
+                'Before publication, require an independent reviewer to read the same named rows before and after the edit under the same scoped access authority.',
+                'Require that reviewer to differ from the PR author and the applying writer.',
+                'Require the reviewer to confirm the same test, same claim, identical mutant edit, and nothing weaker for every row.',
+                'Bind the review receipt to reviewer identity, approving verdict, commit SHA, row-file paths, row IDs, and CI evidence.',
+                'Require CoC approval of that review receipt before publication; changed source or evidence invalidates the receipt and approval.',
+                'The CoC supplies no pair bytes on this route.',
+                'Keep messages, briefs, and PR bodies free of pair bytes and TOML text; identify edits only by path, row ID, and field.',
+                'Require separate admission for every mutation or checker execution; keep mutation proof after merge.',
+                "Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.",
+            ):
+                with self.subTest(path=name, requirement=requirement):
+                    self.assertIn(requirement, route)
+            with self.subTest(path=name, contract='standing_grant'):
+                self.assertIn('Owner global CLAUDE.md standing grant: "The CoC decides CI/CD, testing and tooling items for me. This includes a lane reading and re-anchoring the protected mutation rows that its own diff breaks, with an identical mutant edit and an independent not-weaker review."', text)
 
     def test_exact_coc_adaptations_preserve_or_strengthen_the_same_guarantee(self):
         for name in (

@@ -31,9 +31,19 @@ HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
 LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
 
 
-# Modules that can only compute and read or write files: none of them runs a process or reaches one by reflection.
-INERT_MODULES = {'re', 'json', 'pathlib', 'textwrap', 'difflib', 'hashlib', 'collections', 'itertools', 'string',
-                 'math'}
+# Only these public entry points qualify as file-editing data; modules also expose executable internals.
+INERT_MEMBERS = {
+    're': {'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape'},
+    'json': {'loads', 'dumps', 'load', 'dump'},
+    'pathlib': {'Path'},
+    'textwrap': {'dedent'},
+    'difflib': {'unified_diff', 'SequenceMatcher'},
+    'hashlib': {'sha256'},
+    'collections': {'Counter', 'defaultdict', 'deque'},
+    'itertools': {'chain', 'islice', 'product', 'permutations', 'combinations'},
+    'string': {'ascii_letters', 'ascii_lowercase', 'ascii_uppercase', 'digits', 'hexdigits', 'punctuation'},
+    'math': {'ceil', 'floor', 'sqrt', 'isfinite', 'isclose'},
+}
 REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
               'help', 'input'}
 
@@ -44,15 +54,42 @@ def inert_python(body):
         tree = ast.parse(body)
     except (SyntaxError, ValueError):
         return False
+    modules = {}
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import) and any(alias.name.split('.')[0] not in INERT_MODULES for alias in node.names):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name not in INERT_MEMBERS:
+                    return False
+                modules[alias.asname or alias.name] = alias.name
+        if isinstance(node, ast.ImportFrom) and (
+                node.level or node.module not in INERT_MEMBERS
+                or any(alias.name not in INERT_MEMBERS[node.module] for alias in node.names)):
             return False
-        if isinstance(node, ast.ImportFrom) and (node.level or (node.module or '').split('.')[0] not in INERT_MODULES):
-            return False
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            if (isinstance(child, ast.Name) and child.id in modules
+                    and not (isinstance(parent, ast.Attribute) and parent.value is child)):
+                return False
+    for node in ast.walk(tree):
         if isinstance(node, ast.Name) and (node.id in REFLECTION or node.id.startswith('__')):
             return False
-        if isinstance(node, ast.Attribute) and node.attr.startswith('_'):
+        if isinstance(node, ast.Attribute):
+            if node.attr.startswith('_'):
+                return False
+            if (isinstance(node.value, ast.Name) and node.value.id in modules
+                    and node.attr not in INERT_MEMBERS[modules[node.value.id]]):
+                return False
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if '__' in node.value or '.git/' in node.value or '.git\\' in node.value or node.value.endswith('.git'):
+                return False
+        if isinstance(node, ast.Match):
             return False
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == 'get_field':
+                return False
+            if node.func.attr in {'format', 'format_map'} and not (
+                    isinstance(node.func.value, ast.Constant) and isinstance(node.func.value.value, str)):
+                return False
     return True
 
 
@@ -70,6 +107,19 @@ def python_heredoc_shell(command):
     for end in range(1, len(lines)):
         candidate = lines[end].lstrip('\t') if match[1] else lines[end]
         if candidate.removesuffix('\n') == delimiter:
+            remainder = ''.join(lines[end + 1:])
+            try:
+                lexer = shlex.shlex(remainder.replace('\\\n', ''), posix=True, punctuation_chars=True)
+                lexer.whitespace_split = True
+                lexer.commenters = ''
+                tokens = list(lexer)
+            except ValueError:
+                return command
+            # A later interpreter can execute the file whose contents this heredoc writes.
+            if any(os.path.basename(token) in {'sh', 'bash', 'zsh', 'source', '.', 'exec'}
+                   or token.startswith('./') or re.fullmatch(r'python(?:3(?:\.\d+)?)?', os.path.basename(token))
+                   for token in tokens):
+                return command
             body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
             if match[2][0] in '\'"\\' and inert_python(body):
@@ -97,12 +147,23 @@ def python_heredoc_shell(command):
 def literal_ps_awk_filter(command):
     # Only a complete process-list filter with a bare print action supplies inert awk data. It may stand in a
     # command chain, but nothing may follow it in the same pipeline or as an awk argument.
+    regex_literal = r'/(?:[^/\'"\\\r\n;&`$\{\}]|\$(?=[/)| ]))*/'
     comparison = (r'\$[0-9]+[ \t]*(?:==|!=|!~|~|>=|<=|>|<)[ \t]*'
-                  r'(?:"[\w ./-]*"|/[^/\'"\\\r\n]*/|[0-9]+)')
+                  rf'(?:"[\w ./-]*"|{regex_literal}|[0-9]+)')
     expression = rf'[() \t]*{comparison}(?:[() \t]*(?:&&|\|\|)[() \t]*{comparison})*[() \t]*\{{[ \t]*print[ \t]*\}}[ \t]*'
 
     def data(pipeline):
-        if 'push' in pipeline[2] or not re.fullmatch(expression, pipeline[2]):
+        quote, escaped = '', False
+        for char in command[:pipeline.start()]:
+            if escaped:
+                escaped = False
+            elif char == '\\' and quote != "'":
+                escaped = True
+            elif char == quote:
+                quote = ''
+            elif not quote and char in '\'"':
+                quote = char
+        if quote or escaped or 'push' in pipeline[2] or not re.fullmatch(expression, pipeline[2]):
             return pipeline[0]
         return pipeline[1] + 'awk_filter_data'
 
@@ -188,6 +249,8 @@ def shell_git_push(command):
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
+                if re.match(r'[A-Za-z_]\w*=', token):
+                    pending.append(token.split('=', 1)[1])
             # A separator ends the `git` command, so a later command's `-C "$X"` is never read as git's folder.
             # shlex glues `);` into one token, and a newline gives none, so the remainder check refuses newlines.
             if set(token) & set(';&|()'):
