@@ -191,6 +191,13 @@ def python_heredoc_shell(command):
             if match[2][0] in '\'"\\':
                 if re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])', body) or '\\\n' in body:
                     return command
+                try:
+                    tree = ast.parse(body)
+                except (SyntaxError, ValueError):
+                    return command
+                if any(shell_git_push(node.value) for node in ast.walk(tree)
+                       if isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                    return command
                 return lines[0] + ''.join(lines[end + 1:])
             if 'push' in body or '\\\n' in body:
                 return command
