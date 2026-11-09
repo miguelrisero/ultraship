@@ -117,9 +117,9 @@ def quoted_variable(command, token):
     # Arithmetic (`((...))`, `$[...]`, a `a[...]=` subscript) evaluates the quoted value as an expression, and an
     # array subscript there runs commands. Only the standalone `[` and `]` words of a test command stay.
     brackets = re.sub(r'(?<![^\s;&|()])[][](?![^\s;&|()])', ' ', rest)
-    # A `(` glued to a word (`@(...)`, `=(...)`, `<(...)`, `f()`) is an extglob, array, substitution or function, not
-    # a subshell.
-    return (name in found and re.search(r'[\\`\'"#[\]]|<<|\$\{|=\(|\(\(|(?<![\s;&|($])\(', brackets) is None
+    # Any `(` other than `$(` can open a word list (`@(...)`, `a=(...)`, zsh `for x (...)`) that keeps separators as
+    # text, so only command substitution stays.
+    return (name in found and re.search(r'[\\`\'"#[\]]|<<|\$\{|\(\(|(?<!\$)\(', brackets) is None
             and re.search(rf'\$(?:{name}\b|\{{{name}\b)', rest) is None)
 
 
