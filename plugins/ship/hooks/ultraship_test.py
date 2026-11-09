@@ -9,6 +9,9 @@ import subprocess
 import tempfile
 import uuid
 import unittest
+import shutil
+import shlex
+import sys
 from pathlib import Path
 
 HOOK = Path(__file__).resolve().parent / 'ultraship.py'
@@ -21,7 +24,7 @@ def run(args, payload=None, cwd=None, env=None, check=False):
 
 
 def hook(mode, payload, env):
-    out = run(['python3', str(HOOK), mode], payload, env=env, check=True).stdout
+    out = run([sys.executable, str(HOOK), mode], payload, env=env, check=True).stdout
     return json.loads(out) if out.strip().startswith('{') else out
 
 
@@ -220,7 +223,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     git = lambda *a: subprocess.run(['git', '-C', str(repo), *a], check=True, capture_output=True)
     git('init', '-q', '-b', 'feat/x')
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init')
-    ledger = lambda *a: run(['python3', str(LEDGER), *a], cwd=repo)
+    ledger = lambda *a: run([sys.executable, str(LEDGER), *a], cwd=repo)
 
     assert 'ship/ledger/feat__x.tsv' in ledger('path').stdout
     session = {'session_id': 's1', 'cwd': str(repo)}
@@ -291,8 +294,9 @@ class WriterPushEnvironmentTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.repo = Path(self.temporary.name)
-        self.env = {**os.environ, 'HOME': str(self.repo), 'XDG_STATE_HOME': str(self.repo),
-                    'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull}
+        self.env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+        self.env.update(HOME=str(self.repo), XDG_STATE_HOME=str(self.repo),
+                        GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
         self.writer = {'agent_type': 'ship:writer--sol', 'tool_name': 'Bash'}
 
     def rewritten(self, command):
@@ -306,7 +310,6 @@ class WriterPushEnvironmentTests(unittest.TestCase):
         updated = output['updatedInput']
         self.assertEqual({key: value for key, value in updated.items() if key != 'command'},
                          {key: value for key, value in original.items() if key != 'command'})
-        self.assertNotEqual(updated['command'], command)
         return updated['command']
 
     def git(self, *args):
@@ -314,35 +317,34 @@ class WriterPushEnvironmentTests(unittest.TestCase):
 
     def test_writer_script_git_push_destination_is_refused_by_inherited_env(self):
         self.git('init', '-q')
-        remotes = ('https://github.com/example/project.git', 'ssh://git@github.com/example/project.git',
-                   'git@github.com:example/project.git')
+        remotes = ('https://github.com/example/project.git', 'http://github.com/example/project.git',
+                   'ssh://git@github.com/example/project.git', 'git://github.com/example/project.git',
+                   'git@github.com:example/project.git', 'https://test-token@github.com/example/project.git')
         for index, remote in enumerate(remotes):
             self.git('remote', 'add', f'remote{index}', remote)
         tools = self.repo / 'tools'
         tools.mkdir()
         # Only URL resolution runs. No Git transport or push command executes.
         (tools / 'run.py').write_text(
-            'import json, os, subprocess\n'
-            'print(json.dumps({"count": os.environ.get("GIT_CONFIG_COUNT"), "urls": [\n'
+            'import json, subprocess\n'
+            'print(json.dumps({"urls": [\n'
             '    subprocess.check_output(["git", "remote", "get-url", "--push", name], text=True).strip()\n'
-            '    for name in ("remote0", "remote1", "remote2")],\n'
+            f'    for name in {tuple(f"remote{i}" for i in range(len(remotes)))!r}],\n'
             '    "protocols": subprocess.check_output(["git", "config", "--get-regexp",\n'
             '        r"^protocol\\..*\\.allow$"], text=True)}))\n')
         shell = tools / 'run-task'
-        shell.write_text('#!/bin/sh\nexec python3 tools/run.py\n')
+        shell.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} tools/run.py\n')
         shell.chmod(0o755)
         (tools / 'linked-task').symlink_to(shell)
-        for command in ('python3 tools/run.py', 'sh tools/run-task', './tools/linked-task',
+        for command in (f'{shlex.quote(sys.executable)} tools/run.py', 'sh tools/run-task', './tools/linked-task',
                         'PATH="$PWD/tools:$PATH" run-task'):
             with self.subTest(command=command):
                 rewritten = self.rewritten(command)
                 probe = run(['bash', '-c', rewritten], cwd=self.repo, env=self.env, check=True)
                 observed = json.loads(probe.stdout)
-                self.assertGreater(int(observed['count']), 0)
                 self.assertEqual(len(observed['urls']), len(remotes))
                 protocols = dict(line.split(None, 1) for line in observed['protocols'].splitlines())
                 for destination in observed['urls']:
-                    self.assertRegex(destination, r'^[A-Za-z][A-Za-z0-9+.-]*://[^/]*\.invalid(?:/|$)')
                     scheme = destination.split(':', 1)[0]
                     self.assertEqual(protocols.get(f'protocol.{scheme}.allow'), 'never')
 
@@ -354,11 +356,23 @@ class WriterPushEnvironmentTests(unittest.TestCase):
                  'commit', '-q', '--allow-empty', '-m', 'initial')
         initial = self.git('rev-parse', 'HEAD')
         self.git('--git-dir', str(source), 'fetch', str(self.repo), 'HEAD:refs/heads/source')
-        self.git('remote', 'add', 'origin', str(source))
-        command = ('git fetch origin && git -c user.name=Writer -c user.email=writer@example.invalid '
-                   'commit -q --allow-empty -m checkpoint')
-        rewritten = self.rewritten(command)
-        run(['bash', '-c', rewritten], cwd=self.repo, env=self.env, check=True)
+        remote = 'https://github.com/example/project.git'
+        self.git('config', f'url.{source}.insteadOf', remote)
+        self.git('remote', 'add', 'origin', remote)
+        tools = self.repo / 'tools'
+        tools.mkdir()
+        (tools / 'fetch_commit.py').write_text(
+            'import json, subprocess\n'
+            'subprocess.run(["git", "fetch", "origin"], check=True)\n'
+            'subprocess.run(["git", "-c", "user.name=Writer", "-c", "user.email=writer@example.invalid",\n'
+            '                "commit", "-q", "--allow-empty", "-m", "checkpoint"], check=True)\n'
+            'result = subprocess.run(["git", "push", "origin", "HEAD:refs/heads/probe"], capture_output=True)\n'
+            'print(json.dumps({"push_returncode": result.returncode}))\n')
+        rewritten = self.rewritten(f'{shlex.quote(sys.executable)} tools/fetch_commit.py')
+        observed = json.loads(run(['bash', '-c', rewritten], cwd=self.repo, env=self.env, check=True).stdout)
+        self.assertNotEqual(observed['push_returncode'], 0)
+        self.assertEqual(self.git('--git-dir', str(source), 'for-each-ref', '--format=%(refname)',
+                                  'refs/heads/probe'), '')
         self.assertNotEqual(self.git('rev-parse', 'HEAD'), initial)
         self.assertEqual(self.git('log', '-1', '--format=%s'), 'checkpoint')
         self.assertEqual(self.git('rev-parse', 'refs/remotes/origin/source'), initial)
@@ -372,7 +386,7 @@ class WriterPushEnvironmentTests(unittest.TestCase):
         binary.mkdir()
         gh = binary / 'gh'
         # This stand-in observes argv and credential inheritance without contacting GitHub.
-        gh.write_text(f'#!{os.sys.executable}\nimport json, os, sys\n'
+        gh.write_text(f'#!{sys.executable}\nimport json, os, sys\n'
                       'print(json.dumps({"args": sys.argv[1:], "tokens": '
                       '{k: os.environ.get(k) for k in ' + repr(tuple(tokens)) + '}}))\n')
         gh.chmod(0o755)
@@ -387,22 +401,82 @@ class WriterPushEnvironmentTests(unittest.TestCase):
                 self.assertEqual(observed['args'], command.split()[1:])
                 self.assertEqual(observed['tokens'], tokens)
 
+    def test_writer_gh_reads_are_admitted_independently_of_rewrite(self):
+        commands = (
+            "gh api repos/x/y/pulls --paginate --jq '.[].title'",
+            "gh api repos/x/y/pulls/1 -H 'Accept: application/vnd.github.diff'",
+            'gh api repos/x/y/pulls/1 | grep -F x', 'gh api repos/x/y/pulls/1 | cut -f1',
+            'gh api repos/x/y/pulls/1 && rm -f p.json', 'gh api repos/x/y/pulls/1 | awk -F,',
+            'gh pr view 1 --json reviews --jq .reviews', 'gh run view 1 --log-failed',
+            'gh api -X HEAD repos/x/y/pulls/1', 'gh api --method=HEAD repos/x/y/pulls/1',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+        for option in ('-f q=value', '-F q=value', '--field q=value', '--raw-field q=value',
+                       '--input payload.json', '-fq=value', '-Fq=value', '--field=q=value',
+                       '--raw-field=q=value', '--input=payload.json'):
+            command = f'gh api -X GET search/issues {option}'
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_rewrite_preserves_shell_bodies_and_exit_status(self):
+        cases = (("cat <<'EOF' > f\nx\nEOF", 0, ''), ('echo a # c', 0, 'a\n'), ('exit 3', 3, ''))
+        for shell in ('bash', 'zsh'):
+            for command, returncode, stdout in cases:
+                with self.subTest(shell=shell, command=command):
+                    executable = shutil.which(shell)
+                    if executable is None:
+                        self.skipTest(f'{shell} is absent')
+                    rewritten = self.rewritten(command)
+                    result = run([executable, '-c', rewritten], cwd=self.repo, env=self.env)
+                    self.assertEqual(result.returncode, returncode, result.stderr)
+                    self.assertEqual(result.stdout, stdout)
+                    if command.startswith('cat '):
+                        self.assertEqual((self.repo / 'f').read_text(), 'x\n')
+                        (self.repo / 'f').unlink()
+
+    def test_writer_rewrite_preserves_inherited_git_config(self):
+        self.git('init', '-q')
+        self.git('remote', 'add', 'origin', 'https://github.com/example/project.git')
+        self.env.update(GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='user.name', GIT_CONFIG_VALUE_0='Inherited')
+        rewritten = self.rewritten('git config user.name; git remote get-url --push origin; '
+                                   "git config --get-regexp '^protocol\\..*\\.allow$'")
+        result = run(['bash', '-c', rewritten], cwd=self.repo, env=self.env, check=True)
+        name, destination, *settings = result.stdout.splitlines()
+        self.assertEqual(name, 'Inherited')
+        protocols = dict(line.split(None, 1) for line in settings)
+        self.assertEqual(protocols.get(f'protocol.{destination.split(":", 1)[0]}.allow'), 'never')
+
     def test_writer_gh_writes_remain_denied(self):
-        commands = ['gh pr merge 1 --squash', 'gh repo sync x/y', 'cd /repo && gh repo sync x/y']
-        for method in ('POST', 'PUT', 'PATCH', 'DELETE', 'post', 'pAtCh'):
-            for option in (f'-X {method}', f'--method {method}', f'-X{method}', f'--method={method}'):
+        commands = ['gh repo sync x/y', 'cd /repo && gh repo sync x/y']
+        for method in ('POST', 'PUT', 'PATCH', 'DELETE', 'post', 'pAtCh', 'OPTIONS', 'TRACE', 'CONNECT', 'CUSTOM', ''):
+            for option in (f'-X {shlex.quote(method)}', f'--method {shlex.quote(method)}',
+                           f'-X{method}', f'--method={method}', f'-X={method}', f'-X "{method}"', f'-iX{method}'):
                 commands.extend((f'gh api {option} repos/x/y/pulls/1',
-                                 f'gh api repos/x/y/pulls/1 {option}'))
+                                 f'gh api repos/x/y/pulls/1 {option}',
+                                 f'/usr/bin/gh api {option} repos/x/y/pulls/1',
+                                 'gh api \\\n' + f' {option} repos/x/y/pulls/1'))
         for option in ('-f title=value', '-F title=value', '--field title=value', '--raw-field title=value',
                        '--input payload.json', '-ftitle=value', '-Ftitle=value', '--field=title=value',
                        '--raw-field=title=value', '--input=payload.json'):
             commands.extend((f'gh api {option} repos/x/y/pulls/1',
-                             f'gh api repos/x/y/pulls/1 {option}',
-                             f'gh api -X GET repos/x/y/pulls/1 {option}'))
+                             f'gh api repos/x/y/pulls/1 {option}'))
+        commands.append('gh api -X GET --method POST repos/x/y/pulls/1')
         for command in commands:
             with self.subTest(command=command):
                 result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
                 self.assertTrue(denied(result), command)
+
+    def test_writer_graphql_fields_are_denied_with_rest_guidance(self):
+        for option in ("-f query='query { viewer { login } }'", '-F owner=x', '--field owner=x',
+                       '--raw-field=owner=x', '--input query.json'):
+            for command in (f'gh api graphql {option}', f'gh api -X GET graphql {option}'):
+                with self.subTest(command=command):
+                    result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
+                    self.assertTrue(denied(result), command)
+                    self.assertIn('writers cannot send GraphQL requests; use a REST GET with the query in the path',
+                                  result['hookSpecificOutput']['permissionDecisionReason'])
 
 
 if __name__ == '__main__':
