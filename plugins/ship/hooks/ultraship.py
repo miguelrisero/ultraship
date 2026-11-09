@@ -156,6 +156,9 @@ def shell_git_push(command):
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
+            # A separator ends the `git` command, so a later command's `-C "$X"` is never read as git's folder.
+            if not token.strip(';&|('):
+                git_command = False
             if folder_value and git_command and quoted_variable(command, token):
                 skip_value = folder_value = False
                 continue
