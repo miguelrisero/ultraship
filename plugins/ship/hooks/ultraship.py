@@ -119,7 +119,7 @@ def quoted_variable(command, token):
     brackets = re.sub(r'(?<![^\s;&|()])[][](?![^\s;&|()])', ' ', rest)
     # Any `(` other than `$(` can open a word list (`@(...)`, `a=(...)`, zsh `for x (...)`) that keeps separators as
     # text, so only command substitution stays.
-    return (name in found and re.search(r'[\\`\'"#[\]]|<<|\$\{|\(\(|(?<!\$)\(', brackets) is None
+    return (name in found and re.search(r'[\\`\'"#[\]\n]|<<|\$\{|\(\(|(?<!\$)\(', brackets) is None
             and re.search(rf'\$(?:{name}\b|\{{{name}\b)', rest) is None)
 
 
@@ -157,7 +157,8 @@ def shell_git_push(command):
             if any(char.isspace() for char in token):
                 pending.append(token)
             # A separator ends the `git` command, so a later command's `-C "$X"` is never read as git's folder.
-            if not token.strip(';&|('):
+            # shlex glues `);` into one token, and a newline gives none, so the remainder check refuses newlines.
+            if set(token) & set(';&|()'):
                 git_command = False
             if folder_value and git_command and quoted_variable(command, token):
                 skip_value = folder_value = False
