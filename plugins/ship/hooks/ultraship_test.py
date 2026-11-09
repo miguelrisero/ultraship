@@ -83,6 +83,14 @@ with tempfile.TemporaryDirectory() as tmp:
                     cat_append + 'uv run bash f.sh',
                     cat_append + 'timeout 5 sh f.sh',
                     cat_append + 'nohup python3.13 f.py',
+                    cat_append + '"bash" f.sh',
+                    cat_append + '`bash f.sh`',
+                    cat_append + '$SHELL f.sh',
+                    cat_append + 'uv run f.py',
+                    cat_append + 'make',
+                    cat_append + 'pytest',
+                    cat_append + 'uv run --frozen pytest',
+                    cat_append + 'ruff check x; bash f.sh',
                     'cat <<\'EOF\' > f.sh\ngit push\nEOF\nbash f.sh',
                     'git -C $(pwd) status',
                     'git -C "$W" push', 'git -C "${W}" push origin HEAD', 'git --work-tree "$W" push',
@@ -111,6 +119,7 @@ with tempfile.TemporaryDirectory() as tmp:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
         for cmd in [
                     cat_append + ruff_remainder,
+                    cat_append + 'ruff format a.py && ruff check --fix a.py',
                     'cat <<\'EOF\' > tests/test_queue.py\nimport redis\n\ndef test_push(r):\n    r.rpush("jobs", *[1, 2])\n    assert r.lrange("jobs", 0, -1) == [b"1", b"2"]\nEOF',
                     'cat <<\'EOF\' > tests/test_queue.py\ndef test_queue(r):\n    jobs = {}\n    r.lpush("jobs", 1)\n    assert r.lrange("jobs", 0, -1) == [b"1"]\nEOF',
                     'cat <<"EOF" > f.py\nr.rpush("q", [1])\nEOF',
