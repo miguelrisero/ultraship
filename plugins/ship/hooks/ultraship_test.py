@@ -62,6 +62,11 @@ with tempfile.TemporaryDirectory() as tmp:
                     'git -C $(git -C $(git push)) status', 'git -C `pwd` push', 'git -C "$(pwd)" push',
                     'git -C >log . push origin HEAD', 'git >|log push origin HEAD', 'git <<<x push', 'git <<- log push origin HEAD\nlog', "git >'>' push origin HEAD", 'git <<- - push', 'git >&- push', 'git > `printf log` push origin HEAD', 'git >"$(x)" push', 'git <<< - push', "git $'push' origin HEAD", 'git $"push"', 'git -C "$PWD" push', 'git {push,} origin HEAD', "$'git' push origin HEAD", '$"git" push', 'g?t push', '/usr/bin/gi[t] push', '"$G" push', "$'git' $'push'", "$'git' p{u,}sh", 'git pu?h', 'git -C ~/w push', 'git -C $(pwd) pu""sh', 'git -C . pu""sh',
                     'git -C $(pwd) status',
+                    'git -C "$W" push', 'git -C "${W}" push origin HEAD', 'git --work-tree "$W" push',
+                    'git -C $W status', 'git -C "$W" status; git -C $W status', 'git -C "$W" $CMD',
+                    'git -C "$W" -c x=y push', 'git -c "$X" status', 'git -C "$W*" status',
+                    'git -C ""$W status', 'git -C "$W"$X status', 'git -C "$W"" push" status',
+                    "bash -lc 'git -C \"$W\" push'",
                     'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
         for cmd in ['git merge origin/main', 'git fetch origin main && git merge origin/main',
@@ -69,7 +74,9 @@ with tempfile.TemporaryDirectory() as tmp:
                     'git -c push.default=current status', 'git -C push-service status',
                     'git -C . status 2>&1', 'git log --grep push 2>/dev/null', 'git log >push',
                     'git -C /w commit -m "no push here"', 'git commit -m "push"', 'git log --grep push',
-                    'git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status']:
+                    'git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status',
+                    'git -C "$W" status', 'git -C "${W}" log --oneline -3', 'git --git-dir "$G" status',
+                    'git --work-tree "$W" diff --stat', "bash -lc 'git -C \"$W\" status'"]:
             assert not denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
     assert not denied(hook('pre', {'agent_type': 'ship:driver', 'tool_name': 'Bash', 'tool_input': {'command': 'git push'}}, env))
     assert denied(hook('pre', {**writer, 'tool_name': 'Write', 'tool_input': {'file_path': '/r/.claude/settings.local.json'}}, env))

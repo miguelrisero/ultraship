@@ -86,6 +86,7 @@ def shell_git_push(command):
     """Scan Git commands and shell-wrapper strings without regex backtracking."""
     values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
               '--config-env', '--super-prefix', '--attr-source'}
+    folders = {'-C', '--git-dir', '--work-tree'}
     pending = [command]
     while pending:
         text = pending.pop().replace('\\' + '\n', '')
@@ -107,20 +108,29 @@ def shell_git_push(command):
                 and any('push' in re.sub(r'(?<!\w)pushed(?=\s*:)', '', token).translate(expansion)
                         for token in tokens)):
             return True
-        expect_subcommand = skip_value = False
+        # A double-quoted variable cannot word-split, so it can name a folder (`git -C "$W" status`).
+        # An unquoted one can split into `. push`, so any unquoted folder variable keeps the refusal.
+        quoted_folders = all(
+            '$' not in value or re.fullmatch(r'"\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})"[;&|)]*', value)
+            for value in re.findall(r'(?:^|[\s;&|(])(?:-C|--git-dir|--work-tree)\s+(\S*)', text))
+        expect_subcommand = skip_value = folder_value = False
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
+            if folder_value and quoted_folders and re.fullmatch(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', token):
+                skip_value = folder_value = False
+                continue
             # An expansion, glob, quoting form, or redirection before the subcommand can hide it,
             # so it denies. Writers write `git -C . status 2>&1`, never `git $'push'` or `git {push,}`.
             if expect_subcommand and set(token) & set('(`<>${*?['):
                 return True
             if skip_value:
-                skip_value = False
+                skip_value = folder_value = False
                 continue
             if expect_subcommand:
                 if token in values:
                     skip_value = True
+                    folder_value = token in folders
                     continue
                 if token == 'push':
                     return True
