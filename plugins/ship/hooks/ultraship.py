@@ -241,8 +241,29 @@ def literal_ps_awk_filter(command):
                   r"'([^'\r\n]*)'(?=[ \t]*(?:$|;|&&|\|\||\)))", data, command)
 
 
+def cat_heredoc_data(command):
+    # A quoted delimiter makes the body literal data; executable remainders keep the full scan.
+    delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
+    path = r'[\w./-]+'
+    header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
+              rf'(?:<<(-?)[ \t]*{delimiter}[ \t]+>>?[ \t]*{path}'
+              rf'|>>?[ \t]*{path}[ \t]+<<(-?)[ \t]*{delimiter})[ \t]*\n$')
+    lines = command.splitlines(keepends=True)
+    match = re.fullmatch(header, lines[0]) if lines else None
+    if not match:
+        return command
+    end_marker = shlex.split(match[2] or match[4])[0]
+    strip_tabs = match[1] or match[3]
+    for end in range(1, len(lines)):
+        candidate = lines[end].lstrip('\t') if strip_tabs else lines[end]
+        if candidate.removesuffix('\n') == end_marker:
+            remainder = ''.join(lines[end + 1:])
+            return lines[0] + remainder if read_only_shell(remainder) else command
+    return command
+
+
 def git_push(command):
-    reduced = literal_ps_awk_filter(python_heredoc_shell(command))
+    reduced = literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command)))
     try:
         shlex.split(reduced.replace('\\\n', ''), comments=False, posix=True)
     except ValueError:
