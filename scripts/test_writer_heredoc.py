@@ -33,6 +33,34 @@ class WriterHeredocTests(unittest.TestCase):
                 script = indent + body.replace('\n', '\n' + indent).rstrip('\t')
                 self.assertFalse(self.denied(f'python3 - {operator}{delimiter}\n{script}{indent}EOF\n'))
 
+    def test_non_inert_python_push_identifiers_are_admitted(self):
+        for statement in ('x.get().push_async_callback(f, t)', 'queue.rpush(x)', 'pushed_at = x'):
+            with self.subTest(statement=statement):
+                body = f'import agent.trigger_context\nx = []\n{statement}\n'
+                command = f"cd /workspace/repo && python3 - <<'PY'\n{body}PY\n"
+                self.assertFalse(ultraship.inert_python(body))
+                self.assertFalse(ultraship.git_push(command))
+                self.assertFalse(self.denied(command))
+
+    def test_unquoted_non_inert_python_push_identifier_keeps_the_scan(self):
+        command = ("cd /workspace/repo && python3 - <<PY\nimport agent.trigger_context\n"
+                   "x = []\nx.get().push_async_callback(f, t)\nPY\n")
+        self.assertTrue(ultraship.git_push(command))
+        self.assertTrue(self.denied(command))
+
+    def test_non_inert_python_push_wrappers_and_continuation_are_denied(self):
+        # Process calls are classifier input only; the test never executes the heredoc.
+        for statement in ('subprocess.run(["git", "push"])', 'os.system("git push origin HEAD")',
+                          'cmd = "push"\nsubprocess.run(["git", cmd])', 'getattr(repo, "push")()',
+                          'stack.push_async_callback(x)' + '\\'):
+            with self.subTest(statement=statement):
+                body = f'import agent.trigger_context\nx = []\n{statement}\n'
+                command = f"cd /workspace/repo && python3 - <<'PY'\n{body}PY\n"
+                self.assertFalse(ultraship.inert_python(body))
+                self.assertEqual(ultraship.python_heredoc_shell(command), command)
+                self.assertTrue(ultraship.git_push(command))
+                self.assertTrue(self.denied(command))
+
     def test_inert_python_file_edit_is_file_text(self):
         body = ("p = '.github/scripts/merge-queue-gate-status.test.mjs'\n"
                 "s = open(p).read()\n"

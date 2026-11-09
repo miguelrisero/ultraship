@@ -188,6 +188,10 @@ def python_heredoc_shell(command):
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
             if match[2][0] in '\'"\\' and inert_python(body):
                 return lines[0] + ''.join(lines[end + 1:])
+            if match[2][0] in '\'"\\':
+                if re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])', body) or '\\\n' in body:
+                    return command
+                return lines[0] + ''.join(lines[end + 1:])
             if 'push' in body or '\\\n' in body:
                 return command
             if any(c in body for c in '$`{}'):
