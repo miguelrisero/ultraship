@@ -109,9 +109,13 @@ def inert_python(body):
             value = statement.value
             literals[name] = (value.value if name not in literals and isinstance(value, ast.Constant)
                               and isinstance(value.value, str) else None)
+    calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
     for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == 'open' and id(node) not in calls:
+            return False
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'open':
-            if any(keyword.arg not in {'mode', 'encoding', 'newline', 'errors'} for keyword in node.keywords):
+            if (any(isinstance(argument, ast.Starred) for argument in node.args)
+                    or any(keyword.arg not in {'mode', 'encoding', 'newline', 'errors'} for keyword in node.keywords)):
                 return False
             modes = [*node.args[1:2], *(keyword.value for keyword in node.keywords if keyword.arg == 'mode')]
             if not modes:
@@ -312,11 +316,16 @@ def shell_git_push(command):
         # word can become the subcommand; `$S/prepush-results.txt` is a path.
         plain = ('IFS' not in text
                  and not re.search(r'[`*?[{]|\$', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text)))
-        spelling = r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])' if plain else 'push'
         expansion = str.maketrans('', '', '$`*?[]{},')
-        if (any(set(token) & set('$`*?[{') for token in tokens)
-                and any(re.search(spelling, re.sub(r'(?<!\w)pushed(?=\s*:)', '', token).translate(expansion))
-                        for token in tokens)):
+        if plain:
+            # Delete each expansion and quote first, so `"$G"push` reads `push` while `$S/prepush` does not.
+            words = re.sub(r'["\']', '', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text))
+            spelled = re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])',
+                                re.sub(r'(?<!\w)pushed(?=\s*:)', '', words))
+        else:
+            spelled = any('push' in re.sub(r'(?<!\w)pushed(?=\s*:)', '', token).translate(expansion)
+                          for token in tokens)
+        if any(set(token) & set('$`*?[{') for token in tokens) and spelled:
             return True
         expect_subcommand = skip_value = folder_value = False
         # Only a `git` that starts a command reads its own arguments; `eval git -C "$W"` or `watch git ...`

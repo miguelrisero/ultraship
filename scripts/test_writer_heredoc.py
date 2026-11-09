@@ -159,6 +159,9 @@ class WriterHeredocTests(unittest.TestCase):
             "open('lib/site.pth', 'a').write('git push origin HEAD')\n",
             "from pathlib import Path\nPath('x.txt').write_text('git push origin HEAD')\nPath('x.txt').replace('traceback.py')\n",
             "open('x.txt', 'w', opener=None).write('git push origin HEAD')\n",
+            "f = open\nf('traceback.py', 'w').write('git push origin HEAD')\n1 / 0\n",
+            "open(*['traceback.py', 'w']).write('git push origin HEAD')\n1 / 0\n",
+            "o = [open]\no[0]('traceback.py', 'w').write('git push origin HEAD')\n1 / 0\n",
         ):
             with self.subTest(body=body):
                 self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
@@ -173,7 +176,8 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(ultraship.git_push(command))
         for command in ('X=prepush; git ${X#pre}', 'X=prepush; git ${X:3}', 'IFS=e; X=.epush; git -C $X',
-                        'X=push; git $X', "git $'push'", 'git pus?', 'git {push,}', 'S=". push"; git -C $S'):
+                        'X=push; git $X', "git $'push'", 'git pus?', 'git {push,}', 'S=". push"; git -C $S',
+                        'G=/usr/lib/git-core/git-; "$G"push origin HEAD', 'G=/usr/lib/git-core/git-; ${G}push origin HEAD'):
             with self.subTest(command=command):
                 self.assertTrue(ultraship.git_push(command))
 
