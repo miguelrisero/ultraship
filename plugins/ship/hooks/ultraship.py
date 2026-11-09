@@ -242,7 +242,7 @@ def literal_ps_awk_filter(command):
 
 
 def cat_heredoc_data(command):
-    # ponytail: symlinked paths are not resolved; resolve destinations before admitting writes through symlinks.
+    # ponytail: destination checks leave a time-of-check race; atomic filesystem enforcement needs a sandbox.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
     path = r'[\w./-]+'
     header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
@@ -273,13 +273,16 @@ def cat_heredoc_data(command):
             folder = re.match(rf'^[ \t]*cd +({path}) +&& +', lines[0])
             if folder:
                 written = Path(folder[1]) / written
-            if ruff_segments and (
-                    written.suffix not in {'.py', '.pyi'}
-                    or written.name in {'setup.py', 'sitecustomize.py', 'usercustomize.py'}
-                    or set(written.parts) & {'..', '.venv', 'venv', 'env', 'site-packages', 'bin', 'Scripts',
-                                             '.git', 'node_modules', 'lib', 'lib64', 'Lib', 'dist-packages'}
-                    or any(part.startswith('python') for part in written.parts)):
-                return command
+            if ruff_segments:
+                if not written.is_absolute():
+                    return command
+                for destination in (written, Path(os.path.realpath(written))):
+                    if (destination.suffix not in {'.py', '.pyi'} or destination.name == 'setup.py'
+                            or set(destination.parts) & {'..', '.venv', 'venv', 'env', 'site-packages', 'bin', 'Scripts',
+                                                         '.git', 'node_modules', 'lib', 'lib64', 'Lib', 'dist-packages'}
+                            or any(part.startswith('python') or Path(part).stem in {'sitecustomize', 'usercustomize'}
+                                   for part in destination.parts)):
+                        return command
             return re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
     return command
 

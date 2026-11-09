@@ -36,12 +36,16 @@ assert not ultraship.git_push('git ' + '-Cc ' * 200 + 'status')
 assert ultraship.git_push('git ' + '-Cc ' * 200 + 'push')
 assert time.monotonic() - started < 0.1
 
-with tempfile.TemporaryDirectory() as tmp:
+with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.parents[3]) as symlink_tmp:
     env = {**os.environ, 'XDG_STATE_HOME': tmp, 'HOME': tmp}
     writer = {'agent_type': 'ship:writer--sol', 'agent_id': 'w1', 'tool_name': 'Bash'}
     cat_append = ('cd /workspace/repo && cat >> backend/api/tests/integration/test_approval_expiry.py <<\'EOF\'\n'
                   'r.rpush("jobs", *[1, 2])\nEOF\n')
     sync_write = "cat > {path} <<'EOF'\nimport os\nos.system('git push')\nEOF\n"
+    installed = Path(symlink_tmp, 'site-packages')
+    installed.mkdir()
+    linked = Path(symlink_tmp, 'linked')
+    linked.symlink_to(installed, target_is_directory=True)
     ruff_remainder = ('uv run --frozen --directory backend/api ruff check --fix tests/integration/test_approval_expiry.py'
                       ' && uv run --frozen --directory backend/api ruff format tests/integration/test_approval_expiry.py')
 
@@ -56,6 +60,11 @@ with tempfile.TemporaryDirectory() as tmp:
             'cd /repo && ' + sync_write.format(path='backend.py') + 'uv run ruff check',
             'cd /repo && ' + sync_write.format(path='backend.py') + 'uv run ruff check --no-sync',
             'cd /repo && ' + sync_write.format(path='backend.py') + 'uv run --directory --no-sync ruff check',
+            'cd - && ' + sync_write.format(path='sitecustomize/__init__.py') + 'uv run --no-sync ruff check',
+            'cd sub && ' + sync_write.format(path='x.py') + 'ruff check x.py',
+            sync_write.format(path='x.py') + 'ruff check x.py',
+            'cd /repo && ' + sync_write.format(path='sitecustomize/__init__.py') + 'uv run --no-sync ruff check',
+            sync_write.format(path=linked / 'x.py') + 'ruff check x.py',
         )
         decisions = [denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env))
                      for cmd in review_inputs]
@@ -143,7 +152,7 @@ with tempfile.TemporaryDirectory() as tmp:
         for cmd in [
                     cat_append + ruff_remainder.replace('uv run ', 'uv run --no-sync '),
                     cat_append + 'ruff format a.py && ruff check --fix a.py',
-                    sync_write.format(path='tests/x.py') + 'ruff format tests/x.py',
+                    'cd /workspace/repo && ' + sync_write.format(path='tests/x.py') + 'ruff format tests/x.py',
                     'cat <<\'EOF\' > tests/test_queue.py\nimport redis\n\ndef test_push(r):\n    r.rpush("jobs", *[1, 2])\n    assert r.lrange("jobs", 0, -1) == [b"1", b"2"]\nEOF',
                     'cat <<\'EOF\' > tests/test_queue.py\ndef test_queue(r):\n    jobs = {}\n    r.lpush("jobs", 1)\n    assert r.lrange("jobs", 0, -1) == [b"1"]\nEOF',
                     'cat <<"EOF" > f.py\nr.rpush("q", [1])\nEOF',
