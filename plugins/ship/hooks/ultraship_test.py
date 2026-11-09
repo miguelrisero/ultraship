@@ -370,7 +370,7 @@ class WriterGitHubGuardTests(unittest.TestCase):
             for action in actions:
                 command = f'gh {group} {action}'
                 with self.subTest(command=command):
-                    self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+                    self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
 
     def test_writer_gh_configuration_edits_are_denied(self):
         custom = self.repo / 'custom-gh'
@@ -394,6 +394,49 @@ class WriterGitHubGuardTests(unittest.TestCase):
                     self.assertTrue(denied(hook('pre', {**self.writer,
                                                       'tool_input': {'command': command + suffix}}, self.env)))
         for command in ('gh auth status', 'gh config get git_protocol', 'gh config list'):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_non_read_commands_are_denied(self):
+        commands = (
+            'gh issue comment 1 -b x', 'gh issue create -t x -b y',
+            'gh pr update-branch 12 --rebase', 'gh pr reopen 1', 'gh run rerun 1',
+            'gh secret set X -b y', 'gh label delete x', 'gh repo archive -y', 'gh repo rename x',
+            'gh gist create f --public', 'gh ext install o/t', 'gh extensions exec t',
+            'gh --help=false api -X POST repos/o/r/issues -f title=t',
+            'gh alias --clobber=true set w api', 'gh w -XPOST -ftitle=t repos/o/r/issues',
+            'gh auth status --show-token', 'gh auth status -t', 'gh config get oauth_token -h github.com',
+        )
+        for command in commands:
+            for suffix in ('', " '"):
+                with self.subTest(command=command, suffix=suffix):
+                    self.assertTrue(denied(hook('pre', {**self.writer,
+                                                      'tool_input': {'command': command + suffix}}, self.env)))
+
+    def test_writer_gh_shell_expansion_and_redirection_writes_are_denied(self):
+        commands = (
+            'echo a#b; gh api -X POST repos/o/r/issues -f title=t',
+            'b=${ref#refs/heads/}; gh api -X POST repos/o/r/issues -f title=t',
+            'gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues -X POST -f title=t',
+            'gh api repos/o/r/issues 2>&1 -X POST -f title=t',
+            "F='-XPOST -ftitle=t'; gh api repos/o/r/issues $F",
+            "$'gh' api -X POST repos/o/r/issues -f title=t",
+            'gh${IFS}api${IFS}-XPOST${IFS}-ftitle=t${IFS}repos/o/r/issues',
+            'echo -XPOST -ftitle=t | xargs gh api repos/o/r/issues',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_read_allowlist_preserves_reads(self):
+        commands = ["gh pr view 12 --json title -q '.title'", "gh api 'repos/o/r/pulls?state=open'",
+                    'gh --help=false pr --help=false view 1', 'gh --version', 'gh version', 'gh help',
+                    'gh search issues x']
+        for group, verbs in (('pr', ('view', 'list', 'checks', 'diff', 'status')),
+                             ('issue', ('view', 'list', 'status')), ('run', ('view', 'list', 'watch')),
+                             ('repo', ('view',)), ('workflow', ('view', 'list'))):
+            commands.extend(f'gh {group} {verb}' for verb in verbs)
+        for command in commands:
             with self.subTest(command=command):
                 self.assertEqual(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env), '')
 

@@ -27,7 +27,6 @@ WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
     terraform\s+(apply|destroy) | kubectl\s+(apply|delete|rollout) | helm\s+(install|upgrade|uninstall) |
     vercel(\s+\S+)*\s+--prod | vercel\s+deploy | wrangler\s+(deploy|publish) | fly(ctl)?\s+deploy | docker\s+push
 )\b""", re.X)
-GH_WRITE_COMMAND = re.compile(r'(?:^|[\s;&|(`])(?:[\w./-]+/)?gh\s+(?:api|repo\s+sync)\b')
 GH_METHOD = re.compile(r'^(?:--method(?:=(.*))?|-[ip]*X(.*))$')
 GH_FIELD = re.compile(r'^(?:--(?:field|raw-field|input)(?:=.*)?|-[ip]*[fF].*)$')
 HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
@@ -440,7 +439,7 @@ def load_ledger():
     return module
 
 
-# ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, Bash writes to gh configuration, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
+# ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, Bash writes to gh configuration, glob `?` and writer-created file names, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
 def writer_gh_denial(command, depth=0):
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = re.sub(r'''['"\\]''', '', command)
@@ -448,50 +447,82 @@ def writer_gh_denial(command, depth=0):
         return None
     if depth >= 4:
         return 'Writers cannot run deeply nested GitHub commands.'
+    reason = 'Writers may run only read-only gh commands.'
+    reads = {'pr': ('view', 'list', 'checks', 'diff', 'status'),
+             'issue': ('view', 'list', 'status'), 'run': ('view', 'list', 'watch'),
+             'repo': ('view',), 'workflow': ('view', 'list')}
+    if any(marker in command for marker in ('$(', '<(', '>(', '`')):
+        return reason
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace = ' \t\r'
         lexer.whitespace_split = True
+        lexer.commenters = ''
         tokens = list(lexer)
     except ValueError:
-        if re.search(r'gh\W+(api|repo)\b', unquoted):
-            return 'Writers cannot run a GitHub command with unclosed shell quoting.'
-        groups = re.finditer(r'\bgh\W+(alias|extensions?|ext|auth|config)\b(?:\s+([\w-]+))?', unquoted)
+        groups = re.finditer(r'\bgh\s+(?:-\S+\s+)*([\w-]+)(?:\s+(?:-\S+\s+)*([\w-]+))?', unquoted)
         for group in groups:
-            allowed = {'alias': ('list',), 'auth': ('status',), 'config': ('get', 'list')}.get(
-                group[1], ('list', 'search', 'browse'))
-            if group[2] not in allowed:
-                return 'Writers cannot configure GitHub aliases or install or execute GitHub extensions.'
+            if group[1] in reads and group[2] in reads[group[1]]:
+                continue
+            if group[1] in ('search', 'version', 'help'):
+                continue
+            return reason
         return None
     for token in tokens:
         if any(char.isspace() or char in ';&|()' for char in token):
-            reason = writer_gh_denial(token, depth + 1)
-            if reason:
-                return reason
+            nested = writer_gh_denial(token, depth + 1)
+            if nested:
+                return nested
     segments, segment = [], []
-    for token in tokens:
-        if token and all(char in ';&|\n()' for char in token):
+    for index, token in enumerate(tokens):
+        redirect = (token == '&' and (segment and segment[-1].endswith(('<', '>'))
+                    or index + 1 < len(tokens) and tokens[index + 1].startswith('>')))
+        if token and all(char in ';&|\n()' for char in token) and not redirect:
             segments.append(segment)
             segment = []
         else:
             segment.append(token)
     segments.append(segment)
     for words in segments:
+        if not any(re.search(r'\bgh\b', word) for word in words):
+            continue
+        if 'api' in words and any(word.strip('/') == 'graphql' for word in words) and any(
+                GH_FIELD.fullmatch(word) for word in words):
+            return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
+        exempt = False
+        for word in words:
+            if exempt:
+                exempt = False
+                continue
+            if word in ('-q', '--jq', '-t', '--template', '-H', '--header'):
+                exempt = True
+                continue
+            if any(char in word for char in '$`*[{'):
+                return reason
         for index, word in enumerate(words):
             if os.path.basename(word) != 'gh':
                 continue
+            if any(os.path.basename(previous) in ('xargs', 'parallel') for previous in words[:index]):
+                return reason
             arguments = words[index + 1:]
-            if arguments[:2] == ['repo', 'sync']:
-                return 'Writers cannot sync GitHub repositories.'
-            if (arguments[:1] == ['alias'] and arguments[1:2] != ['list']) or (
-                    arguments[:1] in (['extension'], ['extensions'], ['ext'])
-                    and arguments[1:2] not in (['list'], ['search'], ['browse'])):
-                return 'Writers cannot configure GitHub aliases or install or execute GitHub extensions.'
-            if (arguments[:1] == ['auth'] and arguments[1:2] != ['status']) or (
-                    arguments[:1] == ['config'] and arguments[1:2] not in (['get'], ['list'])):
-                return 'Writers cannot access GitHub credentials or change GitHub CLI configuration.'
-            if not arguments or arguments[0] != 'api':
+            cursor = 0
+            while cursor < len(arguments) and arguments[cursor].startswith('-'):
+                cursor += 1
+            if cursor == len(arguments):
+                if arguments == ['--version']:
+                    continue
+                return reason
+            group = arguments[cursor]
+            if group in ('search', 'version', 'help'):
                 continue
+            if group != 'api':
+                cursor += 1
+                while cursor < len(arguments) and arguments[cursor].startswith('-'):
+                    cursor += 1
+                if group not in reads or cursor == len(arguments) or arguments[cursor] not in reads[group]:
+                    return reason
+                continue
+            arguments = arguments[cursor:]
             methods, fields, endpoints = [], False, []
             cursor = 1
             while cursor < len(arguments):
