@@ -83,15 +83,36 @@ def git_push(command):
 
 
 def quoted_variable(text, token):
-    """Whether every reference to the variable `token` names in `text` is exactly `"$NAME"`."""
+    """Whether every reference to the variable `token` names in `text` is a standalone `"$NAME"` word."""
     # A double-quoted variable cannot word-split, so it can name a folder (`git -C "$W" status`).
-    # Any other reference to it (`$W`, `""$W`, `"x $W"`) could split into `. push`, so it refuses.
+    # Any other reference (`$W`, `""$W""`, `x"$W"`, `"x $W"`) could split into `. push`, so it refuses.
+    # The scan tracks real quote state; a substring test would accept the `"$W"` inside `""$W""`.
     match = re.fullmatch(r'\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})', token)
     if not match:
         return False
     name = re.escape(match.group(1) or match.group(2))
-    quoted = re.compile(rf'"\$(?:{name}|\{{{name}\}})"')
-    return bool(quoted.search(text)) and not re.search(rf'\$(?:{name}\b|\{{{name}\}})', quoted.sub('', text))
+    reference = re.compile(rf'\$(?:{name}\b|\{{{name}\}})')
+    edges = ' \t\n;&|()'
+    found, state, i = False, None, 0
+    while i < len(text):
+        char = text[i]
+        if state == "'":
+            state = None if char == "'" else state
+        elif char == '\\':
+            i += 1
+        elif char == "'" and state is None:
+            state = "'"
+        elif char == '"':
+            state = None if state == '"' else '"'
+        elif reference.match(text, i):
+            end = reference.match(text, i).end()
+            if not (state == '"' and text[i - 1] == '"' and text[end:end + 1] == '"'
+                    and (i < 2 or text[i - 2] in edges) and (end + 1 == len(text) or text[end + 1] in edges)):
+                return False
+            found, i = True, end
+            continue
+        i += 1
+    return found
 
 
 def shell_git_push(command):
