@@ -242,7 +242,7 @@ def literal_ps_awk_filter(command):
 
 
 def cat_heredoc_data(command):
-    # ponytail: custom uv cache-keys can rebuild on other files; require --no-sync for those projects.
+    # ponytail: source paths exclude executable installs; custom uv cache-keys need --no-sync to avoid rebuilding other source files.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
     path = r'[\w./-]+'
     header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
@@ -266,9 +266,9 @@ def cat_heredoc_data(command):
                     read_only_shell(segment) or re.fullmatch(ruff, segment) for segment in segments):
                 return command
             written = Path(re.search(r'>>?[ \t]*([\w./-]+)', lines[0])[1])
-            if (written.name == 'setup.py' or written.suffix in {'.toml', '.cfg', '.lock', '.pth'}) and any(
-                    re.fullmatch(ruff, segment) and segment.split()[:2] == ['uv', 'run']
-                    and '--no-sync' not in segment.split() for segment in segments):
+            if any(re.fullmatch(ruff, segment) for segment in segments) and (
+                    written.suffix not in {'.py', '.pyi'} or written.name == 'setup.py'
+                    or set(written.parts) & {'.venv', 'venv', 'env', 'site-packages', 'bin', 'Scripts', '.git', 'node_modules'}):
                 return command
             return re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
     return command
