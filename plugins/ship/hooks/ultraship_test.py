@@ -8,6 +8,9 @@ import re
 import subprocess
 import tempfile
 import uuid
+import unittest
+import shlex
+import sys
 from pathlib import Path
 
 HOOK = Path(__file__).resolve().parent / 'ultraship.py'
@@ -20,12 +23,12 @@ def run(args, payload=None, cwd=None, env=None, check=False):
 
 
 def hook(mode, payload, env):
-    out = run(['python3', str(HOOK), mode], payload, env=env, check=True).stdout
+    out = run([sys.executable, str(HOOK), mode], payload, env=env, check=True).stdout
     return json.loads(out) if out.strip().startswith('{') else out
 
 
 def denied(result):
-    return isinstance(result, dict) and result['hookSpecificOutput']['permissionDecision'] == 'deny'
+    return isinstance(result, dict) and result['hookSpecificOutput'].get('permissionDecision') == 'deny'
 
 
 spec = importlib.util.spec_from_file_location('ultraship', HOOK)
@@ -219,7 +222,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     git = lambda *a: subprocess.run(['git', '-C', str(repo), *a], check=True, capture_output=True)
     git('init', '-q', '-b', 'feat/x')
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init')
-    ledger = lambda *a: run(['python3', str(LEDGER), *a], cwd=repo)
+    ledger = lambda *a: run([sys.executable, str(LEDGER), *a], cwd=repo)
 
     assert 'ship/ledger/feat__x.tsv' in ledger('path').stdout
     session = {'session_id': 's1', 'cwd': str(repo)}
@@ -283,3 +286,231 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     assert hook('stop', session, env) == ''
 
 print('ultraship hooks: ok')
+
+
+class WriterGitHubGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.repo = Path(self.temporary.name)
+        self.env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+        self.env.update(HOME=str(self.repo), XDG_STATE_HOME=str(self.repo),
+                        GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+        self.writer = {'agent_type': 'ship:writer--sol', 'tool_name': 'Bash'}
+
+    def test_writer_gh_reads_are_admitted(self):
+        for command in ('gh api repos/x/y/pulls/1', 'gh api -X GET repos/x/y/pulls/1',
+                        'gh api --method=GET repos/x/y/pulls/1', 'gh pr view 1', 'gh pr checks 1', 'gh run view 1'):
+            with self.subTest(command=command):
+                self.assertEqual(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env), '')
+
+    def test_writer_gh_reads_are_admitted_independently_of_rewrite(self):
+        commands = (
+            "gh api repos/x/y/pulls --paginate --jq '.[].title'",
+            "gh api repos/x/y/pulls/1 -H 'Accept: application/vnd.github.diff'",
+            'gh api repos/x/y/pulls/1 | grep -F x', 'gh api repos/x/y/pulls/1 | cut -f1',
+            'gh api repos/x/y/pulls/1 && rm -f p.json', 'gh api repos/x/y/pulls/1 | awk -F,',
+            'gh pr view 1 --json reviews --jq .reviews', 'gh run view 1 --log-failed',
+            'gh api -X HEAD repos/x/y/pulls/1', 'gh api --method=HEAD repos/x/y/pulls/1',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+        for option in ('-f q=value', '-F q=value', '--field q=value', '--raw-field q=value',
+                       '--input payload.json', '-fq=value', '-Fq=value', '--field=q=value',
+                       '--raw-field=q=value', '--input=payload.json'):
+            command = f'gh api -X GET search/issues {option}'
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_writes_remain_denied(self):
+        commands = ['gh repo sync x/y', 'cd /repo && gh repo sync x/y']
+        for method in ('POST', 'PUT', 'PATCH', 'DELETE', 'post', 'pAtCh', 'OPTIONS', 'TRACE', 'CONNECT', 'CUSTOM', ''):
+            for option in (f'-X {shlex.quote(method)}', f'--method {shlex.quote(method)}',
+                           f'-X{method}', f'--method={method}', f'-X={method}', f'-X "{method}"', f'-iX{method}'):
+                commands.extend((f'gh api {option} repos/x/y/pulls/1',
+                                 f'gh api repos/x/y/pulls/1 {option}',
+                                 f'/usr/bin/gh api {option} repos/x/y/pulls/1',
+                                 'gh api \\\n' + f' {option} repos/x/y/pulls/1'))
+        for option in ('-f title=value', '-F title=value', '--field title=value', '--raw-field title=value',
+                       '--input payload.json', '-ftitle=value', '-Ftitle=value', '--field=title=value',
+                       '--raw-field=title=value', '--input=payload.json'):
+            commands.extend((f'gh api {option} repos/x/y/pulls/1',
+                             f'gh api repos/x/y/pulls/1 {option}'))
+        commands.append('gh api -X GET --method POST repos/x/y/pulls/1')
+        for command in commands:
+            with self.subTest(command=command):
+                result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
+                self.assertTrue(denied(result), command)
+
+    def test_writer_nested_and_quoted_gh_writes_are_denied(self):
+        commands = ('bash -c "gh api -X POST repos/o/r/issues"', "sh -c 'gh repo sync'",
+                    'eval "gh api --method PATCH repos/o/r"', "'gh' api -X POST repos/o/r",
+                    'g""h api -X DELETE repos/o/r', 'zsh -c "x=1; gh api -XPUT repos/o/r"')
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_alias_and_extension_mutations_are_denied(self):
+        for command in ('gh alias set write api', 'gh alias import aliases.yml',
+                        'gh extension install owner/tool', 'gh extension upgrade tool', 'gh extension exec tool'):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_extension_alias_forms_are_denied(self):
+        for group in ('extension', 'extensions', 'ext', 'alias'):
+            for action in ('remove', 'create', 'custom'):
+                for suffix in ('', " '"):
+                    command = f'gh {group} {action} tool{suffix}'
+                    with self.subTest(command=command):
+                        self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+        for group, actions in (('extension', ('list', 'search', 'browse')),
+                               ('extensions', ('list', 'search', 'browse')),
+                               ('ext', ('list', 'search', 'browse')), ('alias', ('list',))):
+            for action in actions:
+                command = f'gh {group} {action}'
+                with self.subTest(command=command):
+                    self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_configuration_edits_are_denied(self):
+        custom = self.repo / 'custom-gh'
+        self.env['GH_CONFIG_DIR'] = str(custom)
+        for root in (self.repo / '.config/gh', custom):
+            for tool in ('Edit', 'Write', 'NotebookEdit'):
+                key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+                target = str(root / 'hosts.yml')
+                with self.subTest(tool=tool, target=target):
+                    self.assertTrue(denied(hook('pre', {**self.writer, 'tool_name': tool,
+                                                      'tool_input': {key: target}}, self.env)))
+        for target in (self.repo / '.config/gh-other/hosts.yml', self.repo / 'custom-gh-other/hosts.yml'):
+            self.assertFalse(denied(hook('pre', {**self.writer, 'tool_name': 'Write',
+                                                'tool_input': {'file_path': str(target)}}, self.env)))
+
+    def test_writer_gh_auth_and_config_writes_are_denied(self):
+        for command in ('gh auth token', 'gh auth login --with-token', 'gh auth setup-git',
+                        'gh config set editor vim', 'gh config clear-cache'):
+            for suffix in ('', " '"):
+                with self.subTest(command=command, suffix=suffix):
+                    self.assertTrue(denied(hook('pre', {**self.writer,
+                                                      'tool_input': {'command': command + suffix}}, self.env)))
+        for command in ('gh auth status', 'gh config get git_protocol', 'gh config list'):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_non_read_commands_are_denied(self):
+        commands = (
+            'gh issue comment 1 -b x', 'gh issue create -t x -b y',
+            'gh pr update-branch 12 --rebase', 'gh pr reopen 1', 'gh run rerun 1',
+            'gh secret set X -b y', 'gh label delete x', 'gh repo archive -y', 'gh repo rename x',
+            'gh gist create f --public', 'gh ext install o/t', 'gh extensions exec t',
+            'gh --help=false api -X POST repos/o/r/issues -f title=t',
+            'gh alias --clobber=true set w api', 'gh w -XPOST -ftitle=t repos/o/r/issues',
+            'gh auth status --show-token', 'gh auth status -t', 'gh config get oauth_token -h github.com',
+        )
+        for command in commands:
+            for suffix in ('', " '"):
+                with self.subTest(command=command, suffix=suffix):
+                    self.assertTrue(denied(hook('pre', {**self.writer,
+                                                      'tool_input': {'command': command + suffix}}, self.env)))
+
+    def test_writer_gh_shell_expansion_and_redirection_writes_are_denied(self):
+        commands = (
+            'echo a#b; gh api -X POST repos/o/r/issues -f title=t',
+            'b=${ref#refs/heads/}; gh api -X POST repos/o/r/issues -f title=t',
+            'gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues -X POST -f title=t',
+            'gh api repos/o/r/issues 2>&1 -X POST -f title=t',
+            "F='-XPOST -ftitle=t'; gh api repos/o/r/issues $F",
+            "$'gh' api -X POST repos/o/r/issues -f title=t",
+            'gh${IFS}api${IFS}-XPOST${IFS}-ftitle=t${IFS}repos/o/r/issues',
+            'echo -XPOST -ftitle=t | xargs gh api repos/o/r/issues',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_value_expansion_and_early_flags_are_denied(self):
+        commands = ("F='. -XPOST -ftitle=t'; gh api -q $F repos/o/r/issues",
+                    'gh issue comment 1 -b "it\'s', 'gh pr -R view comment 1 -b x',
+                    'gh --repo=o/r pr view 1', 'gh pr --repo o/r view 1',
+                    'gh --help=false pr --help=false view 1')
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+        for command in ("gh pr view 12 --json title -q '.title'",
+                        "gh pr view 12 --json title -q '[{title: .title}]'",
+                        'gh pr view 12 -R o/r --json title'):
+            with self.subTest(command=command):
+                self.assertEqual(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env), '')
+
+    def test_writer_gh_read_allowlist_preserves_reads(self):
+        commands = ["gh pr view 12 --json title -q '.title'", "gh api 'repos/o/r/pulls?state=open'",
+                    'gh pr view 12 -R o/r --json title', 'gh --version', 'gh --help', 'gh version', 'gh help',
+                    'gh search issues x']
+        for group, verbs in (('pr', ('view', 'list', 'checks', 'diff', 'status')),
+                             ('issue', ('view', 'list', 'status')), ('run', ('view', 'list', 'watch')),
+                             ('repo', ('view',)), ('workflow', ('view', 'list'))):
+            commands.extend(f'gh {group} {verb}' for verb in verbs)
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env), '')
+
+    def test_writer_xdg_gh_configuration_edits_are_denied(self):
+        self.env['XDG_CONFIG_HOME'] = str(self.repo / 'xdg')
+        for tool in ('Edit', 'Write', 'NotebookEdit'):
+            key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+            with self.subTest(tool=tool):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_name': tool,
+                    'tool_input': {key: str(self.repo / 'xdg/gh/hosts.yml')}}, self.env)))
+
+    def test_writer_relative_gh_configuration_targets_use_tool_cwd(self):
+        self.env['GH_CONFIG_DIR'] = str(self.repo / 'cli')
+        for tool in ('Edit', 'Write', 'NotebookEdit'):
+            key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+            with self.subTest(tool=tool):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_name': tool, 'cwd': str(self.repo),
+                    'tool_input': {key: 'cli/hosts.yml'}}, self.env)))
+
+    def test_writer_relative_gh_configuration_targets_use_process_cwd(self):
+        self.env['GH_CONFIG_DIR'] = str(self.repo / 'cli')
+        for tool in ('Edit', 'Write', 'NotebookEdit'):
+            key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+            payload = {**self.writer, 'tool_name': tool, 'tool_input': {key: 'cli/hosts.yml'}}
+            with self.subTest(tool=tool):
+                result = run([sys.executable, str(HOOK), 'pre'], payload, cwd=self.repo, env=self.env, check=True)
+                self.assertTrue(denied(json.loads(result.stdout)) if result.stdout.strip() else False)
+
+    def test_writer_preview_graphql_fields_are_denied(self):
+        for command in ('gh api -X GET -p x graphql -f query=q',
+                        'gh api -X GET --preview x graphql -F query=q',
+                        'gh api -X GET repos/o/r graphql -f query=q'):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+        command = 'gh api -X GET repos/o/r/pulls -f state=open'
+        self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_deep_gh_commands_fail_closed(self):
+        command = 'gh api repos/o/r'
+        for _ in range(5):
+            command = 'sh -c ' + shlex.quote(command)
+        self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_quoted_heredoc_data_with_apostrophe_is_admitted(self):
+        for body in ("don't run anything", "don't run gh api"):
+            command = f"cat <<'EOF' > receipt.txt\n{body}\nEOF\n"
+            with self.subTest(body=body):
+                self.assertNotEqual(ultraship.cat_heredoc_data(command), command)
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_graphql_fields_are_denied_with_rest_guidance(self):
+        for option in ("-f query='query { viewer { login } }'", '-F owner=x', '--field owner=x',
+                       '--raw-field=owner=x', '--input query.json'):
+            for command in (f'gh api graphql {option}', f'gh api -X GET graphql {option}'):
+                with self.subTest(command=command):
+                    result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
+                    self.assertTrue(denied(result), command)
+                    self.assertIn('writers cannot send GraphQL requests; use a REST GET with the query in the path',
+                                  result['hookSpecificOutput']['permissionDecisionReason'])
+
+
+if __name__ == '__main__':
+    unittest.main()

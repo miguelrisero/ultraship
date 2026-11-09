@@ -27,6 +27,8 @@ WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
     terraform\s+(apply|destroy) | kubectl\s+(apply|delete|rollout) | helm\s+(install|upgrade|uninstall) |
     vercel(\s+\S+)*\s+--prod | vercel\s+deploy | wrangler\s+(deploy|publish) | fly(ctl)?\s+deploy | docker\s+push
 )\b""", re.X)
+GH_METHOD = re.compile(r'^(?:--method(?:=(.*))?|-[ip]*X(.*))$')
+GH_FIELD = re.compile(r'^(?:--(?:field|raw-field|input)(?:=.*)?|-[ip]*[fF].*)$')
 HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
 LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
 
@@ -437,6 +439,110 @@ def load_ledger():
     return module
 
 
+# ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, Bash writes to gh configuration, glob `?` and writer-created file names, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
+def writer_gh_denial(command, depth=0):
+    command = cat_heredoc_data(command).replace('\\\n', '')
+    unquoted = re.sub(r'''['"\\]''', '', command)
+    if not re.search(r'\bgh\b', unquoted):
+        return None
+    if depth >= 4:
+        return 'Writers cannot run deeply nested GitHub commands.'
+    reason = 'Writers may run only read-only gh commands.'
+    reads = {'pr': ('view', 'list', 'checks', 'diff', 'status'),
+             'issue': ('view', 'list', 'status'), 'run': ('view', 'list', 'watch'),
+             'repo': ('view',), 'workflow': ('view', 'list')}
+    if any(marker in command for marker in ('$(', '<(', '>(', '`')):
+        return reason
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        tokens = list(lexer)
+    except ValueError:
+        return reason
+    for token in tokens:
+        if any(char.isspace() or char in ';&|()' for char in token):
+            nested = writer_gh_denial(token, depth + 1)
+            if nested:
+                return nested
+    segments, segment = [], []
+    for index, token in enumerate(tokens):
+        redirect = (token == '&' and (segment and segment[-1].endswith(('<', '>'))
+                    or index + 1 < len(tokens) and tokens[index + 1].startswith('>')))
+        if token and all(char in ';&|\n()' for char in token) and not redirect:
+            segments.append(segment)
+            segment = []
+        else:
+            segment.append(token)
+    segments.append(segment)
+    for words in segments:
+        if not any(re.search(r'\bgh\b', word) for word in words):
+            continue
+        if 'api' in words and any(word.strip('/') == 'graphql' for word in words) and any(
+                GH_FIELD.fullmatch(word) for word in words):
+            return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
+        exempt = False
+        for word in words:
+            if any(char in word for char in '$`'):
+                return reason
+            if exempt:
+                exempt = False
+                continue
+            if word in ('-q', '--jq', '-t', '--template', '-H', '--header'):
+                exempt = True
+                continue
+            if any(char in word for char in '*[{'):
+                return reason
+        for index, word in enumerate(words):
+            if os.path.basename(word) != 'gh':
+                continue
+            if any(os.path.basename(previous) in ('xargs', 'parallel') for previous in words[:index]):
+                return reason
+            arguments = words[index + 1:]
+            cursor = 0
+            if arguments in (['--version'], ['--help']):
+                continue
+            if not arguments or arguments[0].startswith('-'):
+                return reason
+            group = arguments[cursor]
+            if group in ('search', 'version', 'help'):
+                continue
+            if group != 'api':
+                cursor += 1
+                if group not in reads or cursor == len(arguments) or arguments[cursor] not in reads[group]:
+                    return reason
+                continue
+            arguments = arguments[cursor:]
+            methods, fields, endpoints = [], False, []
+            cursor = 1
+            while cursor < len(arguments):
+                argument = arguments[cursor]
+                method = GH_METHOD.fullmatch(argument)
+                if method:
+                    value = method[1] if argument.startswith('--') else method[2]
+                    if value is None or value == '':
+                        cursor += 1
+                        value = arguments[cursor] if cursor < len(arguments) else ''
+                    methods.append(value.removeprefix('=').upper())
+                elif GH_FIELD.fullmatch(argument):
+                    fields = True
+                    if argument in ('-f', '-F', '--field', '--raw-field', '--input'):
+                        cursor += 1
+                elif argument in ('-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache',
+                                  '-p', '--preview'):
+                    cursor += 1
+                elif not argument.startswith('-'):
+                    endpoints.append(argument.strip('/'))
+                cursor += 1
+            if fields and 'graphql' in endpoints:
+                return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
+            if any(method not in ('GET', 'HEAD') for method in methods) or (
+                    fields and (not methods or any(method != 'GET' for method in methods))):
+                return 'Writers cannot send mutating GitHub API requests; use a REST GET.'
+    return None
+
+
 def pre(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
@@ -450,10 +556,26 @@ def pre(data):
                                or WRITER_BASH.search(tin.get('command', ''))):
             deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                  'commit grants permit local base-branch merges into their own lane branch.')
+        if tool == 'Bash':
+            reason = writer_gh_denial(tin.get('command', ''))
+            if reason:
+                deny(reason)
         target = tin.get('file_path') or tin.get('notebook_path') or ''
         if tool in ('Edit', 'Write', 'NotebookEdit') and (
                 HARNESS_PATH.search(target) or target.startswith(str(Path.home() / '.claude') + '/')):
             deny('Writers do not edit harness configuration.')
+        if tool in ('Edit', 'Write', 'NotebookEdit'):
+            gh_paths = [Path.home() / '.config/gh']
+            if os.environ.get('GH_CONFIG_DIR'):
+                gh_paths.append(Path(os.environ['GH_CONFIG_DIR']))
+            if os.environ.get('XDG_CONFIG_HOME'):
+                gh_paths.append(Path(os.environ['XDG_CONFIG_HOME']) / 'gh')
+            destination = Path(target).expanduser()
+            if not destination.is_absolute():
+                destination = Path(data.get('cwd') or Path.cwd()) / destination
+            destination = destination.resolve()
+            if any(destination.is_relative_to(path.expanduser().resolve()) for path in gh_paths):
+                deny('Writers do not edit GitHub CLI configuration.')
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
         counter.parent.mkdir(parents=True, exist_ok=True)
