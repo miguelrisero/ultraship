@@ -130,7 +130,7 @@ Approved test adaptations follow the writer contract (owner rule, Input `32c223a
 Refresh paired `old` and `new` anchor strings only in exact approved PR-owned rows.
 Category 5 uses exactly one route below, named in the brief.
 Every requirement of the named route applies; route-specific sentences bind only that route.
-Pairs from a private derivation stay in the private-proposal route.
+Pairs from an admitted derivation gate stay in the private-proposal route.
 Category 5 requires separate applicable loaded edit/access authority before any writer edit; missing authority blocks editing.
 Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
 The PR author product diff supplies supporting evidence only at the CI-named subject file.
@@ -177,8 +177,8 @@ Preserve the same designated test and guarantee, equivalent mutant semantics, as
 Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.
 Keep mutation proof after merge under separate applicable execution admission.
 Retain Peral's authority over CI runners and the merge queue.
-Permit only the row-ID lookup and row-line reads specified in the lane-derived route.
-This clause grants zero other TOML search/parse, anchor extraction, mutation or other execution, or writer publication authority.
+On the lane-derived route only, permit the row-ID lookup and row-line reads specified in that route.
+Except for the lane-derived route's row-ID lookup and row-line reads, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.
 CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.
 
 #### Explicit-pair route

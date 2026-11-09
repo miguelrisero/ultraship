@@ -108,7 +108,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             route_selection_clauses = (
                 'Category 5 uses exactly one route below, named in the brief.',
                 'Every requirement of the named route applies; route-specific sentences bind only that route.',
-                'Pairs from a private derivation stay in the private-proposal route.',
+                'Pairs from an admitted derivation gate stay in the private-proposal route.',
             )
             for phrase in (
                 category,
@@ -214,7 +214,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     '- Never loosen an assertion, widen a bound, or delete a check under this rule.',
                     '- Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.',
                     '- Record the approver, the exact edit, and the Input ID in the PR body.',
-                    '- Every other control stays: caller-owned TERM escalation only, no D1160 commands, no mutation TOML search outside the owner-scoped lane-derived route, the protected-path rules, and zero writer push authority.',
+                    '- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and zero writer push authority.',
                 )
                 _, _, standing = text.partition('### Standing owner rule\n')
                 standing = re.split(r'^ {0,3}#{1,3}(?:[ \t]+|$)|^.+\n {0,3}(?:=+|-+)[ \t]*$',
@@ -332,8 +332,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.',
                 'Keep mutation proof after merge under separate applicable execution admission.',
                 "Retain Peral's authority over CI runners and the merge queue.",
-                'Permit only the row-ID lookup and row-line reads specified in the lane-derived route.',
-                'This clause grants zero other TOML search/parse, anchor extraction, mutation or other execution, or writer publication authority.',
+                'On the lane-derived route only, permit the row-ID lookup and row-line reads specified in that route.',
+                'Except for the lane-derived route\'s row-ID lookup and row-line reads, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.',
                 'CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.',
             ):
                 with self.subTest(path=name, requirement=requirement):

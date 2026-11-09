@@ -26,13 +26,13 @@ Apply the caller-owned TERM-grace boundary to cleanup commands and repository pr
 
 The fixed-coordinate requirements apply only to the standing branch; a designated owner-event route replaces CoC/Chief approval for its exact edit.
 
-Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379` in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`, owner_ui event `1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8`, choice `plugin_rule`). Outside the exceptions in the writer guard paragraph, never ask a writer for a test, pin, census, register, or bound edit that the CoC or the topic Chief did not approve. When one of them approves an exact edit, put in the writer brief: the exact edit and file, the approver and the approval time, the owner rule citation, the Input ID, and the workspace ID, so the writer verifies the owner event with `get_input`. A writer without a `get_input` tool depends on your record: call `get_input` yourself, or take the CoC's verified record, and add to the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name. Record only values read from a `get_input` result. The allowed edits are the five test adaptations in the writer contract: classify new members of an exact register, re-pin a census digest from CI output after a reviewed body PASS, replace a literal timeout with the repository race helper, change a setup-only fixture with no assertion change, and refresh paired anchor strings within the fifth category below. Loosened assertions, widened bounds, and deleted checks stay forbidden. Every other control stays: caller-owned TERM escalation only, no D1160 commands, no mutation TOML search outside the owner-scoped lane-derived route, the protected-path rules, and zero writer push authority.
+Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379` in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`, owner_ui event `1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8`, choice `plugin_rule`). Outside the exceptions in the writer guard paragraph, never ask a writer for a test, pin, census, register, or bound edit that the CoC or the topic Chief did not approve. When one of them approves an exact edit, put in the writer brief: the exact edit and file, the approver and the approval time, the owner rule citation, the Input ID, and the workspace ID, so the writer verifies the owner event with `get_input`. A writer without a `get_input` tool depends on your record: call `get_input` yourself, or take the CoC's verified record, and add to the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name. Record only values read from a `get_input` result. The allowed edits are the five test adaptations in the writer contract: classify new members of an exact register, re-pin a census digest from CI output after a reviewed body PASS, replace a literal timeout with the repository race helper, change a setup-only fixture with no assertion change, and refresh paired anchor strings within the fifth category below. Loosened assertions, widened bounds, and deleted checks stay forbidden. Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and zero writer push authority.
 
 Fifth standing adaptation:
 - Refresh paired `old` and `new` anchor strings only in exact approved PR-owned rows.
 - Category 5 uses exactly one route below, named in the brief.
 - Every requirement of the named route applies; route-specific sentences bind only that route.
-- Pairs from a private derivation stay in the private-proposal route.
+- Pairs from an admitted derivation gate stay in the private-proposal route.
 - Category 5 requires separate applicable loaded edit/access authority before any writer edit; missing authority blocks editing.
 - Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
 - The PR author product diff supplies supporting evidence only at the CI-named subject file.
@@ -78,8 +78,8 @@ Preserve the same designated test and guarantee, equivalent mutant semantics, as
 Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.
 Keep mutation proof after merge under separate applicable execution admission.
 Retain Peral's authority over CI runners and the merge queue.
-Permit only the row-ID lookup and row-line reads specified in the lane-derived route.
-This clause grants zero other TOML search/parse, anchor extraction, mutation or other execution, or writer publication authority.
+On the lane-derived route only, permit the row-ID lookup and row-line reads specified in that route.
+Except for the lane-derived route's row-ID lookup and row-line reads, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.
 CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.
 
 #### Explicit-pair route
