@@ -50,6 +50,14 @@ with tempfile.TemporaryDirectory() as tmp:
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'Explore', 'model': 'haiku'}}, env))
 
     for agent in ['ship:writer--sol', 'ship:writer--sonnet']:
+        review_inputs = (
+            'cd /repo/.venv/lib/python3.13/site-packages && '
+            + sync_write.format(path='sitecustomize.py') + 'uv run --no-sync --project /repo ruff check',
+            'cd /repo && ' + sync_write.format(path='backend.py') + 'uv run ruff check',
+        )
+        decisions = [denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env))
+                     for cmd in review_inputs]
+        assert decisions == [True, True], (agent, decisions, review_inputs)
         for cmd in ['git push origin HEAD', 'git -C /w push origin HEAD', 'git -c core.x=y push',
                     'git --git-dir=/w/.git push', 'cd /w && git -C /w push',
                     'git -C "/a b" -c core.x=y --no-pager push', 'git --git-dir /w/.git push',
@@ -76,6 +84,7 @@ with tempfile.TemporaryDirectory() as tmp:
                     'cat <<\'EOF\' >| f.py\ngit push\nEOF',
                     'cat <<\'EOF\' > f.py\ngit push',
                     'cat >> f.py <<\'EOF\'; git push\nr.rpush("q", 1)\nEOF',
+                    cat_append + ruff_remainder,
                     cat_append + 'git push origin HEAD',
                     cat_append + 'ruff format x && git push',
                     cat_append + "bash -c 'git push'",
@@ -130,7 +139,7 @@ with tempfile.TemporaryDirectory() as tmp:
                     'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
         for cmd in [
-                    cat_append + ruff_remainder,
+                    cat_append + ruff_remainder.replace('uv run ', 'uv run --no-sync '),
                     cat_append + 'ruff format a.py && ruff check --fix a.py',
                     sync_write.format(path='tests/x.py') + 'ruff format tests/x.py',
                     'cat <<\'EOF\' > tests/test_queue.py\nimport redis\n\ndef test_push(r):\n    r.rpush("jobs", *[1, 2])\n    assert r.lrange("jobs", 0, -1) == [b"1", b"2"]\nEOF',

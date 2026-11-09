@@ -242,7 +242,7 @@ def literal_ps_awk_filter(command):
 
 
 def cat_heredoc_data(command):
-    # ponytail: source paths exclude executable installs; custom uv cache-keys need --no-sync to avoid rebuilding other source files.
+    # ponytail: symlinked paths are not resolved; resolve destinations before admitting writes through symlinks.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
     path = r'[\w./-]+'
     header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
@@ -265,10 +265,20 @@ def cat_heredoc_data(command):
             if not read_only_shell(remainder) and not all(
                     read_only_shell(segment) or re.fullmatch(ruff, segment) for segment in segments):
                 return command
+            ruff_segments = [segment for segment in segments if re.fullmatch(ruff, segment)]
+            if any(segment.split()[:2] == ['uv', 'run'] and '--no-sync' not in segment.split()
+                   for segment in ruff_segments):
+                return command
             written = Path(re.search(r'>>?[ \t]*([\w./-]+)', lines[0])[1])
-            if any(re.fullmatch(ruff, segment) for segment in segments) and (
-                    written.suffix not in {'.py', '.pyi'} or written.name == 'setup.py'
-                    or set(written.parts) & {'.venv', 'venv', 'env', 'site-packages', 'bin', 'Scripts', '.git', 'node_modules'}):
+            folder = re.match(rf'^[ \t]*cd +({path}) +&& +', lines[0])
+            if folder:
+                written = Path(folder[1]) / written
+            if ruff_segments and (
+                    written.suffix not in {'.py', '.pyi'}
+                    or written.name in {'setup.py', 'sitecustomize.py', 'usercustomize.py'}
+                    or set(written.parts) & {'..', '.venv', 'venv', 'env', 'site-packages', 'bin', 'Scripts',
+                                             '.git', 'node_modules', 'lib', 'lib64', 'Lib', 'dist-packages'}
+                    or any(part.startswith('python') for part in written.parts)):
                 return command
             return re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
     return command
