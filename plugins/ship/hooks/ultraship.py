@@ -258,8 +258,9 @@ def cat_heredoc_data(command):
         candidate = lines[end].lstrip('\t') if strip_tabs else lines[end]
         if candidate.removesuffix('\n') == end_marker:
             remainder = ''.join(lines[end + 1:])
-            if re.search(r'(?:^|[;&|(\n])[ \t]*(?:(?:bash|sh|zsh|dash|ksh|fish|source|\.|exec|eval|xargs|env|'
-                         r'python|python3|node|perl|ruby|chmod)(?=$|[\s;&|()])|\./|/)', remainder):
+            if re.search(r'(?:^|[\s;&|(])(?:bash|sh|zsh|dash|ksh|fish|source|exec|eval|xargs|env|'
+                         r'python[0-9.]*|node|perl|ruby|chmod)(?=$|[\s;&|()])'
+                         r'|(?:^|[;&|(\n])[ \t]*(?:\.(?=$|[\s;&|()])|\./|/)', remainder):
                 return command
             return re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
     return command
