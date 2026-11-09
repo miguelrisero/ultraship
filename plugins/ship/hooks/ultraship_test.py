@@ -36,15 +36,59 @@ assert not ultraship.git_push('git ' + '-Cc ' * 200 + 'status')
 assert ultraship.git_push('git ' + '-Cc ' * 200 + 'push')
 assert time.monotonic() - started < 0.1
 
-with tempfile.TemporaryDirectory() as tmp:
+with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.parents[3]) as symlink_tmp:
     env = {**os.environ, 'XDG_STATE_HOME': tmp, 'HOME': tmp}
     writer = {'agent_type': 'ship:writer--sol', 'agent_id': 'w1', 'tool_name': 'Bash'}
+    cat_append = ('cd /workspace/repo && cat >> backend/api/tests/integration/test_approval_expiry.py <<\'EOF\'\n'
+                  'r.rpush("jobs", *[1, 2])\nEOF\n')
+    sync_write = "cat > {path} <<'EOF'\nimport os\nos.system('git push')\nEOF\n"
+    installed = Path(symlink_tmp, 'site-packages')
+    installed.mkdir()
+    linked = Path(symlink_tmp, 'linked')
+    linked.symlink_to(installed, target_is_directory=True)
+    tools = Path(symlink_tmp, 'tools')
+    tools.mkdir()
+    driver = tools / 'driver.py'
+    driver.write_text('')
+    aliased_ruff = Path(symlink_tmp, 'aliased/.venv/bin/ruff')
+    aliased_ruff.parent.mkdir(parents=True)
+    aliased_ruff.symlink_to(driver)
+    real_ruff = Path(symlink_tmp, 'real/.venv/bin/ruff')
+    real_ruff.parent.mkdir(parents=True)
+    real_ruff.write_text('')
+    ruff_remainder = ('uv run --frozen --directory backend/api ruff check --fix tests/integration/test_approval_expiry.py'
+                      ' && uv run --frozen --directory backend/api ruff format tests/integration/test_approval_expiry.py')
 
     assert denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol', 'model': 'opus'}}, env))
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol'}}, env))
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'Explore', 'model': 'haiku'}}, env))
 
     for agent in ['ship:writer--sol', 'ship:writer--sonnet']:
+        destination_cases = ('setup.py', 'pkg/sitecustomize.py', 'pkg/usercustomize/__init__.py',
+                             'lib/python3.13/x.py', 'x.pth', 'x.toml', 'lib/x.py', 'python3.13/x.py')
+        destination_decisions = [
+            denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {
+                'command': 'cd /repo && ' + sync_write.format(path=path) + 'ruff check'}}, env))
+            for path in destination_cases]
+        assert all(destination_decisions), (agent, list(zip(destination_cases, destination_decisions)))
+        review_inputs = (
+            'cd /repo/.venv/lib/python3.13/site-packages && '
+            + sync_write.format(path='sitecustomize.py') + 'uv run --no-sync --project /repo ruff check',
+            'cd /repo && ' + sync_write.format(path='backend.py') + 'uv run ruff check',
+            'cd /repo && ' + sync_write.format(path='backend.py') + 'uv run ruff check --no-sync',
+            'cd /repo && ' + sync_write.format(path='backend.py') + 'uv run --directory --no-sync ruff check',
+            'cd - && ' + sync_write.format(path='sitecustomize/__init__.py') + 'uv run --no-sync ruff check',
+            'cd sub && ' + sync_write.format(path='x.py') + 'ruff check x.py',
+            sync_write.format(path='x.py') + 'ruff check x.py',
+            'cd /repo && ' + sync_write.format(path='sitecustomize/__init__.py') + 'uv run --no-sync ruff check',
+            sync_write.format(path=linked / 'x.py') + 'ruff check x.py',
+            cat_append + ruff_remainder.replace('uv run ', 'uv run --no-sync '),
+            cat_append + '.venv/bin/ruff check backend/api/tests/integration/test_approval_expiry.py',
+            sync_write.format(path=driver) + f'{aliased_ruff} check {driver}',
+        )
+        decisions = [denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env))
+                     for cmd in review_inputs]
+        assert decisions == [True] * len(review_inputs), (agent, decisions, review_inputs)
         for cmd in ['git push origin HEAD', 'git -C /w push origin HEAD', 'git -c core.x=y push',
                     'git --git-dir=/w/.git push', 'cd /w && git -C /w push',
                     'git -C "/a b" -c core.x=y --no-pager push', 'git --git-dir /w/.git push',
@@ -70,6 +114,35 @@ with tempfile.TemporaryDirectory() as tmp:
                     'cat <<\'EOF\' > $X\ngit push\nEOF',
                     'cat <<\'EOF\' >| f.py\ngit push\nEOF',
                     'cat <<\'EOF\' > f.py\ngit push',
+                    'cat >> f.py <<\'EOF\'; git push\nr.rpush("q", 1)\nEOF',
+                    cat_append + ruff_remainder,
+                    cat_append + 'git push origin HEAD',
+                    cat_append + 'ruff format x && git push',
+                    cat_append + "bash -c 'git push'",
+                    cat_append + 'python3 f.py',
+                    cat_append + "sh -c 'x'",
+                    cat_append + 'uv run bash f.sh',
+                    cat_append + 'timeout 5 sh f.sh',
+                    cat_append + 'nohup python3.13 f.py',
+                    cat_append + '"bash" f.sh',
+                    cat_append + '`bash f.sh`',
+                    cat_append + '$SHELL f.sh',
+                    cat_append + 'uv run f.py',
+                    cat_append + 'make',
+                    cat_append + 'pytest',
+                    cat_append + 'uv run --frozen pytest',
+                    cat_append + 'ruff check x; bash f.sh',
+                    cat_append + 'uv run --script f.py ruff check',
+                    cat_append + 'uv run --with ./pkg ruff check',
+                    cat_append + 'uv run --python f.py ruff check',
+                    sync_write.format(path='backend/api/setup.py') + 'uv run --directory backend/api ruff check',
+                    sync_write.format(path='backend/api/pyproject.toml') + 'uv run --frozen --directory backend/api ruff check',
+                    sync_write.format(path='uv.lock') + 'uv run --frozen --directory backend/api ruff check',
+                    sync_write.format(path='backend/api/setup.py') + 'uv run --no-sync --directory backend/api ruff check',
+                    sync_write.format(path='.venv/bin/ruff') + 'uv run ruff check',
+                    sync_write.format(path='bin/ruff') + 'ruff check',
+                    sync_write.format(path='ruff') + 'ruff check',
+                    sync_write.format(path='.venv/lib/python3.13/site-packages/x.pth') + 'ruff check',
                     'cat <<\'EOF\' > f.sh\ngit push\nEOF\nbash f.sh',
                     'git -C $(pwd) status',
                     'git -C "$W" push', 'git -C "${W}" push origin HEAD', 'git --work-tree "$W" push',
@@ -97,6 +170,14 @@ with tempfile.TemporaryDirectory() as tmp:
                     'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
         for cmd in [
+                    cat_append + ('/workspace/repo/backend/api/.venv/bin/ruff check --fix '
+                                  'backend/api/tests/integration/test_approval_expiry.py && '
+                                  '/workspace/repo/backend/api/.venv/bin/ruff format '
+                                  'backend/api/tests/integration/test_approval_expiry.py'),
+                    cat_append + 'ruff check backend/api/tests/integration/test_approval_expiry.py',
+                    sync_write.format(path=driver) + f'{real_ruff} check {driver}',
+                    cat_append + 'ruff format a.py && ruff check --fix a.py',
+                    'cd /workspace/repo && ' + sync_write.format(path='tests/x.py') + 'ruff format tests/x.py',
                     'cat <<\'EOF\' > tests/test_queue.py\nimport redis\n\ndef test_push(r):\n    r.rpush("jobs", *[1, 2])\n    assert r.lrange("jobs", 0, -1) == [b"1", b"2"]\nEOF',
                     'cat <<\'EOF\' > tests/test_queue.py\ndef test_queue(r):\n    jobs = {}\n    r.lpush("jobs", 1)\n    assert r.lrange("jobs", 0, -1) == [b"1"]\nEOF',
                     'cat <<"EOF" > f.py\nr.rpush("q", [1])\nEOF',

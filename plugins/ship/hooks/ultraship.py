@@ -242,7 +242,7 @@ def literal_ps_awk_filter(command):
 
 
 def cat_heredoc_data(command):
-    # A quoted delimiter makes the body literal data; executable remainders keep the full scan.
+    # ponytail: PATH or link aliases can reach the written file; sandbox execution to enforce filesystem identity.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
     path = r'[\w./-]+'
     header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
@@ -258,7 +258,33 @@ def cat_heredoc_data(command):
         candidate = lines[end].lstrip('\t') if strip_tabs else lines[end]
         if candidate.removesuffix('\n') == end_marker:
             remainder = ''.join(lines[end + 1:])
-            return lines[0] + remainder if read_only_shell(remainder) else command
+            ruff = (r'(?:ruff|/[\w./-]+/\.venv/bin/ruff)[ \t]+'
+                    r'(?:check|format)(?:[ \t]+[A-Za-z0-9./_=\-]+)*')
+            segments = [part.strip() for part in re.split(r'&&|;|\n', remainder) if part.strip()]
+            if not read_only_shell(remainder) and not all(
+                    read_only_shell(segment) or re.fullmatch(ruff, segment) for segment in segments):
+                return command
+            ruff_segments = [segment for segment in segments if re.fullmatch(ruff, segment)]
+            for segment in ruff_segments:
+                executable = Path(segment.split()[0])
+                if executable.is_absolute() and (
+                        Path(os.path.realpath(executable)).parent != Path(os.path.realpath(executable.parent))):
+                    return command
+            written = Path(re.search(r'>>?[ \t]*([\w./-]+)', lines[0])[1])
+            folder = re.match(rf'^[ \t]*cd +({path}) +&& +', lines[0])
+            if folder:
+                written = Path(folder[1]) / written
+            if ruff_segments:
+                if not written.is_absolute():
+                    return command
+                for destination in (written, Path(os.path.realpath(written))):
+                    if (destination.suffix not in {'.py', '.pyi'} or destination.name == 'setup.py'
+                            or set(destination.parts) & {'..', '.venv', 'venv', 'env', 'site-packages', 'bin', 'Scripts',
+                                                         '.git', 'node_modules', 'lib', 'lib64', 'Lib', 'dist-packages'}
+                            or any(part.startswith('python') or Path(part).stem in {'sitecustomize', 'usercustomize'}
+                                   for part in destination.parts)):
+                        return command
+            return re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
     return command
 
 
