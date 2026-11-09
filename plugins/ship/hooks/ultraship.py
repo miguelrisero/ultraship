@@ -460,14 +460,7 @@ def writer_gh_denial(command, depth=0):
         lexer.commenters = ''
         tokens = list(lexer)
     except ValueError:
-        groups = re.finditer(r'\bgh\s+(?:-\S+\s+)*([\w-]+)(?:\s+(?:-\S+\s+)*([\w-]+))?', unquoted)
-        for group in groups:
-            if group[1] in reads and group[2] in reads[group[1]]:
-                continue
-            if group[1] in ('search', 'version', 'help'):
-                continue
-            return reason
-        return None
+        return reason
     for token in tokens:
         if any(char.isspace() or char in ';&|()' for char in token):
             nested = writer_gh_denial(token, depth + 1)
@@ -491,13 +484,15 @@ def writer_gh_denial(command, depth=0):
             return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
         exempt = False
         for word in words:
+            if any(char in word for char in '$`'):
+                return reason
             if exempt:
                 exempt = False
                 continue
             if word in ('-q', '--jq', '-t', '--template', '-H', '--header'):
                 exempt = True
                 continue
-            if any(char in word for char in '$`*[{'):
+            if any(char in word for char in '*[{'):
                 return reason
         for index, word in enumerate(words):
             if os.path.basename(word) != 'gh':
@@ -506,19 +501,15 @@ def writer_gh_denial(command, depth=0):
                 return reason
             arguments = words[index + 1:]
             cursor = 0
-            while cursor < len(arguments) and arguments[cursor].startswith('-'):
-                cursor += 1
-            if cursor == len(arguments):
-                if arguments == ['--version']:
-                    continue
+            if arguments in (['--version'], ['--help']):
+                continue
+            if not arguments or arguments[0].startswith('-'):
                 return reason
             group = arguments[cursor]
             if group in ('search', 'version', 'help'):
                 continue
             if group != 'api':
                 cursor += 1
-                while cursor < len(arguments) and arguments[cursor].startswith('-'):
-                    cursor += 1
                 if group not in reads or cursor == len(arguments) or arguments[cursor] not in reads[group]:
                     return reason
                 continue

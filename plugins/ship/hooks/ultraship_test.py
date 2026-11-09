@@ -428,9 +428,23 @@ class WriterGitHubGuardTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
 
+    def test_writer_gh_value_expansion_and_early_flags_are_denied(self):
+        commands = ("F='. -XPOST -ftitle=t'; gh api -q $F repos/o/r/issues",
+                    'gh issue comment 1 -b "it\'s', 'gh pr -R view comment 1 -b x',
+                    'gh --repo=o/r pr view 1', 'gh pr --repo o/r view 1',
+                    'gh --help=false pr --help=false view 1')
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+        for command in ("gh pr view 12 --json title -q '.title'",
+                        "gh pr view 12 --json title -q '[{title: .title}]'",
+                        'gh pr view 12 -R o/r --json title'):
+            with self.subTest(command=command):
+                self.assertEqual(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env), '')
+
     def test_writer_gh_read_allowlist_preserves_reads(self):
         commands = ["gh pr view 12 --json title -q '.title'", "gh api 'repos/o/r/pulls?state=open'",
-                    'gh --help=false pr --help=false view 1', 'gh --version', 'gh version', 'gh help',
+                    'gh pr view 12 -R o/r --json title', 'gh --version', 'gh --help', 'gh version', 'gh help',
                     'gh search issues x']
         for group, verbs in (('pr', ('view', 'list', 'checks', 'diff', 'status')),
                              ('issue', ('view', 'list', 'status')), ('run', ('view', 'list', 'watch')),
