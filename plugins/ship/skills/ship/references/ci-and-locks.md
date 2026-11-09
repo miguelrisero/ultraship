@@ -15,11 +15,14 @@ Read a merge queue from its own `/mq/queue` endpoint where the repository has on
 Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/lock-idle.py" <lock-file>` in the guard's PID namespace.
 The probe reads `/proc/locks` and `/proc/[0-9]*/fdinfo/*` and reports holder and waiter PIDs.
 The probe skips unreadable fdinfo for other users because the guard and its children share one UID.
-Launch a repository's flaky-pattern guard only when the probe reports zero holders and zero waiters.
-For Patricia, check `/var/ops/CoC/gate/locks/flaky-guard.lock` before `make test-flaky-patterns`; keep the guard's own bound unchanged.
-When the lock is busy, re-probe every 60 seconds for up to 10 minutes.
-If the lock remains busy after 10 minutes, report the holder and waiter PIDs to the chief as a blocker.
-Never launch behind a busy lock or skip the guard silently.
+The lock serves one holder at a time. Each lane runs at most one guard, which holds the lock or waits as one waiter.
+For Patricia, probe `/var/ops/CoC/gate/locks/flaky-guard.lock` before `make test-flaky-patterns`; keep the guard's own bound unchanged.
+Launch the guard when the probe lists no PID of the lane's own guard, even behind other holders and waiters.
+Record the guard's PID; never start a second guard while that PID holds or waits.
+`flock` wakes waiters in no fixed order, so a lane can wait behind a later arrival.
+While the lane's guard waits, re-probe every 60 seconds for up to 10 minutes.
+If the guard still waits after 10 minutes, report the holder and waiter PIDs to the chief as a blocker and keep the guard waiting.
+Never skip the guard silently.
 Treat a probe error as a blocker.
 Never flock, delete, or signal through the probe.
 Drivers copy this lock rule into every writer brief that can run the flaky-pattern guard.

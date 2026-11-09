@@ -3,6 +3,7 @@ import importlib.util
 import os
 from pathlib import Path
 from types import SimpleNamespace
+import selectors
 import shutil
 import subprocess
 import sys
@@ -62,7 +63,8 @@ class CIQuotaTests(unittest.TestCase):
             'gh run watch', 'check-runs loop', 'job polling',
             'repeated status comments', 'once per failure',
             'gh run view <run-id> --log-failed', '/mq/queue',
-            '/proc/locks', 'zero holders and zero waiters',
+            '/proc/locks', 'one holder at a time', 'one waiter',
+            "no PID of the lane's own guard", 'never start a second guard',
             'make test-flaky-patterns', '/var/ops/CoC/gate/locks/flaky-guard.lock',
             'lock-idle.py', "guard's own bound unchanged", "guard's PID namespace",
             'every 60 seconds', 'up to 10 minutes', 'blocker',
@@ -198,6 +200,66 @@ class LockIdleTests(unittest.TestCase):
                     process.stdout.close()
             self.assertEqual(self.probe(path).returncode, 0)
             self.assertTrue(path.exists())
+
+    def test_waiting_lane_acquires_after_holder_exits_beside_other_waiters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'guard.lock'
+            child = 'import sys; print("acquired", flush=True); sys.stdin.read()'
+            processes = []
+
+            def start():
+                process = subprocess.Popen(
+                    ['flock', str(path), sys.executable, '-c', child],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                )
+                processes.append(process)
+                return process
+
+            def wait_for_probe(text):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    result = self.probe(path)
+                    if text in result.stdout:
+                        return result
+                    time.sleep(0.01)
+                self.fail(f'probe never reported {text!r}: {result.stdout}')
+
+            def next_acquirer(waiters):
+                with selectors.DefaultSelector() as selector:
+                    for waiter in waiters:
+                        selector.register(waiter.stdout, selectors.EVENT_READ, waiter)
+                    ready = selector.select(timeout=5)
+                self.assertEqual(len(ready), 1, 'exactly one waiter takes the lock')
+                waiter = ready[0][0].data
+                self.assertEqual(waiter.stdout.readline().strip(), 'acquired')
+                return waiter
+
+            def release(process):
+                process.stdin.close()
+                process.wait(timeout=5)
+
+            try:
+                holder = start()
+                self.assertEqual(holder.stdout.readline().strip(), 'acquired')
+                waiters = [start(), start()]
+                wait_for_probe('holders=1 waiters=2')
+                release(holder)
+                first = next_acquirer(waiters)
+                other = next(w for w in waiters if w is not first)
+                result = wait_for_probe('holders=1 waiters=1')
+                self.assertIn(f'holder pid={first.pid}', result.stdout)
+                self.assertIn(f'waiter pid={other.pid}', result.stdout)
+                release(first)
+                self.assertIs(next_acquirer([other]), other)
+                release(other)
+            finally:
+                for process in processes:
+                    if not process.stdin.closed:
+                        process.stdin.close()
+                for process in processes:
+                    process.wait(timeout=5)
+                    process.stdout.close()
+            self.assertEqual(self.probe(path).returncode, 0)
 
 
 if __name__ == '__main__':
