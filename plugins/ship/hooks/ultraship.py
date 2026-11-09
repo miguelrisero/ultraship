@@ -31,10 +31,35 @@ HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
 LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
 
 
+# Modules that can only compute and read or write files: none of them runs a process or reaches one by reflection.
+INERT_MODULES = {'re', 'json', 'pathlib', 'textwrap', 'difflib', 'hashlib', 'collections', 'itertools', 'string',
+                 'math'}
+REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
+              'help', 'input'}
+
+
+def inert_python(body):
+    """Whether a Python script can only compute and read or write files, so its words are file text, not commands."""
+    try:
+        tree = ast.parse(body)
+    except (SyntaxError, ValueError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(alias.name.split('.')[0] not in INERT_MODULES for alias in node.names):
+            return False
+        if isinstance(node, ast.ImportFrom) and (node.level or (node.module or '').split('.')[0] not in INERT_MODULES):
+            return False
+        if isinstance(node, ast.Name) and (node.id in REFLECTION or node.id.startswith('__')):
+            return False
+        if isinstance(node, ast.Attribute) and node.attr.startswith('_'):
+            return False
+    return True
+
+
 def python_heredoc_shell(command):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
-    header = re.compile(r"^[ \t]*(?:python|python3(?:\.\d+)?) +- +<<(-?)[ \t]*"
+    header = re.compile(r"^[ \t]*(?:cd +[\w./-]+ +&& +)?(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(-?)[ \t]*"
                         r"('[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
                         r"[ \t]*\n$")
     lines = command.splitlines(keepends=True)
@@ -46,6 +71,9 @@ def python_heredoc_shell(command):
         candidate = lines[end].lstrip('\t') if match[1] else lines[end]
         if candidate.removesuffix('\n') == delimiter:
             body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
+            # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
+            if match[2][0] in '\'"\\' and inert_python(body):
+                return lines[0] + ''.join(lines[end + 1:])
             if 'push' in body or '\\\n' in body:
                 return command
             if any(c in body for c in '$`{}'):
@@ -67,15 +95,19 @@ def python_heredoc_shell(command):
 
 
 def literal_ps_awk_filter(command):
-    # Only a complete process-list filter with a bare print action supplies inert awk data.
-    pipeline = re.fullmatch(r"[ \t]*ps[ \t]+-eo[ \t]+pid,args[ \t]*\|[ \t]*awk[ \t]+'([^'\r\n]*)'[ \t]*", command)
-    if not pipeline:
-        return command
-    comparison = r'\$[0-9]+[ \t]*(?:==|!=|!~|~|>=|<=|>|<)[ \t]*(?:"[\w ./-]*"|/[\w .^$*+-]+/|[0-9]+)'
+    # Only a complete process-list filter with a bare print action supplies inert awk data. It may stand in a
+    # command chain, but nothing may follow it in the same pipeline or as an awk argument.
+    comparison = (r'\$[0-9]+[ \t]*(?:==|!=|!~|~|>=|<=|>|<)[ \t]*'
+                  r'(?:"[\w ./-]*"|/[^/\'"\\\r\n]*/|[0-9]+)')
     expression = rf'[() \t]*{comparison}(?:[() \t]*(?:&&|\|\|)[() \t]*{comparison})*[() \t]*\{{[ \t]*print[ \t]*\}}[ \t]*'
-    if 'push' in pipeline[1] or not re.fullmatch(expression, pipeline[1]):
-        return command
-    return command[:pipeline.start(1)] + 'awk_filter_data' + command[pipeline.end(1):]
+
+    def data(pipeline):
+        if 'push' in pipeline[2] or not re.fullmatch(expression, pipeline[2]):
+            return pipeline[0]
+        return pipeline[1] + 'awk_filter_data'
+
+    return re.sub(r"(?:^|(?<=[;&|(]))([ \t]*ps[ \t]+-eo[ \t]+[a-z]+(?:,[a-z]+)*[ \t]*\|[ \t]*awk[ \t]+)"
+                  r"'([^'\r\n]*)'(?=[ \t]*(?:$|;|&&|\|\||\)))", data, command)
 
 
 def git_push(command):

@@ -39,6 +39,10 @@ PY"""
             '''ps -eo pid,args | awk '$3 == "git" && $0 ~ /merge/ {print}' ''',
             '''ps -eo pid,args | awk '$2 == "git" && $1 > 0 {print}' ''',
             '''\tps\t-eo pid,args |\tawk '($4 == "git") {print}'\t''',
+            '''ps -eo pid,args | awk '$3 == "git" && $0 ~ /merge/ {print}'\n''',
+            '''ps -eo pid,args | awk '$3 == "git" && $0 ~ /merge/ {print}'; true''',
+            '''cd /w && git rev-parse HEAD && git status --porcelain; printf 'ACTIVE\\n'; '''
+            '''ps -eo pid,ppid,comm,args | awk '$3 == "git" && $0 ~ / (merge|commit|apply|cherry-pick|rebase)( |$)/ {print}' ''',
         ):
             with self.subTest(command=command):
                 self.assertEqual(self.admission(command), {})
@@ -46,9 +50,9 @@ PY"""
     def test_unsupported_pipeline_shapes_keep_original_classification(self):
         command = '''ps -eo pid,args | awk '$3 == "git" && $0 ~ /merge/ {print}' '''
         for candidate in (
-            command + '\n', command.replace('ps -eo pid,args', 'ps -ef'),
+            command.replace('ps -eo pid,args', 'ps -ef'),
             command.replace('ps ', 'env ps ', 1), command.replace('ps ', 'ps\n', 1),
-            command + ' processes.txt', command + ' | cat', command + '; true',
+            command + ' processes.txt', command + ' | cat', command + ' & true',
             '''awk '$3 == "git" {print}' ''', 'ps -ef | awk \'{print}\'',
             'printf plain | sort', 'echo plain',
         ):
@@ -74,7 +78,8 @@ PY"""
             '''git awk '$3 == "git" {print}' $'push' ''',
             filter_command + '; git push origin HEAD',
             filter_command + ' && git push origin HEAD',
-            filter_command + ' | bash -c "git push"',
+            filter_command + ' | bash -c "git push"', filter_command + ' | sh; git push',
+            '''ps -eo pid,args | awk '$1 ~ /x/ {system("git push")}' ''',
             '''printf 'git pu%s\\n' sh | awk '$1 == "git" {print}' | bash''',
             '''echo "$(ps -ef | awk '$1 == "git" {print}')"; git $'push' ''',
         ):

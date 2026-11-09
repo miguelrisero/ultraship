@@ -33,6 +33,28 @@ class WriterHeredocTests(unittest.TestCase):
                 script = indent + body.replace('\n', '\n' + indent).rstrip('\t')
                 self.assertFalse(self.denied(f'python3 - {operator}{delimiter}\n{script}{indent}EOF\n'))
 
+    def test_inert_python_file_edit_is_file_text(self):
+        body = ("p = '.github/scripts/merge-queue-gate-status.test.mjs'\n"
+                "s = open(p).read()\n"
+                "s = s.replace('hits.push(a)', 'signals.push({ b: `${c}` })')  # an auto-merge request can merge\n"
+                "open(p, 'w').write(s)\n")
+        for header in ("python3 - <<'EOF'", 'python3 - <<"EOF"', 'python3 - <<\\EOF', "python3 -I - <<'EOF'",
+                       "cd /w/lane-1 && python3 - <<'EOF'"):
+            with self.subTest(header=header):
+                self.assertFalse(self.denied(f'{header}\nimport re, json\nfrom pathlib import Path\n{body}EOF\n'))
+
+    def test_python_that_can_reach_a_process_keeps_the_scan(self):
+        for body in ("__import__('os').system('git push')", "import sys\nsys.modules['os'].system('git push')",
+                     "().__class__.__base__.__subclasses__()  # git push", "exec('git push')",
+                     "eval('git push')", "getattr(open, 'git push')", "from os import system\nsystem('git push')",
+                     "import importlib\nimportlib.import_module('os').system('git push')",
+                     "from . import x  # git push", "help('git push')", "print(__builtins__)  # git push"):
+            with self.subTest(body=body):
+                self.assertTrue(self.denied(f"python3 - <<'EOF'\n{body}\nEOF\n"))
+        self.assertTrue(self.denied("python3 - <<EOF\nprint('$(git push)')\nEOF\n"))
+        self.assertTrue(self.denied("python3 - <<'EOF'\nprint('git push')\nEOF\ngit push origin HEAD\n"))
+        self.assertTrue(self.denied("cd /w && git push && python3 - <<'EOF'\nprint(1)\nEOF\n"))
+
     def test_real_push_after_heredoc_is_denied(self):
         for operator, delimiter, indent in (('<<', "'EOF'", ''), ('<<', 'EOF', ''),
                                             ('<<-', 'EOF', '\t')):
