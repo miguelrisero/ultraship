@@ -258,8 +258,8 @@ def cat_heredoc_data(command):
         candidate = lines[end].lstrip('\t') if strip_tabs else lines[end]
         if candidate.removesuffix('\n') == end_marker:
             remainder = ''.join(lines[end + 1:])
-            ruff = (r'(?:uv[ \t]+run(?:[ \t]+--[A-Za-z0-9_][A-Za-z0-9./_=\-]*'
-                    r'(?:[ \t]+[A-Za-z0-9./_=\-]+)?)*[ \t]+)?'
+            ruff = (r'(?:uv[ \t]+run(?:[ \t]+(?:--(?:frozen|locked|offline|no-sync|quiet)|-q|'
+                    r'--(?:directory|project)[ \t]+[A-Za-z0-9./_\-]+))*[ \t]+)?'
                     r'ruff[ \t]+(?:check|format)(?:[ \t]+[A-Za-z0-9./_=\-]+)*')
             if not read_only_shell(remainder) and not all(
                     read_only_shell(segment) or re.fullmatch(ruff, segment)
