@@ -23,6 +23,13 @@ class WriterPublicationReceiptTests(unittest.TestCase):
             capture_output=True, text=True, check=True)
         return json.loads(result.stdout) if result.stdout.strip() else {}
 
+    def assertAdmitted(self, command):
+        output = self.admission(command)['hookSpecificOutput']
+        self.assertNotIn('permissionDecision', output)
+        rewritten = output['updatedInput']['command']
+        self.assertTrue(rewritten.startswith('export GIT_CONFIG_COUNT='))
+        self.assertTrue(rewritten.endswith('\n' + command))
+
     def test_local_python_receipt_with_false_publication_field_is_admitted(self):
         command = """python3 -I - <<'PY'
 from pathlib import Path
@@ -32,7 +39,7 @@ assert subprocess.check_output(['git', 'status', '--porcelain']) == b''
 receipt = {'byte_count': len(committed), 'pushed': False}
 Path('receipt.json').write_text(json.dumps(receipt) + '\\n')
 PY"""
-        self.assertEqual(self.admission(command), {})
+        self.assertAdmitted(command)
 
     def test_literal_awk_field_filters_are_admitted(self):
         for command in (
@@ -45,7 +52,7 @@ PY"""
             '''ps -eo pid,ppid,comm,args | awk '$3 == "git" && $0 ~ / (merge|commit|apply|cherry-pick|rebase)( |$)/ {print}' ''',
         ):
             with self.subTest(command=command):
-                self.assertEqual(self.admission(command), {})
+                self.assertAdmitted(command)
 
     def test_unsupported_pipeline_shapes_keep_original_classification(self):
         command = '''ps -eo pid,args | awk '$3 == "git" && $0 ~ /merge/ {print}' '''

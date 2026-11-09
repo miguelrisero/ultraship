@@ -440,17 +440,27 @@ def load_ledger():
     return module
 
 
-def writer_gh_denial(command):
-    command = command.replace('\\\n', '')
-    if not GH_WRITE_COMMAND.search(command):
+def writer_gh_denial(command, depth=0):
+    command = cat_heredoc_data(command).replace('\\\n', '')
+    unquoted = re.sub(r'''['"\\]''', '', command)
+    if not re.search(r'\bgh\b', unquoted):
         return None
+    if depth >= 4:
+        return 'Writers cannot run deeply nested GitHub commands.'
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace = ' \t\r'
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
-        return 'Writers cannot run a command with unclosed shell quoting.'
+        if re.search(r'gh\W+(api|repo|alias|extension)\b', unquoted):
+            return 'Writers cannot run a GitHub command with unclosed shell quoting.'
+        return None
+    for token in tokens:
+        if any(char.isspace() or char in ';&|()' for char in token):
+            reason = writer_gh_denial(token, depth + 1)
+            if reason:
+                return reason
     segments, segment = [], []
     for token in tokens:
         if token and all(char in ';&|\n()' for char in token):
@@ -466,9 +476,12 @@ def writer_gh_denial(command):
             arguments = words[index + 1:]
             if arguments[:2] == ['repo', 'sync']:
                 return 'Writers cannot sync GitHub repositories.'
+            if (arguments[:1] == ['alias'] and arguments[1:2] in (['set'], ['import'])) or (
+                    arguments[:1] == ['extension'] and arguments[1:2] in (['install'], ['upgrade'], ['exec'])):
+                return 'Writers cannot configure GitHub aliases or install or execute GitHub extensions.'
             if not arguments or arguments[0] != 'api':
                 continue
-            methods, fields, endpoint = [], False, ''
+            methods, fields, endpoints = [], False, []
             cursor = 1
             while cursor < len(arguments):
                 argument = arguments[cursor]
@@ -483,12 +496,13 @@ def writer_gh_denial(command):
                     fields = True
                     if argument in ('-f', '-F', '--field', '--raw-field', '--input'):
                         cursor += 1
-                elif argument in ('-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache'):
+                elif argument in ('-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache',
+                                  '-p', '--preview'):
                     cursor += 1
-                elif not argument.startswith('-') and not endpoint:
-                    endpoint = argument
+                elif not argument.startswith('-'):
+                    endpoints.append(argument.strip('/'))
                 cursor += 1
-            if fields and endpoint.strip('/') == 'graphql':
+            if fields and 'graphql' in endpoints:
                 return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
             if any(method not in ('GET', 'HEAD') for method in methods) or (
                     fields and (not methods or any(method != 'GET' for method in methods))):
@@ -497,7 +511,7 @@ def writer_gh_denial(command):
 
 
 def writer_command(command):
-    # ponytail: env clearing, git -c, explicit pushurl, direct ssh, and writable-token HTTP bypass this; upgrade to an isolated read-only credential (owner Input a464c49b).
+    # ponytail: env clearing, git -c, explicit pushurl, direct ssh, writable-token HTTP, and existing gh aliases and extensions bypass this; upgrade to an isolated read-only credential (owner Input a464c49b).
     try:
         count = int(os.environ.get('GIT_CONFIG_COUNT') or '0')
         if count < 0:

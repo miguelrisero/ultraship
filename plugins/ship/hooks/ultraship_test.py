@@ -467,6 +467,42 @@ class WriterPushEnvironmentTests(unittest.TestCase):
                 result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
                 self.assertTrue(denied(result), command)
 
+    def test_writer_nested_and_quoted_gh_writes_are_denied(self):
+        commands = ('bash -c "gh api -X POST repos/o/r/issues"', "sh -c 'gh repo sync'",
+                    'eval "gh api --method PATCH repos/o/r"', "'gh' api -X POST repos/o/r",
+                    'g""h api -X DELETE repos/o/r', 'zsh -c "x=1; gh api -XPUT repos/o/r"')
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_alias_and_extension_mutations_are_denied(self):
+        for command in ('gh alias set write api', 'gh alias import aliases.yml',
+                        'gh extension install owner/tool', 'gh extension upgrade tool', 'gh extension exec tool'):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_preview_graphql_fields_are_denied(self):
+        for command in ('gh api -X GET -p x graphql -f query=q',
+                        'gh api -X GET --preview x graphql -F query=q',
+                        'gh api -X GET repos/o/r graphql -f query=q'):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+        command = 'gh api -X GET repos/o/r/pulls -f state=open'
+        self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_deep_gh_commands_fail_closed(self):
+        command = 'gh api repos/o/r'
+        for _ in range(5):
+            command = 'sh -c ' + shlex.quote(command)
+        self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_quoted_heredoc_data_with_apostrophe_is_admitted(self):
+        for body in ("don't run anything", "don't run gh api"):
+            command = f"cat <<'EOF' > receipt.txt\n{body}\nEOF\n"
+            with self.subTest(body=body):
+                self.assertNotEqual(ultraship.cat_heredoc_data(command), command)
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
     def test_writer_graphql_fields_are_denied_with_rest_guidance(self):
         for option in ("-f query='query { viewer { login } }'", '-F owner=x', '--field owner=x',
                        '--raw-field=owner=x', '--input query.json'):
