@@ -41,6 +41,7 @@ with tempfile.TemporaryDirectory() as tmp:
     writer = {'agent_type': 'ship:writer--sol', 'agent_id': 'w1', 'tool_name': 'Bash'}
     cat_append = ('cd /workspace/repo && cat >> backend/api/tests/integration/test_approval_expiry.py <<\'EOF\'\n'
                   'r.rpush("jobs", *[1, 2])\nEOF\n')
+    sync_write = "cat > {path} <<'EOF'\nimport os\nos.system('git push')\nEOF\n"
     ruff_remainder = ('uv run --frozen --directory backend/api ruff check --fix tests/integration/test_approval_expiry.py'
                       ' && uv run --frozen --directory backend/api ruff format tests/integration/test_approval_expiry.py')
 
@@ -94,6 +95,9 @@ with tempfile.TemporaryDirectory() as tmp:
                     cat_append + 'uv run --script f.py ruff check',
                     cat_append + 'uv run --with ./pkg ruff check',
                     cat_append + 'uv run --python f.py ruff check',
+                    sync_write.format(path='backend/api/setup.py') + 'uv run --directory backend/api ruff check',
+                    sync_write.format(path='backend/api/pyproject.toml') + 'uv run --frozen --directory backend/api ruff check',
+                    sync_write.format(path='uv.lock') + 'uv run --frozen --directory backend/api ruff check',
                     'cat <<\'EOF\' > f.sh\ngit push\nEOF\nbash f.sh',
                     'git -C $(pwd) status',
                     'git -C "$W" push', 'git -C "${W}" push origin HEAD', 'git --work-tree "$W" push',
@@ -123,6 +127,7 @@ with tempfile.TemporaryDirectory() as tmp:
         for cmd in [
                     cat_append + ruff_remainder,
                     cat_append + 'ruff format a.py && ruff check --fix a.py',
+                    sync_write.format(path='backend/api/setup.py') + 'uv run --no-sync --directory backend/api ruff check',
                     'cat <<\'EOF\' > tests/test_queue.py\nimport redis\n\ndef test_push(r):\n    r.rpush("jobs", *[1, 2])\n    assert r.lrange("jobs", 0, -1) == [b"1", b"2"]\nEOF',
                     'cat <<\'EOF\' > tests/test_queue.py\ndef test_queue(r):\n    jobs = {}\n    r.lpush("jobs", 1)\n    assert r.lrange("jobs", 0, -1) == [b"1"]\nEOF',
                     'cat <<"EOF" > f.py\nr.rpush("q", [1])\nEOF',

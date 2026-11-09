@@ -242,7 +242,7 @@ def literal_ps_awk_filter(command):
 
 
 def cat_heredoc_data(command):
-    # Quoted bodies stay literal data when only read commands or literal Ruff commands follow.
+    # ponytail: custom uv cache-keys can rebuild on other files; require --no-sync for those projects.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
     path = r'[\w./-]+'
     header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
@@ -261,9 +261,14 @@ def cat_heredoc_data(command):
             ruff = (r'(?:uv[ \t]+run(?:[ \t]+(?:--(?:frozen|locked|offline|no-sync|quiet)|-q|'
                     r'--(?:directory|project)[ \t]+[A-Za-z0-9./_\-]+))*[ \t]+)?'
                     r'ruff[ \t]+(?:check|format)(?:[ \t]+[A-Za-z0-9./_=\-]+)*')
+            segments = [part.strip() for part in re.split(r'&&|;|\n', remainder) if part.strip()]
             if not read_only_shell(remainder) and not all(
-                    read_only_shell(segment) or re.fullmatch(ruff, segment)
-                    for part in re.split(r'&&|;|\n', remainder) if (segment := part.strip())):
+                    read_only_shell(segment) or re.fullmatch(ruff, segment) for segment in segments):
+                return command
+            written = Path(re.search(r'>>?[ \t]*([\w./-]+)', lines[0])[1])
+            if (written.name == 'setup.py' or written.suffix in {'.toml', '.cfg', '.lock', '.pth'}) and any(
+                    re.fullmatch(ruff, segment) and segment.split()[:2] == ['uv', 'run']
+                    and '--no-sync' not in segment.split() for segment in segments):
                 return command
             return re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
     return command
