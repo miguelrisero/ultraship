@@ -9,7 +9,6 @@ import subprocess
 import tempfile
 import uuid
 import unittest
-import shutil
 import shlex
 import sys
 from pathlib import Path
@@ -289,7 +288,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
 print('ultraship hooks: ok')
 
 
-class WriterPushEnvironmentTests(unittest.TestCase):
+class WriterGitHubGuardTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -299,107 +298,11 @@ class WriterPushEnvironmentTests(unittest.TestCase):
                         GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
         self.writer = {'agent_type': 'ship:writer--sol', 'tool_name': 'Bash'}
 
-    def rewritten(self, command):
-        original = {'command': command, 'description': 'Check writer permissions',
-                    'timeout': 120000, 'run_in_background': False}
-        result = hook('pre', {**self.writer, 'tool_input': original}, self.env)
-        self.assertIsInstance(result, dict, 'writer Bash must return a push-refusing updatedInput')
-        output = result['hookSpecificOutput']
-        self.assertEqual(output['hookEventName'], 'PreToolUse')
-        self.assertNotIn('permissionDecision', output, 'the rewrite must retain normal permission evaluation')
-        updated = output['updatedInput']
-        self.assertEqual({key: value for key, value in updated.items() if key != 'command'},
-                         {key: value for key, value in original.items() if key != 'command'})
-        return updated['command']
-
-    def git(self, *args):
-        return run(['git', *args], cwd=self.repo, env=self.env, check=True).stdout.strip()
-
-    def test_writer_script_git_push_destination_is_refused_by_inherited_env(self):
-        self.git('init', '-q')
-        remotes = ('https://github.com/example/project.git', 'http://github.com/example/project.git',
-                   'ssh://git@github.com/example/project.git', 'git://github.com/example/project.git',
-                   'git@github.com:example/project.git', 'https://test-token@github.com/example/project.git')
-        for index, remote in enumerate(remotes):
-            self.git('remote', 'add', f'remote{index}', remote)
-        tools = self.repo / 'tools'
-        tools.mkdir()
-        # Only URL resolution runs. No Git transport or push command executes.
-        (tools / 'run.py').write_text(
-            'import json, subprocess\n'
-            'print(json.dumps({"urls": [\n'
-            '    subprocess.check_output(["git", "remote", "get-url", "--push", name], text=True).strip()\n'
-            f'    for name in {tuple(f"remote{i}" for i in range(len(remotes)))!r}],\n'
-            '    "protocols": subprocess.check_output(["git", "config", "--get-regexp",\n'
-            '        r"^protocol\\..*\\.allow$"], text=True)}))\n')
-        shell = tools / 'run-task'
-        shell.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} tools/run.py\n')
-        shell.chmod(0o755)
-        (tools / 'linked-task').symlink_to(shell)
-        for command in (f'{shlex.quote(sys.executable)} tools/run.py', 'sh tools/run-task', './tools/linked-task',
-                        'PATH="$PWD/tools:$PATH" run-task'):
+    def test_writer_gh_reads_are_admitted(self):
+        for command in ('gh api repos/x/y/pulls/1', 'gh api -X GET repos/x/y/pulls/1',
+                        'gh api --method=GET repos/x/y/pulls/1', 'gh pr view 1', 'gh pr checks 1', 'gh run view 1'):
             with self.subTest(command=command):
-                rewritten = self.rewritten(command)
-                probe = run(['bash', '-c', rewritten], cwd=self.repo, env=self.env, check=True)
-                observed = json.loads(probe.stdout)
-                self.assertEqual(len(observed['urls']), len(remotes))
-                protocols = dict(line.split(None, 1) for line in observed['protocols'].splitlines())
-                for destination in observed['urls']:
-                    scheme = destination.split(':', 1)[0]
-                    self.assertEqual(protocols.get(f'protocol.{scheme}.allow'), 'never')
-
-    def test_writer_git_fetch_and_commit_still_work_with_push_refusing_env(self):
-        source = self.repo / 'source.git'
-        self.git('init', '-q', '--bare', str(source))
-        self.git('init', '-q', '-b', 'writer-work')
-        self.git('-c', 'user.name=Writer', '-c', 'user.email=writer@example.invalid',
-                 'commit', '-q', '--allow-empty', '-m', 'initial')
-        initial = self.git('rev-parse', 'HEAD')
-        self.git('--git-dir', str(source), 'fetch', str(self.repo), 'HEAD:refs/heads/source')
-        remote = 'https://github.com/example/project.git'
-        self.git('config', f'url.{source}.insteadOf', remote)
-        self.git('remote', 'add', 'origin', remote)
-        tools = self.repo / 'tools'
-        tools.mkdir()
-        (tools / 'fetch_commit.py').write_text(
-            'import json, subprocess\n'
-            'subprocess.run(["git", "fetch", "origin"], check=True)\n'
-            'subprocess.run(["git", "-c", "user.name=Writer", "-c", "user.email=writer@example.invalid",\n'
-            '                "commit", "-q", "--allow-empty", "-m", "checkpoint"], check=True)\n'
-            'result = subprocess.run(["git", "push", "origin", "HEAD:refs/heads/probe"], capture_output=True)\n'
-            'print(json.dumps({"push_returncode": result.returncode}))\n')
-        rewritten = self.rewritten(f'{shlex.quote(sys.executable)} tools/fetch_commit.py')
-        observed = json.loads(run(['bash', '-c', rewritten], cwd=self.repo, env=self.env, check=True).stdout)
-        self.assertNotEqual(observed['push_returncode'], 0)
-        self.assertEqual(self.git('--git-dir', str(source), 'for-each-ref', '--format=%(refname)',
-                                  'refs/heads/probe'), '')
-        self.assertNotEqual(self.git('rev-parse', 'HEAD'), initial)
-        self.assertEqual(self.git('log', '-1', '--format=%s'), 'checkpoint')
-        self.assertEqual(self.git('rev-parse', 'refs/remotes/origin/source'), initial)
-        self.assertEqual(self.git('remote', 'get-url', 'origin'), str(source))
-
-    def test_writer_gh_reads_keep_authentication_with_push_refusing_env(self):
-        tokens = {name: 'test-read-credential' for name in
-                  ('GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN')}
-        self.env.update(tokens)
-        binary = self.repo / 'bin'
-        binary.mkdir()
-        gh = binary / 'gh'
-        # This stand-in observes argv and credential inheritance without contacting GitHub.
-        gh.write_text(f'#!{sys.executable}\nimport json, os, sys\n'
-                      'print(json.dumps({"args": sys.argv[1:], "tokens": '
-                      '{k: os.environ.get(k) for k in ' + repr(tuple(tokens)) + '}}))\n')
-        gh.chmod(0o755)
-        self.env['PATH'] = str(binary) + os.pathsep + self.env['PATH']
-        commands = ('gh api repos/x/y/pulls/1', 'gh api -X GET repos/x/y/pulls/1',
-                    'gh api --method=GET repos/x/y/pulls/1', 'gh pr view 1', 'gh pr checks 1', 'gh run view 1')
-        for command in commands:
-            with self.subTest(command=command):
-                rewritten = self.rewritten(command)
-                observed = json.loads(run(['bash', '-c', rewritten], cwd=self.repo,
-                                          env=self.env, check=True).stdout)
-                self.assertEqual(observed['args'], command.split()[1:])
-                self.assertEqual(observed['tokens'], tokens)
+                self.assertEqual(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env), '')
 
     def test_writer_gh_reads_are_admitted_independently_of_rewrite(self):
         commands = (
@@ -419,33 +322,6 @@ class WriterPushEnvironmentTests(unittest.TestCase):
             command = f'gh api -X GET search/issues {option}'
             with self.subTest(command=command):
                 self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
-
-    def test_writer_rewrite_preserves_shell_bodies_and_exit_status(self):
-        cases = (("cat <<'EOF' > f\nx\nEOF", 0, ''), ('echo a # c', 0, 'a\n'), ('exit 3', 3, ''))
-        for shell in ('bash', 'zsh'):
-            for command, returncode, stdout in cases:
-                with self.subTest(shell=shell, command=command):
-                    executable = shutil.which(shell)
-                    if executable is None:
-                        self.skipTest(f'{shell} is absent')
-                    rewritten = self.rewritten(command)
-                    result = run([executable, '-c', rewritten], cwd=self.repo, env=self.env)
-                    self.assertEqual(result.returncode, returncode, result.stderr)
-                    self.assertEqual(result.stdout, stdout)
-                    if command.startswith('cat '):
-                        self.assertEqual((self.repo / 'f').read_text(), 'x\n')
-                        (self.repo / 'f').unlink()
-
-    def test_writer_rewrite_preserves_inherited_git_config(self):
-        self.git('init', '-q')
-        self.git('remote', 'add', 'origin', 'https://github.com/example/project.git')
-        self.env.update(GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='user.name', GIT_CONFIG_VALUE_0='Inherited')
-        rewritten = self.rewritten('git config user.name; git remote get-url --push origin; git config --list')
-        result = run(['bash', '-c', rewritten], cwd=self.repo, env=self.env, check=True)
-        name, destination, *settings = result.stdout.splitlines()
-        self.assertEqual(name, 'Inherited')
-        protocols = dict(line.split('=', 1) for line in settings if line.startswith('protocol.'))
-        self.assertEqual(protocols.get(f'protocol.{destination.split(":", 1)[0]}.allow'), 'never')
 
     def test_writer_gh_writes_remain_denied(self):
         commands = ['gh repo sync x/y', 'cd /repo && gh repo sync x/y']
@@ -480,6 +356,35 @@ class WriterPushEnvironmentTests(unittest.TestCase):
                         'gh extension install owner/tool', 'gh extension upgrade tool', 'gh extension exec tool'):
             with self.subTest(command=command):
                 self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_extension_alias_forms_are_denied(self):
+        for group in ('extension', 'extensions', 'ext', 'alias'):
+            for action in ('remove', 'create', 'custom'):
+                for suffix in ('', " '"):
+                    command = f'gh {group} {action} tool{suffix}'
+                    with self.subTest(command=command):
+                        self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+        for group, actions in (('extension', ('list', 'search', 'browse')),
+                               ('extensions', ('list', 'search', 'browse')),
+                               ('ext', ('list', 'search', 'browse')), ('alias', ('list',))):
+            for action in actions:
+                command = f'gh {group} {action}'
+                with self.subTest(command=command):
+                    self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_gh_configuration_edits_are_denied(self):
+        custom = self.repo / 'custom-gh'
+        self.env['GH_CONFIG_DIR'] = str(custom)
+        for root in (self.repo / '.config/gh', custom):
+            for tool in ('Edit', 'Write', 'NotebookEdit'):
+                key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+                target = str(root / 'hosts.yml')
+                with self.subTest(tool=tool, target=target):
+                    self.assertTrue(denied(hook('pre', {**self.writer, 'tool_name': tool,
+                                                      'tool_input': {key: target}}, self.env)))
+        for target in (self.repo / '.config/gh-other/hosts.yml', self.repo / 'custom-gh-other/hosts.yml'):
+            self.assertFalse(denied(hook('pre', {**self.writer, 'tool_name': 'Write',
+                                                'tool_input': {'file_path': str(target)}}, self.env)))
 
     def test_writer_preview_graphql_fields_are_denied(self):
         for command in ('gh api -X GET -p x graphql -f query=q',

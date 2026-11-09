@@ -440,6 +440,7 @@ def load_ledger():
     return module
 
 
+# ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
 def writer_gh_denial(command, depth=0):
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = re.sub(r'''['"\\]''', '', command)
@@ -453,8 +454,13 @@ def writer_gh_denial(command, depth=0):
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
-        if re.search(r'gh\W+(api|repo|alias|extension)\b', unquoted):
+        if re.search(r'gh\W+(api|repo)\b', unquoted):
             return 'Writers cannot run a GitHub command with unclosed shell quoting.'
+        groups = re.finditer(r'\bgh\W+(alias|extensions?|ext)\b(?:\s+([\w-]+))?', unquoted)
+        for group in groups:
+            allowed = ('list',) if group[1] == 'alias' else ('list', 'search', 'browse')
+            if group[2] not in allowed:
+                return 'Writers cannot configure GitHub aliases or install or execute GitHub extensions.'
         return None
     for token in tokens:
         if any(char.isspace() or char in ';&|()' for char in token):
@@ -476,8 +482,9 @@ def writer_gh_denial(command, depth=0):
             arguments = words[index + 1:]
             if arguments[:2] == ['repo', 'sync']:
                 return 'Writers cannot sync GitHub repositories.'
-            if (arguments[:1] == ['alias'] and arguments[1:2] in (['set'], ['import'])) or (
-                    arguments[:1] == ['extension'] and arguments[1:2] in (['install'], ['upgrade'], ['exec'])):
+            if (arguments[:1] == ['alias'] and arguments[1:2] != ['list']) or (
+                    arguments[:1] in (['extension'], ['extensions'], ['ext'])
+                    and arguments[1:2] not in (['list'], ['search'], ['browse'])):
                 return 'Writers cannot configure GitHub aliases or install or execute GitHub extensions.'
             if not arguments or arguments[0] != 'api':
                 continue
@@ -510,24 +517,6 @@ def writer_gh_denial(command, depth=0):
     return None
 
 
-def writer_command(command):
-    # ponytail: env clearing, git -c, explicit pushurl, direct ssh, writable-token HTTP, and existing gh aliases and extensions bypass this; upgrade to an isolated read-only credential (owner Input a464c49b).
-    try:
-        count = int(os.environ.get('GIT_CONFIG_COUNT') or '0')
-        if count < 0:
-            raise ValueError
-    except ValueError:
-        deny('Writers require a valid inherited GIT_CONFIG_COUNT.')
-    settings = [('url.ultraship-denied://writer.invalid/.pushInsteadOf', prefix)
-                for prefix in ('https://', 'http://', 'ssh://', 'git://', 'git@')]
-    settings.append(('protocol.ultraship-denied.allow', 'never'))
-    exports = [f'GIT_CONFIG_COUNT={count + len(settings)}']
-    for index, (key, value) in enumerate(settings, count):
-        exports.extend((f'GIT_CONFIG_KEY_{index}={shlex.quote(key)}',
-                        f'GIT_CONFIG_VALUE_{index}={shlex.quote(value)}'))
-    return 'export ' + ' '.join(exports) + '\n' + command
-
-
 def pre(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
@@ -545,14 +534,17 @@ def pre(data):
             reason = writer_gh_denial(tin.get('command', ''))
             if reason:
                 deny(reason)
-            print(json.dumps({'hookSpecificOutput': {
-                'hookEventName': 'PreToolUse',
-                'updatedInput': {**tin, 'command': writer_command(tin.get('command', ''))}}}))
-            return
         target = tin.get('file_path') or tin.get('notebook_path') or ''
         if tool in ('Edit', 'Write', 'NotebookEdit') and (
                 HARNESS_PATH.search(target) or target.startswith(str(Path.home() / '.claude') + '/')):
             deny('Writers do not edit harness configuration.')
+        if tool in ('Edit', 'Write', 'NotebookEdit'):
+            gh_paths = [Path.home() / '.config/gh']
+            if os.environ.get('GH_CONFIG_DIR'):
+                gh_paths.append(Path(os.environ['GH_CONFIG_DIR']))
+            destination = Path(target).expanduser().resolve()
+            if any(destination.is_relative_to(path.expanduser().resolve()) for path in gh_paths):
+                deny('Writers do not edit GitHub CLI configuration.')
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
         counter.parent.mkdir(parents=True, exist_ok=True)
