@@ -34,13 +34,14 @@ An authoritative mismatch blocks access and cannot use fallback.
 Check the relayed record's internal consistency, answer, and exact scope; refuse stale, superseded, cancelled, inconsistent, or invented provenance.
 Block every protected read on a missing record, missing field, or mismatch.
 Require the CoC-approved exact allowlist of row-file paths and unique row IDs from the PR's own failing anchor CI evidence.
-Require the recorded base SHA and frozen SHA after the edit before any protected read.
+Require the recorded base SHA, author head SHA, and frozen SHA after the edit before any protected read.
 Require the brief to name two read-only trees: one at the base SHA and one at the frozen SHA after the edit.
 Read rows only inside those two trees.
 Require every supplied diff to leave out the row-file hunks.
 Require the recorded diff between the base SHA and frozen SHA after the edit to show that the PR's own subject change breaks each named row.
-Bind CI evidence to the repository, PR, base SHA, frozen SHA after the edit, tested merge SHA/tree, run ID, attempt, and job ID/name.
-Require the tested merge to contain the recorded base SHA and frozen SHA after the edit.
+Bind CI evidence to the repository, PR, base SHA, author head SHA, tested merge SHA/tree, run ID, attempt, and job ID/name.
+Require the tested merge to contain the recorded base SHA and author head SHA.
+Require the frozen SHA after the edit to contain the author head SHA.
 Bind each row to its CI-named subject file.
 Refuse stale, ambiguous, unrelated, or unlawfully obtained scope or evidence before any protected read.
 Permit locating each named row by its row ID inside its named file in each named read-only tree.
