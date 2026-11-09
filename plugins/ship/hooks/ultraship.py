@@ -242,7 +242,7 @@ def literal_ps_awk_filter(command):
 
 
 def cat_heredoc_data(command):
-    # A quoted delimiter makes the body literal data; executable remainders keep the full scan.
+    # Quoted bodies are literal data unless a later interpreter or executable can consume the written file.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
     path = r'[\w./-]+'
     header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
@@ -258,7 +258,10 @@ def cat_heredoc_data(command):
         candidate = lines[end].lstrip('\t') if strip_tabs else lines[end]
         if candidate.removesuffix('\n') == end_marker:
             remainder = ''.join(lines[end + 1:])
-            return lines[0] + remainder if read_only_shell(remainder) else command
+            if re.search(r'(?:^|[;&|(\n])[ \t]*(?:(?:bash|sh|zsh|dash|ksh|fish|source|\.|exec|eval|xargs|env|'
+                         r'python|python3|node|perl|ruby|chmod)(?=$|[\s;&|()])|\./|/)', remainder):
+                return command
+            return re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
     return command
 
 

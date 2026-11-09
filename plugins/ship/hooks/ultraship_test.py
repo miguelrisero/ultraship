@@ -39,6 +39,10 @@ assert time.monotonic() - started < 0.1
 with tempfile.TemporaryDirectory() as tmp:
     env = {**os.environ, 'XDG_STATE_HOME': tmp, 'HOME': tmp}
     writer = {'agent_type': 'ship:writer--sol', 'agent_id': 'w1', 'tool_name': 'Bash'}
+    cat_append = ('cd /workspace/repo && cat >> backend/api/tests/integration/test_approval_expiry.py <<\'EOF\'\n'
+                  'r.rpush("jobs", *[1, 2])\nEOF\n')
+    ruff_remainder = ('uv run --frozen --directory backend/api ruff check --fix tests/integration/test_approval_expiry.py'
+                      ' && uv run --frozen --directory backend/api ruff format tests/integration/test_approval_expiry.py')
 
     assert denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol', 'model': 'opus'}}, env))
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol'}}, env))
@@ -70,6 +74,12 @@ with tempfile.TemporaryDirectory() as tmp:
                     'cat <<\'EOF\' > $X\ngit push\nEOF',
                     'cat <<\'EOF\' >| f.py\ngit push\nEOF',
                     'cat <<\'EOF\' > f.py\ngit push',
+                    'cat >> f.py <<\'EOF\'; git push\nr.rpush("q", 1)\nEOF',
+                    cat_append + 'git push origin HEAD',
+                    cat_append + 'ruff format x && git push',
+                    cat_append + "bash -c 'git push'",
+                    cat_append + 'python3 f.py',
+                    cat_append + "sh -c 'x'",
                     'cat <<\'EOF\' > f.sh\ngit push\nEOF\nbash f.sh',
                     'git -C $(pwd) status',
                     'git -C "$W" push', 'git -C "${W}" push origin HEAD', 'git --work-tree "$W" push',
@@ -97,6 +107,7 @@ with tempfile.TemporaryDirectory() as tmp:
                     'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
         for cmd in [
+                    cat_append + ruff_remainder,
                     'cat <<\'EOF\' > tests/test_queue.py\nimport redis\n\ndef test_push(r):\n    r.rpush("jobs", *[1, 2])\n    assert r.lrange("jobs", 0, -1) == [b"1", b"2"]\nEOF',
                     'cat <<\'EOF\' > tests/test_queue.py\ndef test_queue(r):\n    jobs = {}\n    r.lpush("jobs", 1)\n    assert r.lrange("jobs", 0, -1) == [b"1"]\nEOF',
                     'cat <<"EOF" > f.py\nr.rpush("q", [1])\nEOF',
