@@ -386,6 +386,42 @@ class WriterGitHubGuardTests(unittest.TestCase):
             self.assertFalse(denied(hook('pre', {**self.writer, 'tool_name': 'Write',
                                                 'tool_input': {'file_path': str(target)}}, self.env)))
 
+    def test_writer_gh_auth_and_config_writes_are_denied(self):
+        for command in ('gh auth token', 'gh auth login --with-token', 'gh auth setup-git',
+                        'gh config set editor vim', 'gh config clear-cache'):
+            for suffix in ('', " '"):
+                with self.subTest(command=command, suffix=suffix):
+                    self.assertTrue(denied(hook('pre', {**self.writer,
+                                                      'tool_input': {'command': command + suffix}}, self.env)))
+        for command in ('gh auth status', 'gh config get git_protocol', 'gh config list'):
+            with self.subTest(command=command):
+                self.assertEqual(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env), '')
+
+    def test_writer_xdg_gh_configuration_edits_are_denied(self):
+        self.env['XDG_CONFIG_HOME'] = str(self.repo / 'xdg')
+        for tool in ('Edit', 'Write', 'NotebookEdit'):
+            key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+            with self.subTest(tool=tool):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_name': tool,
+                    'tool_input': {key: str(self.repo / 'xdg/gh/hosts.yml')}}, self.env)))
+
+    def test_writer_relative_gh_configuration_targets_use_tool_cwd(self):
+        self.env['GH_CONFIG_DIR'] = str(self.repo / 'cli')
+        for tool in ('Edit', 'Write', 'NotebookEdit'):
+            key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+            with self.subTest(tool=tool):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_name': tool, 'cwd': str(self.repo),
+                    'tool_input': {key: 'cli/hosts.yml'}}, self.env)))
+
+    def test_writer_relative_gh_configuration_targets_use_process_cwd(self):
+        self.env['GH_CONFIG_DIR'] = str(self.repo / 'cli')
+        for tool in ('Edit', 'Write', 'NotebookEdit'):
+            key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+            payload = {**self.writer, 'tool_name': tool, 'tool_input': {key: 'cli/hosts.yml'}}
+            with self.subTest(tool=tool):
+                result = run([sys.executable, str(HOOK), 'pre'], payload, cwd=self.repo, env=self.env, check=True)
+                self.assertTrue(denied(json.loads(result.stdout)) if result.stdout.strip() else False)
+
     def test_writer_preview_graphql_fields_are_denied(self):
         for command in ('gh api -X GET -p x graphql -f query=q',
                         'gh api -X GET --preview x graphql -F query=q',

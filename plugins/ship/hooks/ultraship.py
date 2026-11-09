@@ -440,7 +440,7 @@ def load_ledger():
     return module
 
 
-# ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
+# ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, Bash writes to gh configuration, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
 def writer_gh_denial(command, depth=0):
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = re.sub(r'''['"\\]''', '', command)
@@ -456,9 +456,10 @@ def writer_gh_denial(command, depth=0):
     except ValueError:
         if re.search(r'gh\W+(api|repo)\b', unquoted):
             return 'Writers cannot run a GitHub command with unclosed shell quoting.'
-        groups = re.finditer(r'\bgh\W+(alias|extensions?|ext)\b(?:\s+([\w-]+))?', unquoted)
+        groups = re.finditer(r'\bgh\W+(alias|extensions?|ext|auth|config)\b(?:\s+([\w-]+))?', unquoted)
         for group in groups:
-            allowed = ('list',) if group[1] == 'alias' else ('list', 'search', 'browse')
+            allowed = {'alias': ('list',), 'auth': ('status',), 'config': ('get', 'list')}.get(
+                group[1], ('list', 'search', 'browse'))
             if group[2] not in allowed:
                 return 'Writers cannot configure GitHub aliases or install or execute GitHub extensions.'
         return None
@@ -486,6 +487,9 @@ def writer_gh_denial(command, depth=0):
                     arguments[:1] in (['extension'], ['extensions'], ['ext'])
                     and arguments[1:2] not in (['list'], ['search'], ['browse'])):
                 return 'Writers cannot configure GitHub aliases or install or execute GitHub extensions.'
+            if (arguments[:1] == ['auth'] and arguments[1:2] != ['status']) or (
+                    arguments[:1] == ['config'] and arguments[1:2] not in (['get'], ['list'])):
+                return 'Writers cannot access GitHub credentials or change GitHub CLI configuration.'
             if not arguments or arguments[0] != 'api':
                 continue
             methods, fields, endpoints = [], False, []
@@ -542,7 +546,12 @@ def pre(data):
             gh_paths = [Path.home() / '.config/gh']
             if os.environ.get('GH_CONFIG_DIR'):
                 gh_paths.append(Path(os.environ['GH_CONFIG_DIR']))
-            destination = Path(target).expanduser().resolve()
+            if os.environ.get('XDG_CONFIG_HOME'):
+                gh_paths.append(Path(os.environ['XDG_CONFIG_HOME']) / 'gh')
+            destination = Path(target).expanduser()
+            if not destination.is_absolute():
+                destination = Path(data.get('cwd') or Path.cwd()) / destination
+            destination = destination.resolve()
             if any(destination.is_relative_to(path.expanduser().resolve()) for path in gh_paths):
                 deny('Writers do not edit GitHub CLI configuration.')
     if role(data, 'researcher') and DISCOVERY.match(tool):
