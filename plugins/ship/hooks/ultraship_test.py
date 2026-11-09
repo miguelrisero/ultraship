@@ -8,6 +8,7 @@ import re
 import subprocess
 import tempfile
 import uuid
+import unittest
 from pathlib import Path
 
 HOOK = Path(__file__).resolve().parent / 'ultraship.py'
@@ -25,7 +26,7 @@ def hook(mode, payload, env):
 
 
 def denied(result):
-    return isinstance(result, dict) and result['hookSpecificOutput']['permissionDecision'] == 'deny'
+    return isinstance(result, dict) and result['hookSpecificOutput'].get('permissionDecision') == 'deny'
 
 
 spec = importlib.util.spec_from_file_location('ultraship', HOOK)
@@ -283,3 +284,126 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     assert hook('stop', session, env) == ''
 
 print('ultraship hooks: ok')
+
+
+class WriterPushEnvironmentTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.repo = Path(self.temporary.name)
+        self.env = {**os.environ, 'HOME': str(self.repo), 'XDG_STATE_HOME': str(self.repo),
+                    'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull}
+        self.writer = {'agent_type': 'ship:writer--sol', 'tool_name': 'Bash'}
+
+    def rewritten(self, command):
+        original = {'command': command, 'description': 'Check writer permissions',
+                    'timeout': 120000, 'run_in_background': False}
+        result = hook('pre', {**self.writer, 'tool_input': original}, self.env)
+        self.assertIsInstance(result, dict, 'writer Bash must return a push-refusing updatedInput')
+        output = result['hookSpecificOutput']
+        self.assertEqual(output['hookEventName'], 'PreToolUse')
+        self.assertNotIn('permissionDecision', output, 'the rewrite must retain normal permission evaluation')
+        updated = output['updatedInput']
+        self.assertEqual({key: value for key, value in updated.items() if key != 'command'},
+                         {key: value for key, value in original.items() if key != 'command'})
+        self.assertNotEqual(updated['command'], command)
+        return updated['command']
+
+    def git(self, *args):
+        return run(['git', *args], cwd=self.repo, env=self.env, check=True).stdout.strip()
+
+    def test_writer_script_git_push_destination_is_refused_by_inherited_env(self):
+        self.git('init', '-q')
+        remotes = ('https://github.com/example/project.git', 'ssh://git@github.com/example/project.git',
+                   'git@github.com:example/project.git')
+        for index, remote in enumerate(remotes):
+            self.git('remote', 'add', f'remote{index}', remote)
+        tools = self.repo / 'tools'
+        tools.mkdir()
+        # Only URL resolution runs. No Git transport or push command executes.
+        (tools / 'run.py').write_text(
+            'import json, os, subprocess\n'
+            'print(json.dumps({"count": os.environ.get("GIT_CONFIG_COUNT"), "urls": [\n'
+            '    subprocess.check_output(["git", "remote", "get-url", "--push", name], text=True).strip()\n'
+            '    for name in ("remote0", "remote1", "remote2")],\n'
+            '    "protocols": subprocess.check_output(["git", "config", "--get-regexp",\n'
+            '        r"^protocol\\..*\\.allow$"], text=True)}))\n')
+        shell = tools / 'run-task'
+        shell.write_text('#!/bin/sh\nexec python3 tools/run.py\n')
+        shell.chmod(0o755)
+        (tools / 'linked-task').symlink_to(shell)
+        for command in ('python3 tools/run.py', 'sh tools/run-task', './tools/linked-task',
+                        'PATH="$PWD/tools:$PATH" run-task'):
+            with self.subTest(command=command):
+                rewritten = self.rewritten(command)
+                probe = run(['bash', '-c', rewritten], cwd=self.repo, env=self.env, check=True)
+                observed = json.loads(probe.stdout)
+                self.assertGreater(int(observed['count']), 0)
+                self.assertEqual(len(observed['urls']), len(remotes))
+                protocols = dict(line.split(None, 1) for line in observed['protocols'].splitlines())
+                for destination in observed['urls']:
+                    self.assertRegex(destination, r'^[A-Za-z][A-Za-z0-9+.-]*://[^/]*\.invalid(?:/|$)')
+                    scheme = destination.split(':', 1)[0]
+                    self.assertEqual(protocols.get(f'protocol.{scheme}.allow'), 'never')
+
+    def test_writer_git_fetch_and_commit_still_work_with_push_refusing_env(self):
+        source = self.repo / 'source.git'
+        self.git('init', '-q', '--bare', str(source))
+        self.git('init', '-q', '-b', 'writer-work')
+        self.git('-c', 'user.name=Writer', '-c', 'user.email=writer@example.invalid',
+                 'commit', '-q', '--allow-empty', '-m', 'initial')
+        initial = self.git('rev-parse', 'HEAD')
+        self.git('--git-dir', str(source), 'fetch', str(self.repo), 'HEAD:refs/heads/source')
+        self.git('remote', 'add', 'origin', str(source))
+        command = ('git fetch origin && git -c user.name=Writer -c user.email=writer@example.invalid '
+                   'commit -q --allow-empty -m checkpoint')
+        rewritten = self.rewritten(command)
+        run(['bash', '-c', rewritten], cwd=self.repo, env=self.env, check=True)
+        self.assertNotEqual(self.git('rev-parse', 'HEAD'), initial)
+        self.assertEqual(self.git('log', '-1', '--format=%s'), 'checkpoint')
+        self.assertEqual(self.git('rev-parse', 'refs/remotes/origin/source'), initial)
+        self.assertEqual(self.git('remote', 'get-url', 'origin'), str(source))
+
+    def test_writer_gh_reads_keep_authentication_with_push_refusing_env(self):
+        tokens = {name: 'test-read-credential' for name in
+                  ('GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN')}
+        self.env.update(tokens)
+        binary = self.repo / 'bin'
+        binary.mkdir()
+        gh = binary / 'gh'
+        # This stand-in observes argv and credential inheritance without contacting GitHub.
+        gh.write_text(f'#!{os.sys.executable}\nimport json, os, sys\n'
+                      'print(json.dumps({"args": sys.argv[1:], "tokens": '
+                      '{k: os.environ.get(k) for k in ' + repr(tuple(tokens)) + '}}))\n')
+        gh.chmod(0o755)
+        self.env['PATH'] = str(binary) + os.pathsep + self.env['PATH']
+        commands = ('gh api repos/x/y/pulls/1', 'gh api -X GET repos/x/y/pulls/1',
+                    'gh api --method=GET repos/x/y/pulls/1', 'gh pr view 1', 'gh pr checks 1', 'gh run view 1')
+        for command in commands:
+            with self.subTest(command=command):
+                rewritten = self.rewritten(command)
+                observed = json.loads(run(['bash', '-c', rewritten], cwd=self.repo,
+                                          env=self.env, check=True).stdout)
+                self.assertEqual(observed['args'], command.split()[1:])
+                self.assertEqual(observed['tokens'], tokens)
+
+    def test_writer_gh_writes_remain_denied(self):
+        commands = ['gh pr merge 1 --squash', 'gh repo sync x/y', 'cd /repo && gh repo sync x/y']
+        for method in ('POST', 'PUT', 'PATCH', 'DELETE', 'post', 'pAtCh'):
+            for option in (f'-X {method}', f'--method {method}', f'-X{method}', f'--method={method}'):
+                commands.extend((f'gh api {option} repos/x/y/pulls/1',
+                                 f'gh api repos/x/y/pulls/1 {option}'))
+        for option in ('-f title=value', '-F title=value', '--field title=value', '--raw-field title=value',
+                       '--input payload.json', '-ftitle=value', '-Ftitle=value', '--field=title=value',
+                       '--raw-field=title=value', '--input=payload.json'):
+            commands.extend((f'gh api {option} repos/x/y/pulls/1',
+                             f'gh api repos/x/y/pulls/1 {option}',
+                             f'gh api -X GET repos/x/y/pulls/1 {option}'))
+        for command in commands:
+            with self.subTest(command=command):
+                result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
+                self.assertTrue(denied(result), command)
+
+
+if __name__ == '__main__':
+    unittest.main()
