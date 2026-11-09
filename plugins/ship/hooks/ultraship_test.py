@@ -64,6 +64,13 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'Explore', 'model': 'haiku'}}, env))
 
     for agent in ['ship:writer--sol', 'ship:writer--sonnet']:
+        destination_cases = ('setup.py', 'pkg/sitecustomize.py', 'pkg/usercustomize/__init__.py',
+                             'lib/python3.13/x.py', 'x.pth', 'x.toml', 'lib/x.py', 'python3.13/x.py')
+        destination_decisions = [
+            denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {
+                'command': 'cd /repo && ' + sync_write.format(path=path) + 'ruff check'}}, env))
+            for path in destination_cases]
+        assert all(destination_decisions), (agent, list(zip(destination_cases, destination_decisions)))
         review_inputs = (
             'cd /repo/.venv/lib/python3.13/site-packages && '
             + sync_write.format(path='sitecustomize.py') + 'uv run --no-sync --project /repo ruff check',
