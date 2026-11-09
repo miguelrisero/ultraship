@@ -90,7 +90,7 @@ def quoted_variable(command, token):
     """Whether `command` references the variable `token` names only as standalone `"$NAME"` words.
 
     Other quotes must be inert literals, and the command must hold no escape, comment, heredoc, backtick, `${`
-    expansion, array assignment or arithmetic, so shlex
+    expansion, array assignment, subscript or arithmetic, so shlex
     and the shell split it the same way and no nested shell or `eval` can re-read the quoted value as code.
     """
     # A double-quoted variable cannot word-split, so it can name a folder (`git -C "$W" status`). Any other
@@ -114,8 +114,10 @@ def quoted_variable(command, token):
 
     rest = SHELL_QUOTES.sub(plain, command)
     # `${E:-:;git ...}` and `a=(git ...)` hold a `;` or `(` that shlex reads as a command start and the shell does not.
-    # Arithmetic `((...))` evaluates the quoted value as an expression, and an array subscript there runs commands.
-    return (name in found and re.search(r'[\\`\'"#]|<<|\$\{|=\(|\(\(', rest) is None
+    # Arithmetic (`((...))`, `$[...]`, a `a[...]=` subscript) evaluates the quoted value as an expression, and an
+    # array subscript there runs commands. Only the standalone `[` and `]` words of a test command stay.
+    brackets = re.sub(r'(?<![^\s;&|()])[][](?![^\s;&|()])', ' ', rest)
+    return (name in found and re.search(r'[\\`\'"#[\]]|<<|\$\{|=\(|\(\(', brackets) is None
             and re.search(rf'\$(?:{name}\b|\{{{name}\b)', rest) is None)
 
 
