@@ -54,10 +54,12 @@ with tempfile.TemporaryDirectory() as tmp:
             'cd /repo/.venv/lib/python3.13/site-packages && '
             + sync_write.format(path='sitecustomize.py') + 'uv run --no-sync --project /repo ruff check',
             'cd /repo && ' + sync_write.format(path='backend.py') + 'uv run ruff check',
+            'cd /repo && ' + sync_write.format(path='backend.py') + 'uv run ruff check --no-sync',
+            'cd /repo && ' + sync_write.format(path='backend.py') + 'uv run --directory --no-sync ruff check',
         )
         decisions = [denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env))
                      for cmd in review_inputs]
-        assert decisions == [True, True], (agent, decisions, review_inputs)
+        assert decisions == [True] * len(review_inputs), (agent, decisions, review_inputs)
         for cmd in ['git push origin HEAD', 'git -C /w push origin HEAD', 'git -c core.x=y push',
                     'git --git-dir=/w/.git push', 'cd /w && git -C /w push',
                     'git -C "/a b" -c core.x=y --no-pager push', 'git --git-dir /w/.git push',
