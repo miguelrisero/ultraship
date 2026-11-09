@@ -240,7 +240,7 @@ class LockIdleTests(unittest.TestCase):
 
             try:
                 holder = start()
-                self.assertEqual(holder.stdout.readline().strip(), 'acquired')
+                self.assertIs(next_acquirer([holder]), holder)
                 waiters = [start(), start()]
                 wait_for_probe('holders=1 waiters=2')
                 release(holder)
