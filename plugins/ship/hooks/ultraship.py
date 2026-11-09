@@ -82,8 +82,12 @@ def git_push(command):
     return shell_git_push(literal_ps_awk_filter(python_heredoc_shell(command)))
 
 
-def quoted_variable(text, token):
-    """Whether every reference to the variable `token` names in `text` is a standalone `"$NAME"` word."""
+def quoted_variable(text, token, *, outer=False):
+    """Whether every reference to the variable `token` names in `text` is a standalone `"$NAME"` word.
+
+    With `outer`, references inside single quotes are literal text for a nested shell and are skipped,
+    and the text need not reference the variable at all.
+    """
     # A double-quoted variable cannot word-split, so it can name a folder (`git -C "$W" status`).
     # Any other reference (`$W`, `""$W""`, `x"$W"`, `"x $W"`) could split into `. push`, so it refuses.
     # The scan tracks real quote state; a substring test would accept the `"$W"` inside `""$W""`.
@@ -112,15 +116,18 @@ def quoted_variable(text, token):
             found, i = True, end
             continue
         i += 1
-    return found
+    return found or outer
 
 
 def shell_git_push(command):
     """Scan Git commands and shell-wrapper strings without regex backtracking."""
     values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
-              '--config-env', '--super-prefix', '--attr-source'}
+              '--config-env', '--super-prefix', '--attr-source', '--shallow-file'}
     folders = {'-C', '--git-dir', '--work-tree'}
     pending = [command]
+    # A nested shell string reaches its shell after the outer shell expands double-quoted variables, and an
+    # unquoted heredoc body expands too; either can turn a quoted outer value into inner code.
+    outer_heredoc = re.search(r'(?<!<)<<-?\s*[^\s\'"<]', command) is not None
     while pending:
         text = pending.pop().replace('\\' + '\n', '')
         try:
@@ -142,10 +149,14 @@ def shell_git_push(command):
                         for token in tokens)):
             return True
         expect_subcommand = skip_value = folder_value = False
+        # Only a `git` that starts a command reads its own arguments; `eval git -C "$W"` or `watch git ...`
+        # re-reads them, where a quoted value can split again.
+        command_start = git_command = True
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
-            if folder_value and quoted_variable(text, token):
+            if (folder_value and git_command and not outer_heredoc and quoted_variable(text, token)
+                    and quoted_variable(command, token, outer=True)):
                 skip_value = folder_value = False
                 continue
             # An expansion, glob, quoting form, or redirection before the subcommand can hide it,
@@ -167,6 +178,8 @@ def shell_git_push(command):
                     expect_subcommand = False
             if os.path.basename(token) == 'git':
                 expect_subcommand = True
+                git_command = command_start
+            command_start = (not token.strip(';&|(`') or command_start and re.match(r'[A-Za-z_]\w*=', token) is not None)
     return False
 
 

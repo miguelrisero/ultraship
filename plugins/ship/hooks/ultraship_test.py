@@ -69,6 +69,8 @@ with tempfile.TemporaryDirectory() as tmp:
                     'git "-C" $W status', 'git -C "$W"x status', 'git -C "$W" status; echo $W',
                     'git -C "x $W" status', "git -C '$W' status; git -C $W status",
                     'git -C ""$W"" status', 'git -C x"$W" status', 'git -C "$W" status # $W',
+                    'eval git -C "$W"', 'watch git -C "$W" status', 'bash -c "git -C \\"$W\\""',
+                    'bash <<EOF\ngit -C "$W"\nEOF', 'git --shallow-file -C "$W"', 'eval "git -C \\"$W\\" status"',
                     "bash -lc 'git -C \"$W\" push'",
                     'gh pr merge 3 --squash', 'cd x && gh pr merge 3 --squash', 'npm publish', 'vercel --prod', 'terraform apply']:
             assert denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
