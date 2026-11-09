@@ -1,4 +1,5 @@
 """Writer admission distinguishes a local publication receipt from executable push spellings."""
+import re
 import json
 from pathlib import Path
 import subprocess
@@ -81,13 +82,6 @@ PY"""
                 result = self.admission(command)
                 self.assertEqual(result.get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
 
-    def test_directory_variable_reads_retain_original_refusal(self):
-        for command in ('git -C "$worktree" rev-parse HEAD',
-                        'git -C "${worktree}" status --porcelain'):
-            with self.subTest(command=command):
-                result = self.admission(command)
-                self.assertEqual(result.get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
-
     def test_git_directory_values_preserve_executable_push_denials(self):
         for command in ('git -C $worktree origin HEAD',
                         '''bash -c 'git -C $worktree origin HEAD' ''',
@@ -101,17 +95,16 @@ PY"""
                 result = self.admission(command)
                 self.assertEqual(result.get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
 
-    def test_actual_directory_consumer_retains_original_refusal(self):
-        command = '''worktree=/home/miguel/.vk-worktrees/.bettercoding-workspaces/ada6-pati-teams-parit/lanes/w-report; head=$(git -C "$worktree" rev-parse HEAD) || exit; status=$(GIT_OPTIONAL_LOCKS=0 git -C "$worktree" status --porcelain) || exit; printf 'HEAD %s\\nSTATUS\\n%s\\n' "$head" "$status"; if [ "$head" != 0971b394465d2b5130643f9e4ab1ee711a6a7657 ] || [ -n "$status" ]; then printf 'BLOCKER: worktree preconditions fail\\n'; exit 1; fi'''
-        for candidate in (command, 'head=$(git -C "$worktree" rev-parse HEAD)',
-                          'status=$(git -C "${worktree}" status --porcelain)',
-                          'status=$(GIT_OPTIONAL_LOCKS=0 git -C "$worktree" status --porcelain)'):
-            with self.subTest(command=candidate):
-                result = self.admission(candidate)
-                self.assertEqual(result.get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
-
-    def test_unsupported_assignment_context_preserves_original_refusal(self):
+    def test_quoted_directory_variable_reads_classify_like_a_literal_directory(self):
+        # The owner approved reading past a double-quoted folder variable; the subcommand check
+        # then runs exactly as it does for a literal folder.
         for command in (
+            '''worktree=/home/miguel/.vk-worktrees/.bettercoding-workspaces/ada6-pati-teams-parit/lanes/w-report; head=$(git -C "$worktree" rev-parse HEAD) || exit; status=$(GIT_OPTIONAL_LOCKS=0 git -C "$worktree" status --porcelain) || exit; printf 'HEAD %s\\nSTATUS\\n%s\\n' "$head" "$status"; if [ "$head" != 0971b394465d2b5130643f9e4ab1ee711a6a7657 ] || [ -n "$status" ]; then printf 'BLOCKER: worktree preconditions fail\\n'; exit 1; fi''',
+            'git -C "$worktree" rev-parse HEAD',
+            'git -C "${worktree}" status --porcelain',
+            'head=$(git -C "$worktree" rev-parse HEAD)',
+            'status=$(git -C "${worktree}" status --porcelain)',
+            'status=$(GIT_OPTIONAL_LOCKS=0 git -C "$worktree" status --porcelain)',
             '{ :; head=$(git -C "$worktree" rev-parse HEAD); }',
             'status=$(git -C "$worktree" status --porcelain); eval "$status"',
             'status=$(git -C "$worktree" status --porcelain); bash -c "$status"',
@@ -123,9 +116,17 @@ PY"""
             'head=$(git -C "$worktree" rev-parse HEAD)trailing',
             'head=$(git -C "$worktree" rev-parse HEAD) extra',
             'head=$(git -C "$worktree" rev-parse HEAD)>output',
+        ):
+            literal = re.sub(r'"\$\{?worktree\}?"', '/w', command)
+            with self.subTest(command=command):
+                self.assertNotEqual(self.admission(literal).get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
+                self.assertNotEqual(self.admission(command).get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
+
+    def test_unsupported_assignment_context_preserves_original_refusal(self):
+        for command in (
+            '''echo "$(head=$(git -C "$worktree" rev-parse HEAD))"''',
             'head=$(git -C "$worktree" rev-parse HEAD) # ; other=$(git -C "$worktree" status --porcelain)',
             r'prefix=value\; head=$(git -C "$worktree" rev-parse HEAD)',
-            '''echo "$(head=$(git -C "$worktree" rev-parse HEAD))"''',
             '''bash -c 'head=$(git -C "$worktree" rev-parse HEAD)' ''',
             '''eval 'head=$(git -C "$worktree" rev-parse HEAD)' ''',
             '''cat <<'EOF'\nhead=$(git -C "$worktree" rev-parse HEAD)\nEOF''',

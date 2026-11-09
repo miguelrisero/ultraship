@@ -82,10 +82,52 @@ def git_push(command):
     return shell_git_push(literal_ps_awk_filter(python_heredoc_shell(command)))
 
 
+# One left-to-right scan: a single-quoted span, a standalone `"$NAME"` word, or another double-quoted span.
+SHELL_QUOTES = re.compile(r'''(?<!\$)'[^']*'|(?<![^\s;&|()])"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})"(?![^\s;&|()])|"[^"]*"''')
+
+
+def quoted_variable(command, token):
+    """Whether `command` references the variable `token` names only as standalone `"$NAME"` words.
+
+    Other quotes must be inert literals, and the command must hold no escape, comment, heredoc, backtick, `${`
+    expansion, array assignment, subscript or arithmetic, so shlex
+    and the shell split it the same way and no nested shell or `eval` can re-read the quoted value as code.
+    """
+    # A double-quoted variable cannot word-split, so it can name a folder (`git -C "$W" status`). Any other
+    # reference (`$W`, `x"$W"`, `"x $W"`, `${W:-x}`, `'git -C "$W"'`) could split into `. push`, so it refuses.
+    match = re.fullmatch(r'\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})', token)
+    if not match:
+        return False
+    name = match.group(1) or match.group(2)
+    found = []
+
+    def plain(quoted):
+        variable = quoted.group(1) or quoted.group(2)
+        if variable:
+            found.append(variable)
+            return ' '
+        # A literal is inert when it holds no expansion and nothing shlex would read as a separator or an
+        # assignment once it drops the quotes (`';'`, `'X=1'`).
+        text = quoted.group(0)
+        unsafe = r'[$`";&|()=]' if text[0] == "'" else r'[$`\\\';&|()=]'
+        return '"' if re.search(unsafe, text[1:-1]) else '_'
+
+    rest = SHELL_QUOTES.sub(plain, command)
+    # `${E:-:;git ...}` and `a=(git ...)` hold a `;` or `(` that shlex reads as a command start and the shell does not.
+    # Arithmetic (`((...))`, `$[...]`, a `a[...]=` subscript) evaluates the quoted value as an expression, and an
+    # array subscript there runs commands. Only the standalone `[` and `]` words of a test command stay.
+    brackets = re.sub(r'(?<![^\s;&|()])[][](?![^\s;&|()])', ' ', rest)
+    # Any `(` other than `$(` can open a word list (`@(...)`, `a=(...)`, zsh `for x (...)`) that keeps separators as
+    # text, so only command substitution stays.
+    return (name in found and re.search(r'[\\`\'"#[\]\n]|<<|\$\{|\(\(|(?<!\$)\(', brackets) is None
+            and re.search(rf'\$(?:{name}\b|\{{{name}\b)', rest) is None)
+
+
 def shell_git_push(command):
     """Scan Git commands and shell-wrapper strings without regex backtracking."""
     values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
-              '--config-env', '--super-prefix', '--attr-source'}
+              '--config-env', '--super-prefix', '--attr-source', '--shallow-file'}
+    folders = {'-C', '--git-dir', '--work-tree'}
     pending = [command]
     while pending:
         text = pending.pop().replace('\\' + '\n', '')
@@ -107,20 +149,31 @@ def shell_git_push(command):
                 and any('push' in re.sub(r'(?<!\w)pushed(?=\s*:)', '', token).translate(expansion)
                         for token in tokens)):
             return True
-        expect_subcommand = skip_value = False
+        expect_subcommand = skip_value = folder_value = False
+        # Only a `git` that starts a command reads its own arguments; `eval git -C "$W"` or `watch git ...`
+        # re-reads them, where a quoted value can split again.
+        command_start = git_command = True
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
+            # A separator ends the `git` command, so a later command's `-C "$X"` is never read as git's folder.
+            # shlex glues `);` into one token, and a newline gives none, so the remainder check refuses newlines.
+            if set(token) & set(';&|()'):
+                git_command = False
+            if folder_value and git_command and quoted_variable(command, token):
+                skip_value = folder_value = False
+                continue
             # An expansion, glob, quoting form, or redirection before the subcommand can hide it,
             # so it denies. Writers write `git -C . status 2>&1`, never `git $'push'` or `git {push,}`.
             if expect_subcommand and set(token) & set('(`<>${*?['):
                 return True
             if skip_value:
-                skip_value = False
+                skip_value = folder_value = False
                 continue
             if expect_subcommand:
                 if token in values:
                     skip_value = True
+                    folder_value = token in folders
                     continue
                 if token == 'push':
                     return True
@@ -129,6 +182,8 @@ def shell_git_push(command):
                     expect_subcommand = False
             if os.path.basename(token) == 'git':
                 expect_subcommand = True
+                git_command = command_start
+            command_start = (not token.strip(';&|(') or command_start and re.match(r'[A-Za-z_]\w*=', token) is not None)
     return False
 
 
