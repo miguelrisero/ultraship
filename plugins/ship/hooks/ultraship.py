@@ -44,6 +44,14 @@ INERT_MEMBERS = {
     'string': {'ascii_letters', 'ascii_lowercase', 'ascii_uppercase', 'digits', 'hexdigits', 'punctuation'},
     'math': {'ceil', 'floor', 'sqrt', 'isfinite', 'isclose'},
 }
+INERT_ATTRIBUTES = {
+    'Path', 'read_text', 'write_text', 'exists', 'open', 'read', 'write', 'close', 'name', 'parent', 'with_suffix',
+    'replace', 'split', 'rsplit', 'join', 'strip', 'lstrip', 'rstrip', 'splitlines', 'startswith', 'endswith',
+    'find', 'index', 'count', 'lower', 'upper', 'encode', 'decode', 'append', 'extend', 'insert', 'pop', 'get',
+    'items', 'keys', 'values', 'group', 'groups', 'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape',
+    'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest',
+}
+READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'printf', 'echo', 'ls', 'true', 'test', '['}
 REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
               'help', 'input'}
 
@@ -74,7 +82,7 @@ def inert_python(body):
         if isinstance(node, ast.Name) and (node.id in REFLECTION or node.id.startswith('__')):
             return False
         if isinstance(node, ast.Attribute):
-            if node.attr.startswith('_'):
+            if node.attr not in INERT_ATTRIBUTES:
                 return False
             if (isinstance(node.value, ast.Name) and node.value.id in modules
                     and node.attr not in INERT_MEMBERS[modules[node.value.id]]):
@@ -84,12 +92,41 @@ def inert_python(body):
                 return False
         if isinstance(node, ast.Match):
             return False
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr == 'get_field':
+    return True
+
+
+def read_only_shell(command):
+    # Only literal read commands qualify; expansions and redirections can execute or create another program.
+    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|\[\]\\]", command):
+        return False
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n')
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    parts, current = [], []
+    for token in tokens:
+        if token and all(char in ';&|\n' for char in token):
+            if token not in {';', '&&', '||', '|', '\n'}:
                 return False
-            if node.func.attr in {'format', 'format_map'} and not (
-                    isinstance(node.func.value, ast.Constant) and isinstance(node.func.value.value, str)):
-                return False
+            if current:
+                parts.append(current)
+                current = []
+        else:
+            current.append(token)
+    if current:
+        parts.append(current)
+    for words in parts:
+        if words[0] not in READ_ONLY_COMMANDS:
+            return False
+        if words[0] == 'sed' and not (
+                len(words) >= 3 and words[1] == '-n'
+                and re.fullmatch(r'[0-9]+(?:,[0-9]+)?p', words[2])
+                and all(not word.startswith('-') for word in words[3:])):
+            return False
     return True
 
 
@@ -108,17 +145,7 @@ def python_heredoc_shell(command):
         candidate = lines[end].lstrip('\t') if match[1] else lines[end]
         if candidate.removesuffix('\n') == delimiter:
             remainder = ''.join(lines[end + 1:])
-            try:
-                lexer = shlex.shlex(remainder.replace('\\\n', ''), posix=True, punctuation_chars=True)
-                lexer.whitespace_split = True
-                lexer.commenters = ''
-                tokens = list(lexer)
-            except ValueError:
-                return command
-            # A later interpreter can execute the file whose contents this heredoc writes.
-            if any(os.path.basename(token) in {'sh', 'bash', 'zsh', 'source', '.', 'exec'}
-                   or token.startswith('./') or re.fullmatch(r'python(?:3(?:\.\d+)?)?', os.path.basename(token))
-                   for token in tokens):
+            if not read_only_shell(remainder):
                 return command
             body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
@@ -153,8 +180,11 @@ def literal_ps_awk_filter(command):
     expression = rf'[() \t]*{comparison}(?:[() \t]*(?:&&|\|\|)[() \t]*{comparison})*[() \t]*\{{[ \t]*print[ \t]*\}}[ \t]*'
 
     def data(pipeline):
+        prefix = command[:pipeline.start()]
+        if any(marker in prefix for marker in ('#', '<<', "$'")):
+            return pipeline[0]
         quote, escaped = '', False
-        for char in command[:pipeline.start()]:
+        for char in prefix:
             if escaped:
                 escaped = False
             elif char == '\\' and quote != "'":
@@ -230,7 +260,7 @@ def shell_git_push(command):
             lexer.commenters = ''
             tokens = list(lexer)
         except ValueError:
-            if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text):
+            if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text.translate(str.maketrans('', '', '$`*?[]{},'))):
                 return True
             continue
         # An expansion or glob can assemble the executable (`$'git' $'push'`), so with any

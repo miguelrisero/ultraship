@@ -80,6 +80,43 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(ultraship.git_push(command))
                 self.assertTrue(self.denied(command))
 
+    def test_attribute_chains_and_shell_consumers_keep_push_denied(self):
+        header, end = "python3 - <<'EOF'\n", 'EOF\n'
+        # These strings are classifier input; process calls and shell consumers never execute.
+        commands = (
+            header + "from pathlib import Path\np = Path('.gi' + 't/hooks/pre-commit')\n"
+            "p.write_text('#!/bin/sh' + chr(10) + 'git push origin HEAD' + chr(10))\np.chmod(0o755)\n"
+            + end + 'git commit -m wip\n',
+            header + "from pathlib import Path\nPath('Makefile').write_text('all:' + chr(10) + chr(9) + 'git push origin HEAD' + chr(10))\n"
+            + end + 'make\n',
+            "true # don't\necho 'a;ps -eo pid,args | awk '$1 ~ /x| git p[u]sh origin HEAD|/ {print}';echo '",
+            "echo $'a\\';ps -eo pid,args | awk '$1 ~ /x| git p[u]sh origin HEAD|/ {print}';echo '",
+            "cat <<X\n'\nX\necho 'a;ps -eo pid,args | awk '$1 ~ /x| git p[u]sh origin HEAD|/ {print}';echo '",
+            ": >push # don't\necho 'a;ps -eo pid,args | awk '$1 ~ /x| git p[u]sh origin HEAD|/ {print}';echo '",
+            'git p[u]sh origin HEAD',
+            header + "from pathlib import Path\nPath.parser.os.system('git push origin HEAD')\n" + end,
+            header + "from pathlib import Path\nPath('.').parser.os.system('git push origin HEAD')\n" + end,
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(ultraship.git_push(command))
+                self.assertTrue(self.denied(command))
+
+    def test_heredoc_remainder_allows_only_read_commands(self):
+        header = "python3 - <<'EOF'\nopen('x','w').write('git push origin HEAD')\nEOF\n"
+        for remainder in ('pytest', '"$SHELL" x', 'make', 'git commit -m wip', 'git status',
+                          'true;make', 'true\npytest', 'cat x | ./x', 'sed -i 1p x',
+                          "sed -n '1e' x", "sed -n '1w x' x", "sed -n '1p' -e '1e' x",
+                          "sed -n '1p;1e' x", 'echo x >x'):
+            with self.subTest(remainder=remainder):
+                self.assertFalse(ultraship.read_only_shell(remainder))
+                self.assertTrue(self.denied(header + remainder))
+        for remainder in ("sed -n '1,3p' x | head -3; grep -n x x", 'cat x\nwc x',
+                          "printf 'x\\n'; ls", 'test -e x && echo x', '[ -f x ] || true'):
+            with self.subTest(remainder=remainder):
+                self.assertTrue(ultraship.read_only_shell(remainder))
+                self.assertFalse(self.denied(header + remainder))
+
     def test_imported_members_and_formatting_keep_the_scan(self):
         for body in (
             "import pathlib as p\np.os.system('git push')",
