@@ -31,10 +31,146 @@ HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
 LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
 
 
+# Only these public entry points qualify as file-editing data; modules also expose executable internals.
+INERT_MEMBERS = {
+    're': {'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape'},
+    'json': {'loads', 'dumps', 'load', 'dump'},
+    'textwrap': {'dedent'},
+    'difflib': {'unified_diff', 'SequenceMatcher'},
+    'hashlib': {'sha256'},
+    'collections': {'Counter', 'defaultdict', 'deque'},
+    'itertools': {'chain', 'islice', 'product', 'permutations', 'combinations'},
+    'string': {'ascii_letters', 'ascii_lowercase', 'ascii_uppercase', 'digits', 'hexdigits', 'punctuation'},
+    'math': {'ceil', 'floor', 'sqrt', 'isfinite', 'isclose'},
+}
+INERT_ATTRIBUTES = {
+    'Path', 'read_text', 'write_text', 'exists', 'open', 'read', 'write', 'close', 'name', 'parent', 'with_suffix',
+    'replace', 'split', 'rsplit', 'join', 'strip', 'lstrip', 'rstrip', 'splitlines', 'startswith', 'endswith',
+    'find', 'index', 'count', 'lower', 'upper', 'encode', 'decode', 'append', 'extend', 'insert', 'pop', 'get',
+    'items', 'keys', 'values', 'group', 'groups', 'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape',
+    'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest',
+}
+READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true'}
+READ_ONLY_STARTS = {'cat', 'grep', 'head', 'tail', 'ls', 'wc', 'diff', 'cd', 'git'}
+REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
+              'help', 'input'}
+
+
+def inert_python(body):
+    """Whether a Python script can only compute and read or write files, so its words are file text, not commands."""
+    try:
+        tree = ast.parse(body)
+    except (SyntaxError, ValueError):
+        return False
+    # Imports run before any statement can write a file, so the script never imports a module it wrote itself.
+    leading = set()
+    for statement in tree.body:
+        if not isinstance(statement, (ast.Import, ast.ImportFrom)):
+            break
+        leading.add(statement)
+    modules = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and node not in leading:
+            return False
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name not in INERT_MEMBERS:
+                    return False
+                modules[alias.asname or alias.name] = alias.name
+        if isinstance(node, ast.ImportFrom) and (
+                node.level or node.module not in INERT_MEMBERS
+                or any(alias.name not in INERT_MEMBERS[node.module] for alias in node.names)):
+            return False
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            if (isinstance(child, ast.Name) and child.id in modules
+                    and not (isinstance(parent, ast.Attribute) and parent.value is child)):
+                return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and (node.id in REFLECTION or node.id.startswith('__')):
+            return False
+        if isinstance(node, ast.Attribute):
+            if node.attr not in INERT_ATTRIBUTES:
+                return False
+            if (isinstance(node.value, ast.Name) and node.value.id in modules
+                    and node.attr not in INERT_MEMBERS[modules[node.value.id]]):
+                return False
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if '__' in node.value or '.git/' in node.value or '.git\\' in node.value or node.value.endswith('.git'):
+                return False
+        if isinstance(node, ast.Match):
+            return False
+    # The interpreter imports modules from the current folder (Python 3.13 imports `traceback` on any uncaught
+    # error), so a write must name a literal path that Python cannot load.
+    literals = {}
+    for statement in tree.body:
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            name = statement.targets[0].id
+            value = statement.value
+            literals[name] = (value.value if name not in literals and isinstance(value, ast.Constant)
+                              and isinstance(value.value, str) else None)
+    calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == 'open' and id(node) not in calls:
+            return False
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'open':
+            if (any(isinstance(argument, ast.Starred) for argument in node.args)
+                    or any(keyword.arg not in {'mode', 'encoding', 'newline', 'errors'} for keyword in node.keywords)):
+                return False
+            modes = [*node.args[1:2], *(keyword.value for keyword in node.keywords if keyword.arg == 'mode')]
+            if not modes:
+                continue
+            if all(isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
+                   for mode in modes):
+                continue
+            target = node.args[0] if node.args else None
+            path = (target.value if isinstance(target, ast.Constant) else
+                    literals.get(target.id) if isinstance(target, ast.Name) else None)
+            if not isinstance(path, str) or re.search(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', path, re.I):
+                return False
+    return True
+
+
+def read_only_shell(command):
+    # Only literal read commands qualify; expansions and redirections can execute or create another program.
+    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|\[\]\\]", command):
+        return False
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n')
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    parts, current = [], []
+    for token in tokens:
+        if token and all(char in ';&|\n' for char in token):
+            if token not in {';', '&&', '||', '|', '\n'}:
+                return False
+            if current:
+                parts.append(current)
+                current = []
+        else:
+            current.append(token)
+    if current:
+        parts.append(current)
+    for words in parts:
+        if words[0] not in READ_ONLY_COMMANDS:
+            return False
+        if words[0] == 'sed' and not (
+                len(words) >= 3 and words[1] == '-n'
+                and re.fullmatch(r'[0-9]+(?:,[0-9]+)?p', words[2])
+                and all(not word.startswith('-') for word in words[3:])):
+            return False
+    return True
+
+
 def python_heredoc_shell(command):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
-    header = re.compile(r"^[ \t]*(?:python|python3(?:\.\d+)?) +- +<<(-?)[ \t]*"
+    header = re.compile(r"^[ \t]*(?:cd +[\w./-]+ +&& +)?(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(-?)[ \t]*"
                         r"('[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
                         r"[ \t]*\n$")
     lines = command.splitlines(keepends=True)
@@ -45,7 +181,13 @@ def python_heredoc_shell(command):
     for end in range(1, len(lines)):
         candidate = lines[end].lstrip('\t') if match[1] else lines[end]
         if candidate.removesuffix('\n') == delimiter:
+            remainder = ''.join(lines[end + 1:])
+            if not read_only_shell(remainder):
+                return command
             body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
+            # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
+            if match[2][0] in '\'"\\' and inert_python(body):
+                return lines[0] + ''.join(lines[end + 1:])
             if 'push' in body or '\\\n' in body:
                 return command
             if any(c in body for c in '$`{}'):
@@ -67,19 +209,46 @@ def python_heredoc_shell(command):
 
 
 def literal_ps_awk_filter(command):
-    # Only a complete process-list filter with a bare print action supplies inert awk data.
-    pipeline = re.fullmatch(r"[ \t]*ps[ \t]+-eo[ \t]+pid,args[ \t]*\|[ \t]*awk[ \t]+'([^'\r\n]*)'[ \t]*", command)
-    if not pipeline:
-        return command
-    comparison = r'\$[0-9]+[ \t]*(?:==|!=|!~|~|>=|<=|>|<)[ \t]*(?:"[\w ./-]*"|/[\w .^$*+-]+/|[0-9]+)'
+    # Only a complete process-list filter with a bare print action supplies inert awk data. It may stand in a
+    # command chain, but nothing may follow it in the same pipeline or as an awk argument.
+    regex_literal = r'/(?:[^/\'"\\\r\n;&`$\{\}]|\$(?=[/)| ]))*/'
+    comparison = (r'\$[0-9]+[ \t]*(?:==|!=|!~|~|>=|<=|>|<)[ \t]*'
+                  rf'(?:"[\w ./-]*"|{regex_literal}|[0-9]+)')
     expression = rf'[() \t]*{comparison}(?:[() \t]*(?:&&|\|\|)[() \t]*{comparison})*[() \t]*\{{[ \t]*print[ \t]*\}}[ \t]*'
-    if 'push' in pipeline[1] or not re.fullmatch(expression, pipeline[1]):
-        return command
-    return command[:pipeline.start(1)] + 'awk_filter_data' + command[pipeline.end(1):]
+
+    def data(pipeline):
+        prefix = command[:pipeline.start()]
+        # Only plain words, quotes and quote-free `$(...)` may precede the filter; other shell grammar (nested
+        # quotes in `${...}`, `case` patterns, comments, heredocs) changes where quotes open.
+        plain = re.sub(r'\$\([^\'"()$`#<\\\n]*\)', '_', prefix)
+        if re.search(r"#|<<|\$'|`|\$\{|[()]|\bcase\b", plain):
+            return pipeline[0]
+        quote, escaped = '', False
+        for char in plain:
+            if escaped:
+                escaped = False
+            elif char == '\\' and quote != "'":
+                escaped = True
+            elif char == quote:
+                quote = ''
+            elif not quote and char in '\'"':
+                quote = char
+        if quote or escaped or 'push' in pipeline[2] or not re.fullmatch(expression, pipeline[2]):
+            return pipeline[0]
+        return pipeline[1] + 'awk_filter_data'
+
+    return re.sub(r"(?:^|(?<=[;&|(]))([ \t]*ps[ \t]+-eo[ \t]+[a-z]+(?:,[a-z]+)*[ \t]*\|[ \t]*awk[ \t]+)"
+                  r"'([^'\r\n]*)'(?=[ \t]*(?:$|;|&&|\|\||\)))", data, command)
 
 
 def git_push(command):
-    return shell_git_push(literal_ps_awk_filter(python_heredoc_shell(command)))
+    reduced = literal_ps_awk_filter(python_heredoc_shell(command))
+    try:
+        shlex.split(reduced.replace('\\\n', ''), comments=False, posix=True)
+    except ValueError:
+        # A reduction that leaves unbalanced quotes misread the shell, so the original command is scanned.
+        reduced = command
+    return shell_git_push(reduced)
 
 
 # One left-to-right scan: a single-quoted span, a standalone `"$NAME"` word, or another double-quoted span.
@@ -137,17 +306,31 @@ def shell_git_push(command):
             lexer.commenters = ''
             tokens = list(lexer)
         except ValueError:
-            if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text):
+            if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text.translate(str.maketrans('', '', '$`*?[]{},'))):
                 return True
             continue
         # An expansion or glob can assemble the executable (`$'git' $'push'`), so with any
         # `push` spelling it denies. Exclude only the literal receipt key `pushed:` before
         # normalization; brace lists must retain the conservative substring check.
         # A rare false denial remains, for example `echo $X; git stash push`.
+        # Plain `$NAME` expansions under the default IFS cannot slice or split a word, so only a whole `push`
+        # word can become the subcommand; `$S/prepush-results.txt` is a path.
+        plain = ('IFS' not in text
+                 and not re.search(r'[`*?[{\\]|\$', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text)))
         expansion = str.maketrans('', '', '$`*?[]{},')
-        if (any(set(token) & set('$`*?[{') for token in tokens)
-                and any('push' in re.sub(r'(?<!\w)pushed(?=\s*:)', '', token).translate(expansion)
-                        for token in tokens)):
+        # Delete each expansion and quote first, so `"$G"push` reads `push` while `$S/prepush` does not.
+        words = re.sub(r'["\']', '', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text))
+        # Many builtins assign a variable from their arguments (`printf -v`, zsh `print -v`), so the relaxation
+        # holds only when every command starts with a command that cannot assign one.
+        plain = plain and all(part.split()[0] in READ_ONLY_STARTS
+                              for part in re.split(r'[;&|\n]+', words) if part.strip())
+        if plain:
+            spelled = re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])',
+                                re.sub(r'(?<!\w)pushed(?=\s*:)', '', words))
+        else:
+            spelled = any('push' in re.sub(r'(?<!\w)pushed(?=\s*:)', '', token).translate(expansion)
+                          for token in tokens)
+        if any(set(token) & set('$`*?[{') for token in tokens) and spelled:
             return True
         expect_subcommand = skip_value = folder_value = False
         # Only a `git` that starts a command reads its own arguments; `eval git -C "$W"` or `watch git ...`
@@ -156,6 +339,8 @@ def shell_git_push(command):
         for token in tokens:
             if any(char.isspace() for char in token):
                 pending.append(token)
+                if re.match(r'[A-Za-z_]\w*=', token):
+                    pending.append(token.split('=', 1)[1])
             # A separator ends the `git` command, so a later command's `-C "$X"` is never read as git's folder.
             # shlex glues `);` into one token, and a newline gives none, so the remainder check refuses newlines.
             if set(token) & set(';&|()'):
