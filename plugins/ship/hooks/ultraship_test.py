@@ -603,6 +603,34 @@ class IsolatedPythonFileEditTests(unittest.TestCase):
                 self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {
                     'command': self.command(body, header=f"cd /repo/{target} && python3 -I - <<'PY'")}}, self.env)))
 
+    def test_isolated_attribute_rebinding_keeps_the_push_scan(self):
+        for mutation in ('Path.read_text = lambda self: Path("payload.txt")',
+                         'Path.read_text: object = lambda self: Path("payload.txt")',
+                         'Path.read_text += other', 'del Path.read_text'):
+            with self.subTest(mutation=mutation):
+                body = ('from pathlib import Path\n'
+                        'Path("payload.txt").write_text("git push")\n' + mutation + '\n'
+                        'Path("safe.txt").read_text().replace("sitecustomize.py")')
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {
+                    'command': self.command(body)}}, self.env)))
+
+    def test_isolated_targets_use_the_tool_working_directory(self):
+        body = 'from pathlib import Path\nPath("requests/__init__.py").write_text("git push")'
+        for cwd in ('/repo', '/repo/.venv/lib/python3.13/site-packages'):
+            for header in ("python3 -I - <<'PY'", "cd requests && python3 -I - <<'PY'"):
+                with self.subTest(cwd=cwd, header=header):
+                    self.assertEqual(denied(hook('pre', {**self.writer, 'cwd': cwd, 'tool_input': {
+                        'command': self.command(body, header=header)}}, self.env)), cwd != '/repo')
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp) / 'site-packages'
+            cwd.mkdir()
+            result = run([sys.executable, str(HOOK), 'pre'], {**self.writer, 'tool_input': {
+                'command': self.command(body, header="python3 -I - <<'PY'")}},
+                cwd=cwd, env=self.env, check=True)
+            self.assertTrue(denied(json.loads(result.stdout) if result.stdout.strip().startswith('{') else result.stdout))
+        self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {
+            'command': self.command(body, header="python3 -I - <<'PY'")}}, self.env)))
+
     def test_subprocess_import_cannot_qualify_as_inert_file_text(self):
         self.assertFalse(ultraship.inert_python("import subprocess\nprint('file text')", isolated=True))
 

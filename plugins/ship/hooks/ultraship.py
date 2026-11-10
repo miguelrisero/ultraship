@@ -146,6 +146,8 @@ def isolated_python_targets(tree, modules, cwd):
                     and node.module == 'pathlib' for alias in node.names if alias.name == 'Path'}
     bindings = {}
     for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            return False
         if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             parent = parents[node]
             value = (parent.value if isinstance(parent, (ast.Assign, ast.AnnAssign))
@@ -174,7 +176,7 @@ def isolated_python_targets(tree, modules, cwd):
                 or any(Path(part).stem in {'sitecustomize', 'usercustomize'} for part in parts)
                 or any(re.search(r'\.(?:py[cdiow]|pth|so)(?:$|[^a-z0-9])', part) for part in parts))
 
-    if cwd is not None and denied_path(Path(cwd)):
+    if cwd is None or denied_path(Path(cwd)):
         return False
 
     def safe_target(node, allow_string=False):
@@ -271,7 +273,7 @@ def read_only_shell(command):
     return True
 
 
-def python_heredoc_shell(command):
+def python_heredoc_shell(command, cwd=None):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     header = re.compile(r"^[ \t]*(?:cd +(?P<cwd>[\w./-]+) +&& +)?(?:python|python3(?:\.\d+)?)"
@@ -282,6 +284,18 @@ def python_heredoc_shell(command):
     match = header.fullmatch(lines[0]) if lines else None
     if not match:
         return command
+    if match['isolated']:
+        directory = Path(match['cwd']) if match['cwd'] else None
+        if directory is None or not directory.is_absolute():
+            if not cwd:
+                try:
+                    cwd = Path.cwd()
+                except OSError:
+                    return command
+            if not Path(cwd).is_absolute():
+                return command
+            directory = Path(cwd) / (directory or '.')
+        cwd = directory
     delimiter = shlex.split(match['delimiter'])[0]
     for end in range(1, len(lines)):
         candidate = lines[end].lstrip('\t') if match['tabs'] else lines[end]
@@ -292,7 +306,7 @@ def python_heredoc_shell(command):
             body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
             if match['delimiter'][0] in '\'"\\' and inert_python(
-                    body, isolated=bool(match['isolated']), cwd=match['cwd']):
+                    body, isolated=bool(match['isolated']), cwd=cwd):
                 return lines[0] + ''.join(lines[end + 1:])
             if 'push' in body or '\\\n' in body:
                 return command
@@ -394,8 +408,8 @@ def cat_heredoc_data(command):
     return command
 
 
-def git_push(command):
-    reduced = literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command)))
+def git_push(command, cwd=None):
+    reduced = literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command), cwd=cwd))
     try:
         shlex.split(reduced.replace('\\\n', ''), comments=False, posix=True)
     except ValueError:
@@ -656,7 +670,7 @@ def pre(data):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
                     'mcp__bettercoding__set_input_status'):
             deny('Writers return owner decision needs to the driver. Only the driver maintains Inputs.')
-        if tool == 'Bash' and (git_push(tin.get('command', ''))
+        if tool == 'Bash' and (git_push(tin.get('command', ''), cwd=data.get('cwd'))
                                or WRITER_BASH.search(tin.get('command', ''))):
             deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                  'commit grants permit local base-branch merges into their own lane branch.')
