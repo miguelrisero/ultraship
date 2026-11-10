@@ -63,7 +63,7 @@ REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globa
               'help', 'input'}
 
 
-def inert_python(body):
+def inert_python(body, loadable=False):
     """Whether a Python script can only compute and read or write files, so its words are file text, not commands."""
     try:
         tree = ast.parse(body)
@@ -146,27 +146,29 @@ def inert_python(body):
             target = node.args[0] if node.args else None
             path = (target.value if isinstance(target, ast.Constant) else
                     literals.get(target.id) if isinstance(target, ast.Name) else None)
-            if not writable(path):
+            if not writable(path, loadable):
                 return False
-    return inert_paths(tree, literals, bound)
+    return inert_paths(tree, literals, bound, loadable)
 
 
-def writable(path):
+def writable(path, loadable):
     """Whether an inert script may write `path`: a literal that this run of Python cannot import.
 
-    Python imports a later module from the current folder first, so a module file needs a relative path inside a
-    folder that no standard-library module is named after."""
+    Python imports a later module from the current folder first, so a module file needs `loadable`, a relative path,
+    and a top folder and file name that no standard-library module is named after. Python prefers a regular module to
+    a folder without `__init__.py`, so a file inside such a folder hides nothing. `loadable` holds only for the
+    interpreter this hook runs on, because another one has other standard-library names."""
     if not isinstance(path, str):
         return False
     if not LOADABLE.search(path):
         return True
     parts = PurePosixPath(path).parts
-    return (not re.search(r'\.(?:pth|so)(?:$|[^A-Za-z0-9])', path, re.I) and not path.startswith('/')
+    return (loadable and not re.search(r'\.(?:pth|so)(?:$|[^A-Za-z0-9])', path, re.I) and not path.startswith('/')
             and '\\' not in path and len(parts) > 1 and '..' not in parts
-            and parts[0].split('.')[0].lower() not in STANDARD_MODULES)
+            and all(part.split('.')[0].lower() not in {*STANDARD_MODULES, '__init__'} for part in (parts[0], parts[-1])))
 
 
-def inert_paths(tree, literals, bound):
+def inert_paths(tree, literals, bound, loadable):
     """Whether every `Path` is built from one literal and used only as the receiver of `PATH_METHODS`.
 
     A write needs a `writable` path, the same rule as `open`. A name may hold several paths in turn; a write through
@@ -183,7 +185,7 @@ def inert_paths(tree, literals, bound):
             return True
         return (len(call.args) == 1 and not isinstance(call.args[0], ast.Starred)
                 and all(keyword.arg in {'encoding', 'errors', 'newline'} for keyword in call.keywords)
-                and all(writable(path) for path in paths))
+                and all(writable(path, loadable) for path in paths))
 
     def constructed(node):
         argument = node.args[0] if len(node.args) == 1 and not node.keywords else None
@@ -227,10 +229,31 @@ def inert_paths(tree, literals, bound):
     return True
 
 
+def outside_single_quotes(command):
+    """The shell text outside single quotes, which are literal in every shell.
+
+    A quote inside double quotes or after a backslash opens nothing, so its text stays."""
+    kept, single, double, escaped = [], False, False, False
+    for char in command:
+        if single:
+            single = char != "'"
+            continue
+        if escaped:
+            escaped = False
+        elif char == '\\':
+            escaped = True
+        elif char == '"':
+            double = not double
+        elif char == "'" and not double:
+            single = True
+            continue
+        kept.append(char)
+    return ''.join(kept)
+
+
 def read_only_shell(command):
     # Only literal read commands qualify; expansions and redirections can execute or create another program.
-    # Single-quoted text is literal in every shell, so only the text outside it is checked.
-    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|\[\]\\]", re.sub(r"'[^']*'", "''", command)):
+    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|\[\]\\]", outside_single_quotes(command)):
         return False
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n')
@@ -283,7 +306,8 @@ def python_heredoc_shell(command, inert_only=False):
                 return command
             body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            if match[2][0] in '\'"\\' and inert_python(body):
+            loadable = re.match(r'[ \t]*(?:cd +[\w./-]+ +&& +)?python3 ', lines[0]) is not None
+            if match[2][0] in '\'"\\' and inert_python(body, loadable):
                 return lines[0] + ''.join(lines[end + 1:])
             if inert_only:
                 return command

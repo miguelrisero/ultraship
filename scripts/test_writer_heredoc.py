@@ -168,9 +168,24 @@ class WriterHeredocTests(unittest.TestCase):
             "n = 'x.txt'\nfor n in ['traceback.py']:\n    open(n, 'w').write('git push origin HEAD')\n1 / 0\n",
             "n = 'x.txt'\ndef f():\n    global n\n    n = 'traceback.py'\nf()\nopen(n, 'w').write('git push origin HEAD')\n1 / 0\n",
             "n = 'x.txt'\ntry:\n    1 / 0\nexcept ZeroDivisionError as n:\n    pass\nopen(n, 'w').write('git push')\n",
+            "from pathlib import Path\nn = 'x.txt'\nif True:\n    n = 'traceback.py'\nPath(n).write_text('git push origin HEAD')\n1 / 0\n",
+            "n = 'x.txt'\nif True:\n    n = 'traceback.py'\nopen(n, 'w').write('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path\nPath('vendor/__init__.py').write_text('git push origin HEAD')\n",
+            "open('backend/api/json.py', 'w').write('git push origin HEAD')\n",
         ):
             with self.subTest(body=body):
                 self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+        # Another interpreter has other standard-library names than the one this hook runs on.
+        for python in ('python', 'python3.14'):
+            with self.subTest(python=python):
+                self.assertTrue(self.denied(
+                    python + " - <<'EOF'\nopen('vendor/mod.py', 'w').write('git push origin HEAD')\nEOF\n"))
+
+    def test_quotes_that_open_no_literal_keep_the_remainder_scan(self):
+        write = "python3 - <<'EOF'\nopen('x.txt', 'w').write('gh pr merge 3')\nEOF\n"
+        for remainder in ('echo "\'" $(bash x.txt) "\'"\n', "echo \\' $(bash x.txt) \\'\n"):
+            with self.subTest(remainder=remainder):
+                self.assertTrue(self.denied(write + remainder))
 
     def test_literal_non_python_write_is_file_text(self):
         command = ("python3 - <<'EOF'\np = 'notes.md'\ns = open(p).read()\n"
