@@ -603,6 +603,22 @@ class IsolatedPythonFileEditTests(unittest.TestCase):
                 self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {
                     'command': self.command(body, header=f"cd /repo/{target} && python3 -I - <<'PY'")}}, self.env)))
 
+    def test_isolated_python_installation_targets_keep_the_push_scan(self):
+        for directory in ('lib/python3', 'lib/python3.13', 'lib64/python3.13',
+                          'lib/python3.13t', 'python313.zip', 'LIB/PYTHON3',
+                          'LIB/PYTHON3.13', 'LIB64/PYTHON3.13', 'LIB/PYTHON3.13T', 'PYTHON313.ZIP'):
+            for header, target in (("cd /repo && python3 -I - <<'PY'", directory + '/traceback.py'),
+                                   (f"cd /review-python/{directory} && python3 -I - <<'PY'", 'traceback.py')):
+                with self.subTest(directory=directory, header=header):
+                    body = f"from pathlib import Path\nPath({target!r}).write_text('git push')\n1 / 0"
+                    self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {
+                        'command': self.command(body, header=header)}}, self.env)))
+        for target in ('backend/lib/helpers.py', 'src/python_tools.py'):
+            with self.subTest(target=target):
+                body = f"from pathlib import Path\nPath({target!r}).write_text('git push')"
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {
+                    'command': self.command(body)}}, self.env)))
+
     def test_isolated_attribute_rebinding_keeps_the_push_scan(self):
         for mutation in ('Path.read_text = lambda self: Path("payload.txt")',
                          'Path.read_text: object = lambda self: Path("payload.txt")',

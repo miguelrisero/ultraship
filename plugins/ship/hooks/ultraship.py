@@ -174,6 +174,10 @@ def isolated_python_targets(tree, modules, cwd):
         parts = [part.casefold() for part in path.parts]
         return (bool(set(parts) & {'site-packages', 'dist-packages', '.git', '.venv', '..'})
                 or any(Path(part).stem in {'sitecustomize', 'usercustomize'} for part in parts)
+                or any(directory in {'lib', 'lib64'}
+                       and re.fullmatch(r'python[0-9]+(?:\.[0-9]+)*t?', child)
+                       for directory, child in zip(parts, parts[1:]))
+                or any(re.fullmatch(r'python[0-9]+(?:\.[0-9]+)*\.zip', part) for part in parts)
                 or any(re.search(r'\.(?:py[cdiow]|pth|so)(?:$|[^a-z0-9])', part) for part in parts))
 
     if cwd is None or denied_path(Path(cwd)):
