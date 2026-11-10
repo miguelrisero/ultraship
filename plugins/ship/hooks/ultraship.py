@@ -12,7 +12,7 @@ import sys
 import tempfile
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
 RESEARCH_BUDGET = 40
@@ -46,15 +46,16 @@ INERT_MEMBERS = {
     'math': {'ceil', 'floor', 'sqrt', 'isfinite', 'isclose'},
     'pathlib': {'Path'},
 }
-# A `Path` may only read, test or write its own literal path; its other methods rename, link or open files.
-PATH_METHODS = {'read_text', 'exists', 'write_text'}
+# A `Path` may only read, test, delete or write its own literal path; its other methods rename, link or open files.
+PATH_METHODS = {'read_text', 'exists', 'write_text', 'unlink'}
 LOADABLE = re.compile(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', re.I)
+STANDARD_MODULES = {name.lower() for name in (*sys.stdlib_module_names, *sys.builtin_module_names)}
 INERT_ATTRIBUTES = {
     'Path', 'read_text', 'write_text', 'exists', 'open', 'read', 'write', 'close', 'name', 'parent', 'with_suffix',
     'replace', 'split', 'rsplit', 'join', 'strip', 'lstrip', 'rstrip', 'splitlines', 'startswith', 'endswith',
     'find', 'index', 'count', 'lower', 'upper', 'encode', 'decode', 'append', 'extend', 'insert', 'pop', 'get',
     'items', 'keys', 'values', 'group', 'groups', 'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape',
-    'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest',
+    'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest', 'unlink',
 }
 READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true'}
 READ_ONLY_STARTS = {'cat', 'grep', 'head', 'tail', 'ls', 'wc', 'diff', 'cd', 'git'}
@@ -104,19 +105,29 @@ def inert_python(body):
                     and node.attr not in INERT_MEMBERS[modules[node.value.id]]):
                 return False
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if '__' in node.value or '.git/' in node.value or '.git\\' in node.value or node.value.endswith('.git'):
+            # A dunder attribute path (`0.__globals__`, `[__x`) or a bare dunder name can reach reflection through
+            # format fields; other text that mentions a dunder, such as `import __main__`, is file text.
+            if re.search(r'^__|[.\[]__', node.value) or '.git/' in node.value or '.git\\' in node.value or node.value.endswith('.git'):
                 return False
         if isinstance(node, ast.Match):
             return False
     # The interpreter imports modules from the current folder (Python 3.13 imports `traceback` on any uncaught
     # error), so a write must name a literal path that Python cannot load.
+    # A name keeps its literal only when nothing else in the script binds it.
+    bound = [node.id for node in ast.walk(tree) if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load)]
+    bound += [node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)]
+    bound += [name for node in ast.walk(tree) if isinstance(node, (ast.Global, ast.Nonlocal)) for name in node.names]
+    bound += [node.name for node in ast.walk(tree) if isinstance(
+        node, (ast.ExceptHandler, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name]
+    bound += [(alias.asname or alias.name).split('.')[0] for node in ast.walk(tree)
+              if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names]
     literals = {}
     for statement in tree.body:
         if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
                 and isinstance(statement.targets[0], ast.Name)):
             name = statement.targets[0].id
             value = statement.value
-            literals[name] = (value.value if name not in literals and isinstance(value, ast.Constant)
+            literals[name] = (value.value if bound.count(name) == 1 and isinstance(value, ast.Constant)
                               and isinstance(value.value, str) else None)
     calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
     for node in ast.walk(tree):
@@ -135,18 +146,34 @@ def inert_python(body):
             target = node.args[0] if node.args else None
             path = (target.value if isinstance(target, ast.Constant) else
                     literals.get(target.id) if isinstance(target, ast.Name) else None)
-            if not isinstance(path, str) or LOADABLE.search(path):
+            if not writable(path):
                 return False
-    return inert_paths(tree, literals)
+    return inert_paths(tree, literals, bound)
 
 
-def inert_paths(tree, literals):
+def writable(path):
+    """Whether an inert script may write `path`: a literal that this run of Python cannot import.
+
+    Python imports a later module from the current folder first, so a module file needs a relative path inside a
+    folder that no standard-library module is named after."""
+    if not isinstance(path, str):
+        return False
+    if not LOADABLE.search(path):
+        return True
+    parts = PurePosixPath(path).parts
+    return (not re.search(r'\.(?:pth|so)(?:$|[^A-Za-z0-9])', path, re.I) and not path.startswith('/')
+            and '\\' not in path and len(parts) > 1 and '..' not in parts
+            and parts[0].split('.')[0].lower() not in STANDARD_MODULES)
+
+
+def inert_paths(tree, literals, bound):
     """Whether every `Path` is built from one literal and used only as the receiver of `PATH_METHODS`.
 
-    A write needs a literal path that Python cannot load, the same rule as `open`."""
+    A write needs a `writable` path, the same rule as `open`. A name may hold several paths in turn; a write through
+    it needs every one of them to be writable."""
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
 
-    def used(node, path):
+    def used(node, paths):
         attribute = parents.get(node)
         call = parents.get(attribute)
         if not (isinstance(attribute, ast.Attribute) and attribute.value is node and attribute.attr in PATH_METHODS
@@ -156,39 +183,54 @@ def inert_paths(tree, literals):
             return True
         return (len(call.args) == 1 and not isinstance(call.args[0], ast.Starred)
                 and all(keyword.arg in {'encoding', 'errors', 'newline'} for keyword in call.keywords)
-                and isinstance(path, str) and not LOADABLE.search(path))
+                and all(writable(path) for path in paths))
 
-    stores = [node.id for node in ast.walk(tree) if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load)]
+    def constructed(node):
+        argument = node.args[0] if len(node.args) == 1 and not node.keywords else None
+        return (argument.value if isinstance(argument, ast.Constant) and isinstance(argument.value, str) else
+                literals.get(argument.id) if isinstance(argument, ast.Name) else None)
+
+    imported = sum(alias.name == 'Path' for node in ast.walk(tree)
+                   if isinstance(node, ast.ImportFrom) and node.module == 'pathlib' for alias in node.names)
+    holders = {}
+    for statement in tree.body:
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name) and isinstance(statement.value, ast.Call)):
+            holders.setdefault(statement.targets[0].id, []).append(statement)
     for node in ast.walk(tree):
         named = (node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else None)
         if named != 'Path':
             continue
         call = parents.get(node)
-        if not (isinstance(call, ast.Call) and call.func is node) or 'Path' in stores:
+        if not (isinstance(call, ast.Call) and call.func is node) or bound.count('Path') != imported:
             return False
         if call.keywords or len(call.args) != 1:
             return False
-        argument = call.args[0]
-        path = (argument.value if isinstance(argument, ast.Constant) and isinstance(argument.value, str) else
-                literals.get(argument.id) if isinstance(argument, ast.Name) else None)
         owner = parents.get(call)
         if isinstance(owner, ast.Attribute):
-            if not used(call, path):
+            if not used(call, [constructed(call)]):
                 return False
-        elif (isinstance(owner, ast.Assign) and owner in tree.body and len(owner.targets) == 1
-              and isinstance(owner.targets[0], ast.Name) and stores.count(owner.targets[0].id) == 1):
-            name = owner.targets[0].id
-            if not all(used(load, path) for load in ast.walk(tree)
-                       if isinstance(load, ast.Name) and load.id == name and isinstance(load.ctx, ast.Load)):
-                return False
-        else:
+            continue
+        name = (owner.targets[0].id if isinstance(owner, ast.Assign)
+                and owner in holders.get(getattr(owner.targets[0], 'id', None), []) else None)
+        # Every binding of the name must be a top-level `name = Path(...)`, so each load holds one of those paths.
+        assignments = holders.get(name, [])
+        if (not name or bound.count(name) != len(assignments)
+                or not all(isinstance(assignment.value.func, (ast.Name, ast.Attribute))
+                           and getattr(assignment.value.func, 'id', getattr(assignment.value.func, 'attr', None)) == 'Path'
+                           for assignment in assignments)):
+            return False
+        paths = [constructed(assignment.value) for assignment in assignments]
+        if not all(used(load, paths) for load in ast.walk(tree)
+                   if isinstance(load, ast.Name) and load.id == name and isinstance(load.ctx, ast.Load)):
             return False
     return True
 
 
 def read_only_shell(command):
     # Only literal read commands qualify; expansions and redirections can execute or create another program.
-    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|\[\]\\]", command):
+    # Single-quoted text is literal in every shell, so only the text outside it is checked.
+    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|\[\]\\]", re.sub(r"'[^']*'", "''", command)):
         return False
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n')

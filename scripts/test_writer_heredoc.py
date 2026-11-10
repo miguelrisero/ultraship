@@ -162,6 +162,12 @@ class WriterHeredocTests(unittest.TestCase):
             "f = open\nf('traceback.py', 'w').write('git push origin HEAD')\n1 / 0\n",
             "open(*['traceback.py', 'w']).write('git push origin HEAD')\n1 / 0\n",
             "o = [open]\no[0]('traceback.py', 'w').write('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path\nn = 'traceback'\nn += '.py'\nPath(n).write_text('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path\nn = 'x.txt'\n(lambda n: Path(n).write_text('git push origin HEAD'))('traceback.py')\n1 / 0\n",
+            "from pathlib import Path\nn = 'x.txt'\n(n := 'traceback.py')\nPath(n).write_text('git push origin HEAD')\n1 / 0\n",
+            "n = 'x.txt'\nfor n in ['traceback.py']:\n    open(n, 'w').write('git push origin HEAD')\n1 / 0\n",
+            "n = 'x.txt'\ndef f():\n    global n\n    n = 'traceback.py'\nf()\nopen(n, 'w').write('git push origin HEAD')\n1 / 0\n",
+            "n = 'x.txt'\ntry:\n    1 / 0\nexcept ZeroDivisionError as n:\n    pass\nopen(n, 'w').write('git push')\n",
         ):
             with self.subTest(body=body):
                 self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
@@ -183,6 +189,40 @@ class WriterHeredocTests(unittest.TestCase):
         ):
             with self.subTest(body=body):
                 self.assertFalse(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+
+    def test_multi_file_pathlib_edits_are_file_text(self):
+        readme = ("python3 -I - <<'PY'\nfrom pathlib import Path\n"
+                  "p=Path('.github/workflows/ci.yml');s=p.read_text();s=s.replace('a', 'b');p.write_text(s)\n"
+                  "p=Path('services/merge-queue/README.md');s=p.read_text();p.write_text(s + 'The publisher `merge` step pushes with a lease.')\n"
+                  "PY\nsed -n '1,125p' Makefile && grep -n '^api-lint\\|^api-test:' Makefile\n")
+        tests = ("python3 - <<'PY'\nfrom pathlib import Path\n"
+                 "p = Path('backend/api/tests/test_decision_native.py')\np.unlink()\n"
+                 "p = Path('backend/api/tests/test_decision_custody.py')\n"
+                 "s = p.read_text().replace('x', '    from evals.decisions import __main__ as command')\n"
+                 "s += '''\n\ndef test_missing_git(monkeypatch):\n    def missing_git(*args, **kwargs):\n"
+                 "        raise FileNotFoundError(\"git\")\n    [call] = run()\n    assert [call] == [{\"code\": \"git_state_unavailable\"}]\n'''\n"
+                 "p.write_text(s)\n"
+                 "PY\nsed -n '30,95p' backend/api/evals/decisions/offline.py\n")
+        single = ("python3 - <<'PY'\np = 'backend/api/tests/test_queue.py'\n"
+                  "open(p, 'w').write('''def f():\n    raise FileNotFoundError(\"git\")\n    [x] = [1]\n''')\nPY\n")
+        for command in (readme, tests, single):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command))
+
+    def test_python_writes_that_python_can_import_keep_the_scan(self):
+        for path in ('traceback.py', 'traceback/__init__.py', 'Traceback/__init__.py', 'json/decoder.py',
+                     '../traceback.py', 'x/../traceback.py', '/tmp/w/traceback.py', 'lib/site.pth', 'x/y.so'):
+            for body in ("from pathlib import Path\nPath('" + path + "').write_text('git push origin HEAD')\n1 / 0\n",
+                         "open('" + path + "', 'w').write('git push origin HEAD')\n1 / 0\n"):
+                with self.subTest(body=body):
+                    self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+        for body in ("from pathlib import Path\np = Path('notes.md')\np = Path('traceback.py')\np.write_text('git push')\n",
+                     "from pathlib import Path\np = Path('notes.md')\np = 'traceback.py'\nopen(p, 'w').write('git push')\n",
+                     "from pathlib import Path\np = Path('notes.md')\nif p.exists():\n    p = Path('traceback.py')\np.write_text('git push')\n",
+                     "x = '__import__'  # git push\n", "x = '0.' + '__globals__'  # git push\n",
+                     "x = '{0[__builtins__]}'  # git push\n"):
+            with self.subTest(body=body):
+                self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
 
     def test_pathlib_writes_that_escape_a_literal_path_keep_the_scan(self):
         for body in (
