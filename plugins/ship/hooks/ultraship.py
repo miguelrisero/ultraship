@@ -809,7 +809,7 @@ def account(ledger, cwd, notifications, receipts, session):
                 receipts[result_id] = identity
                 break
         else:
-            raise ValueError(f'Review results have no unused ledger row: {agent}')
+            raise ValueError(f'Review results have no unused ledger row: {agent}; pending result {result["id"]}')
 
 
 def stop(data):
