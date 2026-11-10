@@ -58,7 +58,7 @@ REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globa
               'help', 'input'}
 
 
-def inert_python(body):
+def inert_python(body, isolated=False, cwd=None):
     """Whether a Python script can only compute and read or write files, so its words are file text, not commands."""
     try:
         tree = ast.parse(body)
@@ -70,18 +70,20 @@ def inert_python(body):
         if not isinstance(statement, (ast.Import, ast.ImportFrom)):
             break
         leading.add(statement)
+    members = {**INERT_MEMBERS, 'pathlib': {'Path'}} if isolated else INERT_MEMBERS
+    attributes = INERT_ATTRIBUTES | {'unlink'} if isolated else INERT_ATTRIBUTES
     modules = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)) and node not in leading:
             return False
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name not in INERT_MEMBERS:
+                if alias.name not in members:
                     return False
                 modules[alias.asname or alias.name] = alias.name
         if isinstance(node, ast.ImportFrom) and (
-                node.level or node.module not in INERT_MEMBERS
-                or any(alias.name not in INERT_MEMBERS[node.module] for alias in node.names)):
+                node.level or node.module not in members
+                or any(alias.name not in members[node.module] for alias in node.names)):
             return False
     for parent in ast.walk(tree):
         for child in ast.iter_child_nodes(parent):
@@ -92,16 +94,19 @@ def inert_python(body):
         if isinstance(node, ast.Name) and (node.id in REFLECTION or node.id.startswith('__')):
             return False
         if isinstance(node, ast.Attribute):
-            if node.attr not in INERT_ATTRIBUTES:
+            if node.attr not in attributes:
                 return False
             if (isinstance(node.value, ast.Name) and node.value.id in modules
-                    and node.attr not in INERT_MEMBERS[modules[node.value.id]]):
+                    and node.attr not in members[modules[node.value.id]]):
                 return False
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if '__' in node.value or '.git/' in node.value or '.git\\' in node.value or node.value.endswith('.git'):
+            if (not isolated and '__' in node.value
+                    or '.git/' in node.value or '.git\\' in node.value or node.value.endswith('.git')):
                 return False
         if isinstance(node, ast.Match):
             return False
+    if isolated:
+        return isolated_python_targets(tree, modules, cwd)
     # The interpreter imports modules from the current folder (Python 3.13 imports `traceback` on any uncaught
     # error), so a write must name a literal path that Python cannot load.
     literals = {}
@@ -131,6 +136,85 @@ def inert_python(body):
                     literals.get(target.id) if isinstance(target, ast.Name) else None)
             if not isinstance(path, str) or re.search(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', path, re.I):
                 return False
+    return True
+
+
+def isolated_python_targets(tree, modules, cwd):
+    """Keep isolated file edits on literal, non-installation targets."""
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    constructors = {alias.asname or alias.name for node in tree.body if isinstance(node, ast.ImportFrom)
+                    and node.module == 'pathlib' for alias in node.names if alias.name == 'Path'}
+    bindings = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            parent = parents[node]
+            value = (parent.value if isinstance(parent, (ast.Assign, ast.AnnAssign))
+                     and (not isinstance(parent, ast.Assign) or parent.targets == [node]) else None)
+            bindings.setdefault(node.id, []).append(value)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.arg, ast.ExceptHandler)):
+            name = node.arg if isinstance(node, ast.arg) else node.name
+            if name:
+                bindings.setdefault(name, []).append(None)
+    if (constructors | set(modules) | {'open'}) & bindings.keys():
+        return False
+
+    def literal(node, allow_string):
+        if (isinstance(node, ast.Call) and len(node.args) == 1 and not node.keywords
+                and (isinstance(node.func, ast.Name) and node.func.id in constructors
+                     or isinstance(node.func, ast.Attribute) and node.func.attr == 'Path'
+                     and isinstance(node.func.value, ast.Name) and modules.get(node.func.value.id) == 'pathlib')):
+            node = node.args[0]
+        elif not allow_string:
+            return None
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+    def safe_target(node, allow_string=False):
+        values = bindings.get(node.id, []) if isinstance(node, ast.Name) else [node]
+        for value in values:
+            path = literal(value, allow_string)
+            if not path or '\\' in path or '\0' in path:
+                return False
+            destination = Path(path)
+            if (set(destination.parts) & {'site-packages', 'dist-packages', '.git', '.venv', '..'}
+                    or any(Path(part).stem in {'sitecustomize', 'usercustomize'} for part in destination.parts)
+                    or re.search(r'\.(?:py[cdiow]|pth|so)(?:$|[^A-Za-z0-9])', path, re.I)
+                    or destination.is_absolute() and (
+                        cwd is None or not destination.is_relative_to(Path(cwd).absolute()))):
+                return False
+        return bool(values)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == 'open':
+            if not (isinstance(parents.get(node), ast.Call) and parents[node].func is node):
+                return False
+        if not isinstance(node, ast.Attribute):
+            continue
+        parent = parents[node]
+        if node.attr in {'write_text', 'unlink', 'open'}:
+            if not (isinstance(parent, ast.Call) and parent.func is node and safe_target(node.value)):
+                return False
+        # Path.replace moves files; string replacement remains inert file-text editing.
+        if node.attr == 'replace' and (
+                isinstance(node.value, ast.Call) and literal(node.value, False) is not None
+                or isinstance(node.value, ast.Name) and any(
+                    literal(value, False) is not None for value in bindings.get(node.value.id, []))):
+            return False
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'open'
+                or isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'open'):
+            continue
+        if (any(isinstance(argument, ast.Starred) for argument in node.args)
+                or any(keyword.arg not in {'mode', 'encoding', 'newline', 'errors'} for keyword in node.keywords)):
+            return False
+        method = isinstance(node.func, ast.Attribute)
+        modes = [*node.args[int(not method):int(not method) + 1],
+                 *(keyword.value for keyword in node.keywords if keyword.arg == 'mode')]
+        if not modes or all(isinstance(mode, ast.Constant) and isinstance(mode.value, str)
+                            and set(mode.value) <= set('rbt') for mode in modes):
+            continue
+        target = node.func.value if method else node.args[0] if node.args else None
+        if not safe_target(target, allow_string=not method):
+            return False
     return True
 
 
@@ -172,23 +256,25 @@ def read_only_shell(command):
 def python_heredoc_shell(command):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
-    header = re.compile(r"^[ \t]*(?:cd +[\w./-]+ +&& +)?(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(-?)[ \t]*"
-                        r"('[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
+    header = re.compile(r"^[ \t]*(?:cd +(?P<cwd>[\w./-]+) +&& +)?(?:python|python3(?:\.\d+)?)"
+                        r"(?P<isolated> +-I)? +- +<<(?P<tabs>-?)[ \t]*"
+                        r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
                         r"[ \t]*\n$")
     lines = command.splitlines(keepends=True)
     match = header.fullmatch(lines[0]) if lines else None
     if not match:
         return command
-    delimiter = shlex.split(match[2])[0]
+    delimiter = shlex.split(match['delimiter'])[0]
     for end in range(1, len(lines)):
-        candidate = lines[end].lstrip('\t') if match[1] else lines[end]
+        candidate = lines[end].lstrip('\t') if match['tabs'] else lines[end]
         if candidate.removesuffix('\n') == delimiter:
             remainder = ''.join(lines[end + 1:])
             if not read_only_shell(remainder):
                 return command
-            body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
+            body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            if match[2][0] in '\'"\\' and inert_python(body):
+            if match['delimiter'][0] in '\'"\\' and inert_python(
+                    body, isolated=bool(match['isolated']), cwd=match['cwd']):
                 return lines[0] + ''.join(lines[end + 1:])
             if 'push' in body or '\\\n' in body:
                 return command
