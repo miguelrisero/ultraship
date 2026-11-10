@@ -8,13 +8,11 @@ import json
 import os
 import re
 import shlex
-import site
 import sys
-import sysconfig
 import tempfile
 import time
 import uuid
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
 RESEARCH_BUDGET = 40
@@ -51,10 +49,6 @@ INERT_MEMBERS = {
 # A `Path` may only read, test, delete or write its own literal path; its other methods rename, link or open files.
 PATH_METHODS = {'read_text', 'exists', 'write_text', 'unlink'}
 LOADABLE = re.compile(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', re.I)
-STANDARD_MODULES = {name.lower() for name in (*sys.stdlib_module_names, *sys.builtin_module_names)}
-IMPORT_FOLDERS = {os.path.realpath(folder) for folder in (
-    *(sysconfig.get_paths()[key] for key in ('stdlib', 'platstdlib', 'purelib', 'platlib')),
-    site.getusersitepackages(), *filter(None, sys.path))}
 INERT_ATTRIBUTES = {
     'Path', 'read_text', 'write_text', 'exists', 'open', 'read', 'write', 'close', 'name', 'parent', 'with_suffix',
     'replace', 'split', 'rsplit', 'join', 'strip', 'lstrip', 'rstrip', 'splitlines', 'startswith', 'endswith',
@@ -68,7 +62,7 @@ REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globa
               'help', 'input'}
 
 
-def inert_python(body, loadable=False):
+def inert_python(body):
     """Whether a Python script can only compute and read or write files, so its words are file text, not commands."""
     try:
         tree = ast.parse(body)
@@ -151,42 +145,20 @@ def inert_python(body, loadable=False):
             target = node.args[0] if node.args else None
             path = (target.value if isinstance(target, ast.Constant) else
                     literals.get(target.id) if isinstance(target, ast.Name) else None)
-            if not writable(path, loadable):
+            if not writable(path):
                 return False
-    return inert_paths(tree, literals, bound, loadable)
+    return inert_paths(tree, literals, bound)
 
 
-def standard_parts(parts):
-    """Whether a path climbs with `..` or names a standard-library module, package, `__init__` or a site hook."""
-    names = {*STANDARD_MODULES, '__init__', 'sitecustomize', 'usercustomize', 'site-packages', 'dist-packages'}
-    return '..' in parts or any(part.split('.')[0].lower() in names for part in parts)
+def writable(path):
+    """Whether an inert script may write `path`: a literal that Python cannot import.
+
+    Python can import a module written moments earlier, also while it formats an exception, so no module file
+    qualifies; writers edit those with the Edit tool."""
+    return isinstance(path, str) and not LOADABLE.search(path)
 
 
-def outside_imports(path):
-    """Whether the real location of `path`, after symbolic links, lies outside every folder this Python imports from."""
-    real = os.path.realpath(path)
-    return not any(real == folder or real.startswith(folder.rstrip('/') + '/') for folder in IMPORT_FOLDERS)
-
-
-def writable(path, loadable):
-    """Whether an inert script may write `path`: a literal that this run of Python cannot import.
-
-    Python imports a later module from the current folder first, so a module file needs `loadable`, the real folder
-    the script runs in, and a relative path with no folder or file name that a standard-library module or package is
-    named after, whose real location is outside every import folder. Python prefers a regular module to a folder
-    without `__init__.py`, so a file inside such a folder hides nothing. `loadable` is set only for a plain `python3`
-    header, the interpreter this hook runs on, because another interpreter has other standard-library names."""
-    if not isinstance(path, str):
-        return False
-    if not LOADABLE.search(path):
-        return True
-    parts = PurePosixPath(path).parts
-    return (loadable and not re.search(r'\.(?:pth|so)(?:$|[^A-Za-z0-9])', path, re.I) and not path.startswith('/')
-            and '\\' not in path and len(parts) > 1 and not standard_parts(parts)
-            and outside_imports(os.path.join(loadable, path)))
-
-
-def inert_paths(tree, literals, bound, loadable):
+def inert_paths(tree, literals, bound):
     """Whether every `Path` is built from one literal and used only as the receiver of `PATH_METHODS`.
 
     A write needs a `writable` path, the same rule as `open`. A name may hold several paths in turn; a write through
@@ -203,7 +175,7 @@ def inert_paths(tree, literals, bound, loadable):
             return True
         return (len(call.args) == 1 and not isinstance(call.args[0], ast.Starred)
                 and all(keyword.arg in {'encoding', 'errors', 'newline'} for keyword in call.keywords)
-                and all(writable(path, loadable) for path in paths))
+                and all(writable(path) for path in paths))
 
     def constructed(node):
         argument = node.args[0] if len(node.args) == 1 and not node.keywords else None
@@ -271,10 +243,12 @@ def outside_single_quotes(command):
 
 def read_only_shell(command):
     # Only literal read commands qualify; expansions and redirections can execute or create another program.
-    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|\[\]\\]", outside_single_quotes(command)):
+    # A backslash, a glob bracket or a quoted operator outside single quotes changes the words the shell runs.
+    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|]", outside_single_quotes(command)):
         return False
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n')
+        # Non-POSIX tokens keep their quotes, so only an unquoted operator separates commands.
+        lexer = shlex.shlex(command, posix=False, punctuation_chars=';&|\n')
         lexer.whitespace = ' \t\r'
         lexer.whitespace_split = True
         lexer.commenters = ''
@@ -290,7 +264,13 @@ def read_only_shell(command):
                 parts.append(current)
                 current = []
         else:
-            current.append(token)
+            try:
+                word = shlex.split(token)
+            except ValueError:
+                return False
+            if len(word) != 1:
+                return False
+            current.append(word[0])
     if current:
         parts.append(current)
     for words in parts:
@@ -304,7 +284,7 @@ def read_only_shell(command):
     return True
 
 
-def python_heredoc_shell(command, inert_only=False, cwd=None):
+def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
@@ -324,12 +304,7 @@ def python_heredoc_shell(command, inert_only=False, cwd=None):
                 return command
             body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            # Only an absolute `cd` names its folder; `cd -` and a relative name can follow OLDPWD or CDPATH.
-            folder = re.match(r'[ \t]*(?:cd +(/[\w./-]*) +&& +)?python3 ', lines[0])
-            loadable = folder and (folder[1] or cwd)
-            if not (loadable and not standard_parts(PurePosixPath(loadable).parts) and outside_imports(loadable)):
-                loadable = None
-            if match[2][0] in '\'"\\' and inert_python(body, loadable):
+            if match[2][0] in '\'"\\' and inert_python(body):
                 return lines[0] + ''.join(lines[end + 1:])
             if inert_only:
                 return command
@@ -433,8 +408,8 @@ def cat_heredoc_data(command):
     return command
 
 
-def git_push(command, cwd=None):
-    reduced = literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command), cwd=cwd))
+def git_push(command):
+    reduced = literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command)))
     try:
         shlex.split(reduced.replace('\\\n', ''), comments=False, posix=True)
     except ValueError:
@@ -696,9 +671,8 @@ def pre(data):
                     'mcp__bettercoding__set_input_status'):
             deny('Writers return owner decision needs to the driver. Only the driver maintains Inputs.')
         # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
-        file_text_removed = python_heredoc_shell(cat_heredoc_data(tin.get('command', '')), inert_only=True,
-                                                 cwd=data.get('cwd'))
-        if tool == 'Bash' and (git_push(tin.get('command', ''), data.get('cwd'))
+        file_text_removed = python_heredoc_shell(cat_heredoc_data(tin.get('command', '')), inert_only=True)
+        if tool == 'Bash' and (git_push(tin.get('command', ''))
                                or WRITER_BASH.search(file_text_removed)):
             deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                  'commit grants permit local base-branch merges into their own lane branch.')

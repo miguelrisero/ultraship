@@ -3,10 +3,7 @@ import contextlib
 import importlib.util
 import io
 import json
-import os
 from pathlib import Path
-import sysconfig
-import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,11 +13,11 @@ spec.loader.exec_module(ultraship)
 
 
 class WriterHeredocTests(unittest.TestCase):
-    def denied(self, command, cwd='/w/lane-1'):
+    def denied(self, command):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             try:
-                ultraship.pre({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash', 'cwd': cwd,
+                ultraship.pre({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
                                'tool_input': {'command': command}})
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
@@ -190,24 +187,11 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(
                     python + " - <<'EOF'\nopen('vendor/mod.py', 'w').write('git push origin HEAD')\nEOF\n"))
 
-    def test_module_writes_inside_an_import_folder_keep_the_scan(self):
-        write = "python3 - <<'EOF'\nopen('mime/text.py', 'w').write('git push origin HEAD')\nEOF\n"
-        email = os.path.join(sysconfig.get_paths()['stdlib'], 'email')
-        # `cd -` and a relative `cd` reach a folder the header does not name.
-        for header in ('cd - && ', 'cd dom && '):
-            with self.subTest(header=header):
-                self.assertTrue(self.denied(header + write))
-        for cwd in (email, None):
-            with self.subTest(cwd=cwd):
-                self.assertTrue(self.denied(write, cwd=cwd))
-        with tempfile.TemporaryDirectory() as folder:
-            os.symlink(email, os.path.join(folder, 'vendor'))
-            self.assertTrue(self.denied(write.replace('mime/text.py', 'vendor/mime/text.py'), cwd=folder))
-            self.assertFalse(self.denied(write.replace('git push origin HEAD', 'notes'), cwd=folder))
-
     def test_quotes_that_open_no_literal_keep_the_remainder_scan(self):
         write = "python3 - <<'EOF'\nopen('x.txt', 'w').write('gh pr merge 3')\nEOF\n"
-        for remainder in ('echo "\'" $(bash x.txt) "\'"\n', "echo \\' $(bash x.txt) \\'\n"):
+        for remainder in ('echo "\'" $(bash x.txt) "\'"\n', "echo \\' $(bash x.txt) \\'\n",
+                          "sed -n 1p ';' echo -e e x.txt\n", 'sed -n 1p ";" echo -e e x.txt\n',
+                          "sed -n 1p \\; echo -e e x.txt\n", "sed -n 1p [-]e e x.txt\n"):
             with self.subTest(remainder=remainder):
                 self.assertTrue(self.denied(write + remainder))
 
@@ -234,19 +218,26 @@ class WriterHeredocTests(unittest.TestCase):
                   "p=Path('.github/workflows/ci.yml');s=p.read_text();s=s.replace('a', 'b');p.write_text(s)\n"
                   "p=Path('services/merge-queue/README.md');s=p.read_text();p.write_text(s + 'The publisher `merge` step pushes with a lease.')\n"
                   "PY\nsed -n '1,125p' Makefile && grep -n '^api-lint\\|^api-test:' Makefile\n")
-        tests = ("python3 - <<'PY'\nfrom pathlib import Path\n"
-                 "p = Path('backend/api/tests/test_decision_native.py')\np.unlink()\n"
-                 "p = Path('backend/api/tests/test_decision_custody.py')\n"
+        tests = ("cd /w/lane-1 && python3 - <<'PY'\nfrom pathlib import Path\n"
+                 "Path('backend/api/tests/test_decision_native.py').unlink()\n"
+                 "p = Path('backend/api/tests/decision_custody.md')\n"
                  "s = p.read_text().replace('x', '    from evals.decisions import __main__ as command')\n"
                  "s += '''\n\ndef test_missing_git(monkeypatch):\n    def missing_git(*args, **kwargs):\n"
                  "        raise FileNotFoundError(\"git\")\n    [call] = run()\n    assert [call] == [{\"code\": \"git_state_unavailable\"}]\n'''\n"
                  "p.write_text(s)\n"
                  "PY\nsed -n '30,95p' backend/api/evals/decisions/offline.py\n")
-        single = ("python3 - <<'PY'\np = 'backend/api/tests/test_queue.py'\n"
+        single = ("cd /w/lane-1 && python3 - <<'PY'\np = 'backend/api/tests/queue.md'\n"
                   "open(p, 'w').write('''def f():\n    raise FileNotFoundError(\"git\")\n    [x] = [1]\n''')\nPY\n")
         for command in (readme, tests, single):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command))
+        # Python can import a module written moments earlier, so a module file is never file text.
+        for command in (tests.replace('decision_custody.md', 'test_decision_custody.py'),
+                        single.replace('queue.md', 'test_queue.py'),
+                        "python3 - <<'EOF'\nopen('scripts/review_probe.py', 'w').write('git push origin HEAD')\n"
+                        "raise ImportError('missing', name='scripts.review_probe', name_from='missing')\nEOF\n"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
 
     def test_python_writes_that_python_can_import_keep_the_scan(self):
         for path in ('traceback.py', 'traceback/__init__.py', 'Traceback/__init__.py', 'json/decoder.py',
