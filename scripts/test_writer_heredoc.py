@@ -171,6 +171,45 @@ class WriterHeredocTests(unittest.TestCase):
                    "open(p, 'w').write(s.replace('git push', 'git status'))\nEOF\n")
         self.assertFalse(self.denied(command))
 
+    def test_pathlib_file_edit_with_push_and_publish_words_is_file_text(self):
+        rust = ("    keys.push(code);  // The release job runs cargo publish, gh release create and gh pr merge."
+                + chr(92) + "n")
+        for body in (
+            "from pathlib import Path\np = Path('apps/desktop/src-tauri/src/macos_keys.rs')\n"
+            "s = p.read_text()\ns = s.replace('    keys.clear();\\n', '" + rust + "')\np.write_text(s)\n",
+            "from pathlib import Path\nPath('notes.md').write_text(Path('notes.md').read_text()"
+            ".replace('draft', 'released with docker push and npm publish'))\n",
+            "import pathlib\nf = 'src/queue.rs'\npathlib.Path(f).write_text('jobs.push(job);' + chr(10), encoding='utf-8')\n",
+        ):
+            with self.subTest(body=body):
+                self.assertFalse(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+
+    def test_pathlib_writes_that_escape_a_literal_path_keep_the_scan(self):
+        for body in (
+            "from pathlib import Path\nPath('traceback.py').write_text('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path\np = Path('x.txt')\np.open('w').write('git push origin HEAD')\n",
+            "from pathlib import Path\np = Path('x.txt')\nq = p\nq.replace('traceback.py')  # git push\n",
+            "from pathlib import Path\nP = Path\nP('traceback.py').write_text('git push origin HEAD')\n",
+            "from pathlib import Path\n(Path('d') / 'traceback.py').write_text('git push origin HEAD')\n",
+            "from pathlib import Path\nn = 'trace' + 'back.py'\nPath(n).write_text('git push origin HEAD')\n",
+            "from pathlib import Path\np = Path('x.txt')\np = Path('traceback.py')\np.write_text('git push')\n",
+            "from pathlib import Path\nPath('x.txt').write_text('git push', **{'errors': 'strict'})\n",
+            "from pathlib import Path\nPath = open\nPath('traceback.py', 'w').write('git push origin HEAD')\n",
+            "from pathlib import Path\nPath('x.txt').parent.write_text('git push origin HEAD')\n",
+            "from pathlib import Path\nfor p in [Path('x.txt')]:\n    p.replace('traceback.py')  # git push\n",
+        ):
+            with self.subTest(body=body):
+                self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+
+    def test_publish_commands_beside_file_text_stay_denied(self):
+        edit = "python3 - <<'EOF'\nfrom pathlib import Path\nPath('notes.md').write_text('gh pr merge')\nEOF\n"
+        for command in (edit + 'gh pr merge 3 --squash', edit + 'cargo publish', edit + 'npm publish',
+                        "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['gh', 'pr', 'merge', '3'])\nEOF\n",
+                        "python3 - <<EOF\nprint('$(gh pr merge 3)')\nEOF\n",
+                        "cat <<'EOF' | bash\ngh pr merge 3\nEOF\n"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
     def test_plain_expansion_beside_a_push_containing_path_is_admitted(self):
         for command in ('head -40 "$S"/prepush-results.txt', 'cat $S/prepush-results.txt && git status'):
             with self.subTest(command=command):

@@ -44,7 +44,11 @@ INERT_MEMBERS = {
     'itertools': {'chain', 'islice', 'product', 'permutations', 'combinations'},
     'string': {'ascii_letters', 'ascii_lowercase', 'ascii_uppercase', 'digits', 'hexdigits', 'punctuation'},
     'math': {'ceil', 'floor', 'sqrt', 'isfinite', 'isclose'},
+    'pathlib': {'Path'},
 }
+# A `Path` may only read, test or write its own literal path; its other methods rename, link or open files.
+PATH_METHODS = {'read_text', 'exists', 'write_text'}
+LOADABLE = re.compile(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', re.I)
 INERT_ATTRIBUTES = {
     'Path', 'read_text', 'write_text', 'exists', 'open', 'read', 'write', 'close', 'name', 'parent', 'with_suffix',
     'replace', 'split', 'rsplit', 'join', 'strip', 'lstrip', 'rstrip', 'splitlines', 'startswith', 'endswith',
@@ -129,8 +133,54 @@ def inert_python(body):
             target = node.args[0] if node.args else None
             path = (target.value if isinstance(target, ast.Constant) else
                     literals.get(target.id) if isinstance(target, ast.Name) else None)
-            if not isinstance(path, str) or re.search(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', path, re.I):
+            if not isinstance(path, str) or LOADABLE.search(path):
                 return False
+    return inert_paths(tree, literals)
+
+
+def inert_paths(tree, literals):
+    """Whether every `Path` is built from one literal and used only as the receiver of `PATH_METHODS`.
+
+    A write needs a literal path that Python cannot load, the same rule as `open`."""
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+
+    def used(node, path):
+        attribute = parents.get(node)
+        call = parents.get(attribute)
+        if not (isinstance(attribute, ast.Attribute) and attribute.value is node and attribute.attr in PATH_METHODS
+                and isinstance(call, ast.Call) and call.func is attribute):
+            return False
+        if attribute.attr != 'write_text':
+            return True
+        return (len(call.args) == 1 and not isinstance(call.args[0], ast.Starred)
+                and all(keyword.arg in {'encoding', 'errors', 'newline'} for keyword in call.keywords)
+                and isinstance(path, str) and not LOADABLE.search(path))
+
+    stores = [node.id for node in ast.walk(tree) if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load)]
+    for node in ast.walk(tree):
+        named = (node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else None)
+        if named != 'Path':
+            continue
+        call = parents.get(node)
+        if not (isinstance(call, ast.Call) and call.func is node) or 'Path' in stores:
+            return False
+        if call.keywords or len(call.args) != 1:
+            return False
+        argument = call.args[0]
+        path = (argument.value if isinstance(argument, ast.Constant) and isinstance(argument.value, str) else
+                literals.get(argument.id) if isinstance(argument, ast.Name) else None)
+        owner = parents.get(call)
+        if isinstance(owner, ast.Attribute):
+            if not used(call, path):
+                return False
+        elif (isinstance(owner, ast.Assign) and owner in tree.body and len(owner.targets) == 1
+              and isinstance(owner.targets[0], ast.Name) and stores.count(owner.targets[0].id) == 1):
+            name = owner.targets[0].id
+            if not all(used(load, path) for load in ast.walk(tree)
+                       if isinstance(load, ast.Name) and load.id == name and isinstance(load.ctx, ast.Load)):
+                return False
+        else:
+            return False
     return True
 
 
@@ -169,9 +219,10 @@ def read_only_shell(command):
     return True
 
 
-def python_heredoc_shell(command):
+def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
+    # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
     header = re.compile(r"^[ \t]*(?:cd +[\w./-]+ +&& +)?(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(-?)[ \t]*"
                         r"('[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
                         r"[ \t]*\n$")
@@ -190,6 +241,8 @@ def python_heredoc_shell(command):
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
             if match[2][0] in '\'"\\' and inert_python(body):
                 return lines[0] + ''.join(lines[end + 1:])
+            if inert_only:
+                return command
             if 'push' in body or '\\\n' in body:
                 return command
             if any(c in body for c in '$`{}'):
@@ -552,12 +605,14 @@ def pre(data):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
                     'mcp__bettercoding__set_input_status'):
             deny('Writers return owner decision needs to the driver. Only the driver maintains Inputs.')
+        # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
+        file_text_removed = python_heredoc_shell(cat_heredoc_data(tin.get('command', '')), inert_only=True)
         if tool == 'Bash' and (git_push(tin.get('command', ''))
-                               or WRITER_BASH.search(tin.get('command', ''))):
+                               or WRITER_BASH.search(file_text_removed)):
             deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                  'commit grants permit local base-branch merges into their own lane branch.')
         if tool == 'Bash':
-            reason = writer_gh_denial(tin.get('command', ''))
+            reason = writer_gh_denial(file_text_removed)
             if reason:
                 deny(reason)
         target = tin.get('file_path') or tin.get('notebook_path') or ''
