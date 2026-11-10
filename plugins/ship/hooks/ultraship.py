@@ -246,6 +246,12 @@ def read_only_shell(command):
     # A backslash, a glob bracket or a quoted operator outside single quotes changes the words the shell runs.
     if re.search(r"[^\w \t\n./,:=@%+\-'\";&|]", outside_single_quotes(command)):
         return False
+    # A quote may only wrap a whole word: the shell joins a quoted span with the text or span beside it, and the
+    # non-POSIX lexer below does not. Without backslashes, each span ends at the next matching quote.
+    for span in re.finditer(r"'[^']*'|\"[^\"]*\"", command):
+        if (span.start() and command[span.start() - 1] not in ' \t\n;&|'
+                or span.end() < len(command) and command[span.end()] not in ' \t\n;&|'):
+            return False
     try:
         # Non-POSIX tokens keep their quotes, so only an unquoted operator separates commands.
         lexer = shlex.shlex(command, posix=False, punctuation_chars=';&|\n')
@@ -264,10 +270,6 @@ def read_only_shell(command):
                 parts.append(current)
                 current = []
         else:
-            # A quote may only wrap a whole word; the shell joins a quote with adjacent text and this lexer does not.
-            if (any(quote in token for quote in '\'"')
-                    and not (len(token) >= 2 and token[0] == token[-1] in '\'"' and token[0] not in token[1:-1])):
-                return False
             try:
                 word = shlex.split(token)
             except ValueError:
