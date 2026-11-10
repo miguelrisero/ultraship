@@ -176,11 +176,12 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
         # Another interpreter has other standard-library names than the one this hook runs on.
-        for header in ('cd /usr/local && python3', 'python3'):
+        for header, path in (('cd /usr/local && python3', 'lib/python3.13/encodings/rot_13.py'),
+                             ('python3', 'lib/python3.13/encodings/rot_13.py'),
+                             ('cd /usr/lib/python3.13/xml && python3', 'dom/minidom.py')):
             with self.subTest(header=header):
                 self.assertTrue(self.denied(
-                    header + " - <<'EOF'\nopen('lib/python3.13/encodings/rot_13.py', 'w').write('git push origin HEAD')\n"
-                    "b'x'.decode('rot_13')\nEOF\n"))
+                    f"{header} - <<'EOF'\nopen('{path}', 'w').write('git push origin HEAD')\nb'x'.decode('rot_13')\nEOF\n"))
         for python in ('python', 'python3.14'):
             with self.subTest(python=python):
                 self.assertTrue(self.denied(
