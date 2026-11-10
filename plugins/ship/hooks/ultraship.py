@@ -155,9 +155,10 @@ def writable(path, loadable):
     """Whether an inert script may write `path`: a literal that this run of Python cannot import.
 
     Python imports a later module from the current folder first, so a module file needs `loadable`, a relative path,
-    and a top folder and file name that no standard-library module is named after. Python prefers a regular module to
-    a folder without `__init__.py`, so a file inside such a folder hides nothing. `loadable` holds only for the
-    interpreter this hook runs on, because another one has other standard-library names."""
+    and no folder or file name that a standard-library module or package is named after. Python prefers a regular
+    module to a folder without `__init__.py`, so a file inside such a folder hides nothing. `loadable` holds only for
+    a plain `python3` header, the interpreter this hook runs on in the tool's folder; another interpreter has other
+    standard-library names, and a `cd` can reach the standard library itself."""
     if not isinstance(path, str):
         return False
     if not LOADABLE.search(path):
@@ -165,7 +166,7 @@ def writable(path, loadable):
     parts = PurePosixPath(path).parts
     return (loadable and not re.search(r'\.(?:pth|so)(?:$|[^A-Za-z0-9])', path, re.I) and not path.startswith('/')
             and '\\' not in path and len(parts) > 1 and '..' not in parts
-            and all(part.split('.')[0].lower() not in {*STANDARD_MODULES, '__init__'} for part in (parts[0], parts[-1])))
+            and all(part.split('.')[0].lower() not in {*STANDARD_MODULES, '__init__'} for part in parts))
 
 
 def inert_paths(tree, literals, bound, loadable):
@@ -306,7 +307,7 @@ def python_heredoc_shell(command, inert_only=False):
                 return command
             body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            loadable = re.match(r'[ \t]*(?:cd +[\w./-]+ +&& +)?python3 ', lines[0]) is not None
+            loadable = re.match(r'[ \t]*python3 ', lines[0]) is not None
             if match[2][0] in '\'"\\' and inert_python(body, loadable):
                 return lines[0] + ''.join(lines[end + 1:])
             if inert_only:
