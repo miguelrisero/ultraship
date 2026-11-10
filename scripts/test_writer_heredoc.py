@@ -190,6 +190,8 @@ class WriterHeredocTests(unittest.TestCase):
             "from pathlib import Path\np = Path('x.txt')\np.open('w').write('git push origin HEAD')\n",
             "from pathlib import Path\np = Path('x.txt')\nq = p\nq.replace('traceback.py')  # git push\n",
             "from pathlib import Path\nP = Path\nP('traceback.py').write_text('git push origin HEAD')\n",
+            "from pathlib import Path as P\nP('traceback.py').write_text('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path as Q, Path\nQ('traceback.py').write_text('git push origin HEAD')\n1 / 0\n",
             "from pathlib import Path\n(Path('d') / 'traceback.py').write_text('git push origin HEAD')\n",
             "from pathlib import Path\nn = 'trace' + 'back.py'\nPath(n).write_text('git push origin HEAD')\n",
             "from pathlib import Path\np = Path('x.txt')\np = Path('traceback.py')\np.write_text('git push')\n",

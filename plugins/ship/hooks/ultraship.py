@@ -85,7 +85,9 @@ def inert_python(body):
                 modules[alias.asname or alias.name] = alias.name
         if isinstance(node, ast.ImportFrom) and (
                 node.level or node.module not in INERT_MEMBERS
-                or any(alias.name not in INERT_MEMBERS[node.module] for alias in node.names)):
+                or any(alias.name not in INERT_MEMBERS[node.module] for alias in node.names)
+                # `inert_paths` finds a `Path` by its name, so it must keep that name.
+                or node.module == 'pathlib' and any(alias.asname not in (None, 'Path') for alias in node.names)):
             return False
     for parent in ast.walk(tree):
         for child in ast.iter_child_nodes(parent):
