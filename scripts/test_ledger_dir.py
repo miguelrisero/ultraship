@@ -302,6 +302,8 @@ class LedgerDirTests(unittest.TestCase):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
         owed = self.base / 'state/ultraship/owed/s1.tsv'
         evidence = owed.read_bytes()
+        result_ids = [json.loads(line.split('\t')[3])['id'] for line in evidence.decode().splitlines()]
+        self.assertNotEqual(result_ids[0], result_ids[1])
         bad_env = {**self.env, 'SHIP_LEDGER_DIR': 'relative'}
         blocked = json.loads(self.hook('stop', env=bad_env))
         self.assertEqual(blocked['decision'], 'block')
@@ -340,8 +342,15 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
         self.assertEqual(owed.read_bytes(), evidence)
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
-        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        receipts = self.base / 'state/ultraship/accounted.json'
+        receipts_existed = receipts.exists()
+        committed = receipts.read_bytes() if receipts_existed else None
+        blocked = json.loads(self.hook('stop'))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn(result_ids[1], blocked['reason'])
         self.assertEqual(owed.read_bytes(), evidence)
+        self.assertEqual(receipts.exists(), receipts_existed)
+        self.assertEqual(receipts.read_bytes() if receipts.exists() else None, committed)
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
         self.assertEqual(self.hook('stop'), '')
         self.assertEqual(owed.read_bytes(), b'')

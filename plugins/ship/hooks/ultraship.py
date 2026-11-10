@@ -44,13 +44,17 @@ INERT_MEMBERS = {
     'itertools': {'chain', 'islice', 'product', 'permutations', 'combinations'},
     'string': {'ascii_letters', 'ascii_lowercase', 'ascii_uppercase', 'digits', 'hexdigits', 'punctuation'},
     'math': {'ceil', 'floor', 'sqrt', 'isfinite', 'isclose'},
+    'pathlib': {'Path'},
 }
+# A `Path` may only read, test, delete or write its own literal path; its other methods rename, link or open files.
+PATH_METHODS = {'read_text', 'exists', 'write_text', 'unlink'}
+LOADABLE = re.compile(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', re.I)
 INERT_ATTRIBUTES = {
     'Path', 'read_text', 'write_text', 'exists', 'open', 'read', 'write', 'close', 'name', 'parent', 'with_suffix',
     'replace', 'split', 'rsplit', 'join', 'strip', 'lstrip', 'rstrip', 'splitlines', 'startswith', 'endswith',
     'find', 'index', 'count', 'lower', 'upper', 'encode', 'decode', 'append', 'extend', 'insert', 'pop', 'get',
     'items', 'keys', 'values', 'group', 'groups', 'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape',
-    'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest',
+    'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest', 'unlink',
 }
 READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true'}
 READ_ONLY_STARTS = {'cat', 'grep', 'head', 'tail', 'ls', 'wc', 'diff', 'cd', 'git'}
@@ -81,7 +85,9 @@ def inert_python(body):
                 modules[alias.asname or alias.name] = alias.name
         if isinstance(node, ast.ImportFrom) and (
                 node.level or node.module not in INERT_MEMBERS
-                or any(alias.name not in INERT_MEMBERS[node.module] for alias in node.names)):
+                or any(alias.name not in INERT_MEMBERS[node.module] for alias in node.names)
+                # `inert_paths` finds a `Path` by its name, so it must keep that name.
+                or node.module == 'pathlib' and any(alias.asname not in (None, 'Path') for alias in node.names)):
             return False
     for parent in ast.walk(tree):
         for child in ast.iter_child_nodes(parent):
@@ -98,19 +104,29 @@ def inert_python(body):
                     and node.attr not in INERT_MEMBERS[modules[node.value.id]]):
                 return False
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if '__' in node.value or '.git/' in node.value or '.git\\' in node.value or node.value.endswith('.git'):
+            # A dunder attribute path (`0.__globals__`, `[__x`) or a bare dunder name can reach reflection through
+            # format fields; other text that mentions a dunder, such as `import __main__`, is file text.
+            if re.search(r'^__|[.\[]__', node.value) or '.git/' in node.value or '.git\\' in node.value or node.value.endswith('.git'):
                 return False
         if isinstance(node, ast.Match):
             return False
     # The interpreter imports modules from the current folder (Python 3.13 imports `traceback` on any uncaught
     # error), so a write must name a literal path that Python cannot load.
+    # A name keeps its literal only when nothing else in the script binds it.
+    bound = [node.id for node in ast.walk(tree) if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load)]
+    bound += [node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)]
+    bound += [name for node in ast.walk(tree) if isinstance(node, (ast.Global, ast.Nonlocal)) for name in node.names]
+    bound += [node.name for node in ast.walk(tree) if isinstance(
+        node, (ast.ExceptHandler, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name]
+    bound += [(alias.asname or alias.name).split('.')[0] for node in ast.walk(tree)
+              if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names]
     literals = {}
     for statement in tree.body:
         if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
                 and isinstance(statement.targets[0], ast.Name)):
             name = statement.targets[0].id
             value = statement.value
-            literals[name] = (value.value if name not in literals and isinstance(value, ast.Constant)
+            literals[name] = (value.value if bound.count(name) == 1 and isinstance(value, ast.Constant)
                               and isinstance(value.value, str) else None)
     calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
     for node in ast.walk(tree):
@@ -129,17 +145,116 @@ def inert_python(body):
             target = node.args[0] if node.args else None
             path = (target.value if isinstance(target, ast.Constant) else
                     literals.get(target.id) if isinstance(target, ast.Name) else None)
-            if not isinstance(path, str) or re.search(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', path, re.I):
+            if not writable(path):
                 return False
+    return inert_paths(tree, literals, bound)
+
+
+def writable(path):
+    """Whether an inert script may write `path`: a literal that Python cannot import.
+
+    Python can import a module written moments earlier, also while it formats an exception, so no module file
+    qualifies; writers edit those with the Edit tool."""
+    return isinstance(path, str) and not LOADABLE.search(path)
+
+
+def inert_paths(tree, literals, bound):
+    """Whether every `Path` is built from one literal and used only as the receiver of `PATH_METHODS`.
+
+    A write needs a `writable` path, the same rule as `open`. A name may hold several paths in turn; a write through
+    it needs every one of them to be writable."""
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+
+    def used(node, paths):
+        attribute = parents.get(node)
+        call = parents.get(attribute)
+        if not (isinstance(attribute, ast.Attribute) and attribute.value is node and attribute.attr in PATH_METHODS
+                and isinstance(call, ast.Call) and call.func is attribute):
+            return False
+        if attribute.attr != 'write_text':
+            return True
+        return (len(call.args) == 1 and not isinstance(call.args[0], ast.Starred)
+                and all(keyword.arg in {'encoding', 'errors', 'newline'} for keyword in call.keywords)
+                and all(writable(path) for path in paths))
+
+    def constructed(node):
+        argument = node.args[0] if len(node.args) == 1 and not node.keywords else None
+        return (argument.value if isinstance(argument, ast.Constant) and isinstance(argument.value, str) else
+                literals.get(argument.id) if isinstance(argument, ast.Name) else None)
+
+    imported = sum(alias.name == 'Path' for node in ast.walk(tree)
+                   if isinstance(node, ast.ImportFrom) and node.module == 'pathlib' for alias in node.names)
+    holders = {}
+    for statement in tree.body:
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name) and isinstance(statement.value, ast.Call)):
+            holders.setdefault(statement.targets[0].id, []).append(statement)
+    for node in ast.walk(tree):
+        named = (node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else None)
+        if named != 'Path':
+            continue
+        call = parents.get(node)
+        if not (isinstance(call, ast.Call) and call.func is node) or bound.count('Path') != imported:
+            return False
+        if call.keywords or len(call.args) != 1:
+            return False
+        owner = parents.get(call)
+        if isinstance(owner, ast.Attribute):
+            if not used(call, [constructed(call)]):
+                return False
+            continue
+        name = (owner.targets[0].id if isinstance(owner, ast.Assign)
+                and owner in holders.get(getattr(owner.targets[0], 'id', None), []) else None)
+        # Every binding of the name must be a top-level `name = Path(...)`, so each load holds one of those paths.
+        assignments = holders.get(name, [])
+        if (not name or bound.count(name) != len(assignments)
+                or not all(isinstance(assignment.value.func, (ast.Name, ast.Attribute))
+                           and getattr(assignment.value.func, 'id', getattr(assignment.value.func, 'attr', None)) == 'Path'
+                           for assignment in assignments)):
+            return False
+        paths = [constructed(assignment.value) for assignment in assignments]
+        if not all(used(load, paths) for load in ast.walk(tree)
+                   if isinstance(load, ast.Name) and load.id == name and isinstance(load.ctx, ast.Load)):
+            return False
     return True
+
+
+def outside_single_quotes(command):
+    """The shell text outside single quotes, which are literal in every shell.
+
+    A quote inside double quotes or after a backslash opens nothing, so its text stays."""
+    kept, single, double, escaped = [], False, False, False
+    for char in command:
+        if single:
+            single = char != "'"
+            continue
+        if escaped:
+            escaped = False
+        elif char == '\\':
+            escaped = True
+        elif char == '"':
+            double = not double
+        elif char == "'" and not double:
+            single = True
+            continue
+        kept.append(char)
+    return ''.join(kept)
 
 
 def read_only_shell(command):
     # Only literal read commands qualify; expansions and redirections can execute or create another program.
-    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|\[\]\\]", command):
+    # A backslash, a glob bracket or a quoted operator outside single quotes changes the words the shell runs.
+    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|]", outside_single_quotes(command)):
         return False
+    # A quote may only wrap a whole word: the shell joins a quoted span with the text or span beside it, and the
+    # non-POSIX lexer below does not. Without backslashes, each span ends at the next matching quote.
+    for span in re.finditer(r"'[^']*'|\"[^\"]*\"", command):
+        if (span.start() and command[span.start() - 1] not in ' \t\n;&|'
+                or span.end() < len(command) and command[span.end()] not in ' \t\n;&|'):
+            return False
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n')
+        # Non-POSIX tokens keep their quotes, so only an unquoted operator separates commands.
+        lexer = shlex.shlex(command, posix=False, punctuation_chars=';&|\n')
         lexer.whitespace = ' \t\r'
         lexer.whitespace_split = True
         lexer.commenters = ''
@@ -155,7 +270,13 @@ def read_only_shell(command):
                 parts.append(current)
                 current = []
         else:
-            current.append(token)
+            try:
+                word = shlex.split(token)
+            except ValueError:
+                return False
+            if len(word) != 1:
+                return False
+            current.append(word[0])
     if current:
         parts.append(current)
     for words in parts:
@@ -169,9 +290,10 @@ def read_only_shell(command):
     return True
 
 
-def python_heredoc_shell(command):
+def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
+    # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
     header = re.compile(r"^[ \t]*(?:cd +[\w./-]+ +&& +)?(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(-?)[ \t]*"
                         r"('[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
                         r"[ \t]*\n$")
@@ -190,6 +312,8 @@ def python_heredoc_shell(command):
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
             if match[2][0] in '\'"\\' and inert_python(body):
                 return lines[0] + ''.join(lines[end + 1:])
+            if inert_only:
+                return command
             if 'push' in body or '\\\n' in body:
                 return command
             if any(c in body for c in '$`{}'):
@@ -552,12 +676,14 @@ def pre(data):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
                     'mcp__bettercoding__set_input_status'):
             deny('Writers return owner decision needs to the driver. Only the driver maintains Inputs.')
+        # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
+        file_text_removed = python_heredoc_shell(cat_heredoc_data(tin.get('command', '')), inert_only=True)
         if tool == 'Bash' and (git_push(tin.get('command', ''))
-                               or WRITER_BASH.search(tin.get('command', ''))):
+                               or WRITER_BASH.search(file_text_removed)):
             deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                  'commit grants permit local base-branch merges into their own lane branch.')
         if tool == 'Bash':
-            reason = writer_gh_denial(tin.get('command', ''))
+            reason = writer_gh_denial(file_text_removed)
             if reason:
                 deny(reason)
         target = tin.get('file_path') or tin.get('notebook_path') or ''
@@ -683,7 +809,7 @@ def account(ledger, cwd, notifications, receipts, session):
                 receipts[result_id] = identity
                 break
         else:
-            raise ValueError(f'Review results have no unused ledger row: {agent}')
+            raise ValueError(f'Review results have no unused ledger row: {agent}; pending result {result["id"]}')
 
 
 def stop(data):

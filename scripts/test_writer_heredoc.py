@@ -107,7 +107,7 @@ class WriterHeredocTests(unittest.TestCase):
         for remainder in ('pytest', '"$SHELL" x', 'make', 'git commit -m wip', 'git status',
                           'true;make', 'true\npytest', 'cat x | ./x', 'sed -i 1p x',
                           "sed -n '1e' x", "sed -n '1w x' x", "sed -n '1p' -e '1e' x",
-                          "sed -n '1p;1e' x", 'echo x >x'):
+                          "sed -n '1p;1e' x", 'echo x >x', "sed -n '1'p x", "ec'h'o x", 'cat x"y"', 'cat \'x\'"y"', "sed -n '1p''x' f"):
             with self.subTest(remainder=remainder):
                 self.assertFalse(ultraship.read_only_shell(remainder))
                 self.assertTrue(self.denied(header + remainder))
@@ -162,14 +162,125 @@ class WriterHeredocTests(unittest.TestCase):
             "f = open\nf('traceback.py', 'w').write('git push origin HEAD')\n1 / 0\n",
             "open(*['traceback.py', 'w']).write('git push origin HEAD')\n1 / 0\n",
             "o = [open]\no[0]('traceback.py', 'w').write('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path\nn = 'traceback'\nn += '.py'\nPath(n).write_text('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path\nn = 'x.txt'\n(lambda n: Path(n).write_text('git push origin HEAD'))('traceback.py')\n1 / 0\n",
+            "from pathlib import Path\nn = 'x.txt'\n(n := 'traceback.py')\nPath(n).write_text('git push origin HEAD')\n1 / 0\n",
+            "n = 'x.txt'\nfor n in ['traceback.py']:\n    open(n, 'w').write('git push origin HEAD')\n1 / 0\n",
+            "n = 'x.txt'\ndef f():\n    global n\n    n = 'traceback.py'\nf()\nopen(n, 'w').write('git push origin HEAD')\n1 / 0\n",
+            "n = 'x.txt'\ntry:\n    1 / 0\nexcept ZeroDivisionError as n:\n    pass\nopen(n, 'w').write('git push')\n",
+            "from pathlib import Path\nn = 'x.txt'\nif True:\n    n = 'traceback.py'\nPath(n).write_text('git push origin HEAD')\n1 / 0\n",
+            "n = 'x.txt'\nif True:\n    n = 'traceback.py'\nopen(n, 'w').write('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path\nPath('vendor/__init__.py').write_text('git push origin HEAD')\n",
+            "open('backend/api/json.py', 'w').write('git push origin HEAD')\n",
         ):
             with self.subTest(body=body):
                 self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+        # Another interpreter has other standard-library names than the one this hook runs on.
+        for header, path in (('cd /usr/local && python3', 'lib/python3.13/encodings/rot_13.py'),
+                             ('python3', 'lib/python3.13/encodings/rot_13.py'),
+                             ('cd /usr/lib/python3.13/xml && python3', 'dom/minidom.py')):
+            with self.subTest(header=header):
+                self.assertTrue(self.denied(
+                    f"{header} - <<'EOF'\nopen('{path}', 'w').write('git push origin HEAD')\nb'x'.decode('rot_13')\nEOF\n"))
+        for python in ('python', 'python3.14'):
+            with self.subTest(python=python):
+                self.assertTrue(self.denied(
+                    python + " - <<'EOF'\nopen('vendor/mod.py', 'w').write('git push origin HEAD')\nEOF\n"))
+
+    def test_quotes_that_open_no_literal_keep_the_remainder_scan(self):
+        write = "python3 - <<'EOF'\nopen('x.txt', 'w').write('gh pr merge 3')\nEOF\n"
+        for remainder in ('echo "\'" $(bash x.txt) "\'"\n', "echo \\' $(bash x.txt) \\'\n",
+                          "sed -n 1p ';' echo -e e x.txt\n", 'sed -n 1p ";" echo -e e x.txt\n',
+                          "sed -n 1p \\; echo -e e x.txt\n", "sed -n 1p [-]e e x.txt\n"):
+            with self.subTest(remainder=remainder):
+                self.assertTrue(self.denied(write + remainder))
 
     def test_literal_non_python_write_is_file_text(self):
         command = ("python3 - <<'EOF'\np = 'notes.md'\ns = open(p).read()\n"
                    "open(p, 'w').write(s.replace('git push', 'git status'))\nEOF\n")
         self.assertFalse(self.denied(command))
+
+    def test_pathlib_file_edit_with_push_and_publish_words_is_file_text(self):
+        rust = ("    keys.push(code);  // The release job runs cargo publish, gh release create and gh pr merge."
+                + chr(92) + "n")
+        for body in (
+            "from pathlib import Path\np = Path('apps/desktop/src-tauri/src/macos_keys.rs')\n"
+            "s = p.read_text()\ns = s.replace('    keys.clear();\\n', '" + rust + "')\np.write_text(s)\n",
+            "from pathlib import Path\nPath('notes.md').write_text(Path('notes.md').read_text()"
+            ".replace('draft', 'released with docker push and npm publish'))\n",
+            "import pathlib\nf = 'src/queue.rs'\npathlib.Path(f).write_text('jobs.push(job);' + chr(10), encoding='utf-8')\n",
+        ):
+            with self.subTest(body=body):
+                self.assertFalse(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+
+    def test_multi_file_pathlib_edits_are_file_text(self):
+        readme = ("python3 -I - <<'PY'\nfrom pathlib import Path\n"
+                  "p=Path('.github/workflows/ci.yml');s=p.read_text();s=s.replace('a', 'b');p.write_text(s)\n"
+                  "p=Path('services/merge-queue/README.md');s=p.read_text();p.write_text(s + 'The publisher `merge` step pushes with a lease.')\n"
+                  "PY\nsed -n '1,125p' Makefile && grep -n '^api-lint\\|^api-test:' Makefile\n")
+        tests = ("cd /w/lane-1 && python3 - <<'PY'\nfrom pathlib import Path\n"
+                 "Path('backend/api/tests/test_decision_native.py').unlink()\n"
+                 "p = Path('backend/api/tests/decision_custody.md')\n"
+                 "s = p.read_text().replace('x', '    from evals.decisions import __main__ as command')\n"
+                 "s += '''\n\ndef test_missing_git(monkeypatch):\n    def missing_git(*args, **kwargs):\n"
+                 "        raise FileNotFoundError(\"git\")\n    [call] = run()\n    assert [call] == [{\"code\": \"git_state_unavailable\"}]\n'''\n"
+                 "p.write_text(s)\n"
+                 "PY\nsed -n '30,95p' backend/api/evals/decisions/offline.py\n")
+        single = ("cd /w/lane-1 && python3 - <<'PY'\np = 'backend/api/tests/queue.md'\n"
+                  "open(p, 'w').write('''def f():\n    raise FileNotFoundError(\"git\")\n    [x] = [1]\n''')\nPY\n")
+        for command in (readme, tests, single):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command))
+        # Python can import a module written moments earlier, so a module file is never file text.
+        for command in (tests.replace('decision_custody.md', 'test_decision_custody.py'),
+                        single.replace('queue.md', 'test_queue.py'),
+                        "python3 - <<'EOF'\nopen('scripts/review_probe.py', 'w').write('git push origin HEAD')\n"
+                        "raise ImportError('missing', name='scripts.review_probe', name_from='missing')\nEOF\n"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
+    def test_python_writes_that_python_can_import_keep_the_scan(self):
+        for path in ('traceback.py', 'traceback/__init__.py', 'Traceback/__init__.py', 'json/decoder.py',
+                     '../traceback.py', 'x/../traceback.py', '/tmp/w/traceback.py', 'lib/site.pth', 'x/y.so'):
+            for body in ("from pathlib import Path\nPath('" + path + "').write_text('git push origin HEAD')\n1 / 0\n",
+                         "open('" + path + "', 'w').write('git push origin HEAD')\n1 / 0\n"):
+                with self.subTest(body=body):
+                    self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+        for body in ("from pathlib import Path\np = Path('notes.md')\np = Path('traceback.py')\np.write_text('git push')\n",
+                     "from pathlib import Path\np = Path('notes.md')\np = 'traceback.py'\nopen(p, 'w').write('git push')\n",
+                     "from pathlib import Path\np = Path('notes.md')\nif p.exists():\n    p = Path('traceback.py')\np.write_text('git push')\n",
+                     "x = '__import__'  # git push\n", "x = '0.' + '__globals__'  # git push\n",
+                     "x = '{0[__builtins__]}'  # git push\n"):
+            with self.subTest(body=body):
+                self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+
+    def test_pathlib_writes_that_escape_a_literal_path_keep_the_scan(self):
+        for body in (
+            "from pathlib import Path\nPath('traceback.py').write_text('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path\np = Path('x.txt')\np.open('w').write('git push origin HEAD')\n",
+            "from pathlib import Path\np = Path('x.txt')\nq = p\nq.replace('traceback.py')  # git push\n",
+            "from pathlib import Path\nP = Path\nP('traceback.py').write_text('git push origin HEAD')\n",
+            "from pathlib import Path as P\nP('traceback.py').write_text('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path as Q, Path\nQ('traceback.py').write_text('git push origin HEAD')\n1 / 0\n",
+            "from pathlib import Path\n(Path('d') / 'traceback.py').write_text('git push origin HEAD')\n",
+            "from pathlib import Path\nn = 'trace' + 'back.py'\nPath(n).write_text('git push origin HEAD')\n",
+            "from pathlib import Path\np = Path('x.txt')\np = Path('traceback.py')\np.write_text('git push')\n",
+            "from pathlib import Path\nPath('x.txt').write_text('git push', **{'errors': 'strict'})\n",
+            "from pathlib import Path\nPath = open\nPath('traceback.py', 'w').write('git push origin HEAD')\n",
+            "from pathlib import Path\nPath('x.txt').parent.write_text('git push origin HEAD')\n",
+            "from pathlib import Path\nfor p in [Path('x.txt')]:\n    p.replace('traceback.py')  # git push\n",
+        ):
+            with self.subTest(body=body):
+                self.assertTrue(self.denied("python3 - <<'EOF'\n" + body + "EOF\n"))
+
+    def test_publish_commands_beside_file_text_stay_denied(self):
+        edit = "python3 - <<'EOF'\nfrom pathlib import Path\nPath('notes.md').write_text('gh pr merge')\nEOF\n"
+        for command in (edit + 'gh pr merge 3 --squash', edit + 'cargo publish', edit + 'npm publish',
+                        "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['gh', 'pr', 'merge', '3'])\nEOF\n",
+                        "python3 - <<EOF\nprint('$(gh pr merge 3)')\nEOF\n",
+                        "cat <<'EOF' | bash\ngh pr merge 3\nEOF\n"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
 
     def test_plain_expansion_beside_a_push_containing_path_is_admitted(self):
         for command in ('head -40 "$S"/prepush-results.txt', 'cat $S/prepush-results.txt && git status'):
