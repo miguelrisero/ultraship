@@ -168,6 +168,15 @@ def isolated_python_targets(tree, modules, cwd):
             return None
         return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
+    def denied_path(path):
+        parts = [part.casefold() for part in path.parts]
+        return (bool(set(parts) & {'site-packages', 'dist-packages', '.git', '.venv', '..'})
+                or any(Path(part).stem in {'sitecustomize', 'usercustomize'} for part in parts)
+                or any(re.search(r'\.(?:py[cdiow]|pth|so)(?:$|[^a-z0-9])', part) for part in parts))
+
+    if cwd is not None and denied_path(Path(cwd)):
+        return False
+
     def safe_target(node, allow_string=False):
         values = bindings.get(node.id, []) if isinstance(node, ast.Name) else [node]
         for value in values:
@@ -175,13 +184,25 @@ def isolated_python_targets(tree, modules, cwd):
             if not path or '\\' in path or '\0' in path:
                 return False
             destination = Path(path)
-            if (set(destination.parts) & {'site-packages', 'dist-packages', '.git', '.venv', '..'}
-                    or any(Path(part).stem in {'sitecustomize', 'usercustomize'} for part in destination.parts)
-                    or re.search(r'\.(?:py[cdiow]|pth|so)(?:$|[^A-Za-z0-9])', path, re.I)
-                    or destination.is_absolute() and (
-                        cwd is None or not destination.is_relative_to(Path(cwd).absolute()))):
+            if destination.is_absolute() and (
+                    cwd is None or not destination.is_relative_to(Path(cwd).absolute())):
+                return False
+            if denied_path(Path(cwd or '.') / destination):
                 return False
         return bool(values)
+
+    def string_value(node, seen=frozenset()):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return True
+        if isinstance(node, ast.Name) and node.id not in seen:
+            values = bindings.get(node.id, [])
+            return bool(values) and all(string_value(value, seen | {node.id}) for value in values)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == 'read_text':
+                return safe_target(node.func.value)
+            if node.func.attr == 'replace':
+                return string_value(node.func.value, seen)
+        return False
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and node.id == 'open':
@@ -194,10 +215,7 @@ def isolated_python_targets(tree, modules, cwd):
             if not (isinstance(parent, ast.Call) and parent.func is node and safe_target(node.value)):
                 return False
         # Path.replace moves files; string replacement remains inert file-text editing.
-        if node.attr == 'replace' and (
-                isinstance(node.value, ast.Call) and literal(node.value, False) is not None
-                or isinstance(node.value, ast.Name) and any(
-                    literal(value, False) is not None for value in bindings.get(node.value.id, []))):
+        if node.attr == 'replace' and not string_value(node.value):
             return False
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'open'

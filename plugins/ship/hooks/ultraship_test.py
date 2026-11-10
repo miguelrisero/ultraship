@@ -520,7 +520,7 @@ class IsolatedPythonFileEditTests(unittest.TestCase):
             "s = p.read_text().replace('old', 'new')\n"
             "p.write_text(s + '''\ndef test_git():\n"
             "    from package import __main__\n"
-            "    data = {}\n"
+            "    data = {'command': 'git push'}\n"
             "    raise FileNotFoundError(\"git\")\n''')\n")
 
     def command(self, body, header="cd /repo && python3 -I - <<'PY'", remainder="sed -n '1,5p' tests/test_example.py"):
@@ -533,7 +533,10 @@ class IsolatedPythonFileEditTests(unittest.TestCase):
                   "from pathlib import Path\nPath('/repo/tests/test_example.py').unlink()\nprint('git push')",
                   "p = 'tests/test_example.py'\nopen(p, 'w').write('git push __main__')",
                   "from pathlib import Path\np = Path('tests/test_example.py')\nopen(p, 'w').write('git push')",
-                  "from pathlib import Path\np = Path('tests/test_example.py')\np.open('w').write('git push')")
+                  "from pathlib import Path\np = Path('tests/test_example.py')\np.open('w').write('git push')",
+                  "text = 'git push'\nopen('tests/test_example.py', 'w').write(text.replace('old', 'new'))",
+                  "from pathlib import Path\np = Path('tests/test_example.py')\ntext = p.read_text()\n"
+                  "p.write_text(text.replace('old', 'git push').replace('before', 'after'))")
         for body in bodies:
             with self.subTest(body=body):
                 self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {
@@ -557,6 +560,48 @@ class IsolatedPythonFileEditTests(unittest.TestCase):
                     body = 'from pathlib import Path\n' + operation
                     self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {
                         'command': self.command(body)}}, self.env)))
+
+    def test_isolated_moves_and_nonliteral_paths_keep_the_push_scan(self):
+        operations = (
+            "Path('source.py').parent.replace('destination.py')",
+            "(Path('folder') / 'source.py').replace('destination.py')",
+            "Path('source.py').with_suffix('.txt').replace('destination.py')",
+            "paths[0].replace('destination.py')",
+            "p = Path('source.py')\np = 'text'\np.replace('old', 'new')",
+            "Path('folder/' + name).write_text('text')",
+            "(Path('folder') / name).write_text('text')",
+            "Path(f'{name}.py').write_text('text')",
+        ) + tuple(f"Path('source.py').{method}('destination.py')" for method in (
+            'rename', 'symlink_to', 'hardlink_to', 'link_to', 'touch', 'mkdir', 'chmod', 'write_bytes'))
+        for operation in operations:
+            with self.subTest(operation=operation):
+                body = 'from pathlib import Path\n' + operation + "\nprint('git push')"
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {
+                    'command': self.command(body)}}, self.env)))
+
+    def test_isolated_unsafe_working_directories_keep_the_push_scan(self):
+        for cwd in ('/repo/.git', '/repo/.venv', '/repo/site-packages', '/repo/dist-packages',
+                    '/repo/../outside', '/repo/sitecustomize', '/repo/usercustomize.py', '/repo/x.pth'):
+            for target in ('x.py', cwd + '/x.py'):
+                with self.subTest(cwd=cwd, target=target):
+                    body = f"from pathlib import Path\nPath({target!r}).write_text('git push')"
+                    self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {
+                        'command': self.command(body, header=f"cd {cwd} && python3 -I - <<'PY'")}}, self.env)))
+
+    def test_isolated_case_variant_targets_keep_the_push_scan(self):
+        for target in ('.GIT/config', '.VENV/x.py', 'Site-Packages/x.py', 'Dist-Packages/x.py',
+                       'SiteCustomize.py', 'pkg/UserCustomize/__init__.py', 'X.PTH', 'X.SO', 'X.PYC'):
+            for operation in (f'Path({target!r}).write_text("git push")',
+                              f'Path({target!r}).unlink()\nprint("git push")',
+                              f'open({target!r}, "w").write("git push")'):
+                with self.subTest(target=target, operation=operation):
+                    body = 'from pathlib import Path\n' + operation
+                    self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {
+                        'command': self.command(body)}}, self.env)))
+            with self.subTest(cwd=target):
+                body = "from pathlib import Path\nPath('x.py').write_text('git push')"
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {
+                    'command': self.command(body, header=f"cd /repo/{target} && python3 -I - <<'PY'")}}, self.env)))
 
     def test_subprocess_import_cannot_qualify_as_inert_file_text(self):
         self.assertFalse(ultraship.inert_python("import subprocess\nprint('file text')", isolated=True))
