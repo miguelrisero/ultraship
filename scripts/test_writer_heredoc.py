@@ -3,7 +3,10 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import sysconfig
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,11 +16,11 @@ spec.loader.exec_module(ultraship)
 
 
 class WriterHeredocTests(unittest.TestCase):
-    def denied(self, command):
+    def denied(self, command, cwd='/w/lane-1'):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             try:
-                ultraship.pre({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
+                ultraship.pre({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash', 'cwd': cwd,
                                'tool_input': {'command': command}})
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
@@ -186,6 +189,21 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(python=python):
                 self.assertTrue(self.denied(
                     python + " - <<'EOF'\nopen('vendor/mod.py', 'w').write('git push origin HEAD')\nEOF\n"))
+
+    def test_module_writes_inside_an_import_folder_keep_the_scan(self):
+        write = "python3 - <<'EOF'\nopen('mime/text.py', 'w').write('git push origin HEAD')\nEOF\n"
+        email = os.path.join(sysconfig.get_paths()['stdlib'], 'email')
+        # `cd -` and a relative `cd` reach a folder the header does not name.
+        for header in ('cd - && ', 'cd dom && '):
+            with self.subTest(header=header):
+                self.assertTrue(self.denied(header + write))
+        for cwd in (email, None):
+            with self.subTest(cwd=cwd):
+                self.assertTrue(self.denied(write, cwd=cwd))
+        with tempfile.TemporaryDirectory() as folder:
+            os.symlink(email, os.path.join(folder, 'vendor'))
+            self.assertTrue(self.denied(write.replace('mime/text.py', 'vendor/mime/text.py'), cwd=folder))
+            self.assertFalse(self.denied(write.replace('git push origin HEAD', 'notes'), cwd=folder))
 
     def test_quotes_that_open_no_literal_keep_the_remainder_scan(self):
         write = "python3 - <<'EOF'\nopen('x.txt', 'w').write('gh pr merge 3')\nEOF\n"

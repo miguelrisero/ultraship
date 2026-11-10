@@ -8,7 +8,9 @@ import json
 import os
 import re
 import shlex
+import site
 import sys
+import sysconfig
 import tempfile
 import time
 import uuid
@@ -50,6 +52,9 @@ INERT_MEMBERS = {
 PATH_METHODS = {'read_text', 'exists', 'write_text', 'unlink'}
 LOADABLE = re.compile(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', re.I)
 STANDARD_MODULES = {name.lower() for name in (*sys.stdlib_module_names, *sys.builtin_module_names)}
+IMPORT_FOLDERS = {os.path.realpath(folder) for folder in (
+    *(sysconfig.get_paths()[key] for key in ('stdlib', 'platstdlib', 'purelib', 'platlib')),
+    site.getusersitepackages(), *filter(None, sys.path))}
 INERT_ATTRIBUTES = {
     'Path', 'read_text', 'write_text', 'exists', 'open', 'read', 'write', 'close', 'name', 'parent', 'with_suffix',
     'replace', 'split', 'rsplit', 'join', 'strip', 'lstrip', 'rstrip', 'splitlines', 'startswith', 'endswith',
@@ -152,25 +157,33 @@ def inert_python(body, loadable=False):
 
 
 def standard_parts(parts):
-    """Whether a path climbs with `..` or names a standard-library module, package or `__init__`."""
-    return '..' in parts or any(part.split('.')[0].lower() in {*STANDARD_MODULES, '__init__'} for part in parts)
+    """Whether a path climbs with `..` or names a standard-library module, package, `__init__` or a site hook."""
+    names = {*STANDARD_MODULES, '__init__', 'sitecustomize', 'usercustomize', 'site-packages', 'dist-packages'}
+    return '..' in parts or any(part.split('.')[0].lower() in names for part in parts)
+
+
+def outside_imports(path):
+    """Whether the real location of `path`, after symbolic links, lies outside every folder this Python imports from."""
+    real = os.path.realpath(path)
+    return not any(real == folder or real.startswith(folder.rstrip('/') + '/') for folder in IMPORT_FOLDERS)
 
 
 def writable(path, loadable):
     """Whether an inert script may write `path`: a literal that this run of Python cannot import.
 
-    Python imports a later module from the current folder first, so a module file needs `loadable`, a relative path,
-    and no folder or file name that a standard-library module or package is named after. Python prefers a regular
-    module to a folder without `__init__.py`, so a file inside such a folder hides nothing. `loadable` holds only for
-    a plain `python3` header, the interpreter this hook runs on, and a `cd` folder outside the standard library;
-    another interpreter has other standard-library names."""
+    Python imports a later module from the current folder first, so a module file needs `loadable`, the real folder
+    the script runs in, and a relative path with no folder or file name that a standard-library module or package is
+    named after, whose real location is outside every import folder. Python prefers a regular module to a folder
+    without `__init__.py`, so a file inside such a folder hides nothing. `loadable` is set only for a plain `python3`
+    header, the interpreter this hook runs on, because another interpreter has other standard-library names."""
     if not isinstance(path, str):
         return False
     if not LOADABLE.search(path):
         return True
     parts = PurePosixPath(path).parts
     return (loadable and not re.search(r'\.(?:pth|so)(?:$|[^A-Za-z0-9])', path, re.I) and not path.startswith('/')
-            and '\\' not in path and len(parts) > 1 and not standard_parts(parts))
+            and '\\' not in path and len(parts) > 1 and not standard_parts(parts)
+            and outside_imports(os.path.join(loadable, path)))
 
 
 def inert_paths(tree, literals, bound, loadable):
@@ -291,7 +304,7 @@ def read_only_shell(command):
     return True
 
 
-def python_heredoc_shell(command, inert_only=False):
+def python_heredoc_shell(command, inert_only=False, cwd=None):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
@@ -311,8 +324,11 @@ def python_heredoc_shell(command, inert_only=False):
                 return command
             body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            folder = re.match(r'[ \t]*(?:cd +([\w./-]+) +&& +)?python3 ', lines[0])
-            loadable = folder is not None and not standard_parts(PurePosixPath(folder[1] or '.').parts)
+            # Only an absolute `cd` names its folder; `cd -` and a relative name can follow OLDPWD or CDPATH.
+            folder = re.match(r'[ \t]*(?:cd +(/[\w./-]*) +&& +)?python3 ', lines[0])
+            loadable = folder and (folder[1] or cwd)
+            if not (loadable and not standard_parts(PurePosixPath(loadable).parts) and outside_imports(loadable)):
+                loadable = None
             if match[2][0] in '\'"\\' and inert_python(body, loadable):
                 return lines[0] + ''.join(lines[end + 1:])
             if inert_only:
@@ -417,8 +433,8 @@ def cat_heredoc_data(command):
     return command
 
 
-def git_push(command):
-    reduced = literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command)))
+def git_push(command, cwd=None):
+    reduced = literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command), cwd=cwd))
     try:
         shlex.split(reduced.replace('\\\n', ''), comments=False, posix=True)
     except ValueError:
@@ -680,8 +696,9 @@ def pre(data):
                     'mcp__bettercoding__set_input_status'):
             deny('Writers return owner decision needs to the driver. Only the driver maintains Inputs.')
         # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
-        file_text_removed = python_heredoc_shell(cat_heredoc_data(tin.get('command', '')), inert_only=True)
-        if tool == 'Bash' and (git_push(tin.get('command', ''))
+        file_text_removed = python_heredoc_shell(cat_heredoc_data(tin.get('command', '')), inert_only=True,
+                                                 cwd=data.get('cwd'))
+        if tool == 'Bash' and (git_push(tin.get('command', ''), data.get('cwd'))
                                or WRITER_BASH.search(file_text_removed)):
             deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                  'commit grants permit local base-branch merges into their own lane branch.')
