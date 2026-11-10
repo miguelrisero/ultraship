@@ -107,7 +107,7 @@ class WriterHeredocTests(unittest.TestCase):
         for remainder in ('pytest', '"$SHELL" x', 'make', 'git commit -m wip', 'git status',
                           'true;make', 'true\npytest', 'cat x | ./x', 'sed -i 1p x',
                           "sed -n '1e' x", "sed -n '1w x' x", "sed -n '1p' -e '1e' x",
-                          "sed -n '1p;1e' x", 'echo x >x'):
+                          "sed -n '1p;1e' x", 'echo x >x', "sed -n '1'p x", "ec'h'o x", 'cat x"y"'):
             with self.subTest(remainder=remainder):
                 self.assertFalse(ultraship.read_only_shell(remainder))
                 self.assertTrue(self.denied(header + remainder))

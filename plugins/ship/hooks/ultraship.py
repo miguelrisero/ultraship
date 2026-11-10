@@ -264,6 +264,10 @@ def read_only_shell(command):
                 parts.append(current)
                 current = []
         else:
+            # A quote may only wrap a whole word; the shell joins a quote with adjacent text and this lexer does not.
+            if (any(quote in token for quote in '\'"')
+                    and not (len(token) >= 2 and token[0] == token[-1] in '\'"' and token[0] not in token[1:-1])):
+                return False
             try:
                 word = shlex.split(token)
             except ValueError:
