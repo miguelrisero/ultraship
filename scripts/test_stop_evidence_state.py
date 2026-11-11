@@ -17,9 +17,7 @@ spec.loader.exec_module(hook)
 
 class StopEvidenceStateTests(unittest.TestCase):
     def setUp(self):
-        scratch = ROOT.parent / '.scratch'
-        scratch.mkdir(exist_ok=True)
-        temporary = tempfile.TemporaryDirectory(dir=scratch)
+        temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         state = mock.patch.object(hook, 'STATE', Path(temporary.name))
         state.start()
@@ -140,6 +138,29 @@ class StopEvidenceStateTests(unittest.TestCase):
         self.account.side_effect = None
         self.assertIsNone(self.stop())
         self.assertEqual(self.path.read_bytes(), b'')
+
+    def test_compact_retains_pending_path_recovery_and_stop_fingerprint(self):
+        self.assert_blocked()
+        pending, fingerprint = self.path.read_bytes(), self.reminder.read_bytes()
+        self.ledger.open_run.return_value = None
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            hook.compact(self.data)
+        self.assertIn(f'Pending review evidence remains at {self.path}', output.getvalue())
+        self.assertIn('Account each result with ledger.py', output.getvalue())
+        self.assertEqual(self.path.read_bytes(), pending)
+        self.assertEqual(self.reminder.read_bytes(), fingerprint)
+        self.assertIsNone(self.stop())
+        for missing in (False, True):
+            with self.subTest(missing=missing):
+                self.path.write_text('')
+                if missing:
+                    self.path.unlink()
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    hook.compact(self.data)
+                self.assertNotIn('Pending review evidence', output.getvalue())
+                self.assertEqual(self.reminder.read_bytes(), fingerprint)
 
     def test_reminder_access_failure_keeps_blocking_and_preserves_evidence(self):
         pending = self.path.read_bytes()

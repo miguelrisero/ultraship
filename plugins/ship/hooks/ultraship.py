@@ -1108,6 +1108,10 @@ def compact(data):
         ledger = load_ledger()
         path = ledger.ledger_path(data.get('cwd') or '.')
         run = ledger.open_run(path)
+        pending = owed_file(data)
+        if pending.exists() and pending.stat().st_size:
+            lines.append(f'Pending review evidence remains at {pending}. '
+                         'Account each result with ledger.py before declaring the run complete.')
     except Exception as exc:
         lines.append(f'Ledger resolution failed: {exc}. Pending review evidence remains at {owed_file(data)}. '
                      'Restore ledger access or set SHIP_LEDGER_DIR to an absolute permitted directory before continuing.')
