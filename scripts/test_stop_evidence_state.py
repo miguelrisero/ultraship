@@ -50,6 +50,22 @@ class StopEvidenceStateTests(unittest.TestCase):
         result = self.stop()
         self.assertEqual(result['decision'], 'block')
         self.assertIn(str(self.path), result['reason'])
+        return result
+
+    def test_recovery_guidance_covers_every_retained_agent_identity(self):
+        for row, agent_id in zip(self.rows, ('first-agent', 'second-agent')):
+            result = json.loads(row[3])
+            result['agent_id'] = agent_id
+            row[3] = json.dumps(result)
+        self.write_rows(self.rows)
+        pending = self.path.read_bytes()
+        self.account.side_effect = ValueError('no ledger row for first-agent')
+        reason = self.assert_blocked()['reason']
+        self.assertIn('no ledger row for first-agent', reason)
+        self.assertIn('Read every retained result and use its exact agent identity', reason)
+        self.assertIn('including @agent_id when present', reason)
+        self.assertEqual(self.path.read_bytes(), pending)
+        self.assertIsNone(self.stop())
 
     def test_same_state_passes_and_still_attempts_accounting(self):
         pending = self.path.read_bytes()
@@ -166,12 +182,16 @@ class StopEvidenceStateTests(unittest.TestCase):
         pending = self.path.read_bytes()
         self.reminder.mkdir()
         for _ in range(2):
-            self.assert_blocked()
+            reason = self.assert_blocked()['reason']
+            self.assertIn('review row missing', reason)
+            self.assertIn('Stop reminder unavailable', reason)
             self.assertEqual(self.path.read_bytes(), pending)
         self.reminder.rmdir()
         with mock.patch.object(Path, 'write_text', side_effect=PermissionError('reminder denied')):
             for _ in range(2):
-                self.assert_blocked()
+                reason = self.assert_blocked()['reason']
+                self.assertIn('review row missing', reason)
+                self.assertIn('Stop reminder unavailable: reminder denied', reason)
                 self.assertEqual(self.path.read_bytes(), pending)
         self.assertFalse(self.reminder.exists())
         self.assert_blocked()

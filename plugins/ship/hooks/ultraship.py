@@ -1070,7 +1070,7 @@ def stop(data):
                     for cwd in {o[2] for o in owed}:
                         account(ledger, cwd, [o for o in owed if o[2] == cwd], receipts, str(path))
                     ledger.publish(receipt_path, receipts)
-            except Exception:
+            except Exception as accounting_error:
                 try:
                     canonical = [row[:3] + [json.loads(row[3])] if len(row) == 4 else row for row in owed]
                 except ValueError:
@@ -1078,12 +1078,15 @@ def stop(data):
                 fingerprint = hashlib.sha256(json.dumps(sorted(
                     json.dumps(row, sort_keys=True) for row in canonical)).encode()).hexdigest()
                 try:
-                    previous = reminder.read_text()
-                except FileNotFoundError:
-                    previous = None
-                if previous == fingerprint:
-                    return
-                reminder.write_text(fingerprint)
+                    try:
+                        previous = reminder.read_text()
+                    except FileNotFoundError:
+                        previous = None
+                    if previous == fingerprint:
+                        return
+                    reminder.write_text(fingerprint)
+                except OSError as reminder_error:
+                    raise ValueError(f'{accounting_error}; Stop reminder unavailable: {reminder_error}') from accounting_error
                 raise
             # Clear only after every result has a successful accounting row.
             # Keep this inode so concurrent SubagentStop writers share the lock.
@@ -1095,7 +1098,7 @@ def stop(data):
               f'Pending review evidence retained at {path}: {exc}. '
               'Resolve ledger access (set SHIP_LEDGER_DIR to an absolute permitted directory if needed). '
               'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]` in its open run, '
-              'writing <agent> exactly as this message names it. '
+              'Read every retained result and use its exact agent identity, including @agent_id when present. '
               'For a recorded result in a closed or earlier-branch run, use '
               f'`ledger.py account {path} <result-id> <step> <agent> <sha> <verdict> <evidence>`; '
               'this appends bookkeeping without reopening the run. Never invent review evidence.'}))
