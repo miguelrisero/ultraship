@@ -247,7 +247,10 @@ def correct_binding(identifier, line, reason):
         home, run, old = Path(saved[0]), saved[1], saved[2]
         with home.open('r+b') as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
-            history = [r.split('\t') for r in fh.read().decode().splitlines() if r]
+            text = fh.read().decode()
+            history = [r.split('\t') for r in text.splitlines() if r]
+            if text.rstrip('\n').split('\n') != text.splitlines() or '' in text.splitlines():
+                raise ValueError('ledger lines differ from its rows; name the row by hand-checked evidence instead')
             starts = [i for i, r in enumerate(history) if r[1] == 'run-start']
             start = [i for i in starts if run_identity(i, history[i]) == run]
             if len(start) != 1 or not 0 <= old[0] < len(history) or run_identity(old[0], history[old[0]]) != old:
@@ -261,29 +264,33 @@ def correct_binding(identifier, line, reason):
                 return start < i < end and history[i][1] not in MARKS and history[i][4] != 'owed'
 
             def fits(i, receipt):
-                return agent_key(history[i][2]) == (agent_key(history[receipt[2][0]][2])[0],
-                                                    receipt[3] if len(receipt) > 3 else None)
+                # A bound row names its result's agent ID, because Stop binds only on a matching ID.
+                return agent_key(history[i][2]) == agent_key(history[receipt[2][0]][2])
             if not review(index) or not fits(index, saved):
                 raise ValueError("target line must be a completed review row of this result's run and agent")
             new = run_identity(index, history[index])
             if new == old:
                 return home
             other = next((k for k, v in receipts.items() if v[0] == saved[0] and v[2] == new), None)
-            if other and (receipts[other][1] != run or not review(old[0]) or not fits(old[0], receipts[other])):
+            if other and (receipts[other][1] != run or not review(old[0])):
                 raise ValueError('target row is credited to another result that cannot take the current row')
-            note = {'result': key, 'from': old, 'to': new, 'swap': other, 'reason': reason}
-            row = [str(int(time.time())), 'correct-binding', *history[index][2:4], 'corrected', json.dumps(note)]
-            fh.seek(0, os.SEEK_END)
-            if fh.tell():
-                fh.seek(-1, os.SEEK_END)
-                if fh.read(1) != b'\n':
-                    fh.write(b'\n')
-            fh.write(('\t'.join(row) + '\n').encode())
-            fh.flush()
-            os.fsync(fh.fileno())
+            note = {'result': key, 'agent': history[index][2], 'from': old, 'to': new, 'swap': other, 'reason': reason}
+            # The '-' agent keeps older hooks from taking the audit row as a review.
+            row = [str(int(time.time())), 'correct-binding', '-', history[index][3], 'corrected', json.dumps(note)]
+            last = [json.loads(r[5]) for r in history if r[1] == 'correct-binding' and json.loads(r[5])['result'] == key]
+            # A matching last audit row means a crash came before publish: publish only.
+            if not last or [last[-1][k] for k in ('from', 'to', 'swap')] != [old, new, other]:
+                fh.seek(0, os.SEEK_END)
+                if fh.tell():
+                    fh.seek(-1, os.SEEK_END)
+                    if fh.read(1) != b'\n':
+                        fh.write(b'\n')
+                fh.write(('\t'.join(row) + '\n').encode())
+                fh.flush()
+                os.fsync(fh.fileno())
         if other:
-            receipts[other] = [*receipts[other][:2], old, *receipts[other][3:]]
-        receipts[key] = [*saved[:2], new, *saved[3:]]
+            receipts[other] = [*receipts[other][:2], old]
+        receipts[key] = [*saved[:2], new]
         publish(receipt_path, receipts)
     return home
 
@@ -318,6 +325,8 @@ def main(argv):
             sys.exit(USAGE)
         if not run:
             sys.exit('no open run; start one with run-start')
+        if args[0] in MARKS:
+            sys.exit(f'{args[0]} rows come only from their own command')
         append(path, *args, *([''] * (5 - len(args))))
     elif cmd in ('gaps', 'status'):
         if not run:

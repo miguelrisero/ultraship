@@ -530,8 +530,8 @@ class LedgerDirTests(unittest.TestCase):
             self.assertIn('ship:reviewer--sol@other', blocked['reason'])
             self.assertEqual(owed.read_bytes(), evidence)
 
-    def test_correct_binding_moves_credit_with_an_appended_audit_row(self):
-        # Legacy results carry no agent ID, so close results can swap rows; the correction repairs that.
+    def swapped_pair(self):
+        """Two legacy results with no agent ID take each other's rows; return their IDs and the pending bytes."""
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
         owed = self.base / 'state/ultraship/owed/s1.tsv'
@@ -540,29 +540,117 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass', 'capacity').returncode, 0)
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'findings', 'scrub').returncode, 0)
         self.assertEqual(self.hook('stop'), '')
+        return scrub, capacity, pending
+
+    def bound(self):
+        rows = ledger.rows(self.resolve())
+        receipts = json.loads((self.base / 'state/ultraship/accounted.json').read_text())
+        return {json.loads(k)[2]: rows[v[2][0]][5] for k, v in receipts.items()}
+
+    def line_of(self, note):
+        return str(next(i for i, r in enumerate(ledger.rows(self.resolve())) if r[5:] == [note]) + 1)
+
+    def test_correct_binding_moves_credit_with_an_appended_audit_row(self):
+        scrub, capacity, pending = self.swapped_pair()
         receipt_path = self.base / 'state/ultraship/accounted.json'
         home = self.resolve()
-        bound = lambda: {json.loads(k)[2]: ledger.rows(home)[v[2][0]][5]
-                         for k, v in json.loads(receipt_path.read_text()).items()}
-        self.assertEqual(bound(), {scrub: 'capacity', capacity: 'scrub'})
+        self.assertEqual(self.bound(), {scrub: 'capacity', capacity: 'scrub'})
         before = home.read_bytes()
-        line = str(next(i for i, r in enumerate(ledger.rows(home)) if r[5:] == ['scrub']) + 1)
-        for bad in ('1', '3', '99'):  # run-start, owed row, missing row
-            with self.subTest(line=bad):
-                self.assertNotEqual(self.cli('correct-binding', scrub, bad, 'swap').returncode, 0)
-                self.assertEqual(home.read_bytes(), before)
-        self.assertNotEqual(self.cli('correct-binding', scrub, line, ' ').returncode, 0)
-        fixed = self.cli('correct-binding', scrub, line, 'scrub findings bound to the capacity PASS')
+        self.assertNotEqual(self.cli('correct-binding', scrub, self.line_of('scrub'), ' ').returncode, 0)
+        self.assertNotEqual(self.cli('correct-binding', 'absent', self.line_of('scrub'), 'swap').returncode, 0)
+        self.assertEqual(home.read_bytes(), before)
+        fixed = self.cli('correct-binding', scrub, self.line_of('scrub'), 'scrub findings bound to the capacity PASS')
         self.assertEqual(fixed.returncode, 0, fixed.stderr)
-        self.assertEqual(bound(), {scrub: 'scrub', capacity: 'capacity'})
+        self.assertEqual(self.bound(), {scrub: 'scrub', capacity: 'capacity'})
         after = home.read_bytes()
         self.assertTrue(after.startswith(before))
         audit = ledger.rows(home)[-1]
-        self.assertEqual(audit[1:5], ['correct-binding', 'ship:reviewer--sol', 'sha', 'corrected'])
-        self.assertEqual(json.loads(audit[5])['reason'], 'scrub findings bound to the capacity PASS')
+        self.assertEqual(audit[1:5], ['correct-binding', '-', 'sha', 'corrected'])
+        note = json.loads(audit[5])
+        self.assertEqual((note['agent'], note['reason']), ('ship:reviewer--sol', 'scrub findings bound to the capacity PASS'))
+        self.assertEqual(json.loads(note['swap'])[2], capacity)
         saved = receipt_path.read_bytes()
-        self.assertEqual(self.cli('correct-binding', scrub, line, 'retry').returncode, 0)
+        self.assertEqual(len(json.loads(saved)[next(iter(json.loads(saved)))]), 3)
+        self.assertEqual(self.cli('correct-binding', scrub, self.line_of('scrub'), 'retry').returncode, 0)
         self.assertEqual((home.read_bytes(), receipt_path.read_bytes()), (after, saved))  # an exact retry changes nothing
+        # A later result never takes the audit row as its review.
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
         owed.write_bytes(pending)  # a replay validates the corrected receipts without a second charge
         self.assertEqual(self.hook('stop'), '')
         self.assertEqual(receipt_path.read_bytes(), saved)
+
+    def test_correct_binding_retry_after_a_crash_appends_no_second_audit_row(self):
+        scrub, capacity, _ = self.swapped_pair()
+        receipt_path = self.base / 'state/ultraship/accounted.json'
+        wrong = receipt_path.read_bytes()
+        self.assertEqual(self.cli('correct-binding', scrub, self.line_of('scrub'), 'swap').returncode, 0)
+        audited = self.resolve().read_bytes()
+        receipt_path.write_bytes(wrong)  # the audit row landed and the receipts did not
+        self.assertEqual(self.cli('correct-binding', scrub, self.line_of('scrub'), 'swap').returncode, 0)
+        self.assertEqual(self.resolve().read_bytes(), audited)
+        self.assertEqual(self.bound(), {scrub: 'scrub', capacity: 'capacity'})
+
+    def test_correct_binding_refuses_each_unfit_target(self):
+        scrub, capacity, _ = self.swapped_pair()
+        for note, agent, verdict in (('owed-row', 'ship:reviewer--sol', 'owed'),
+                                     ('other-type', 'ship:reviewer--opus', 'pass'),
+                                     ('other-id', 'ship:reviewer--sol@zzz', 'pass')):
+            self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', verdict, note).returncode, 0)
+        for step in ledger.MARKS:
+            self.assertNotEqual(self.cli('append', step, 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        self.finish_run()
+        self.assertEqual(self.cli('run-start', 'light', 'run-2').returncode, 0)
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass', 'next-run').returncode, 0)
+        home = self.resolve()
+        before = (home.read_bytes(), (self.base / 'state/ultraship/accounted.json').read_bytes())
+        for note in ('owed-row', 'other-type', 'other-id', 'next-run'):
+            with self.subTest(target=note):
+                refused = self.cli('correct-binding', scrub, self.line_of(note), 'move')
+                self.assertIn('target line must be a completed review row', refused.stderr)
+        self.assertIn('target line must be', self.cli('correct-binding', scrub, '999', 'move').stderr)
+        self.assertEqual((home.read_bytes(), (self.base / 'state/ultraship/accounted.json').read_bytes()), before)
+        with home.open('ab') as fh:
+            fh.write(b'\n')  # a blank line before the next row makes file lines and rows differ
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass', 'after-blank').returncode, 0)
+        self.assertIn('ledger lines differ', self.cli('correct-binding', scrub, self.line_of('scrub'), 'move').stderr)
+
+    def test_correct_binding_refuses_a_swap_onto_an_explicit_record(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        first, second = (json.loads(line.split('\t')[3])['id'] for line in owed.read_text().splitlines())
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass', 'ordinary').returncode, 0)
+        self.assertEqual(self.cli('account', str(owed), first, 'deep-review', 'ship:reviewer--sol',
+                                  'sha', 'pass', 'First report.md').returncode, 0)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(self.bound()[second], 'ordinary')
+        refused = self.cli('correct-binding', first, self.line_of('ordinary'), 'move')
+        self.assertIn('cannot take the current row', refused.stderr)
+        explicit = str(next(i for i, r in enumerate(ledger.rows(self.resolve())) if r[1] == 'account-result') + 1)
+        refused = self.cli('correct-binding', second, explicit, 'move')  # same agent column, but a record row
+        self.assertIn('target line must be a completed review row', refused.stderr)
+
+    def test_older_pending_record_with_an_agent_id_accepts_a_row_without_one(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='in-flight')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        epoch, agent, cwd, raw = owed.read_text().rstrip('\n').split('\t')
+        result = json.loads(raw)
+        del result['v']  # written before ID binding
+        owed.write_text('\t'.join([epoch, agent, cwd, json.dumps(result)]) + '\n')
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol@someone-else', 'sha', 'pass').returncode, 0)
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
+        self.assertEqual(self.hook('stop'), '')
+
+    def test_explicit_accounting_checks_the_named_agent_id(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='mine')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        result = json.loads(owed.read_text().split('\t')[3])
+        self.finish_run()
+        args = (str(owed), result['id'], 'deep-review')
+        self.assertNotEqual(self.cli('account', *args, 'ship:reviewer--sol@other', 'sha', 'pass', 'r.md').returncode, 0)
+        recorded = self.cli('account', *args, 'ship:reviewer--sol@mine', 'sha', 'pass', 'r.md')
+        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+        self.assertEqual(self.hook('stop'), '')

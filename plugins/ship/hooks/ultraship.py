@@ -918,7 +918,7 @@ def subagent_stop(data):
         path = owed_file(data)
         path.parent.mkdir(parents=True, exist_ok=True)
         cwd = data.get('cwd') or os.getcwd()
-        result = {'id': str(uuid.uuid4())}
+        result = {'id': str(uuid.uuid4()), 'v': 2}
         for key in ('agent_id', 'agent_transcript_path'):
             value = data.get(key)
             if isinstance(value, str) and value.strip():
@@ -988,7 +988,7 @@ def account(ledger, cwd, notifications, receipts, session):
             if not start < index < end and not ledger.accounting_row(history[index], result_id, result['run']):
                 raise ValueError('Accounting receipt row belongs to another run')
             continue
-        used = {json.dumps(value[:3]) for value in receipts.values()}
+        used = {json.dumps(value) for value in receipts.values()}
         # Reserve an exact-result record before consuming an interchangeable ordinary review row.
         candidates = sorted(range(start + 1, len(history)), key=lambda i:
                             not ledger.accounting_row(history[i], result_id, run_identity(start, history[start])))
@@ -998,14 +998,17 @@ def account(ledger, cwd, notifications, receipts, session):
             explicit = ledger.accounting_row(row, result_id, run_identity(start, history[start]))
             regular = i < end and row[1] not in ledger.MARKS
             kind, ident = ledger.agent_key(row[2])
-            # An ordinary row binds only to the result whose agent ID it names; legacy results name none.
-            if (((explicit and kind == agent) or (regular and (kind, ident) == (agent, result.get('agent_id'))))
+            # A row binds only to the result whose agent ID it names. Records written before
+            # ID binding (no 'v') also accept a row without an ID, so in-flight runs still clear.
+            owner = (kind, ident) == (agent, result.get('agent_id')) or (
+                result.get('v') != 2 and kind == agent and ident is None)
+            if (((explicit and kind == agent) or (regular and owner))
                     and row[4] != 'owed' and int(row[0]) >= int(epoch) - 5 and json.dumps(identity) not in used):
-                receipts[result_id] = [*identity, result.get('agent_id')]
+                receipts[result_id] = identity
                 break
         else:
             named = agent + (f'@{result["agent_id"]}' if result.get('agent_id') else '')
-            raise ValueError(f'Review results have no unused ledger row: {named}; pending result {result["id"]}')
+            raise ValueError(f'Review results have no unused ledger row for agent {named}; pending result {result["id"]}')
 
 
 def stop(data):
@@ -1043,7 +1046,8 @@ def stop(data):
         print(json.dumps({'decision': 'block', 'reason':
               f'Pending review evidence retained at {path}: {exc}. '
               'Resolve ledger access (set SHIP_LEDGER_DIR to an absolute permitted directory if needed). '
-              'Record each result with `ledger.py append <step> <agent>@<agent-id> <sha> <verdict> [note]` in its open run. '
+              'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]` in its open run, '
+              'writing <agent> exactly as this message names it. '
               'For a recorded result in a closed or earlier-branch run, use '
               f'`ledger.py account {path} <result-id> <step> <agent> <sha> <verdict> <evidence>`; '
               'this appends bookkeeping without reopening the run. Never invent review evidence.'}))

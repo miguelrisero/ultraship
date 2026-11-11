@@ -251,7 +251,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     assert {key: result.get(key) for key in provenance} == provenance
     assert uuid.UUID(result['id']).version == 4 and result['id'] != provenance['agent_id']
     assert result['run'] is not None and result['ledger'] == ledger('path').stdout.strip()
-    assert set(result) == {'id', 'ledger', 'run', *provenance}
+    assert set(result) == {'id', 'v', 'ledger', 'run', *provenance}
     assert not Path(provenance['agent_transcript_path']).exists()
     hook('subagent-stop', {**session, 'agent_type': 'ship:writer--sol'}, env)
     blocked = hook('stop', session, env)
@@ -267,7 +267,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
         hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol', **metadata}, env)
         result = json.loads(owed.read_text().split('\t')[3])
         assert {key: result[key] for key in provenance if key in result} == expected, metadata
-        assert set(result) == {'id', 'ledger', 'run', *expected}, metadata
+        assert set(result) == {'id', 'v', 'ledger', 'run', *expected}, metadata
         assert result['run'] is not None
         assert hook('stop', session, env)['decision'] == 'block'
         named = 'ship:reviewer--sol' + (f"@{expected['agent_id']}" if 'agent_id' in expected else '')
