@@ -148,6 +148,43 @@ class WriterFalsePublishTests(unittest.TestCase):
         self.assertDenied('gh pr merge 3 --squash', 'gh pr create --fill', "gh pr comment 3 --body '/merge fix(x): y'",
                           'npm publish', 'vercel --prod', 'wrangler deploy', 'docker push ghcr.io/x/y')
 
+    def test_dated_proof_preparation_in_scratch_is_admitted(self):
+        # The refused Teams-lane shape: a timestamp, then a Python patch of a scratch script, then a syntax check.
+        self.assertAdmitted(
+            "date -u +%FT%TZ && python3 -I - <<'PY'\n"
+            "from pathlib import Path\nimport ast, hashlib\n"
+            "base = Path('/w/.scratch/battery')\np = base / 'battery-1110.sh'\ns = p.read_text()\n"
+            "assert hashlib.sha256(p.read_bytes()).hexdigest() == '0' * 64\n"
+            "s = s.replace('rc=0\\n\"$PY\" -I - <<\\'PY\\' || rc=$?\\n', 'exec \"$PY\" -I - <<\\'PY\\'\\n')\n"
+            "s = s.replace('done\\n', 'elif git(\"status\", \"--porcelain\"):\\n    print(\"DIRTY\")\\n')\n"
+            "body = s.split(\"<<'PY'\\n\", 1)[1].rsplit('\\nPY\\n', 1)[0]\nast.parse(body)\n"
+            "dst = base / 'battery-final-1110.sh'\nwith dst.open('x') as fh:\n    fh.write(s)\n"
+            "dst.chmod(0o444)\nprint(hashlib.sha256(dst.read_bytes()).hexdigest())\nPY\n"
+            "bash -n /w/.scratch/battery/battery-final-1110.sh",
+            "date -u +%FT%TZ && cd /w/lane && python3 - <<'PY'\np = 'tests/startup.test.js'\ns = open(p).read()\n"
+            "open(p, 'w').write(s + \"order.push('listen')\\n\")\nPY")
+
+    def test_test_append_in_own_worktree_is_admitted(self):
+        # The refused photos-lane shape: a heredoc append whose test text calls `order.push`.
+        self.assertAdmitted(
+            "cd /w/repo.lane && cat >> backend/api/tests/unit/routes/startup.test.js <<'EOF'\n\n"
+            "describe('replacement startup contract', () => {\n"
+            "    it('listens once', async () => {\n        const order = [];\n"
+            "        order.push('listen');\n        expect(order).toEqual(['listen']);\n"
+            "        expect(process.exit).toHaveBeenCalledWith(0);\n    });\n});\nEOF")
+
+    def test_publication_behind_a_date_prefix_stays_denied(self):
+        self.assertDenied(
+            'date -u +%FT%TZ && git push origin HEAD', 'date -u && cd /w && git -C /w push',
+            'date -u +%FT%TZ && gh pr merge 3 --squash',
+            "date -u +%FT%TZ && cd /w && gh pr comment 3 --body '/merge fix(x): y'",
+            "date -u +%FT%TZ && python3 - <<'PY'\nprint(1)\nPY\ngit push origin HEAD",
+            "date -u +%FT%TZ && python3 - <<'PY'\nimport subprocess\nsubprocess.run('gh pr merge 3', shell=True)\nPY",
+            "date -u +%FT%TZ && python3 - <<'PY'\n" + GIT_HELPER + "git('status')\nPY",
+            "date -u && python3 - <<'PY'\nimport subprocess\n"
+            "subprocess.run(\"git() { command git pu''sh; }; git\", shell=True)\nPY",
+            "date -u $(git push) && python3 - <<'PY'\nprint(1)\nPY")
+
     def test_denial_names_the_driver_route(self):
         self.assertIn('Return this step to your driver; the driver may run it.',
                       self.decision('git push')['permissionDecisionReason'])

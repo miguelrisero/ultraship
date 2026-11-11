@@ -310,13 +310,17 @@ def read_only_shell(command):
     return True
 
 
+# Literal `cd` and `date` steps run no file, so they may lead a Python heredoc; the scan still reads them.
+PYTHON_LEAD = r'(?:(?:cd +[\w./-]+|date(?: +[-+\w%:]+)*) +&& +)*'
+
+
 def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
-    # Only a literal `cd` and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the interpreter;
-    # a `GIT_CONFIG_*` lead could alias a git read to a push.
-    header = re.compile(r"^(?P<lead>[ \t]*(?:cd +[\w./-]+ +&& +)?(?:PYTHON[A-Z0-9_]*=[\w./-]* +)*)"
+    # Only literal `cd` and `date` steps and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the
+    # interpreter; a `GIT_CONFIG_*` lead could alias a git read to a push.
+    header = re.compile(rf"^(?P<lead>[ \t]*{PYTHON_LEAD}(?:PYTHON[A-Z0-9_]*=[\w./-]* +)*)"
                         r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
                         r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
                         r"[ \t]*\n$")
@@ -331,9 +335,9 @@ def python_heredoc_shell(command, inert_only=False):
             remainder = ''.join(lines[end + 1:])
             body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            # Only a `cd` may lead it and only a read-only remainder may follow it, because another command could
+            # Only a `cd` or `date` may lead it and only a read-only remainder may follow it, because another command could
             # run the file it writes.
-            if (re.fullmatch(r'[ \t]*(?:cd +[\w./-]+ +&& +)?', match['lead']) and read_only_shell(remainder)
+            if (re.fullmatch(rf'[ \t]*{PYTHON_LEAD}', match['lead']) and read_only_shell(remainder)
                     and match['delimiter'][0] in '\'"\\' and inert_python(body)):
                 return lines[0] + remainder
             if inert_only:
@@ -353,7 +357,13 @@ def python_heredoc_shell(command, inert_only=False):
                     line = body_lines[node.lineno - 1]
                     body_lines[node.lineno - 1] = re.sub(r'^(\s*def )git(?=\s*\()',
                                                        r'\1_git_helper', line, count=1)
-            if shell_git_push(''.join(body_lines)):
+            scanned = ''.join(body_lines)
+            # Python runs `git(` only as a call; in a string the shell reads it as a function definition, never a git
+            # command, so text such as a generated script's `git("status")` is not a push.
+            if not any(isinstance(node, ast.Call) and getattr(node.func, 'id', getattr(node.func, 'attr', None)) == 'git'
+                       for node in ast.walk(tree)):
+                scanned = re.sub(r'\bgit\(', 'git_(', scanned)
+            if shell_git_push(scanned):
                 return command
             # The remainder stays in the result, so the push scan reads it as shell.
             return lines[0] + remainder
