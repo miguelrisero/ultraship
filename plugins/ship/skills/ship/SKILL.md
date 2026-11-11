@@ -74,12 +74,12 @@ Every run keeps a ledger with `${CLAUDE_SKILL_DIR}/scripts/ledger.py`:
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" run-start <full|light> <run-id> [board-path]
-python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" append <step> <agent> <sha> <verdict> [note]
+python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" append <step> <agent>@<agent-id> <sha> <verdict> [note]
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" gaps
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" run-end
 ```
 
-Append a row as soon as each review, panel, or CI round returns. Use the step names in [pipeline](references/pipeline.md). `run-end` refuses while a required step has no row. Stop retains pending reviewer evidence until each result has a successful accounting row in its bound run, including a successfully closed run. Persistent hook-state receipts consume each row once across Stop cycles. Keep hook-state receipts with the pending evidence.
+Append a row as soon as each review, panel, or CI round returns. Use the step names in [pipeline](references/pipeline.md). For a reviewer, triage, or verifier result, write the agent as `<agent-type>@<agent-id>`, with the agent ID from that agent's launch result or task notification. Stop binds each result only to a row with its own agent ID, so close results never take each other's rows. A pending record from an older hook also accepts a row without an ID. `run-end` refuses while a required step has no row. Stop retains pending reviewer evidence until each result has a successful accounting row in its bound run, including a successfully closed run. Persistent hook-state receipts consume each row once across Stop cycles. Keep hook-state receipts with the pending evidence.
 
 Each pending result keeps its recorded ledger path and run identity across branch changes. For a completed result whose original run is closed, record its actual review outcome with:
 
@@ -88,6 +88,14 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account <pending.tsv> <result-id
 ```
 
 Use the pending file and result ID from the Stop diagnostic. Supply the actual agent, reviewed SHA, verdict and evidence from the completed result. The command appends an `account-result` record to the recorded ledger. It preserves all existing rows and the run's closure, and exact retries append nothing. This bookkeeping covers only the named result; it grants no pipeline step, review or completion evidence of its own. Never reopen a closed run or invent review rows to clear Stop.
+
+When an accounted result is bound to another result's row, move its credit with:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" correct-binding <result-id> <ledger-line> <reason>
+```
+
+The line is the 1-based line of the correct review row in the bound ledger file, in the same run and with the same agent column. The command refuses a ledger with blank lines or other line breaks. The command appends a `correct-binding` audit row first and never rewrites earlier rows. It then moves the receipt; when another result holds the target row, the two results swap rows. A retry after a crash appends no second audit row, and an exact retry after success changes nothing.
 
 A linked checkout with an external common Git directory uses its existing parent `.scratch/ship-ledgers` with checkout and branch isolation. First use imports the legacy branch history and open run once, with canonical path and SHA256 provenance. The sole driver must hold run custody and retire old writers before import; old legacy writers can race the snapshot. Import needs legacy read permission and local write permission. All subsequent access uses the local ledger. Full checkouts retain the common-directory default. Ambiguous layouts require an absolute `SHIP_LEDGER_DIR`; the override directly contains branch files. See [ledger storage and permissions](../../README.md#hooks).
 
