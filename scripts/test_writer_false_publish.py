@@ -86,8 +86,29 @@ class WriterFalsePublishTests(unittest.TestCase):
     def test_executable_glob_or_expansion_matching_git_push_stays_denied(self):
         self.assertDenied('/usr/lib/git-core/git-pu* origin HEAD', '/usr/lib/git-core/git-p?sh origin HEAD',
                           '/usr/lib/git-core/g*-push origin HEAD', '/usr/lib/git-core/g?t-push origin HEAD',
-                          '/usr/lib/git-core/git-pus[h] origin HEAD', 'env /usr/lib/git-core/git-pu* origin HEAD')
+                          '/usr/lib/git-core/git-pus[h] origin HEAD', 'cd /w && /usr/lib/git-core/git-pu* x')
         self.assertAdmitted('ls *.py', 'git -C "$W" status')
+
+    def test_globs_in_arguments_are_file_names(self):
+        self.assertAdmitted('ls g*', "find . -name 'g*'", 'ls /usr/lib/git-core/git-*', 'ls /usr/lib/git-core/git-pu*',
+                            "git -C /w ls-files 'g*'", 'cat g*.txt', 'head -n 1 g?t-*', 'wc -l /usr/lib/git-core/g*')
+
+    def test_send_pack_and_other_remote_ref_writers_stay_denied(self):
+        self.assertDenied('git send-pack origin HEAD:main', 'S=send-pack; git $S origin HEAD:main',
+                          'S=send-pack && git -C /w $S origin HEAD:main', 'git -C /w send-pack x HEAD:main',
+                          'git http-push https://x/y main', '/usr/lib/git-core/git-send-pack x HEAD:main',
+                          '/usr/lib/git-core/git-http-push x main', 'g?t send-pack x HEAD:main',
+                          '/usr/lib/git-core/git-send-p* x HEAD:main')
+
+    def test_git_config_environment_that_aliases_a_push_stays_denied(self):
+        body = "python3 - <<'PY'\nimport subprocess\nsubprocess.run(('git', 'status'))\nPY"
+        self.assertDenied(
+            'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.status GIT_CONFIG_VALUE_0=push ' + body,
+            'cd /w && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0=push ' + body,
+            'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0=push git st',
+            "export GIT_CONFIG_PARAMETERS=\"'alias.st=push'\"; git st",
+            'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0=send-pack git st')
+        self.assertAdmitted('cd /w && PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 ' + body)
 
     def test_only_read_only_commands_keep_a_literal_variable_fixed(self):
         self.assertDenied(*(f'W=/w; {command} x; git -C $W log' for command in (

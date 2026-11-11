@@ -28,6 +28,9 @@ WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
     terraform\s+(apply|destroy) | kubectl\s+(apply|delete|rollout) | helm\s+(install|upgrade|uninstall) |
     vercel(\s+\S+)*\s+--prod | vercel\s+deploy | wrangler\s+(deploy|publish) | fly(ctl)?\s+deploy | docker\s+push
 )\b""", re.X)
+# Git subcommands and executables that write refs on a remote.
+REMOTE_WRITERS = {'push', 'send-pack', 'http-push'}
+REMOTE_WRITER_NAMES = {f'git-{name}' for name in REMOTE_WRITERS}
 GH_METHOD = re.compile(r'^(?:--method(?:=(.*))?|-[ip]*X(.*))$')
 GH_FIELD = re.compile(r'^(?:--(?:field|raw-field|input)(?:=.*)?|-[ip]*[fF].*)$')
 HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
@@ -295,8 +298,9 @@ def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
-    # Only a literal `cd` and literal assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the interpreter.
-    header = re.compile(r"^(?P<lead>[ \t]*(?:cd +[\w./-]+ +&& +)?(?:[A-Z_][A-Z0-9_]*=[\w./-]* +)*)"
+    # Only a literal `cd` and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the interpreter;
+    # a `GIT_CONFIG_*` lead could alias a git read to a push.
+    header = re.compile(r"^(?P<lead>[ \t]*(?:cd +[\w./-]+ +&& +)?(?:PYTHON[A-Z0-9_]*=[\w./-]* +)*)"
                         r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
                         r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
                         r"[ \t]*\n$")
@@ -585,11 +589,11 @@ def shell_git_push(command):
         plain = plain and all(part.split()[0] in READ_ONLY_STARTS
                               for part in re.split(r'[;&|\n]+', words) if part.strip())
         if plain:
-            spelled = re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])',
+            spelled = re.search(r'(?<![A-Za-z0-9_])(?:push|send-pack)(?![A-Za-z0-9_])',
                                 re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', words))
         else:
-            spelled = any('push' in re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', token).translate(expansion)
-                          for token in tokens)
+            spelled = any(word in re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', token).translate(expansion)
+                          for token in tokens for word in ('push', 'send-pack'))
         if any(set(token) & set('$`*?[{') for token in tokens) and spelled:
             return True
         expect_subcommand = skip_value = folder_value = False
@@ -620,15 +624,19 @@ def shell_git_push(command):
                     skip_value = True
                     folder_value = token in folders
                     continue
-                if token == 'push':
+                if token in REMOTE_WRITERS:
                     return True
                 # Options and other non-word tokens stay pending; a plain word is the subcommand.
                 if re.fullmatch(r'[a-z][a-z0-9-]*', token):
                     expect_subcommand = False
-            # `git-push` runs a push, and a glob or an expansion in the name (`git-pu*`, `$G-push`) can match it.
+            # `git-push` runs a push. A glob or an expansion in the command word (`git-pu*`, `$G-push`) can match it;
+            # in an argument it is only a file name (`ls g*`).
             base = os.path.basename(re.sub(r'\$(?:[A-Za-z_]\w*|\{[^}]*\})', '*', token))
-            if base == 'git-push' or (set(base) & set('*?[') and base.strip('*?')
-                                      and fnmatch.fnmatchcase('git-push', base)):
+            if base in REMOTE_WRITER_NAMES or command_start and set(base) & set('*?[') and base.strip('*?') and any(
+                    fnmatch.fnmatchcase(name, base) for name in REMOTE_WRITER_NAMES):
+                return True
+            # Git reads `GIT_CONFIG_*` from the environment, so a value that spells a remote writer can alias one.
+            if re.match(r'GIT_\w*=', token) and any(word in token for word in REMOTE_WRITERS):
                 return True
             if os.path.basename(token) == 'git':
                 expect_subcommand = True
