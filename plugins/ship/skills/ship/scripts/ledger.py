@@ -2,6 +2,7 @@
 """Ship run ledger: one branch TSV in the resolved ledger home.
 
 Row: epoch<TAB>step<TAB>agent<TAB>sha<TAB>verdict<TAB>note
+A reviewer row names its agent as <agent-type>@<agent-id>; a result binds only to rows with its own agent ID.
 """
 import fcntl
 import hashlib
@@ -20,8 +21,17 @@ REQUIRED = {
 }
 USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py run-start <full|light> <run-id> [board-path]
-       ledger.py append <step> <agent> <sha> <verdict> [note]
-       ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>"""
+       ledger.py append <step> <agent>[@<agent-id>] <sha> <verdict> [note]
+       ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
+       ledger.py correct-binding <result-id> <ledger-line> <reason>"""
+STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
+MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
+
+
+def agent_key(field):
+    """Split an agent column `<agent-type>[@<agent-id>]` into (type, ID or None)."""
+    kind, _, ident = field.partition('@')
+    return kind, ident or None
 
 
 def git(cwd, *args):
@@ -173,7 +183,9 @@ def account(pending, identifier, step, agent, sha, verdict, evidence):
         raise ValueError('pending result ID must match exactly one notification')
     epoch, expected_agent, cwd, raw = matches[0]
     result = json.loads(raw)
-    if agent != expected_agent or not result.get('run') or not result.get('ledger'):
+    kind, ident = agent_key(agent)
+    if (kind != expected_agent or ident not in (None, result.get('agent_id'))
+            or not result.get('run') or not result.get('ledger')):
         raise ValueError('pending result needs its recorded agent, ledger and run')
     home = Path(result['ledger'])
     if not home.is_absolute() or home.resolve() != home:
@@ -203,6 +215,79 @@ def account(pending, identifier, step, agent, sha, verdict, evidence):
     return home
 
 
+def publish(path, value):
+    with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, prefix=path.name + '.', delete=False) as saved:
+        json.dump(value, saved)
+        saved.flush()
+        os.fsync(saved.fileno())
+    os.replace(saved.name, path)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def correct_binding(identifier, line, reason):
+    """Move one accounted result to another review row of its bound run.
+
+    The audit row is appended before the hook-state receipts change; the ledger is never rewritten.
+    A target row already credited to another result swaps credit with it."""
+    if not reason.strip() or '\t' in reason or '\n' in reason:
+        raise ValueError('correction needs a single-line reason')
+    receipt_path = STATE / 'accounted.json'
+    with (STATE / 'accounted.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        receipts = json.loads(receipt_path.read_text())
+        keys = [k for k in receipts if json.loads(k)[2] == identifier]
+        if len(keys) != 1:
+            raise ValueError('result ID must match exactly one accounted result')
+        key = keys[0]
+        saved = receipts[key]
+        home, run, old = Path(saved[0]), saved[1], saved[2]
+        with home.open('r+b') as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            history = [r.split('\t') for r in fh.read().decode().splitlines() if r]
+            starts = [i for i, r in enumerate(history) if r[1] == 'run-start']
+            start = [i for i in starts if run_identity(i, history[i]) == run]
+            if len(start) != 1 or not 0 <= old[0] < len(history) or run_identity(old[0], history[old[0]]) != old:
+                raise ValueError('bound run or row is missing or differs; restore the ledger evidence')
+            start = start[0]
+            end = next((i for i in starts if i > start), len(history))
+            end = next((i for i in range(start + 1, end) if history[i][1] == 'run-end'), end)
+            index = int(line) - 1 if line.isdigit() else -1
+
+            def review(i):
+                return start < i < end and history[i][1] not in MARKS and history[i][4] != 'owed'
+
+            def fits(i, receipt):
+                return agent_key(history[i][2]) == (agent_key(history[receipt[2][0]][2])[0],
+                                                    receipt[3] if len(receipt) > 3 else None)
+            if not review(index) or not fits(index, saved):
+                raise ValueError("target line must be a completed review row of this result's run and agent")
+            new = run_identity(index, history[index])
+            if new == old:
+                return home
+            other = next((k for k, v in receipts.items() if v[0] == saved[0] and v[2] == new), None)
+            if other and (receipts[other][1] != run or not review(old[0]) or not fits(old[0], receipts[other])):
+                raise ValueError('target row is credited to another result that cannot take the current row')
+            note = {'result': key, 'from': old, 'to': new, 'swap': other, 'reason': reason}
+            row = [str(int(time.time())), 'correct-binding', *history[index][2:4], 'corrected', json.dumps(note)]
+            fh.seek(0, os.SEEK_END)
+            if fh.tell():
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b'\n':
+                    fh.write(b'\n')
+            fh.write(('\t'.join(row) + '\n').encode())
+            fh.flush()
+            os.fsync(fh.fileno())
+        if other:
+            receipts[other] = [*receipts[other][:2], old, *receipts[other][3:]]
+        receipts[key] = [*saved[:2], new, *saved[3:]]
+        publish(receipt_path, receipts)
+    return home
+
+
 def main(argv):
     if not argv:
         sys.exit(USAGE)
@@ -211,6 +296,11 @@ def main(argv):
         if len(args) != 7:
             sys.exit(USAGE)
         print(account(*args))
+        return
+    if cmd == 'correct-binding':
+        if len(args) != 3:
+            sys.exit(USAGE)
+        print(correct_binding(*args))
         return
     path = ledger_path()
     run = open_run(path)

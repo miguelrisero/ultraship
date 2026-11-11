@@ -10,7 +10,6 @@ import os
 import re
 import shlex
 import sys
-import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -989,7 +988,7 @@ def account(ledger, cwd, notifications, receipts, session):
             if not start < index < end and not ledger.accounting_row(history[index], result_id, result['run']):
                 raise ValueError('Accounting receipt row belongs to another run')
             continue
-        used = {json.dumps(value) for value in receipts.values()}
+        used = {json.dumps(value[:3]) for value in receipts.values()}
         # Reserve an exact-result record before consuming an interchangeable ordinary review row.
         candidates = sorted(range(start + 1, len(history)), key=lambda i:
                             not ledger.accounting_row(history[i], result_id, run_identity(start, history[start])))
@@ -997,13 +996,16 @@ def account(ledger, cwd, notifications, receipts, session):
             row = history[i]
             identity = [str(home), run_identity(start, history[start]), run_identity(i, row)]
             explicit = ledger.accounting_row(row, result_id, run_identity(start, history[start]))
-            regular = i < end and row[1] not in ('run-start', 'run-end', 'account-result')
-            if ((explicit or regular) and row[2] == agent and row[4] != 'owed'
-                    and int(row[0]) >= int(epoch) - 5 and json.dumps(identity) not in used):
-                receipts[result_id] = identity
+            regular = i < end and row[1] not in ledger.MARKS
+            kind, ident = ledger.agent_key(row[2])
+            # An ordinary row binds only to the result whose agent ID it names; legacy results name none.
+            if (((explicit and kind == agent) or (regular and (kind, ident) == (agent, result.get('agent_id'))))
+                    and row[4] != 'owed' and int(row[0]) >= int(epoch) - 5 and json.dumps(identity) not in used):
+                receipts[result_id] = [*identity, result.get('agent_id')]
                 break
         else:
-            raise ValueError(f'Review results have no unused ledger row: {agent}; pending result {result["id"]}')
+            named = agent + (f'@{result["agent_id"]}' if result.get('agent_id') else '')
+            raise ValueError(f'Review results have no unused ledger row: {named}; pending result {result["id"]}')
 
 
 def stop(data):
@@ -1032,17 +1034,7 @@ def stop(data):
                     receipts = {}
                 for cwd in {o[2] for o in owed}:
                     account(ledger, cwd, [o for o in owed if o[2] == cwd], receipts, str(path))
-                with tempfile.NamedTemporaryFile(mode='w', dir=STATE, prefix='accounted.',
-                                                 delete=False) as saved:
-                    json.dump(receipts, saved)
-                    saved.flush()
-                    os.fsync(saved.fileno())
-                os.replace(saved.name, receipt_path)
-                directory = os.open(STATE, os.O_RDONLY)
-                try:
-                    os.fsync(directory)
-                finally:
-                    os.close(directory)
+                ledger.publish(receipt_path, receipts)
             # Clear only after every result has a successful accounting row.
             # Keep this inode so concurrent SubagentStop writers share the lock.
             pending.seek(0)
@@ -1051,7 +1043,7 @@ def stop(data):
         print(json.dumps({'decision': 'block', 'reason':
               f'Pending review evidence retained at {path}: {exc}. '
               'Resolve ledger access (set SHIP_LEDGER_DIR to an absolute permitted directory if needed). '
-              'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]` in its open run. '
+              'Record each result with `ledger.py append <step> <agent>@<agent-id> <sha> <verdict> [note]` in its open run. '
               'For a recorded result in a closed or earlier-branch run, use '
               f'`ledger.py account {path} <result-id> <step> <agent> <sha> <verdict> <evidence>`; '
               'this appends bookkeeping without reopening the run. Never invent review evidence.'}))

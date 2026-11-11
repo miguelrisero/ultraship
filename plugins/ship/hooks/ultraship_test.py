@@ -256,8 +256,8 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     hook('subagent-stop', {**session, 'agent_type': 'ship:writer--sol'}, env)
     blocked = hook('stop', session, env)
     assert blocked['decision'] == 'block' and 'reviewer--sol' in blocked['reason']
-    assert hook('stop', session, env)['decision'] == 'block'
-    assert ledger('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode == 0
+    assert 'ship:reviewer--sol@reviewer-terminal-1' in hook('stop', session, env)['reason']
+    assert ledger('append', 'deep-review', 'ship:reviewer--sol@reviewer-terminal-1', 'sha', 'pass').returncode == 0
     assert hook('stop', session, env) == ''
 
     metadata_cases = [({}, {}), *[({key: value}, {key: value}) for key, value in provenance.items()]]
@@ -270,7 +270,8 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
         assert set(result) == {'id', 'ledger', 'run', *expected}, metadata
         assert result['run'] is not None
         assert hook('stop', session, env)['decision'] == 'block'
-        assert ledger('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode == 0
+        named = 'ship:reviewer--sol' + (f"@{expected['agent_id']}" if 'agent_id' in expected else '')
+        assert ledger('append', 'deep-review', named, 'sha', 'pass').returncode == 0
         assert hook('stop', session, env) == ''
 
     hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--opus'}, env)
