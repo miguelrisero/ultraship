@@ -616,6 +616,15 @@ def quoted_variable(command, token):
             and re.search(rf'\$(?:{name}\b|\{{{name}\b)', rest) is None)
 
 
+def git_read_words(words):
+    """Whether shell words after `git` are `-C <path>`, then `ls-files`, `ls-tree` or `grep` with only listed options."""
+    while words[:1] == ['-C'] and len(words) > 1 and re.fullmatch(r'[\w./-]+', words[1]):
+        words = words[2:]
+    return bool(words) and words[0] in {'ls-files', 'ls-tree', 'grep'} and all(
+        # A word after the subcommand is a pattern or path, whatever it holds, unless it is an option.
+        re.fullmatch(r'-[nilwEFvz]+|-[ABC][0-9]*|--|(?!-).*', word, re.S) for word in words[1:])
+
+
 def shell_git_push(command):
     """Scan Git commands and shell-wrapper strings without regex backtracking."""
     values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
@@ -653,15 +662,23 @@ def shell_git_push(command):
                                for part in re.split(r'[;&|\n]+', words) if part.strip())
         plain = plain and read_only_starts
         # Single quotes keep a glob literal, so a quoted pathspec (`git ls-files '*pre-push*'`) is file text when
-        # every command is a plain read. Every quoted word must be a pathspec or plain text, and no process
-        # substitution, redirect, other quote, glob or expansion may remain. Git may take only `-C`, then
+        # every command is a plain read. Every quoted word must be a pathspec or plain text, and no newline, process
+        # substitution, redirect, other quote, glob or expansion may remain. Commands are checked on the shell's own
+        # words, so a quoted word never reads as a command or subcommand plus options. Git may take only `-C`, then
         # `ls-files`, `ls-tree` or `grep` with listed options, so no argument picks a pager or helper; configured
         # helpers apply to the same reads without a glob, so this exception adds none.
         unquoted = re.sub(r"(?<![^\s;&|])'(?:(?!-)[\w./:!*?@%+,^~-]*|(?![- ])[\w ./:@%+,^~-]*)'(?![^\s;&|])", '_', text)
-        literal_globs = (read_only_starts and not re.search(r'[*?[\]{}$`\\()<>\'"]', unquoted) and all(
-            re.fullmatch(r'git(?: +-C +[\w./-]+)* +(?:ls-files|ls-tree|grep)'
-                         r'(?: +(?:-[nilwEFvz]+|-[ABC] *[0-9]+|--|[^-\s]\S*))*', part.strip())
-            for part in re.split(r'[;&|\n]+', words) if part.split() and part.split()[0] == 'git'))
+        segments, current = [], []
+        for token in tokens:
+            if token and set(token) <= set(';&|'):
+                segments.append(current)
+                current = []
+            else:
+                current.append(token)
+        segments.append(current)
+        literal_globs = (read_only_starts and '\n' not in text and not re.search(r'[*?[\]{}$`\\()<>\'"]', unquoted)
+                         and all(not segment or segment[0] in READ_ONLY_STARTS and (
+                             segment[0] != 'git' or git_read_words(segment[1:])) for segment in segments))
         if plain:
             spelled = re.search(r'(?<![A-Za-z0-9_])(?:push|send-pack)(?![A-Za-z0-9_])',
                                 re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', words))

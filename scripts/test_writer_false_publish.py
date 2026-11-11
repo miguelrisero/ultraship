@@ -175,7 +175,9 @@ class WriterFalsePublishTests(unittest.TestCase):
             "git ls-files '*push*;x'", "cd /w && git ls-files '*pre-push*' && git -C /w difftool -x '*push*'",
             "git grep -O./x y '*push*'", "git grep --open-files-in-pager=./x y '*push*'",
             "cat '*push*'; git 'diff;cat'", "cat '*push*' 'a;git'", "git log '*push*'",
-            "git diff --ext-diff '*push*'", "git ls-files '*push*' \"x\"", 'git ls-files ~ \'*push*\' $(x)')
+            "git diff --ext-diff '*push*'", "git ls-files '*push*' \"x\"", 'git ls-files ~ \'*push*\' $(x)',
+            "cat '*push*'; git 'grep -n' x", "'cat -n' '*push*'", "git ls-files '*push*'\ngit status",
+            "git -C '/w x' ls-files '*push*'")
 
     def test_publish_commands_stay_denied(self):
         self.assertDenied('gh pr merge 3 --squash', 'gh pr create --fill', "gh pr comment 3 --body '/merge fix(x): y'",
