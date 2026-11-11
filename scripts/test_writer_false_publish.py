@@ -208,6 +208,25 @@ class WriterFalsePublishTests(unittest.TestCase):
             "cd /w/lane && python3 - <<'EOF'\np = 'a.txt'\np = 'traceback.py'\n"
             "open(p, 'w').write('git push origin HEAD')\n1 / 0\nEOF\nbun run test")
 
+    def test_a_shell_glob_on_git_from_a_process_starting_script_stays_denied(self):
+        # zsh runs `/usr/bin/git(|)` as git, so `git(` text stays a command when the script can start a process.
+        self.assertDenied(*(f"date -u +%FT%TZ && python3 - <<'PY'\n{start}\nPY" for start in (
+            "import subprocess\nsubprocess.run('/usr/bin/git(|) send-pack x HEAD:main', shell=True, executable='/bin/zsh')",
+            "import os\nos.system(\"zsh -c '/usr/bin/git(.) send-pack x HEAD:main'\")",
+            "__import__('os').system(\"zsh -c '/usr/bin/git(N) send-pack x HEAD:main'\")")))
+
+    def test_an_interactive_shell_or_a_print_write_before_a_run_stays_denied(self):
+        write = "cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write('x')\nEOF\n"
+        self.assertDenied(write + 'bash -n -i run.sh', write + 'sh -n -i', write + 'zsh -n --rcs run.sh',
+                          "cd /w/lane && python3 - <<'EOF'\nf = open('run.sh', 'w')\nprint('x', file=f)\nEOF\nbash run.sh")
+        self.assertAdmitted(write + 'bash -n run.sh')
+
+    def test_a_run_after_a_heredoc_with_any_lead_stays_denied(self):
+        write = "python3 - <<'X'\nopen('run.sh', 'w').write('git pu' + 'sh origin HEAD')\nX\n"
+        self.assertDenied('date --file=x && ' + write + 'bash run.sh', 'uv run ' + write + 'sh run.sh',
+                          'sleep 2 && bash run.sh & ' + write)
+        self.assertAdmitted("cd /w && uv run python3 - <<'X'\nimport subprocess\nsubprocess.run(['git', 'status'])\nX")
+
     def test_publication_behind_a_date_prefix_stays_denied(self):
         self.assertDenied(
             'date -u +%FT%TZ && git push origin HEAD', 'date -u && cd /w && git -C /w push',

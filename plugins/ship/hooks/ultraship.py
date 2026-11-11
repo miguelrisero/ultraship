@@ -323,7 +323,7 @@ def check_only_shell(command):
     A script can build a push at run time, so a command that runs code (a test runner, `bash f.sh`) never follows."""
     segments = [part.strip() for part in re.split(r'&&|;|\n', command) if part.strip()]
     return read_only_shell(command) or all(
-        read_only_shell(segment) or re.fullmatch(r'(?:ba|z)?sh +-n +[\w./-]+', segment) for segment in segments)
+        read_only_shell(segment) or re.fullmatch(r'(?:ba|z)?sh +-n +[\w./][\w./-]*', segment) for segment in segments)
 
 
 def runs_heredoc_output(command):
@@ -331,28 +331,34 @@ def runs_heredoc_output(command):
 
     A script can build a push at run time (`'pu' + 'sh'`), so its text proves nothing about the files it writes."""
     lines = command.splitlines(keepends=True)
-    match = PYTHON_HEREDOC.fullmatch(lines[0]) if lines else None
+    match = ANY_PYTHON_HEREDOC.fullmatch(lines[0]) if lines else None
     if not match:
         return False
     delimiter = shlex.split(match['delimiter'])[0]
     for end in range(1, len(lines)):
         if (lines[end].lstrip('\t') if match['tabs'] else lines[end]).removesuffix('\n') == delimiter:
             body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
-            if check_only_shell(''.join(lines[end + 1:])):
+            # The written files exist only after the script, so only a later or a background command can run them.
+            if check_only_shell(''.join(lines[end + 1:])) and not re.search(r'(?<!&)&(?![&>])', match['lead']):
                 return False
             if not inert_python(body):
                 return True
-            return any(isinstance(node, ast.Attribute) and node.attr in {'write', 'write_text', 'unlink'}
+            # An inert script writes only through `open` with a write mode or a `Path` write method.
+            return any(isinstance(node, ast.Attribute) and node.attr in {'write_text', 'unlink'}
+                       or isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'open' and not all(
+                           isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
+                           for mode in [*node.args[1:2], *(k.value for k in node.keywords if k.arg == 'mode')])
                        for node in ast.walk(ast.parse(body)))
     return False
 
 
+PYTHON_STDIN = (r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
+                r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)[ \t]*\n$")
 # Only literal `cd` and `date` steps and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the
 # interpreter; a `GIT_CONFIG_*` lead could alias a git read to a push.
-PYTHON_HEREDOC = re.compile(rf"^(?P<lead>[ \t]*{PYTHON_LEAD}(?:PYTHON[A-Z0-9_]*=[\w./-]* +)*)"
-                            r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
-                            r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
-                            r"[ \t]*\n$")
+PYTHON_HEREDOC = re.compile(rf"^(?P<lead>[ \t]*{PYTHON_LEAD}(?:PYTHON[A-Z0-9_]*=[\w./-]* +)*)" + PYTHON_STDIN)
+# Any command may lead it here; the files it writes exist only after it runs.
+ANY_PYTHON_HEREDOC = re.compile(r"^(?P<lead>.*?)" + PYTHON_STDIN)
 
 
 def python_heredoc_shell(command, inert_only=False):
@@ -393,10 +399,16 @@ def python_heredoc_shell(command, inert_only=False):
                     body_lines[node.lineno - 1] = re.sub(r'^(\s*def )git(?=\s*\()',
                                                        r'\1_git_helper', line, count=1)
             scanned = ''.join(body_lines)
-            # Python runs `git(` only as a call; in a string the shell reads it as a function definition, never a git
-            # command, so text such as a generated script's `git("status")` is not a push.
-            if not any(isinstance(node, ast.Call) and getattr(node.func, 'id', getattr(node.func, 'attr', None)) == 'git'
-                       for node in ast.walk(tree)):
+            # A script that can start no process runs `git(` only as a call, so in its strings `git("status")` is text.
+            # A script that can start one may hand zsh `git(|) push`, a glob that runs git.
+            imported = {alias.name.split('.')[0] for node in ast.walk(tree)
+                        if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in (
+                            node.names if isinstance(node, ast.Import) else [ast.alias(node.module or '')])}
+            if (imported <= set(INERT_MEMBERS) | {'ast'}
+                    and not any(isinstance(node, ast.Name) and (node.id in REFLECTION or node.id.startswith('__'))
+                                for node in ast.walk(tree))
+                    and not any(isinstance(node, ast.Call) and getattr(node.func, 'id', getattr(node.func, 'attr', None))
+                                == 'git' for node in ast.walk(tree))):
                 scanned = re.sub(r'\bgit\(', 'git_(', scanned)
             if shell_git_push(scanned):
                 return command
