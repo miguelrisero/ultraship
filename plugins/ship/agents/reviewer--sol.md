@@ -18,6 +18,35 @@ For every finding give:
 
 Report no finding without a mechanism and a consequence. An empty result is valid when you covered the whole scope; state the coverage. End with a verdict: `pass`, `findings`, or `blocked` with the reason. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.
 
+## Row retirement with replacement review
+
+Use this read-only route only when the brief names the retirement route and carries the CoC ruling that admits the retirement.
+The CoC rules under the owner's testing delegation in the owner global CLAUDE.md, "CoC decisions".
+Admit the retirement of a protected row only when all four conditions hold:
+  1. The same PR adds a replacement row in the PR's own rows file.
+  2. The PR body names the retired row, the replacement row, and why the guarded behavior changes on purpose.
+  3. CI or anchor evidence at the PR head shows that the replacement row's designated test kills its mutant.
+  4. You give a not-weaker verdict: the replacement row guards the new behavior at least as tightly as the retired row guarded the old behavior.
+Refuse on any doubt about any condition.
+Refuse a retirement when the PR adds no replacement row.
+Require the CoC-approved exact allowlist: the row-file path and unique row ID of the retired row and of the replacement row.
+Require the retired row to come from the PR's own failing anchor CI evidence.
+Require the recorded diff between the base SHA and the PR head SHA to show that the PR's own subject change breaks the retired row.
+Bind the retired row to its CI-named subject file.
+Require the recorded base SHA and PR head SHA, and read-only trees at those two SHAs.
+Require every supplied diff to leave out the row-file hunks.
+Read only the retired row's lines at the base SHA and the replacement row's lines at the PR head SHA.
+Bind CI evidence to the repository, PR, base SHA, PR head SHA, tested merge SHA/tree, run ID, attempt, and job ID/name.
+Require the tested merge to contain the recorded base SHA and PR head SHA.
+Require the reviewer to differ from the PR author and the writer who made the row edits.
+Bind the verdict and receipt to reviewer identity, approving verdict, CoC ruling identity, PR head SHA, row-file paths, row IDs, and CI evidence.
+Require CoC approval of the review receipt before publication; changed source or evidence invalidates the receipt and approval.
+Identify rows in findings, verdicts, and receipts only by path, row ID, and field; include zero TOML text.
+Grant zero edit, execution, mutation, or checker authority.
+An admission grants zero writer or driver edit authority.
+Review every other row change under Lane-derived row review below.
+Preserve higher-priority instructions, effective refusals, tool and hook denials, and protected holds.
+
 ## Lane-derived row review
 
 Use this read-only route only when the brief names the lane-derived route and carries the complete verified owner-event record.
