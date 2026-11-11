@@ -1044,30 +1044,53 @@ def stop(data):
     if data.get('stop_hook_active'):
         return
     try:
+        reminder = path.with_suffix('.stop-state')
         try:
             path.stat()
         except FileNotFoundError:
+            reminder.unlink(missing_ok=True)
             return
         with path.open('r+') as pending:
             fcntl.flock(pending, fcntl.LOCK_EX)
             owed = [line.split('\t') for line in pending.read().splitlines() if line]
             if not owed:
+                reminder.unlink(missing_ok=True)
                 return
-            ledger = load_ledger()
-            receipt_path = STATE / 'accounted.json'
-            # ponytail: one hook-state receipt lock serializes Stops; shard by ledger
-            # if concurrent Stop throughput matters. This never locks a legacy home.
-            with (STATE / 'accounted.lock').open('a') as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                ledger = load_ledger()
+                receipt_path = STATE / 'accounted.json'
+                # ponytail: one hook-state receipt lock serializes Stops; shard by ledger
+                # if concurrent Stop throughput matters. This never locks a legacy home.
+                with (STATE / 'accounted.lock').open('a') as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    try:
+                        receipts = json.loads(receipt_path.read_text())
+                    except FileNotFoundError:
+                        receipts = {}
+                    for cwd in {o[2] for o in owed}:
+                        account(ledger, cwd, [o for o in owed if o[2] == cwd], receipts, str(path))
+                    ledger.publish(receipt_path, receipts)
+            except Exception as accounting_error:
                 try:
-                    receipts = json.loads(receipt_path.read_text())
-                except FileNotFoundError:
-                    receipts = {}
-                for cwd in {o[2] for o in owed}:
-                    account(ledger, cwd, [o for o in owed if o[2] == cwd], receipts, str(path))
-                ledger.publish(receipt_path, receipts)
+                    canonical = [row[:3] + [json.loads(row[3])] if len(row) == 4 else row for row in owed]
+                except ValueError:
+                    canonical = owed
+                fingerprint = hashlib.sha256(json.dumps(sorted(
+                    json.dumps(row, sort_keys=True) for row in canonical)).encode()).hexdigest()
+                try:
+                    try:
+                        previous = reminder.read_text()
+                    except FileNotFoundError:
+                        previous = None
+                    if previous == fingerprint:
+                        return
+                    reminder.write_text(fingerprint)
+                except OSError as reminder_error:
+                    raise ValueError(f'{accounting_error}; Stop reminder unavailable: {reminder_error}') from accounting_error
+                raise
             # Clear only after every result has a successful accounting row.
             # Keep this inode so concurrent SubagentStop writers share the lock.
+            reminder.unlink(missing_ok=True)
             pending.seek(0)
             pending.truncate()
     except Exception as exc:
@@ -1075,7 +1098,7 @@ def stop(data):
               f'Pending review evidence retained at {path}: {exc}. '
               'Resolve ledger access (set SHIP_LEDGER_DIR to an absolute permitted directory if needed). '
               'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]` in its open run, '
-              'writing <agent> exactly as this message names it. '
+              'Read every retained result and use its exact agent identity, including @agent_id when present. '
               'For a recorded result in a closed or earlier-branch run, use '
               f'`ledger.py account {path} <result-id> <step> <agent> <sha> <verdict> <evidence>`; '
               'this appends bookkeeping without reopening the run. Never invent review evidence.'}))
@@ -1088,6 +1111,10 @@ def compact(data):
         ledger = load_ledger()
         path = ledger.ledger_path(data.get('cwd') or '.')
         run = ledger.open_run(path)
+        pending = owed_file(data)
+        if pending.exists() and pending.stat().st_size:
+            lines.append(f'Pending review evidence remains at {pending}. '
+                         'Account each result with ledger.py before declaring the run complete.')
     except Exception as exc:
         lines.append(f'Ledger resolution failed: {exc}. Pending review evidence remains at {owed_file(data)}. '
                      'Restore ledger access or set SHIP_LEDGER_DIR to an absolute permitted directory before continuing.')
