@@ -218,6 +218,16 @@ class WriterFalsePublishTests(unittest.TestCase):
             "from pathlib import os\nos.system(\"zsh -c '/usr/bin/git(|) send-pack x HEAD:main'\")",
             "from pathlib import Path\nPath('.').parser.os.system(\"zsh -c '/usr/bin/git(|) send-pack x HEAD:main'\")")))
 
+    def test_a_script_that_writes_a_loadable_module_keeps_its_git_text_scanned(self):
+        # Python imports a module the script wrote, so that module can start a process.
+        payload = "import os\\nos.system('zsh -c \"/usr/bin/git(|) send-pack x HEAD:main\"')\\n"
+        self.assertDenied(*(f"date -u && python3 - <<'PY'\n{body}\nPY" for body in (
+            f"open('difflib.py', 'w').write('{payload}')\nimport difflib\nprint('git(|)')",
+            f"from pathlib import Path\nPath('textwrap.py').write_text('{payload}')\nfrom textwrap import dedent\n"
+            "print('git(|)')",
+            f"from pathlib import Path\nbase = Path('/w')\np = base / 'traceback.py'\nwith p.open('w') as f:\n"
+            f"    f.write('{payload}')\nprint('git(|)')\n1 / 0")))
+
     def test_an_interactive_shell_or_a_print_write_before_a_run_stays_denied(self):
         write = "cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write('x')\nEOF\n"
         self.assertDenied(write + 'bash -n -i run.sh', write + 'sh -n -i', write + 'zsh -n --rcs run.sh',

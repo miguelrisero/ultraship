@@ -334,8 +334,52 @@ TEXT_SCRIPT_ATTRIBUTES = INERT_ATTRIBUTES | {'read_bytes', 'chmod', 'parse', 'li
 def starts_no_process(tree):
     """Whether a Python script can start no process and calls no `git` helper, so its `git(` text is only text.
 
-    Names, imports and attributes come from allowlists, because `pathlib.os` or `Path.parser.os` reach `os`."""
+    Names, imports and attributes come from allowlists, because `pathlib.os` or `Path.parser.os` reach `os`.
+    Every write needs literal `writable` paths, because Python imports a module the script wrote (`difflib.py`)."""
+    stores = [node.id for node in ast.walk(tree) if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load)]
+    stores += [node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)]
+    stores += [name for node in ast.walk(tree) if isinstance(node, (ast.Global, ast.Nonlocal)) for name in node.names]
+    stores += [node.name for node in ast.walk(tree) if isinstance(
+        node, (ast.ExceptHandler, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name]
+    stores += [(alias.asname or alias.name).split('.')[0] for node in ast.walk(tree)
+               if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names]
+    top = {}
+    for statement in tree.body:
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            top.setdefault(statement.targets[0].id, []).append(statement.value)
+
+    def paths(node, seen=()):
+        """Every literal path `node` may hold (`'a'`, `Path('a')`, `base / 'b'`), or None."""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return [node.value]
+        if (isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'Path' and len(node.args) == 1
+                and not node.keywords):
+            return paths(node.args[0], seen)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            left, right = paths(node.left, seen), paths(node.right, seen)
+            return [f'{a}/{b}' for a in left for b in right] if left and right else None
+        if (isinstance(node, ast.Name) and node.id not in seen and node.id in top
+                and stores.count(node.id) == len(top[node.id])):
+            found = [paths(value, (*seen, node.id)) for value in top[node.id]]
+            return [path for group in found for path in group] if all(found) else None
+        return None
+
+    def reads(call, index):
+        modes = [*call.args[index:index + 1], *(keyword.value for keyword in call.keywords if keyword.arg == 'mode')]
+        return all(isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
+                   for mode in modes)
+
     for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, 'id', None)
+            attribute = node.func.attr if isinstance(node.func, ast.Attribute) else None
+            target = (node.args[0] if name == 'open' and node.args and not reads(node, 1) else
+                      node.func.value if attribute == 'write_text' or attribute == 'open' and not reads(node, 0)
+                      else None)
+            if name == 'open' and not node.args or target is not None and not all(
+                    writable(path) for path in paths(target) or [None]):
+                return False
         if isinstance(node, ast.Import) and any(alias.name not in {*INERT_MEMBERS, 'ast'} for alias in node.names):
             return False
         if isinstance(node, ast.ImportFrom) and (node.level or node.module not in INERT_MEMBERS or any(
