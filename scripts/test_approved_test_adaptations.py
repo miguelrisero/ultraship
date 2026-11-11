@@ -14,18 +14,19 @@ EXPECTED_LANE_REVIEW = [
     'Authority A: the owner standing grant in the owner global CLAUDE.md (`~/.claude/CLAUDE.md`), section "CoC decisions".',
     'Under authority A, read that file yourself and confirm that the section grants a lane re-anchoring the protected mutation rows its own diff breaks, with an identical mutant edit and an independent not-weaker review.',
     'Under authority A, block every protected read when the file or section is missing or grants less; authority A needs no owner-event record.',
+    'Under authority A, bind the file path, section heading, quoted grant sentence, and verification time.',
     'Authority B: the complete verified owner-event record below.',
     'Owner authority: Input `31f787fe-1463-4447-82fa-6a5e21e17a87`, version 1, choice B, in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`.',
     'The `owner_ui` event is `aacba25c-5e99-438e-85c7-9bb128ecf4b8`, dated 2026-11-08T18:03:15.357469375Z.',
     'The event hash is `d56c4fd20ef712921654f06869818b5b2189a13e9b52249b32379ca5362468a8`.',
     'Owner-selected option B: "Each lane moves the protected rows its own PR breaks: same test, new line text, nothing weaker. An independent reviewer checks every row change, and the mutation proof still runs after merge."',
     'Input context: "Peral keeps CI runner and merge queue changes."',
-    'Bind full Input/workspace UUIDs, current version, event id/hash, choice, actual owner answer, verifier name, and verification time.',
-    'Record selected choice B and `payload.answer.text=null` separately; distinguish the selected option text from Input context.',
-    'Require `event_type=answer_submitted`, `actor_kind=owner_ui`, and `payload.no_answer_yet=false` for this Input and current version.',
-    "Use `get_input` directly when available; accept the driver's or CoC's complete verified record only after tool absence or auth/tool error.",
-    'An authoritative mismatch blocks access and cannot use fallback.',
-    "Check the relayed record's internal consistency, answer, and exact scope; refuse stale, superseded, cancelled, inconsistent, or invented provenance.",
+    'Under authority B, bind full Input/workspace UUIDs, current version, event id/hash, choice, actual owner answer, verifier name, and verification time.',
+    'Under authority B, record selected choice B and `payload.answer.text=null` separately; distinguish the selected option text from Input context.',
+    'Under authority B, require `event_type=answer_submitted`, `actor_kind=owner_ui`, and `payload.no_answer_yet=false` for this Input and current version.',
+    "Under authority B, use `get_input` directly when available; accept the driver's or CoC's complete verified record only after tool absence or auth/tool error.",
+    'Under authority B, an authoritative mismatch blocks access and cannot use fallback.',
+    "Under authority B, check the relayed record's internal consistency, answer, and exact scope; refuse stale, superseded, cancelled, inconsistent, or invented provenance.",
     'Under authority B, block every protected read on a missing record, missing field, or mismatch.',
     "Require the CoC-approved exact allowlist of row-file paths and unique row IDs from the PR's own failing anchor CI evidence.",
     'Require the recorded base SHA, author head SHA, and frozen SHA after the edit before any protected read.',
@@ -46,7 +47,7 @@ EXPECTED_LANE_REVIEW = [
     'Confirm that only the paired `old` and `new` fields changed.',
     "Confirm that each new `old` text matches the subject's new source text at the site the PR changed.",
     'Confirm the identical mutant transformation from `old` to `new` and nothing weaker for every row.',
-    'Bind the verdict and receipt to reviewer identity, approving verdict, commit SHA, row-file paths, row IDs, and CI evidence.',
+    'Bind the verdict and receipt to reviewer identity, approving verdict, authority (A or B), commit SHA, row-file paths, row IDs, and CI evidence.',
     "Bind the receipt's commit SHA to the frozen SHA after the edit.",
     'Require CoC approval of the review receipt before publication; changed source or evidence invalidates the receipt and approval.',
     'Identify rows in findings, verdicts, and receipts only by path, row ID, and field.',
@@ -462,6 +463,12 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     self.assertIn(requirement, route)
             with self.subTest(path=name, contract='standing_grant'):
                 self.assertIn('Owner global CLAUDE.md standing grant: "The CoC decides CI/CD, testing and tooling items for me. This includes a lane reading and re-anchoring the protected mutation rows that its own diff breaks, with an identical mutant edit and an independent not-weaker review."', text)
+
+    def test_lane_routes_let_the_reviewer_use_the_claude_md_grant(self):
+        for name in ('plugins/ship/agents/driver.md', 'plugins/ship/agents/driver--sol.md', 'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md', 'plugins/ship/skills/ship/SKILL.md'):
+            text = (ROOT / name).read_text()
+            with self.subTest(path=name):
+                self.assertIn('Before publication, require an independent reviewer to read the same named rows before and after the edit under the same scoped access authority.' + '\n' + 'The reviewer may instead use authority A of its own definition, the owner global CLAUDE.md grant; that route needs no owner-event relay.', text)
 
     def test_lane_derived_reviewers_require_verified_read_only_row_scope(self):
         routes = []
