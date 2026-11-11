@@ -16,6 +16,16 @@ GIT_HELPER = ("import subprocess\n\n"
               "    return subprocess.check_output(['git', *args], text=True).strip()\n\n")
 
 
+FRONTEND_EDIT = ("cd /w/lane/frontend/app/src && python3 - <<'EOF'\n"
+                 "p = 'components/__tests__/TeamsStoreWaitingPanel.spec.ts'\n"
+                 "open(p, 'w').write(\"it('skips', async () => {\\n  order.push('skip');\\n"
+                 "  await router.push('/onboarding/done');\\n});\\n\")\n"
+                 "p = 'components/TeamsStoreWaitingPanel.vue'\ns = open(p).read()\n"
+                 "old = '<slot name=\"actions\" />'\nassert old in s\n"
+                 "open(p, 'w').write(s.replace(old, '<slot name=\"actions\" :skip-pending=\"skipPending\" />'))\n"
+                 "EOF\n")
+
+
 class WriterFalsePublishTests(unittest.TestCase):
     def decision(self, command):
         output = io.StringIO()
@@ -172,6 +182,21 @@ class WriterFalsePublishTests(unittest.TestCase):
             "    it('listens once', async () => {\n        const order = [];\n"
             "        order.push('listen');\n        expect(order).toEqual(['listen']);\n"
             "        expect(process.exit).toHaveBeenCalledWith(0);\n    });\n});\nEOF")
+
+    def test_frontend_edit_then_checks_is_admitted(self):
+        # The refused frontend shape: write a test file, fix a component slot, then run the checks.
+        self.assertAdmitted(
+            FRONTEND_EDIT + "cd /w/lane/frontend/app && bunx vitest run src/components/__tests__ && "
+            "bun run typecheck && date -u", FRONTEND_EDIT + 'date -u')
+
+    def test_frontend_edit_then_publication_stays_denied(self):
+        self.assertDenied(
+            FRONTEND_EDIT + 'bun run typecheck && git push origin HEAD', FRONTEND_EDIT + 'gh pr merge 3 --squash',
+            FRONTEND_EDIT + "gh pr comment 3 --body '/merge fix(x): y'",
+            "cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write('git push origin HEAD')\nEOF\nbash run.sh",
+            "cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write('gh pr merge 3')\nEOF\nbash run.sh",
+            "cd /w/lane && python3 - <<'EOF'\np = 'a.txt'\np = 'traceback.py'\n"
+            "open(p, 'w').write('git push origin HEAD')\n1 / 0\nEOF\nbun run test")
 
     def test_publication_behind_a_date_prefix_stays_denied(self):
         self.assertDenied(

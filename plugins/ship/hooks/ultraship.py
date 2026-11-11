@@ -140,14 +140,15 @@ def inert_python(body):
         node, (ast.ExceptHandler, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name]
     bound += [(alias.asname or alias.name).split('.')[0] for node in ast.walk(tree)
               if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names]
-    literals = {}
+    literals, assigned = {}, {}
     for statement in tree.body:
         if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
                 and isinstance(statement.targets[0], ast.Name)):
             name = statement.targets[0].id
             value = statement.value
-            literals[name] = (value.value if bound.count(name) == 1 and isinstance(value, ast.Constant)
-                              and isinstance(value.value, str) else None)
+            text = value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else None
+            assigned.setdefault(name, []).append(text)
+            literals[name] = text if bound.count(name) == 1 else None
     calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and node.id == 'open' and id(node) not in calls:
@@ -163,9 +164,11 @@ def inert_python(body):
                    for mode in modes):
                 continue
             target = node.args[0] if node.args else None
-            path = (target.value if isinstance(target, ast.Constant) else
-                    literals.get(target.id) if isinstance(target, ast.Name) else None)
-            if not writable(path):
+            # A name may hold several literal paths in turn, so a write through it needs every one to be writable.
+            paths = ([target.value] if isinstance(target, ast.Constant) else
+                     assigned.get(target.id) if isinstance(target, ast.Name)
+                     and bound.count(target.id) == len(assigned.get(target.id, ())) else None)
+            if not paths or not all(writable(path) for path in paths):
                 return False
     return inert_paths(tree, literals, bound)
 
@@ -314,6 +317,12 @@ def read_only_shell(command):
 PYTHON_LEAD = r'(?:(?:cd +[\w./-]+|date(?: +[-+\w%:]+)*) +&& +)*'
 
 
+def publish_text(text):
+    """Whether file text spells a publish command that a later command could run."""
+    return bool(WRITER_BASH.search(re.sub(r'[\'"`]', ' ', text)) or re.search(
+        r'\bgit\b.*\b(?:push|send-pack|http-push)\b|\bgit-(?:push|send-pack|http-push)\b|\balias\.', text))
+
+
 def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
@@ -335,9 +344,10 @@ def python_heredoc_shell(command, inert_only=False):
             remainder = ''.join(lines[end + 1:])
             body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            # Only a `cd` or `date` may lead it and only a read-only remainder may follow it, because another command could
-            # run the file it writes.
-            if (re.fullmatch(rf'[ \t]*{PYTHON_LEAD}', match['lead']) and read_only_shell(remainder)
+            # Only a `cd` or `date` may lead it. A later command such as a test run may read the files it writes, as it
+            # could after an Edit; a body whose text spells a publish command needs a read-only remainder.
+            if (re.fullmatch(rf'[ \t]*{PYTHON_LEAD}', match['lead'])
+                    and (read_only_shell(remainder) or not publish_text(body))
                     and match['delimiter'][0] in '\'"\\' and inert_python(body)):
                 return lines[0] + remainder
             if inert_only:
