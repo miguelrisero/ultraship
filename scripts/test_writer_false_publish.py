@@ -110,6 +110,32 @@ class WriterFalsePublishTests(unittest.TestCase):
             'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0=send-pack git st')
         self.assertAdmitted('cd /w && PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 ' + body)
 
+    def test_wrapper_runs_its_first_argument_as_the_command_word(self):
+        self.assertDenied(*(f'{wrapper} /usr/lib/git-core/git-pu* origin HEAD' for wrapper in (
+            'env', 'env -u X Y=1', 'command', 'exec', 'exec -a x', 'nice', 'nice -n 10', 'nohup', 'timeout 5',
+            'timeout -s KILL 5m', 'xargs', 'xargs -I {} -n 1', 'sudo', 'sudo -u root', '/usr/bin/env',
+            'sudo env', 'nohup nice -n 5')))
+        self.assertAdmitted('timeout 5 ls g*', 'env X=1 ls g*', 'xargs -n 1 grep -l g*', 'nohup cat g*.txt')
+
+    def test_git_alias_that_runs_a_shell_or_a_writer_stays_denied(self):
+        self.assertDenied('git -c alias.x=push x', 'git -c alias.x=send-pack x origin HEAD:main',
+                          'git -c alias.x=http-push x', "git -c 'alias.x=!sh -c y' x", 'git -c alias.x=!git x',
+                          'git -calias.x=push x', 'git -c ALIAS.x=push x', 'git -C /w -c alias.st=push st',
+                          'git --config-env alias.x=V x', 'git --config-env=alias.x=V x')
+        self.assertAdmitted('git -c alias.lg=log lg', 'git -c core.pager=cat log -1', 'git -c push.default=current status')
+
+    def test_unsplittable_git_text_with_a_writer_or_an_escape_stays_denied(self):
+        self.assertDenied('git send-pack x "', 'git http-push x "', 'git $X "', 'git `x` "', 'git \\x "')
+        self.assertAdmitted('echo "it\'s"')
+
+    def test_git_config_environment_that_defines_an_alias_stays_denied(self):
+        self.assertDenied('GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0=$V git st',
+                          'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=ALIAS.st GIT_CONFIG_VALUE_0=!x git st',
+                          'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=$K GIT_CONFIG_VALUE_0=x git st',
+                          "GIT_CONFIG_PARAMETERS=\"'alias.st=log'\" git st",
+                          'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=ali\\as.st GIT_CONFIG_VALUE_0=x git st')
+        self.assertAdmitted('GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=cat git log -1')
+
     def test_only_read_only_commands_keep_a_literal_variable_fixed(self):
         self.assertDenied(*(f'W=/w; {command} x; git -C $W log' for command in (
             'tar -xf a.tar --to-command=sh', 'zip -T -TT sh a.zip', 'unzip', 'cd', 'sha256sum', 'echo', 'cp',

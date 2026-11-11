@@ -31,6 +31,22 @@ WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
 # Git subcommands and executables that write refs on a remote.
 REMOTE_WRITERS = {'push', 'send-pack', 'http-push'}
 REMOTE_WRITER_NAMES = {f'git-{name}' for name in REMOTE_WRITERS}
+# Commands that run their first non-option, non-assignment argument, and the options that take a value.
+WRAPPERS = {'env': {'-u', '--unset', '-C', '--chdir', '-S', '--split-string'}, 'command': set(),
+            'exec': {'-a'}, 'nice': {'-n', '--adjustment'}, 'nohup': set(),
+            'timeout': {'-s', '--signal', '-k', '--kill-after'},
+            'xargs': {'-a', '--arg-file', '-d', '--delimiter', '-E', '-e', '-I', '-i', '-L', '-l', '-n',
+                      '--max-args', '-P', '--max-procs', '-s', '--max-chars'},
+            'sudo': {'-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt', '-C', '--close-from',
+                     '-U', '--other-user', '-r', '--role', '-t', '--type', '-D', '--chdir', '-R', '--chroot',
+                     '-T', '--command-timeout'}}
+
+
+def alias_runs_writer(setting):
+    """Whether a `-c` setting defines an alias that runs a shell command or names a remote writer."""
+    key, _, value = setting.partition('=')
+    return key.lower().startswith('alias.') and (
+        value.lstrip().startswith('!') or any(word in value for word in REMOTE_WRITERS))
 GH_METHOD = re.compile(r'^(?:--method(?:=(.*))?|-[ip]*X(.*))$')
 GH_FIELD = re.compile(r'^(?:--(?:field|raw-field|input)(?:=.*)?|-[ip]*[fF].*)$')
 HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
@@ -570,7 +586,10 @@ def shell_git_push(command):
             lexer.commenters = ''
             tokens = list(lexer)
         except ValueError:
-            if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text.translate(str.maketrans('', '', '$`*?[]{},'))):
+            # The text cannot be split, so `git` with a writer word or any expansion or escape denies.
+            if re.search(r'\bgit\b', text) and (
+                    re.search(r'\b(?:push|send-pack|http-push)\b', text.translate(str.maketrans('', '', '$`*?[]{},')))
+                    or re.search(r'[$`\\]', text)):
                 return True
             continue
         # An expansion or glob can assemble the executable (`$'git' $'push'`), so with any
@@ -600,7 +619,20 @@ def shell_git_push(command):
         # Only a `git` that starts a command reads its own arguments; `eval git -C "$W"` or `watch git ...`
         # re-reads them, where a quoted value can split again.
         command_start = git_command = True
+        wrapper, wrapper_value, value_option = None, False, None
         for token in tokens:
+            # A wrapper (`env`, `nohup`, `xargs`, `sudo`) runs its first non-option argument as the command word.
+            command_word = command_start
+            if set(token) & set(';&|()'):
+                wrapper = None
+            elif wrapper and not command_start:
+                if wrapper_value:
+                    wrapper_value = False
+                elif token.startswith('-'):
+                    wrapper_value = token in WRAPPERS[wrapper]
+                elif not (re.match(r'[A-Za-z_]\w*=', token)
+                          or wrapper == 'timeout' and re.fullmatch(r'[\d.]+[smhd]?', token)):
+                    command_word, wrapper = True, None
             if any(char.isspace() for char in token):
                 pending.append(token)
                 if re.match(r'[A-Za-z_]\w*=', token):
@@ -611,18 +643,28 @@ def shell_git_push(command):
                 git_command = False
             if folder_value and git_command and quoted_variable(command, token):
                 skip_value = folder_value = False
+                value_option = None
                 continue
             # An expansion, glob, quoting form, or redirection before the subcommand can hide it,
             # so it denies. Writers write `git -C . status 2>&1`, never `git $'push'` or `git {push,}`.
             if expect_subcommand and set(token) & set('(`<>${*?['):
                 return True
+            # An alias that runs a shell command (`!sh`) or a remote writer turns any subcommand into a push.
+            if expect_subcommand and (
+                    value_option == '-c' and alias_runs_writer(token)
+                    or token.startswith('-c') and token != '-c' and alias_runs_writer(token[2:])
+                    or value_option == '--config-env' and token.lower().startswith('alias.')
+                    or token.lower().startswith('--config-env=alias.')):
+                return True
             if skip_value:
                 skip_value = folder_value = False
+                value_option = None
                 continue
             if expect_subcommand:
                 if token in values:
                     skip_value = True
                     folder_value = token in folders
+                    value_option = token
                     continue
                 if token in REMOTE_WRITERS:
                     return True
@@ -632,11 +674,17 @@ def shell_git_push(command):
             # `git-push` runs a push. A glob or an expansion in the command word (`git-pu*`, `$G-push`) can match it;
             # in an argument it is only a file name (`ls g*`).
             base = os.path.basename(re.sub(r'\$(?:[A-Za-z_]\w*|\{[^}]*\})', '*', token))
-            if base in REMOTE_WRITER_NAMES or command_start and set(base) & set('*?[') and base.strip('*?') and any(
+            if base in REMOTE_WRITER_NAMES or command_word and set(base) & set('*?[') and base.strip('*?') and any(
                     fnmatch.fnmatchcase(name, base) for name in REMOTE_WRITER_NAMES):
                 return True
-            # Git reads `GIT_CONFIG_*` from the environment, so a value that spells a remote writer can alias one.
+            if command_word and base in WRAPPERS:
+                wrapper, wrapper_value = base, False
+            # Git reads `GIT_CONFIG_*` from the environment, so a value that spells a remote writer can alias one,
+            # and a key or parameter list that defines an alias can, whatever the value.
             if re.match(r'GIT_\w*=', token) and any(word in token for word in REMOTE_WRITERS):
+                return True
+            if (re.match(r'GIT_CONFIG_(?:KEY_\w*|PARAMETERS)=', token)
+                    and (re.search(r'alias', token, re.I) or set(token) & set('$`\\'))):
                 return True
             if os.path.basename(token) == 'git':
                 expect_subcommand = True
