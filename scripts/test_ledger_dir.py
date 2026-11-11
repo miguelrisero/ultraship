@@ -557,7 +557,7 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(self.bound(), {scrub: 'capacity', capacity: 'scrub'})
         before = home.read_bytes()
         self.assertNotEqual(self.cli('correct-binding', scrub, self.line_of('scrub'), ' ').returncode, 0)
-        self.assertNotEqual(self.cli('correct-binding', 'absent', self.line_of('scrub'), 'swap').returncode, 0)
+        self.assertIn('result ID must match exactly one', self.cli('correct-binding', 'absent', self.line_of('scrub'), 'swap').stderr)
         self.assertEqual(home.read_bytes(), before)
         fixed = self.cli('correct-binding', scrub, self.line_of('scrub'), 'scrub findings bound to the capacity PASS')
         self.assertEqual(fixed.returncode, 0, fixed.stderr)
@@ -591,6 +591,9 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(self.cli('correct-binding', scrub, self.line_of('scrub'), 'swap').returncode, 0)
         self.assertEqual(self.resolve().read_bytes(), audited)
         self.assertEqual(self.bound(), {scrub: 'scrub', capacity: 'capacity'})
+        # A later, different move still appends its own audit row.
+        self.assertEqual(self.cli('correct-binding', scrub, self.line_of('capacity'), 'undo').returncode, 0)
+        self.assertEqual(json.loads(ledger.rows(self.resolve())[-1][5])['reason'], 'undo')
 
     def test_correct_binding_refuses_each_unfit_target(self):
         scrub, capacity, _ = self.swapped_pair()
@@ -632,6 +635,11 @@ class LedgerDirTests(unittest.TestCase):
         refused = self.cli('correct-binding', second, explicit, 'move')  # same agent column, but a record row
         self.assertIn('target line must be a completed review row', refused.stderr)
 
+    def test_correct_binding_refuses_a_ledger_with_another_line_break(self):
+        scrub, _, _ = self.swapped_pair()
+        self.assertEqual(self.cli('append', 'deep-review', 'other', 'sha', 'pass', 'a\u2028b').returncode, 0)
+        self.assertIn('ledger lines differ', self.cli('correct-binding', scrub, self.line_of('scrub'), 'move').stderr)
+
     def test_older_pending_record_with_an_agent_id_accepts_a_row_without_one(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='in-flight')
         owed = self.base / 'state/ultraship/owed/s1.tsv'
@@ -651,6 +659,9 @@ class LedgerDirTests(unittest.TestCase):
         self.finish_run()
         args = (str(owed), result['id'], 'deep-review')
         self.assertNotEqual(self.cli('account', *args, 'ship:reviewer--sol@other', 'sha', 'pass', 'r.md').returncode, 0)
-        recorded = self.cli('account', *args, 'ship:reviewer--sol@mine', 'sha', 'pass', 'r.md')
+        recorded = self.cli('account', *args, 'ship:reviewer--sol', 'sha', 'pass', 'r.md')
         self.assertEqual(recorded.returncode, 0, recorded.stderr)
+        self.assertEqual(ledger.rows(self.resolve())[-1][2], 'ship:reviewer--sol@mine')  # the record names the result's ID
+        retry = self.cli('account', *args, 'ship:reviewer--sol@mine', 'sha', 'pass', 'r.md')
+        self.assertEqual(retry.returncode, 0, retry.stderr)
         self.assertEqual(self.hook('stop'), '')

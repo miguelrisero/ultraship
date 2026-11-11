@@ -192,7 +192,8 @@ def account(pending, identifier, step, agent, sha, verdict, evidence):
         raise ValueError('recorded ledger must be an absolute path without symlinks')
     result_id = json.dumps([str(pending), cwd, identifier])
     note = {'result': result_id, 'run': result['run'], 'step': step, 'evidence': evidence}
-    row = ['account-result', agent, sha, verdict, json.dumps(note)]
+    named = f'{kind}@{result["agent_id"]}' if result.get('agent_id') else kind
+    row = ['account-result', named, sha, verdict, json.dumps(note)]
     with home.open('r+b') as fh:
         fcntl.flock(fh, fcntl.LOCK_EX)
         history = [line.split('\t') for line in fh.read().decode().splitlines() if line]
@@ -250,7 +251,8 @@ def correct_binding(identifier, line, reason):
             text = fh.read().decode()
             history = [r.split('\t') for r in text.splitlines() if r]
             if text.rstrip('\n').split('\n') != text.splitlines() or '' in text.splitlines():
-                raise ValueError('ledger lines differ from its rows; name the row by hand-checked evidence instead')
+                # shortcut: one blank line or extra line break blocks correction on this ledger; map lines to rows if that occurs.
+                raise ValueError('ledger lines differ from its rows; correct-binding cannot name a row in this ledger')
             starts = [i for i, r in enumerate(history) if r[1] == 'run-start']
             start = [i for i in starts if run_identity(i, history[i]) == run]
             if len(start) != 1 or not 0 <= old[0] < len(history) or run_identity(old[0], history[old[0]]) != old:
@@ -277,9 +279,9 @@ def correct_binding(identifier, line, reason):
             note = {'result': key, 'agent': history[index][2], 'from': old, 'to': new, 'swap': other, 'reason': reason}
             # The '-' agent keeps older hooks from taking the audit row as a review.
             row = [str(int(time.time())), 'correct-binding', '-', history[index][3], 'corrected', json.dumps(note)]
-            last = [json.loads(r[5]) for r in history if r[1] == 'correct-binding' and json.loads(r[5])['result'] == key]
-            # A matching last audit row means a crash came before publish: publish only.
-            if not last or [last[-1][k] for k in ('from', 'to', 'swap')] != [old, new, other]:
+            last = [json.loads(r[5]) for r in history if r[1] == 'correct-binding'][-1:]
+            # The ledger's last audit row naming this move means a crash came before publish: publish only.
+            if not last or [last[0][k] for k in ('result', 'from', 'to', 'swap')] != [key, old, new, other]:
                 fh.seek(0, os.SEEK_END)
                 if fh.tell():
                     fh.seek(-1, os.SEEK_END)
