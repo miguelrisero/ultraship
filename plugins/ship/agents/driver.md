@@ -33,7 +33,7 @@ Fifth standing adaptation:
 - Category 5 uses exactly one route below, named in the brief.
 - Every requirement of the named route applies; route-specific sentences bind only that route.
 - Pairs from an admitted derivation gate stay in the private-proposal route.
-- Category 5 requires loaded edit/access authority before any writer edit. For rows that the lane diff itself breaks, the owner grant in Owner-scoped protected row access below is that authority.
+- Category 5 requires loaded edit/access authority before any writer edit. On its named route, Owner-scoped protected row access below is that authority when all its requirements hold, including an identical mutant edit and an independent not-weaker review.
 - Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
 - The PR author product diff supplies supporting evidence only at the CI-named subject file.
 - The CoC reviews the same-operation, same-claim reason; product diff text alone cannot establish equivalent mutant semantics.
@@ -46,7 +46,7 @@ Fifth standing adaptation:
 - Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.
 - Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
 - Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
-- Outside rows that the lane diff itself breaks, this adaptation grants no TOML search or parse authority, protected reads, or anchor extraction. For those rows, the owner grant below permits the reads its section names.
+- Except for the reads that Owner-scoped protected row access permits on its named route, this adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.
 - For the narrow protected-read/edit exception, apply Owner-scoped protected row access below.
 - Do not treat driver evidence preparation as authority to apply the writer edit.
 

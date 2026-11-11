@@ -6,8 +6,12 @@ import re
 import sys
 
 # Short word-number fusions such as `deadline2026` or `by8November00`; hex digests and `b1a2c3d4e` task IDs pass.
-GLUED = re.compile(r'[a-z]{3}[0-9]|[0-9][a-z]{3}')
-HOLD_WORDS = re.compile(r'\b(preserv\w*|holds?|receipts?|custody|custodian|admission|admits?|admitted|authority|zero|provenance|refusals?)\b', re.I)
+GLUED = re.compile(r'[a-z]{3}[0-9]|[0-9][a-z]{3}', re.I)
+# Product and hardware names with a version number are words, not fusions.
+GLUE_EXEMPT = re.compile(r'[0-9a-f]+|b[a-z0-9]{8}|(sha|md)[0-9]*sum|python[0-9.]*|(u?int|float|rtx|gtx|postgres|aarch|x86|utf|base)[0-9]+\w*', re.I)
+HOLD_WORDS = re.compile(r'\b(preserv\w*|holds?|custody|custodian|admission|admits?|admitted|provenance|refusals?)\b', re.I)
+# The harness addresses an in-session subagent by its agent ID and a background subagent's parent as `main`.
+SUBAGENT = re.compile(r'main|a[0-9a-f]{16}')
 
 
 class VisibleText(HTMLParser):
@@ -53,9 +57,16 @@ class VisibleText(HTMLParser):
 
 
 def glued(tokens):
-    words = {t.strip('.,;:()[]!?"\'*') for t in tokens if not re.search(r'[_-]', t)}
-    return {w for w in words if len(w) >= 7 and w.isalnum() and GLUED.search(w)
-            and not re.fullmatch(r'[0-9a-f]+|b[a-z0-9]{8}|sha256sum|python3', w)}
+    words = {re.sub(r"'s$", '', t.strip('.,;:()[]!?"\'*')) for t in tokens if not re.search(r'[_-]', t)}
+    return {w for w in words if len(w) >= 7 and w.isalnum() and GLUED.search(w) and not GLUE_EXEMPT.fullmatch(w)}
+
+
+def hold_wall(text):
+    """Five or more hold words in a status message restate standing holds instead of reporting a change."""
+    prose = re.sub(r'`[^`]*`', '', ''.join(VisibleText(text).parts))
+    words = ' '.join(t for t in prose.split() if not re.search(r'https?://|/', t))
+    if len(HOLD_WORDS.findall(words)) >= 5:
+        raise ValueError('Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.')
 
 
 def check(text, kind='result'):
@@ -84,8 +95,8 @@ def outgoing(event):
         text = args.get('message') or args.get('content') or ''
         if text:  # Native subscriptions and lifecycle controls can have no prose body.
             check(text, 'peer')
-            if len(HOLD_WORDS.findall(re.sub(r'`[^`]*`', '', text))) >= 6:
-                raise ValueError('Drop restated holds, receipts and authority limits; send what changed and the next action.')
+            if not SUBAGENT.fullmatch(str(args.get('to', '')).strip()):  # A brief to a child carries its restrictions.
+                hold_wall(text)
     elif tool.endswith(('create_input', 'update_input')):
         content = args.get('content')
         if content is None:  # Metadata-only writes carry no new owner text.
@@ -110,8 +121,11 @@ def self_test():
     outgoing({'tool_name': 'SendMessage', 'tool_input': {'to': 'peer'}})
     check('https://example.test/averylongsourceidentifier /absolute/long-source-path `averylongloadbearingidentifier` ' + 'a' * 40)
     check(' '.join(['z' * 22] + ['word'] * 12))  # One long token in 13 stays below 8%.
-    check('Run python3 on template0 at 18:00 UTC; task b7re019f0 uses sha256sum.')  # One fusion and exempt IDs pass.
-    wall = peer.replace('The checks pass.', 'Preserve every hold, receipt, custody, admission and zero authority. Preserve it.')
+    check('Run python3 on template0 at 18:00 UTC; task b7re019f0 uses sha256sum on rtx4090 and float32 hosts.')
+    hold_wall('Tests pass with zero failures and zero skips. The receipt is in the board. Authority is unchanged.')
+    hold_wall('Preserve every hold at `https://x.test/hold/custody/admission/provenance/refusal`.')
+    wall = peer.replace('The checks pass.', 'Preserve every hold. Custody stays. Admission waits. Preserve the refusal.')
+    outgoing({'tool_name': 'SendMessage', 'tool_input': {'to': 'a' + '0' * 16, 'message': wall}})
     try:
         outgoing({'tool_name': 'SendMessage', 'tool_input': {'to': 'peer', 'message': wall}})
     except ValueError:
@@ -120,6 +134,7 @@ def self_test():
         raise AssertionError('lint accepted a restated-hold wall')
     for text, kind in [('Newglobaldiskpolicyacceptedtoday', 'result'),
                        ('Send the deadline2026 note by8November00 today.', 'result'),
+                       ("Send the DEADLINE2026 note by the deadline2026's end.", 'result'),
                        (' '.join(['z' * 22] + ['word'] * 11), 'result'),
                        (' '.join(['word'] * 26) + '.', 'result'),
                        (peer.replace('Facts:', 'Evidence:'), 'peer'),
