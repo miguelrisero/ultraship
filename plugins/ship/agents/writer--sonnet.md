@@ -78,7 +78,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
      Category 5 uses exactly one route below, named in the brief.
      Every requirement of the named route applies; route-specific sentences bind only that route.
      Pairs from an admitted derivation gate stay in the private-proposal route.
-     Category 5 requires separate applicable loaded edit/access authority before any writer edit; missing authority blocks editing.
+     Category 5 requires loaded edit/access authority before any writer edit. For rows that the lane diff itself breaks, the owner grant in Owner-scoped protected row access below is that authority.
      Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
      The PR author product diff supplies supporting evidence only at the CI-named subject file.
      The CoC reviews the same-operation, same-claim reason; product diff text alone cannot establish equivalent mutant semantics.
@@ -91,7 +91,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
      Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.
      Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
      Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
-     Except for the owner-scoped lane-derived route below, this adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.
+     Outside rows that the lane diff itself breaks, this adaptation grants no TOML search or parse authority, protected reads, or anchor extraction. For those rows, the owner grant below permits the reads its section names.
      For the narrow protected-read/edit exception, apply Owner-scoped protected row access below.
 - Never loosen an assertion, widen a bound, or delete a check under this rule.
 - Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.
