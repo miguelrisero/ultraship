@@ -649,15 +649,21 @@ def shell_git_push(command):
         words = re.sub(r'["\']', '', re.sub(r'\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})', '', text))
         # Many builtins assign a variable from their arguments (`printf -v`, zsh `print -v`), so the relaxation
         # holds only when every command starts with a command that cannot assign one.
-        plain = plain and all(part.split()[0] in READ_ONLY_STARTS
-                              for part in re.split(r'[;&|\n]+', words) if part.strip())
+        read_only_starts = all(part.split()[0] in READ_ONLY_STARTS
+                               for part in re.split(r'[;&|\n]+', words) if part.strip())
+        plain = plain and read_only_starts
+        # Single quotes keep a glob literal and no read-only start re-reads its arguments, so a quoted pathspec
+        # (`git ls-files '*pre-push*'`) is file text when no other glob, expansion or escape is in the text.
+        # An option or `key=value` word can name a command that git runs through a shell, so it keeps the scan.
+        literal_globs = read_only_starts and not re.search(
+            r'[*?[{$`\\]', re.sub(r"(?<![^\s;&|])'(?!-)[^'\s$`\\=]*'(?![^\s;&|])", "''", text))
         if plain:
             spelled = re.search(r'(?<![A-Za-z0-9_])(?:push|send-pack)(?![A-Za-z0-9_])',
                                 re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', words))
         else:
             spelled = any(word in re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', token).translate(expansion)
                           for token in tokens for word in ('push', 'send-pack'))
-        if any(set(token) & set('$`*?[{') for token in tokens) and spelled:
+        if not literal_globs and any(set(token) & set('$`*?[{') for token in tokens) and spelled:
             return True
         expect_subcommand = skip_value = folder_value = False
         # Only a `git` that starts a command reads its own arguments; `eval git -C "$W"` or `watch git ...`
