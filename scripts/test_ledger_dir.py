@@ -314,7 +314,7 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(self.hook('stop', env=bad_env, stop_hook_active=True), '')
         self.assertEqual(owed.read_bytes(), evidence)
         empty_env = {**self.env, 'SHIP_LEDGER_DIR': str(self.base / 'empty')}
-        self.assertIn('no unused ledger row', json.loads(self.hook('stop', env=empty_env))['reason'])
+        self.assertEqual(self.hook('stop', env=empty_env), '')
         self.assertEqual(owed.read_bytes(), evidence)
         # A failed CLI append leaves the pending evidence intact.
         obstruction = self.base / 'file-not-directory'
@@ -322,7 +322,7 @@ class LedgerDirTests(unittest.TestCase):
         failed_env = {**self.env, 'SHIP_LEDGER_DIR': str(obstruction)}
         self.assertNotEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha',
                                      'pass', env=failed_env).returncode, 0)
-        self.assertEqual(json.loads(self.hook('stop', env=failed_env))['decision'], 'block')
+        self.assertEqual(self.hook('stop', env=failed_env), '')
         self.assertEqual(owed.read_bytes(), evidence)
         local = self.resolve()
         local.chmod(0o400)
@@ -331,23 +331,27 @@ class LedgerDirTests(unittest.TestCase):
                 failed = self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass')
                 self.assertNotEqual(failed.returncode, 0)
                 self.assertIn('PermissionError', failed.stderr)
-                self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+                self.assertEqual(self.hook('stop'), '')
                 self.assertEqual(owed.read_bytes(), evidence)
         finally:
             local.chmod(0o600)
         self.assertEqual(self.cli('append', 'deep-review', 'unrelated', 'sha', 'pass').returncode, 0)
-        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(self.hook('stop'), '')
         self.assertEqual(owed.read_bytes(), evidence)
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'owed').returncode, 0)
-        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(self.hook('stop'), '')
         self.assertEqual(owed.read_bytes(), evidence)
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
         receipts = self.base / 'state/ultraship/accounted.json'
         receipts_existed = receipts.exists()
         committed = receipts.read_bytes() if receipts_existed else None
-        blocked = json.loads(self.hook('stop'))
-        self.assertEqual(blocked['decision'], 'block')
-        self.assertIn(result_ids[1], blocked['reason'])
+        hook_spec = importlib.util.spec_from_file_location('ultraship', HOOK)
+        hook_module = importlib.util.module_from_spec(hook_spec)
+        hook_spec.loader.exec_module(hook_module)
+        with self.assertRaisesRegex(ValueError, result_ids[1]):
+            hook_module.account(ledger, str(self.checkout),
+                                [line.split('\t') for line in evidence.decode().splitlines()], {}, str(owed))
+        self.assertEqual(self.hook('stop'), '')
         self.assertEqual(owed.read_bytes(), evidence)
         self.assertEqual(receipts.exists(), receipts_existed)
         self.assertEqual(receipts.read_bytes() if receipts.exists() else None, committed)
@@ -524,10 +528,11 @@ class LedgerDirTests(unittest.TestCase):
         # A result never binds to a row without its agent ID or with another agent's ID.
         self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='other')
         evidence = owed.read_bytes()
+        blocked = json.loads(self.hook('stop'))
+        self.assertIn('ship:reviewer--sol@other', blocked['reason'])
         for agent in ('ship:reviewer--sol', 'ship:reviewer--sol@capacity-40bf7a98'):
             self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
-            blocked = json.loads(self.hook('stop'))
-            self.assertIn('ship:reviewer--sol@other', blocked['reason'])
+            self.assertEqual(self.hook('stop'), '')
             self.assertEqual(owed.read_bytes(), evidence)
 
     def swapped_pair(self):

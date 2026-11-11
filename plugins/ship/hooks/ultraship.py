@@ -1044,30 +1044,50 @@ def stop(data):
     if data.get('stop_hook_active'):
         return
     try:
+        reminder = path.with_suffix('.stop-state')
         try:
             path.stat()
         except FileNotFoundError:
+            reminder.unlink(missing_ok=True)
             return
         with path.open('r+') as pending:
             fcntl.flock(pending, fcntl.LOCK_EX)
             owed = [line.split('\t') for line in pending.read().splitlines() if line]
             if not owed:
+                reminder.unlink(missing_ok=True)
                 return
-            ledger = load_ledger()
-            receipt_path = STATE / 'accounted.json'
-            # ponytail: one hook-state receipt lock serializes Stops; shard by ledger
-            # if concurrent Stop throughput matters. This never locks a legacy home.
-            with (STATE / 'accounted.lock').open('a') as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                ledger = load_ledger()
+                receipt_path = STATE / 'accounted.json'
+                # ponytail: one hook-state receipt lock serializes Stops; shard by ledger
+                # if concurrent Stop throughput matters. This never locks a legacy home.
+                with (STATE / 'accounted.lock').open('a') as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    try:
+                        receipts = json.loads(receipt_path.read_text())
+                    except FileNotFoundError:
+                        receipts = {}
+                    for cwd in {o[2] for o in owed}:
+                        account(ledger, cwd, [o for o in owed if o[2] == cwd], receipts, str(path))
+                    ledger.publish(receipt_path, receipts)
+            except Exception:
                 try:
-                    receipts = json.loads(receipt_path.read_text())
+                    canonical = [row[:3] + [json.loads(row[3])] if len(row) == 4 else row for row in owed]
+                except ValueError:
+                    canonical = owed
+                fingerprint = hashlib.sha256(json.dumps(sorted(
+                    json.dumps(row, sort_keys=True) for row in canonical)).encode()).hexdigest()
+                try:
+                    previous = reminder.read_text()
                 except FileNotFoundError:
-                    receipts = {}
-                for cwd in {o[2] for o in owed}:
-                    account(ledger, cwd, [o for o in owed if o[2] == cwd], receipts, str(path))
-                ledger.publish(receipt_path, receipts)
+                    previous = None
+                if previous == fingerprint:
+                    return
+                reminder.write_text(fingerprint)
+                raise
             # Clear only after every result has a successful accounting row.
             # Keep this inode so concurrent SubagentStop writers share the lock.
+            reminder.unlink(missing_ok=True)
             pending.seek(0)
             pending.truncate()
     except Exception as exc:
