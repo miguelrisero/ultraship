@@ -108,8 +108,13 @@ All conditions must hold:
 4. Better Review and human threads are resolved: zero unresolved threads.
 5. End-to-end evidence covers that head at the deepest safe level.
 6. `ledger.py gaps` reports none, and `run-end` succeeds.
-7. Every UI PR passes the [real-browser premerge gate](references/pipeline.md#ui-browser-gate) at its current pushed head and matching preview.
+7. Every UI PR passes the [real-browser premerge gate](references/pipeline.md#ui-browser-gate); the default route requires the current pushed head and matching preview.
    This includes dashboard `frontend/app/**`, UI-affecting frontend design-package changes, and marketing UI through its existing Vercel preview route.
+   Only when preview sign-in requires secret handling, accept qualified local real-browser evidence under the pipeline's conditional local route.
+   Require the same exact pushed head, Chromium interaction, synthetic isolation, safe screenshot evidence, and post-check head equality on that route.
+   Local evidence qualifies only for behavior faithfully reproduced by the local stack.
+   Preview/deployment/config-dependent behavior retains its preview-proof hold when appropriate preview proof is unavailable.
+   Preserve every credential refusal and user/project rule on both routes.
    Missing or failed browser evidence blocks merge. CI and review supply zero substitute browser evidence.
 
 Re-read `headRefOid` after verification. A changed head reopens the affected steps. Finish with the direct PR URL. Merge and production actions need their own authority.
