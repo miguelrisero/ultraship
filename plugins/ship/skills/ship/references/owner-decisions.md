@@ -115,10 +115,10 @@ For a policy change, supply its applicable dedicated authority; a register label
 ## Loaded instructions and refusals
 
 An explicit owner refusal blocks all routes for that edit until applicable owner authority resolves it.
-Apply your own loaded definition; a checkout, cache entry, or version supplies zero additional authority.
-When diagnosing a contract mismatch, report the loaded identity evidence available and identify unknown fields without inference.
-Preserve applicable higher-priority prohibitions, tool and hook denials, protected paths, and approval, GO, installation, and publication holds.
-A refusal can lift only when its cause is actually fixed or applicable authority resolves it.
-Repairing missing verification evidence resolves only that evidence gap; it cannot override a binding prohibition or tool denial.
-A version, restart, or new session alone lifts nothing; never substitute an executor to bypass a still-effective refusal.
-Keep prospective source changes separate from runtime adoption and action authority.
+Apply your own loaded definition; a checkout, cache entry, or version supplies zero additional authority. Keep prospective source changes separate from runtime adoption and action authority.
+When diagnosing a contract mismatch, report the loaded identity evidence available and identify unknown fields without inference. Repairing missing verification evidence resolves only that evidence gap; it cannot override a binding prohibition or tool denial.
+Preserve applicable higher-priority prohibitions, tool and hook denials, protected paths, and approval, GO, installation, and publication holds. Every safety-hook refusal remains final.
+For the driver's `Agent` dispatch only, allow one resend when the denial explicitly identifies `Coordination gate error` and an exact text remedy. Require unambiguous gate identity and remedy and the applicable loaded contract; the denial date alone never determines eligibility.
+Apply only that remedy; preserve the action, recipient, scope, authority, and exact owner-provenance checks. Recheck current version, status, and answer provenance before the resend.
+Block missing or ambiguous gate identity, missing or ambiguous remedy, generic `Output contract` denials, broader edits, and changed action, recipient, scope, or authority. Any safety-hook refusal, mixed safety denial, binding tool denial, or higher-priority restriction blocks the resend.
+Record the denial and consumed resend on the durable run board before sending, keyed by the unchanged action, recipient, and scope. Absent records, consumed attempts, and a failed second attempt stay blocked across recovery. A version, restart, or new session alone lifts nothing; never reset an attempt or substitute an executor to bypass a still-effective refusal. Other refusals lift only when their cause is actually fixed or applicable authority resolves them.
