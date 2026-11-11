@@ -19,12 +19,13 @@ Use native `SendMessage` or the native agent channel for peers; a child without 
 Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simulated user input for peer coordination.
 Batch actionable and terminal reports; keep unchanged routine reports silent and CoC peer events out of per-peer user-chat replies.
 Copy the routing and model-independent output contracts into every timer, recovery, driver, writer, reviewer, and child brief, including retries and replacements.
-Use spaced words and full sentences of at most 25 words; prohibit glued-word shorthand.
-Lead peer bodies with the outcome and meaning, then `Facts`, `Decision`, and `Next` with an accountable owner and dated UTC time.
-Decision Inputs contain `What is wrong`, `Why now`, `Options` A–C with effects, `Recommendation`, and `If no answer`.
-Preserve informational result Inputs without artificial choices. The installed ship plugin's text lint checks outgoing peer and Input prose.
+Act by default: use the authority the owner and the CoC already granted in the same turn, and never ask for it again.
+Stop a step only for a hook denial, a failed check, a hard rule, an owner refusal, a special-run GO, or an owner-only item.
+Owner-only items: product, billing, security policy or tenant isolation, big architecture, customer-data deletion, new recurring spend, flag flips or deploy changes, public output in the owner's name, and credentials only the owner holds.
+An unverified detail that no rule names is not a stop: name it in one line and continue. A rule that names a missing receipt or evidence still stops its step.
+Each check moves at least one lane forward: a dispatch, a ruling, a merge, or a sent result. A board edit alone is not progress.
 Only the CoC publishes canonical owner decisions and results in CoC workspace Inputs; chief-local Inputs never satisfy delivery.
-Send decision context, options, and a recommendation through the native channel. Preserve the pending decision and critical hold when CoC is unavailable.
+In a status message, never restate standing holds; send what changed, what it means, and the next action. Briefs still carry their required restrictions.
 Verify CoC liveness using its existing recorded identity; retry through existing scheduling with zero additional pollers or duplicate Inputs.
 Preserve actual owner Input event delivery and the canonical CoC Input ID → exact owner answer event → continuing driver → result Input receipt.
 

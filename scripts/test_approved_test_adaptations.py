@@ -162,7 +162,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 category,
                 *route_selection_clauses,
                 'Categories 1–4 retain their existing CoC-or-Chief approval routes and owner-event verification requirements.',
-                'Category 5 requires separate applicable loaded edit/access authority before any writer edit; missing authority blocks editing.',
+                'Category 5 requires loaded edit/access authority before any writer edit. On its named route, Owner-scoped protected row access below is that authority when all its requirements hold, including an identical mutant edit and an independent not-weaker review.',
                 'Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.',
                 'The PR author product diff supplies supporting evidence only at the CI-named subject file.',
                 'The CoC reviews the same-operation, same-claim reason; product diff text alone cannot establish equivalent mutant semantics.',
@@ -175,7 +175,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.',
                 'Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.',
                 'Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.',
-                'Except for the owner-scoped lane-derived route below, this adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.',
+                'Except for the reads that Owner-scoped protected row access permits on its named route, this adaptation grants no TOML search or parse authority, protected reads, or anchor extraction.',
             ):
                 with self.subTest(path=name, shared_control=phrase):
                     self.assertIn(phrase, shared)
