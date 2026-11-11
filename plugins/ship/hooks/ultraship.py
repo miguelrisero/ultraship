@@ -76,7 +76,7 @@ INERT_ATTRIBUTES = {
     'items', 'keys', 'values', 'group', 'groups', 'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape',
     'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest', 'unlink',
 }
-READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true'}
+READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true', 'date'}
 READ_ONLY_STARTS = {'cat', 'grep', 'head', 'tail', 'ls', 'wc', 'diff', 'cd', 'git'}
 REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
               'help', 'input'}
@@ -140,14 +140,15 @@ def inert_python(body):
         node, (ast.ExceptHandler, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name]
     bound += [(alias.asname or alias.name).split('.')[0] for node in ast.walk(tree)
               if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names]
-    literals = {}
+    literals, assigned = {}, {}
     for statement in tree.body:
         if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
                 and isinstance(statement.targets[0], ast.Name)):
             name = statement.targets[0].id
             value = statement.value
-            literals[name] = (value.value if bound.count(name) == 1 and isinstance(value, ast.Constant)
-                              and isinstance(value.value, str) else None)
+            text = value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else None
+            assigned.setdefault(name, []).append(text)
+            literals[name] = text if bound.count(name) == 1 else None
     calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and node.id == 'open' and id(node) not in calls:
@@ -163,9 +164,11 @@ def inert_python(body):
                    for mode in modes):
                 continue
             target = node.args[0] if node.args else None
-            path = (target.value if isinstance(target, ast.Constant) else
-                    literals.get(target.id) if isinstance(target, ast.Name) else None)
-            if not writable(path):
+            # A name may hold several literal paths in turn, so a write through it needs every one to be writable.
+            paths = ([target.value] if isinstance(target, ast.Constant) else
+                     assigned.get(target.id) if isinstance(target, ast.Name)
+                     and bound.count(target.id) == len(assigned.get(target.id, ())) else None)
+            if not paths or not all(writable(path) for path in paths):
                 return False
     return inert_paths(tree, literals, bound)
 
@@ -310,18 +313,60 @@ def read_only_shell(command):
     return True
 
 
+# Literal `cd` and `date` steps run no file, so they may lead a Python heredoc; the scan still reads them.
+PYTHON_LEAD = r'(?:(?:cd +[\w./-]+|date(?: +[-+\w%:]+)*) +&& +)*'
+
+
+def check_only_shell(command):
+    """Whether every command only reads or syntax-checks files, so none runs a file the heredoc wrote.
+
+    A script can build a push at run time, so a command that runs code (a test runner, `bash f.sh`) never follows."""
+    segments = [part.strip() for part in re.split(r'&&|;|\n', command) if part.strip()]
+    return read_only_shell(command) or all(
+        read_only_shell(segment) or re.fullmatch(r'(?:ba|z)?sh +-n +[\w./][\w./-]*', segment) for segment in segments)
+
+
+def runs_heredoc_output(command):
+    """Whether a Python heredoc that can write files is followed by a command that can run one.
+
+    A script can build a push at run time (`'pu' + 'sh'`), so its text proves nothing about the files it writes."""
+    lines = command.splitlines(keepends=True)
+    match = ANY_PYTHON_HEREDOC.fullmatch(lines[0]) if lines else None
+    if not match:
+        return False
+    delimiter = shlex.split(match['delimiter'])[0]
+    for end in range(1, len(lines)):
+        if (lines[end].lstrip('\t') if match['tabs'] else lines[end]).removesuffix('\n') == delimiter:
+            body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
+            # The written files exist only after the script, so only a later or a background command can run them.
+            if check_only_shell(''.join(lines[end + 1:])) and not re.search(r'(?<!&)&(?![&>])', match['lead']):
+                return False
+            if not inert_python(body):
+                return True
+            # An inert script writes only through `open` with a write mode or a `Path` write method.
+            return any(isinstance(node, ast.Attribute) and node.attr in {'write_text', 'unlink'}
+                       or isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'open' and not all(
+                           isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
+                           for mode in [*node.args[1:2], *(k.value for k in node.keywords if k.arg == 'mode')])
+                       for node in ast.walk(ast.parse(body)))
+    return False
+
+
+PYTHON_STDIN = (r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
+                r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)[ \t]*\n$")
+# Only literal `cd` and `date` steps and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the
+# interpreter; a `GIT_CONFIG_*` lead could alias a git read to a push.
+PYTHON_HEREDOC = re.compile(rf"^(?P<lead>[ \t]*{PYTHON_LEAD}(?:PYTHON[A-Z0-9_]*=[\w./-]* +)*)" + PYTHON_STDIN)
+# Any command may lead it here; the files it writes exist only after it runs.
+ANY_PYTHON_HEREDOC = re.compile(r"^(?P<lead>.*?)" + PYTHON_STDIN)
+
+
 def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
-    # Only a literal `cd` and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the interpreter;
-    # a `GIT_CONFIG_*` lead could alias a git read to a push.
-    header = re.compile(r"^(?P<lead>[ \t]*(?:cd +[\w./-]+ +&& +)?(?:PYTHON[A-Z0-9_]*=[\w./-]* +)*)"
-                        r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
-                        r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
-                        r"[ \t]*\n$")
     lines = command.splitlines(keepends=True)
-    match = header.fullmatch(lines[0]) if lines else None
+    match = PYTHON_HEREDOC.fullmatch(lines[0]) if lines else None
     if not match:
         return command
     delimiter = shlex.split(match['delimiter'])[0]
@@ -331,9 +376,9 @@ def python_heredoc_shell(command, inert_only=False):
             remainder = ''.join(lines[end + 1:])
             body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            # Only a `cd` may lead it and only a read-only remainder may follow it, because another command could
-            # run the file it writes.
-            if (re.fullmatch(r'[ \t]*(?:cd +[\w./-]+ +&& +)?', match['lead']) and read_only_shell(remainder)
+            # Only a `cd` or `date` may lead it and only a read-only remainder may follow it, because another command
+            # could run the file it writes.
+            if (re.fullmatch(rf'[ \t]*{PYTHON_LEAD}', match['lead']) and read_only_shell(remainder)
                     and match['delimiter'][0] in '\'"\\' and inert_python(body)):
                 return lines[0] + remainder
             if inert_only:
@@ -447,7 +492,7 @@ def git_push(command):
     except ValueError:
         # A reduction that leaves unbalanced quotes misread the shell, so the original command is scanned.
         reduced = command
-    return shell_git_push(reduced)
+    return runs_heredoc_output(command) or shell_git_push(reduced)
 
 
 SAFE_VALUE = r'[\w./@%+:,-]+'

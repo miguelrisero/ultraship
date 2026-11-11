@@ -16,6 +16,16 @@ GIT_HELPER = ("import subprocess\n\n"
               "    return subprocess.check_output(['git', *args], text=True).strip()\n\n")
 
 
+FRONTEND_EDIT = ("cd /w/lane/frontend/app/src && python3 - <<'EOF'\n"
+                 "p = 'components/__tests__/TeamsStoreWaitingPanel.spec.ts'\n"
+                 "open(p, 'w').write(\"it('skips', async () => {\\n  order.push('skip');\\n"
+                 "  await router.push('/onboarding/done');\\n});\\n\")\n"
+                 "p = 'components/TeamsStoreWaitingPanel.vue'\ns = open(p).read()\n"
+                 "old = '<slot name=\"actions\" />'\nassert old in s\n"
+                 "open(p, 'w').write(s.replace(old, '<slot name=\"actions\" :skip-pending=\"skipPending\" />'))\n"
+                 "EOF\n")
+
+
 class WriterFalsePublishTests(unittest.TestCase):
     def decision(self, command):
         output = io.StringIO()
@@ -147,6 +157,109 @@ class WriterFalsePublishTests(unittest.TestCase):
     def test_publish_commands_stay_denied(self):
         self.assertDenied('gh pr merge 3 --squash', 'gh pr create --fill', "gh pr comment 3 --body '/merge fix(x): y'",
                           'npm publish', 'vercel --prod', 'wrangler deploy', 'docker push ghcr.io/x/y')
+
+    def test_dated_proof_preparation_in_scratch_is_admitted(self):
+        # The refused Teams-lane shape: a timestamp, then a Python patch of a scratch script, then a syntax check.
+        self.assertAdmitted(
+            "date -u +%FT%TZ && python3 -I - <<'PY'\n"
+            "from pathlib import Path\nimport ast, hashlib\n"
+            "base = Path('/w/.scratch/battery')\np = base / 'battery-1110.sh'\ns = p.read_text()\n"
+            "assert hashlib.sha256(p.read_bytes()).hexdigest() == '0' * 64\n"
+            "s = s.replace('rc=0\\n\"$PY\" -I - <<\\'PY\\' || rc=$?\\n', 'exec \"$PY\" -I - <<\\'PY\\'\\n')\n"
+            "s = s.replace('done\\n', 'elif test -n \"$DIRTY\"; then\\n    echo DIRTY\\n')\n"
+            "body = s.split(\"<<'PY'\\n\", 1)[1].rsplit('\\nPY\\n', 1)[0]\nast.parse(body)\n"
+            "dst = base / 'battery-final-1110.sh'\nwith dst.open('x') as fh:\n    fh.write(s)\n"
+            "dst.chmod(0o444)\nprint(hashlib.sha256(dst.read_bytes()).hexdigest())\nPY\n"
+            "bash -n /w/.scratch/battery/battery-final-1110.sh",
+            "date -u +%FT%TZ && cd /w/lane && python3 - <<'PY'\np = 'tests/startup.test.js'\ns = open(p).read()\n"
+            "open(p, 'w').write(s + \"order.push('listen')\\n\")\nPY")
+
+    def test_test_append_in_own_worktree_is_admitted(self):
+        # The refused photos-lane shape: a heredoc append whose test text calls `order.push`.
+        self.assertAdmitted(
+            "cd /w/repo.lane && cat >> backend/api/tests/unit/routes/startup.test.js <<'EOF'\n\n"
+            "describe('replacement startup contract', () => {\n"
+            "    it('listens once', async () => {\n        const order = [];\n"
+            "        order.push('listen');\n        expect(order).toEqual(['listen']);\n"
+            "        expect(process.exit).toHaveBeenCalledWith(0);\n    });\n});\nEOF")
+
+    def test_frontend_edit_then_read_only_checks_is_admitted(self):
+        # The refused frontend shape: write a test file, fix a component slot, then read the result back.
+        self.assertAdmitted(
+            FRONTEND_EDIT + 'date -u',
+            FRONTEND_EDIT + 'grep -n skip-pending components/TeamsStoreWaitingPanel.vue && wc -l components/TeamsStoreWaitingPanel.vue; date -u')
+
+    def test_a_command_that_runs_written_files_after_a_heredoc_stays_denied(self):
+        # The script can build a push at run time, so nothing that runs code may follow it.
+        built = "'git ' + 'pu' + 'sh origin HEAD'"
+        self.assertDenied(
+            f"cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write({built})\nEOF\nbash run.sh",
+            f"cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write({built})\nEOF\nsh -n run.sh && sh run.sh",
+            f"date -u && python3 -I - <<'EOF'\nimport ast\nopen('run.sh', 'w').write({built})\nEOF\nbash run.sh",
+            f"cd /w/lane && python3 - <<'EOF'\nopen('t.spec.ts', 'w').write({built})\nEOF\nbunx vitest run t.spec.ts",
+            FRONTEND_EDIT + 'cd /w/lane/frontend/app && bunx vitest run src/components/__tests__')
+
+    def test_frontend_edit_then_publication_stays_denied(self):
+        self.assertDenied(
+            FRONTEND_EDIT + 'bun run typecheck && git push origin HEAD', FRONTEND_EDIT + 'gh pr merge 3 --squash',
+            FRONTEND_EDIT + "gh pr comment 3 --body '/merge fix(x): y'",
+            "cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write('git push origin HEAD')\nEOF\nbash run.sh",
+            "cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write('gh pr merge 3')\nEOF\nbash run.sh",
+            "cd /w/lane && python3 - <<'EOF'\np = 'a.txt'\np = 'traceback.py'\n"
+            "open(p, 'w').write('git push origin HEAD')\n1 / 0\nEOF\nbun run test")
+
+    def test_a_shell_glob_on_git_from_a_process_starting_script_stays_denied(self):
+        # zsh runs `/usr/bin/git(|)` as git, so `git(` text stays a command when the script can start a process.
+        self.assertDenied(*(f"date -u +%FT%TZ && python3 - <<'PY'\n{start}\nPY" for start in (
+            "import subprocess\nsubprocess.run('/usr/bin/git(|) send-pack x HEAD:main', shell=True, executable='/bin/zsh')",
+            "import os\nos.system(\"zsh -c '/usr/bin/git(.) send-pack x HEAD:main'\")",
+            "__import__('os').system(\"zsh -c '/usr/bin/git(N) send-pack x HEAD:main'\")",
+            "import pathlib\npathlib.os.system(\"zsh -c '/usr/bin/git(|) send-pack x HEAD:main'\")",
+            "from pathlib import os\nos.system(\"zsh -c '/usr/bin/git(|) send-pack x HEAD:main'\")",
+            "from pathlib import Path\nPath('.').parser.os.system(\"zsh -c '/usr/bin/git(|) send-pack x HEAD:main'\")")))
+
+    def test_a_script_that_writes_a_loadable_module_keeps_its_git_text_scanned(self):
+        # Python imports a module the script wrote, so that module can start a process.
+        payload = "import os\\nos.system('zsh -c \"/usr/bin/git(|) send-pack x HEAD:main\"')\\n"
+        self.assertDenied(*(f"date -u && python3 - <<'PY'\n{body}\nPY" for body in (
+            f"open('difflib.py', 'w').write('{payload}')\nimport difflib\nprint('git(|)')",
+            f"from pathlib import Path\nPath('textwrap.py').write_text('{payload}')\nfrom textwrap import dedent\n"
+            "print('git(|)')",
+            f"from pathlib import Path\nbase = Path('/w')\np = base / 'traceback.py'\nwith p.open('w') as f:\n"
+            f"    f.write('{payload}')\nprint('git(|)')\n1 / 0",
+            f"o = open\no('difflib.py', 'w').write('{payload}')\nimport difflib\nprint('git(|)')",
+            f"from pathlib import Path\nw = Path('difflib.py').write_text\nw('{payload}')\nimport difflib\nprint('git(|)')",
+            f"from pathlib import Path\nPath('a.txt').write_text('{payload}')\nPath('a.txt').replace('difflib.py')\n"
+            "import difflib\nprint('git(|)')",
+            f"p = 'a.txt'\nmatch 'difflib.py':\n    case p:\n        pass\nopen(p, 'w').write('{payload}')\n"
+            "import difflib\nprint('git(|)')",
+            f"Path = lambda p: 'difflib.py'\nopen(Path('a.txt'), 'w').write('{payload}')\nimport difflib\nprint('git(|)')",
+            f"from pathlib import Path\ndef Path(p):\n    return 'difflib.py'\nopen(Path('a.txt'), 'w').write('{payload}')\n"
+            "import difflib\nprint('git(|)')")))
+
+    def test_an_interactive_shell_or_a_print_write_before_a_run_stays_denied(self):
+        write = "cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write('x')\nEOF\n"
+        self.assertDenied(write + 'bash -n -i run.sh', write + 'sh -n -i', write + 'zsh -n --rcs run.sh',
+                          "cd /w/lane && python3 - <<'EOF'\nf = open('run.sh', 'w')\nprint('x', file=f)\nEOF\nbash run.sh")
+        self.assertAdmitted(write + 'bash -n run.sh')
+
+    def test_a_run_after_a_heredoc_with_any_lead_stays_denied(self):
+        write = "python3 - <<'X'\nopen('run.sh', 'w').write('git pu' + 'sh origin HEAD')\nX\n"
+        self.assertDenied('date --file=x && ' + write + 'bash run.sh', 'uv run ' + write + 'sh run.sh',
+                          'sleep 2 && bash run.sh & ' + write)
+        self.assertAdmitted("cd /w && uv run python3 - <<'X'\nimport subprocess\nsubprocess.run(['git', 'status'])\nX")
+
+    def test_publication_behind_a_date_prefix_stays_denied(self):
+        self.assertDenied(
+            'date -u +%FT%TZ && git push origin HEAD', 'date -u && cd /w && git -C /w push',
+            'date -u +%FT%TZ && gh pr merge 3 --squash',
+            "date -u +%FT%TZ && cd /w && gh pr comment 3 --body '/merge fix(x): y'",
+            "date -u +%FT%TZ && python3 - <<'PY'\nprint(1)\nPY\ngit push origin HEAD",
+            "date -u +%FT%TZ && python3 - <<'PY'\nimport subprocess\nsubprocess.run('gh pr merge 3', shell=True)\nPY",
+            "date -u +%FT%TZ && python3 - <<'PY'\n" + GIT_HELPER + "git('status')\nPY",
+            "date -u && python3 - <<'PY'\nimport subprocess\n"
+            "subprocess.run(\"git() { command git pu''sh; }; git\", shell=True)\nPY",
+            "date -u $(git push) && python3 - <<'PY'\nprint(1)\nPY")
 
     def test_denial_names_the_driver_route(self):
         self.assertIn('Return this step to your driver; the driver may run it.',
