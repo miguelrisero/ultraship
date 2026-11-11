@@ -439,6 +439,42 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertEqual([l for l in route.splitlines() if l], EXPECTED_LANE_REVIEW)
         self.assertEqual(routes[0], routes[1])
 
+    def retirement_routes(self):
+        routes = []
+        for name in ('reviewer--sol.md', 'reviewer--opus.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            _, heading, after = text.partition('## Row retirement with replacement review\n')
+            route, lane_heading, _ = after.partition('## Lane-derived row review\n')
+            with self.subTest(path=name, before_lane_route=True):
+                self.assertTrue(heading and lane_heading)
+            routes.append(route)
+        self.assertEqual(routes[0], routes[1])
+        return routes
+
+    def test_retirement_with_replacement_requires_all_four_conditions(self):
+        for route in self.retirement_routes():
+            for requirement in (
+                'Admit the retirement of a protected row only when all four conditions hold:',
+                "  1. The same PR adds a replacement row in the PR's own rows file.",
+                '  2. The PR body names the retired row, the replacement row, and why the guarded behavior changes on purpose.',
+                "  3. CI or anchor evidence at the PR head shows that the replacement row's designated test kills its mutant.",
+                '  4. You give a not-weaker verdict: the replacement row guards the new behavior at least as tightly as the retired row guarded the old behavior.',
+                'Require the reviewer to differ from the PR author and the applying writer.',
+                'Grant zero edit, execution, mutation, or checker authority.',
+                'Review every other row change under Lane-derived row review below.',
+            ):
+                with self.subTest(requirement=requirement):
+                    self.assertIn(requirement, route)
+
+    def test_retirement_without_replacement_or_with_doubt_is_refused(self):
+        for route in self.retirement_routes():
+            for refusal in (
+                'Refuse on any doubt about any condition.',
+                'Refuse a retirement when the PR adds no replacement row.',
+            ):
+                with self.subTest(refusal=refusal):
+                    self.assertIn(refusal, route)
+
     def test_exact_coc_adaptations_preserve_or_strengthen_the_same_guarantee(self):
         for name in (
             'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
