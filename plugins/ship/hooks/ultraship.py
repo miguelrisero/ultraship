@@ -76,7 +76,7 @@ INERT_ATTRIBUTES = {
     'items', 'keys', 'values', 'group', 'groups', 'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape',
     'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest', 'unlink',
 }
-READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true'}
+READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true', 'date'}
 READ_ONLY_STARTS = {'cat', 'grep', 'head', 'tail', 'ls', 'wc', 'diff', 'cd', 'git'}
 REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
               'help', 'input'}
@@ -317,24 +317,50 @@ def read_only_shell(command):
 PYTHON_LEAD = r'(?:(?:cd +[\w./-]+|date(?: +[-+\w%:]+)*) +&& +)*'
 
 
-def publish_text(text):
-    """Whether file text spells a publish command that a later command could run."""
-    return bool(WRITER_BASH.search(re.sub(r'[\'"`]', ' ', text)) or re.search(
-        r'\bgit\b.*\b(?:push|send-pack|http-push)\b|\bgit-(?:push|send-pack|http-push)\b|\balias\.', text))
+def check_only_shell(command):
+    """Whether every command only reads or syntax-checks files, so none runs a file the heredoc wrote.
+
+    A script can build a push at run time, so a command that runs code (a test runner, `bash f.sh`) never follows."""
+    segments = [part.strip() for part in re.split(r'&&|;|\n', command) if part.strip()]
+    return read_only_shell(command) or all(
+        read_only_shell(segment) or re.fullmatch(r'(?:ba|z)?sh +-n +[\w./-]+', segment) for segment in segments)
+
+
+def runs_heredoc_output(command):
+    """Whether a Python heredoc that can write files is followed by a command that can run one.
+
+    A script can build a push at run time (`'pu' + 'sh'`), so its text proves nothing about the files it writes."""
+    lines = command.splitlines(keepends=True)
+    match = PYTHON_HEREDOC.fullmatch(lines[0]) if lines else None
+    if not match:
+        return False
+    delimiter = shlex.split(match['delimiter'])[0]
+    for end in range(1, len(lines)):
+        if (lines[end].lstrip('\t') if match['tabs'] else lines[end]).removesuffix('\n') == delimiter:
+            body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
+            if check_only_shell(''.join(lines[end + 1:])):
+                return False
+            if not inert_python(body):
+                return True
+            return any(isinstance(node, ast.Attribute) and node.attr in {'write', 'write_text', 'unlink'}
+                       for node in ast.walk(ast.parse(body)))
+    return False
+
+
+# Only literal `cd` and `date` steps and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the
+# interpreter; a `GIT_CONFIG_*` lead could alias a git read to a push.
+PYTHON_HEREDOC = re.compile(rf"^(?P<lead>[ \t]*{PYTHON_LEAD}(?:PYTHON[A-Z0-9_]*=[\w./-]* +)*)"
+                            r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
+                            r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
+                            r"[ \t]*\n$")
 
 
 def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
-    # Only literal `cd` and `date` steps and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the
-    # interpreter; a `GIT_CONFIG_*` lead could alias a git read to a push.
-    header = re.compile(rf"^(?P<lead>[ \t]*{PYTHON_LEAD}(?:PYTHON[A-Z0-9_]*=[\w./-]* +)*)"
-                        r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
-                        r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
-                        r"[ \t]*\n$")
     lines = command.splitlines(keepends=True)
-    match = header.fullmatch(lines[0]) if lines else None
+    match = PYTHON_HEREDOC.fullmatch(lines[0]) if lines else None
     if not match:
         return command
     delimiter = shlex.split(match['delimiter'])[0]
@@ -344,10 +370,9 @@ def python_heredoc_shell(command, inert_only=False):
             remainder = ''.join(lines[end + 1:])
             body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            # Only a `cd` or `date` may lead it. A later command such as a test run may read the files it writes, as it
-            # could after an Edit; a body whose text spells a publish command needs a read-only remainder.
-            if (re.fullmatch(rf'[ \t]*{PYTHON_LEAD}', match['lead'])
-                    and (read_only_shell(remainder) or not publish_text(body))
+            # Only a `cd` or `date` may lead it and only a read-only remainder may follow it, because another command
+            # could run the file it writes.
+            if (re.fullmatch(rf'[ \t]*{PYTHON_LEAD}', match['lead']) and read_only_shell(remainder)
                     and match['delimiter'][0] in '\'"\\' and inert_python(body)):
                 return lines[0] + remainder
             if inert_only:
@@ -467,7 +492,7 @@ def git_push(command):
     except ValueError:
         # A reduction that leaves unbalanced quotes misread the shell, so the original command is scanned.
         reduced = command
-    return shell_git_push(reduced)
+    return runs_heredoc_output(command) or shell_git_push(reduced)
 
 
 SAFE_VALUE = r'[\w./@%+:,-]+'

@@ -183,11 +183,21 @@ class WriterFalsePublishTests(unittest.TestCase):
             "        order.push('listen');\n        expect(order).toEqual(['listen']);\n"
             "        expect(process.exit).toHaveBeenCalledWith(0);\n    });\n});\nEOF")
 
-    def test_frontend_edit_then_checks_is_admitted(self):
-        # The refused frontend shape: write a test file, fix a component slot, then run the checks.
+    def test_frontend_edit_then_read_only_checks_is_admitted(self):
+        # The refused frontend shape: write a test file, fix a component slot, then read the result back.
         self.assertAdmitted(
-            FRONTEND_EDIT + "cd /w/lane/frontend/app && bunx vitest run src/components/__tests__ && "
-            "bun run typecheck && date -u", FRONTEND_EDIT + 'date -u')
+            FRONTEND_EDIT + 'date -u',
+            FRONTEND_EDIT + 'grep -n skip-pending components/TeamsStoreWaitingPanel.vue && wc -l components/TeamsStoreWaitingPanel.vue; date -u')
+
+    def test_a_command_that_runs_written_files_after_a_heredoc_stays_denied(self):
+        # The script can build a push at run time, so nothing that runs code may follow it.
+        built = "'git ' + 'pu' + 'sh origin HEAD'"
+        self.assertDenied(
+            f"cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write({built})\nEOF\nbash run.sh",
+            f"cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write({built})\nEOF\nsh -n run.sh && sh run.sh",
+            f"date -u && python3 -I - <<'EOF'\nimport ast\nopen('run.sh', 'w').write({built})\nEOF\nbash run.sh",
+            f"cd /w/lane && python3 - <<'EOF'\nopen('t.spec.ts', 'w').write({built})\nEOF\nbunx vitest run t.spec.ts",
+            FRONTEND_EDIT + 'cd /w/lane/frontend/app && bunx vitest run src/components/__tests__')
 
     def test_frontend_edit_then_publication_stays_denied(self):
         self.assertDenied(
