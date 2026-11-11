@@ -6,7 +6,7 @@ The other models reach Claude Code through [Better Shunt](https://github.com/mig
 
 | Model ID | Provider | Path |
 |---|---|---|
-| `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5-5` | Anthropic | shunt passthrough |
+| `claude-opus-5-5`, `claude-fable-5-2`, `claude-sonnet-5-5` | Anthropic | shunt passthrough |
 | `gpt-6.1-sol`, `gpt-6-luna`, `gpt-6-astra` | ChatGPT login (Codex) | shunt `responses` adapter |
 | `kimi-k3` | Kimi coding API | shunt `anthropic` adapter |
 
@@ -177,11 +177,13 @@ The `[1m]` suffix is a client hint.
 It tells Claude Code to use a 1M-token context budget for the model.
 Claude Code removes the suffix before it sends the request, and shunt removes it too.
 
+Keep `modelPicker.replaceBuiltInOptions` set to `false`: custom rows extend the native picker instead of hiding future models. The `fable` alias follows the current Fable release (5.2 at this update); use it when you want that behavior. Explicit version IDs remain available for reproducible selections.
+
 Use these IDs in the Claude Code picker:
 
 | Picker ID | Label |
 |---|---|
-| `claude-fable-5-1[1m]` | Claude Fable 5.1 (1M) |
+| `claude-fable-5-2[1m]` | Claude Fable 5.2 (1M) |
 | `claude-opus-5-5[1m]` | Claude Opus 5.5 (1M) |
 | `claude-sonnet-5-5[1m]` | Claude Sonnet 5.5 (1M) |
 | `haiku` | Claude Haiku (200k) |
@@ -245,9 +247,9 @@ Run shunt under a supervisor for daily use, for example a systemd user unit or l
      },
      "autoCompactWindow": 600000,
      "modelPicker": {
-       "replaceBuiltInOptions": true,
+       "replaceBuiltInOptions": false,
        "options": [
-         { "model": "claude-fable-5-1[1m]", "label": "Claude Fable 5.1 (1M)" },
+         { "model": "claude-fable-5-2[1m]", "label": "Claude Fable 5.2 (1M)" },
          { "model": "claude-opus-5-5[1m]", "label": "Claude Opus 5.5 (1M)" },
          { "model": "claude-sonnet-5-5[1m]", "label": "Claude Sonnet 5.5 (1M)" },
          { "model": "haiku", "label": "Claude Haiku (200k)" },
@@ -334,7 +336,7 @@ Do not give a per-call `model` override.
 | `config check failed` at start | `shunt.toml` has an error. | Run `shunt check --config ~/.config/shunt/shunt.toml`. |
 | Tool search is inactive | Claude Code turns it off behind a custom base URL. | Set `ENABLE_TOOL_SEARCH=true` in `settings.json`. |
 | Effort stays at `medium` | The model has no effort setting. | Set `modelSettings.<bare ID>.effortLevel`, or run `/effort`. |
-| A native model shows a 200K window | The ID has no `[1m]` suffix. | Select `claude-opus-5-5[1m]` or `claude-fable-5-1[1m]`. |
+| A native model shows a 200K window | The ID has no `[1m]` suffix. | Select `claude-opus-5-5[1m]` or `claude-fable-5-2[1m]`. |
 | A routed model goes to Anthropic | The ID has no route. | Compare the ID with `GET /routes`. |
 
 The `x-gateway-upstream` response header names the upstream that served a request.
