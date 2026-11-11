@@ -3,6 +3,7 @@
 ## GitHub quota
 
 Read CI only through GraphQL `gh pr checks` or `gh pr view`.
+The watcher reads classic required status checks and branch rules once at startup to determine the required contexts.
 Limit each polling reader to at most once every 5 minutes per PR.
 Run one CI reader at a time during babysit, including Better Review reads and `watch-checks.sh`.
 One-shot completion-gate reads in `skills/ship/SKILL.md` are exempt from this polling cadence.

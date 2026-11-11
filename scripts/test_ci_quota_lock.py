@@ -30,14 +30,27 @@ class CIQuotaTests(unittest.TestCase):
         self.assertEqual(text.count('gh pr checks'), 1)
         self.assertIn('--json bucket,name,link', text)
         self.assertIn("printf '%s\\n' \"$rows\"", text)
-        for forbidden in ('gh run watch', 'check-runs', 'gh api'):
+        for forbidden in ('gh run watch', 'check-runs'):
             self.assertNotIn(forbidden, text)
+        api_lines = [line for line in text.splitlines() if 'gh api' in line]
+        self.assertEqual(len(api_lines), 2)
+        self.assertIn('gh api "repos/$repo/branches/$base/protection/required_status_checks"', api_lines[0])
+        self.assertIn('gh api "repos/$repo/rules/branches/$base"', api_lines[1])
+        self.assertTrue(all(text.index(line) < text.index('while :; do') for line in api_lines))
 
     def test_completion_prints_names_and_links_with_one_read(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             gh = directory / 'gh'
-            gh.write_text('#!/bin/sh\nprintf "read\\n" >> "$CALLS"\nprintf "%s\\n" "$ROWS"\n')
+            gh.write_text('''#!/bin/sh
+case "$1 $2" in
+  'pr view') printf 'example/repo\\tmain\\n' ;;
+  'pr checks') printf 'read\\n' >> "$CALLS"; printf '%s\\n' "$ROWS" ;;
+  'api repos/example/repo/branches/main/protection/required_status_checks') printf 'build\\n' ;;
+  'api repos/example/repo/rules/branches/main') exit 0 ;;
+  *) exit 99 ;;
+esac
+''')
             gh.chmod(0o755)
             calls = directory / 'calls'
             for bucket, expected in (('pass', 0), ('fail', 1), ('cancel', 1), ('', 2), ('pending', 3)):
