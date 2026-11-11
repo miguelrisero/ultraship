@@ -326,6 +326,28 @@ def check_only_shell(command):
         read_only_shell(segment) or re.fullmatch(r'(?:ba|z)?sh +-n +[\w./][\w./-]*', segment) for segment in segments)
 
 
+# Attributes a proof script reads besides `INERT_ATTRIBUTES`; none reaches a module such as `pathlib.os`.
+TEXT_SCRIPT_ATTRIBUTES = INERT_ATTRIBUTES | {'read_bytes', 'chmod', 'parse', 'literal_eval', 'walk', 'body',
+                                             'targets', 'id', 'value', 'Assign', 'Name'}
+
+
+def starts_no_process(tree):
+    """Whether a Python script can start no process and calls no `git` helper, so its `git(` text is only text.
+
+    Names, imports and attributes come from allowlists, because `pathlib.os` or `Path.parser.os` reach `os`."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(alias.name not in {*INERT_MEMBERS, 'ast'} for alias in node.names):
+            return False
+        if isinstance(node, ast.ImportFrom) and (node.level or node.module not in INERT_MEMBERS or any(
+                alias.name not in INERT_MEMBERS[node.module] for alias in node.names)):
+            return False
+        if isinstance(node, ast.Name) and (node.id in REFLECTION or node.id.startswith('__') or node.id == 'git'):
+            return False
+        if isinstance(node, ast.Attribute) and node.attr not in TEXT_SCRIPT_ATTRIBUTES:
+            return False
+    return True
+
+
 def runs_heredoc_output(command):
     """Whether a Python heredoc that can write files is followed by a command that can run one.
 
@@ -401,14 +423,7 @@ def python_heredoc_shell(command, inert_only=False):
             scanned = ''.join(body_lines)
             # A script that can start no process runs `git(` only as a call, so in its strings `git("status")` is text.
             # A script that can start one may hand zsh `git(|) push`, a glob that runs git.
-            imported = {alias.name.split('.')[0] for node in ast.walk(tree)
-                        if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in (
-                            node.names if isinstance(node, ast.Import) else [ast.alias(node.module or '')])}
-            if (imported <= set(INERT_MEMBERS) | {'ast'}
-                    and not any(isinstance(node, ast.Name) and (node.id in REFLECTION or node.id.startswith('__'))
-                                for node in ast.walk(tree))
-                    and not any(isinstance(node, ast.Call) and getattr(node.func, 'id', getattr(node.func, 'attr', None))
-                                == 'git' for node in ast.walk(tree))):
+            if starts_no_process(tree):
                 scanned = re.sub(r'\bgit\(', 'git_(', scanned)
             if shell_git_push(scanned):
                 return command

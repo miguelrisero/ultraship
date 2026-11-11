@@ -213,7 +213,10 @@ class WriterFalsePublishTests(unittest.TestCase):
         self.assertDenied(*(f"date -u +%FT%TZ && python3 - <<'PY'\n{start}\nPY" for start in (
             "import subprocess\nsubprocess.run('/usr/bin/git(|) send-pack x HEAD:main', shell=True, executable='/bin/zsh')",
             "import os\nos.system(\"zsh -c '/usr/bin/git(.) send-pack x HEAD:main'\")",
-            "__import__('os').system(\"zsh -c '/usr/bin/git(N) send-pack x HEAD:main'\")")))
+            "__import__('os').system(\"zsh -c '/usr/bin/git(N) send-pack x HEAD:main'\")",
+            "import pathlib\npathlib.os.system(\"zsh -c '/usr/bin/git(|) send-pack x HEAD:main'\")",
+            "from pathlib import os\nos.system(\"zsh -c '/usr/bin/git(|) send-pack x HEAD:main'\")",
+            "from pathlib import Path\nPath('.').parser.os.system(\"zsh -c '/usr/bin/git(|) send-pack x HEAD:main'\")")))
 
     def test_an_interactive_shell_or_a_print_write_before_a_run_stays_denied(self):
         write = "cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write('x')\nEOF\n"
