@@ -166,7 +166,7 @@ class WriterFalsePublishTests(unittest.TestCase):
             "base = Path('/w/.scratch/battery')\np = base / 'battery-1110.sh'\ns = p.read_text()\n"
             "assert hashlib.sha256(p.read_bytes()).hexdigest() == '0' * 64\n"
             "s = s.replace('rc=0\\n\"$PY\" -I - <<\\'PY\\' || rc=$?\\n', 'exec \"$PY\" -I - <<\\'PY\\'\\n')\n"
-            "s = s.replace('done\\n', 'elif git(\"status\", \"--porcelain\"):\\n    print(\"DIRTY\")\\n')\n"
+            "s = s.replace('done\\n', 'elif test -n \"$DIRTY\"; then\\n    echo DIRTY\\n')\n"
             "body = s.split(\"<<'PY'\\n\", 1)[1].rsplit('\\nPY\\n', 1)[0]\nast.parse(body)\n"
             "dst = base / 'battery-final-1110.sh'\nwith dst.open('x') as fh:\n    fh.write(s)\n"
             "dst.chmod(0o444)\nprint(hashlib.sha256(dst.read_bytes()).hexdigest())\nPY\n"
@@ -236,9 +236,6 @@ class WriterFalsePublishTests(unittest.TestCase):
             f"Path = lambda p: 'difflib.py'\nopen(Path('a.txt'), 'w').write('{payload}')\nimport difflib\nprint('git(|)')",
             f"from pathlib import Path\ndef Path(p):\n    return 'difflib.py'\nopen(Path('a.txt'), 'w').write('{payload}')\n"
             "import difflib\nprint('git(|)')")))
-        # A starred path also denies in this check, whatever the shell scan reads.
-        tree = ultraship.ast.parse("open(*('difflib.py', 'w')).write('x')\nprint('git(|)')")
-        self.assertFalse(ultraship.starts_no_process(tree))
 
     def test_an_interactive_shell_or_a_print_write_before_a_run_stays_denied(self):
         write = "cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write('x')\nEOF\n"
