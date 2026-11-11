@@ -370,13 +370,25 @@ def starts_no_process(tree):
         return all(isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
                    for mode in modes)
 
+    calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
     for node in ast.walk(tree):
+        # An alias (`o = open`, `w = p.write_text`) writes through a name the checks below never see.
+        if (getattr(node, 'id', None) == 'open' or getattr(node, 'attr', None) in {'open', 'write_text', 'replace'}) \
+                and id(node) not in calls:
+            return False
         if isinstance(node, ast.Call):
             name = getattr(node.func, 'id', None)
             attribute = node.func.attr if isinstance(node.func, ast.Attribute) else None
+            # A starred or `**` argument hides the path and the mode.
+            if (name == 'open' or attribute in {'open', 'write_text', 'replace'}) and (
+                    any(isinstance(argument, ast.Starred) for argument in node.args)
+                    or any(keyword.arg is None for keyword in node.keywords)):
+                return False
+            # `Path.replace(target)` renames a file onto `target`; `str.replace` takes two arguments.
+            renamed = attribute == 'replace' and (len(node.args) + len(node.keywords) == 1)
             target = (node.args[0] if name == 'open' and node.args and not reads(node, 1) else
                       node.func.value if attribute == 'write_text' or attribute == 'open' and not reads(node, 0)
-                      else None)
+                      else (node.args or [keyword.value for keyword in node.keywords])[0] if renamed else None)
             if name == 'open' and not node.args or target is not None and not all(
                     writable(path) for path in paths(target) or [None]):
                 return False

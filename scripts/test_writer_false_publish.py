@@ -226,7 +226,14 @@ class WriterFalsePublishTests(unittest.TestCase):
             f"from pathlib import Path\nPath('textwrap.py').write_text('{payload}')\nfrom textwrap import dedent\n"
             "print('git(|)')",
             f"from pathlib import Path\nbase = Path('/w')\np = base / 'traceback.py'\nwith p.open('w') as f:\n"
-            f"    f.write('{payload}')\nprint('git(|)')\n1 / 0")))
+            f"    f.write('{payload}')\nprint('git(|)')\n1 / 0",
+            f"o = open\no('difflib.py', 'w').write('{payload}')\nimport difflib\nprint('git(|)')",
+            f"from pathlib import Path\nw = Path('difflib.py').write_text\nw('{payload}')\nimport difflib\nprint('git(|)')",
+            f"from pathlib import Path\nPath('a.txt').write_text('{payload}')\nPath('a.txt').replace('difflib.py')\n"
+            "import difflib\nprint('git(|)')")))
+        # A starred path also denies in this check, whatever the shell scan reads.
+        tree = ultraship.ast.parse("open(*('difflib.py', 'w')).write('x')\nprint('git(|)')")
+        self.assertFalse(ultraship.starts_no_process(tree))
 
     def test_an_interactive_shell_or_a_print_write_before_a_run_stays_denied(self):
         write = "cd /w/lane && python3 - <<'EOF'\nopen('run.sh', 'w').write('x')\nEOF\n"
