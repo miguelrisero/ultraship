@@ -133,6 +133,12 @@ Apply this gate to every UI PR, including dashboard `frontend/app/**` and UI-aff
 Use the existing Vercel preview route for marketing `frontend/website/**` UI changes.
 The driver owns this check within existing browser, login, seed, posting, and merge authority.
 This instruction grants zero additional permission and requires no simultaneous CoC plugin installation.
+Preserve user and project rules on both routes.
+Never request, read, copy, or print preview credentials or session tokens to unblock this gate.
+Keep every existing credential refusal, permission denial, and secret-handling hold.
+
+**Default preview route (steps 1–5).** Use this route unless the conditional local route below qualifies.
+Marketing retains its existing Vercel preview route.
 
 1. Record the current pushed head and verify that the selected PR preview deploy serves that exact head.
 2. Refuse unsafe data isolation before login, seed, interaction, or capture. Use only an owned synthetic preview fixture.
@@ -142,11 +148,38 @@ This instruction grants zero additional permission and requires no simultaneous 
 4. Sign in with `agent-browser` as the preview admin when the changed screen requires authentication.
    Create an owned synthetic sample dashboard or record only when the changed screen needs one and seed authority permits it.
 5. Open the changed screen and exercise the changed interaction in the matching preview.
+
+**Conditional local route.** Use this route only when preview sign-in requires secret handling.
+This route applies only to non-marketing UI.
+For this route, only behavior faithfully reproduced by the local stack qualifies.
+Preview/deployment/config-dependent behavior still requires appropriate preview proof.
+Keep that scope held if preview proof is unavailable.
+
+- Refuse unsafe data isolation before local setup, login, seed, interaction, or capture.
+- Require a clean checkout at the exact current pushed head, with pushed-head evidence.
+  Build and start the local server from that head, with build provenance and server identity bound to that checkout.
+- Use only the existing authorized local e2e authentication and seed path with own synthetic data.
+  Patricia's local harness uses a passwordless synthetic INTERNAL persona, database-bound refresh injection, and an isolated synthetic stack.
+  Local tokens belong to that local database and origin; they provide zero preview authentication evidence.
+  Never use local tokens to authenticate to a preview or print their values.
+- Use real Chromium through agent-browser or the existing e2e harness.
+  Open the same changed screen and exercise the changed interaction on the local origin.
+- Record the reason preview sign-in requires secret handling, without secret values.
+  Record the local origin, build/server command and result, browser command and result, checked head, interaction result, and screenshot route.
+  Keep commands and results free of secrets.
+
+**Shared requirements (both routes).** Complete these steps after either qualifying route.
+
 6. Capture the changed screen. Inspect the image, URL, and accompanying text for sensitive data before publication.
    Exclude credentials, customer or production data, session tokens, and sensitive browser state from screenshots, URLs, and logs.
    Redact or recapture unsafe evidence. Publish only a safe screenshot or access-restricted evidence link on the PR.
-7. Record the checked head, matching preview, interaction result, and safe screenshot or restricted link on the PR.
-   Recheck the pushed head after verification. A relevant head or preview change reopens this gate.
+7. Record the checked head, interaction result, and safe screenshot or restricted link on the PR.
+   Include the matching preview for the default route or the required local evidence for the conditional local route.
+   Recheck the pushed head after verification. Require post-check head equality with the checked head.
+   Recheck both local HEAD and pushed head on the local route.
+   Require the local checkout to remain clean on the local route.
+   Any head or preview change reopens this gate.
+   A local checkout, build, server, or origin change also reopens this gate.
 
 Missing or failed browser proof blocks merge. CI, code review, and post-merge mutation proof supply zero substitute evidence.
 If permission or safe isolation is unavailable, report the gap to the driver and retain the merge hold.
