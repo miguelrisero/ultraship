@@ -294,43 +294,56 @@ def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
-    header = re.compile(r"^[ \t]*(?:cd +[\w./-]+ +&& +)?(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(-?)[ \t]*"
-                        r"('[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
+    # A quote-free, expansion-free shell prefix (`cd /w && make x > log 2>&1 && `) stays in the header line,
+    # so the push scan still reads it.
+    header = re.compile(r"^(?P<lead>[ \t]*(?:[\w ./=:,+@%>&|-]*?(?:&&|;) *)?(?:[A-Z_][A-Z0-9_]*=[\w./-]* +)*)"
+                        r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
+                        r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
                         r"[ \t]*\n$")
     lines = command.splitlines(keepends=True)
     match = header.fullmatch(lines[0]) if lines else None
     if not match:
         return command
-    delimiter = shlex.split(match[2])[0]
+    delimiter = shlex.split(match['delimiter'])[0]
     for end in range(1, len(lines)):
-        candidate = lines[end].lstrip('\t') if match[1] else lines[end]
+        candidate = lines[end].lstrip('\t') if match['tabs'] else lines[end]
         if candidate.removesuffix('\n') == delimiter:
             remainder = ''.join(lines[end + 1:])
-            if not read_only_shell(remainder):
-                return command
-            body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
+            body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            if match[2][0] in '\'"\\' and inert_python(body):
-                return lines[0] + ''.join(lines[end + 1:])
+            # Only a `cd` may lead it and only a read-only remainder may follow it, because another command could
+            # run the file it writes.
+            if (re.fullmatch(r'[ \t]*(?:cd +[\w./-]+ +&& +)?', match['lead']) and read_only_shell(remainder)
+                    and match['delimiter'][0] in '\'"\\' and inert_python(body)):
+                return lines[0] + remainder
             if inert_only:
                 return command
             if 'push' in body or '\\\n' in body:
                 return command
-            if any(c in body for c in '$`{}'):
+            # An unquoted delimiter lets the shell expand the body; a quoted one keeps f-strings and dicts as text.
+            if match['delimiter'][0] not in '\'"\\' and any(c in body for c in '$`{}'):
                 return command
             try:
                 tree = ast.parse(body)
             except (SyntaxError, ValueError):
                 return command
-            body_lines = body.splitlines(keepends=True)
+            # A Python helper named `git` (`def git(*a)`, `git('status')`) is no shell command, so it is renamed
+            # before the scan; string arguments such as `'git'` keep the scan.
+            body_lines = [line.encode() for line in body.splitlines(keepends=True)]
+            names = sorted(((node.lineno, node.col_offset) for node in ast.walk(tree)
+                            if isinstance(node, ast.Name) and node.id == 'git'), reverse=True)
+            for lineno, column in names:
+                line = body_lines[lineno - 1] if lineno <= len(body_lines) else b''
+                if line[column:column + 3] == b'git':
+                    body_lines[lineno - 1] = line[:column] + b'_git_helper' + line[column + 3:]
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef) and node.name == 'git':
-                    line = body_lines[node.lineno - 1]
-                    body_lines[node.lineno - 1] = re.sub(r'^(\s*def )git(?=\s*\()',
-                                                       r'\1_git_helper', line, count=1)
-            if shell_git_push(''.join(body_lines)):
+                    body_lines[node.lineno - 1] = re.sub(rb'^(\s*def )git(?=\s*\()', rb'\1_git_helper',
+                                                         body_lines[node.lineno - 1], count=1)
+            if shell_git_push(b''.join(body_lines).decode()):
                 return command
-            return lines[0] + ''.join(lines[end + 1:])
+            # The remainder stays in the result, so the push scan reads it as shell.
+            return lines[0] + remainder
     return command
 
 
@@ -415,13 +428,100 @@ def cat_heredoc_data(command):
 
 
 def git_push(command):
-    reduced = literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command)))
+    reduced = literal_variables(literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command))))
     try:
         shlex.split(reduced.replace('\\\n', ''), comments=False, posix=True)
     except ValueError:
         # A reduction that leaves unbalanced quotes misread the shell, so the original command is scanned.
         reduced = command
     return shell_git_push(reduced)
+
+
+SAFE_VALUE = r'[\w./@%+:,-]+'
+ASSIGNMENT = rf'([A-Za-z_]\w*)=(["\']?)({SAFE_VALUE})\2'
+# Commands that cannot assign a shell variable, so a literal assignment keeps its value for the whole script.
+LITERAL_STARTS = READ_ONLY_STARTS | {
+    'rg', 'sed', 'awk', 'sort', 'uniq', 'cut', 'tr', 'tee', 'find', 'xargs', 'stat', 'file', 'date', 'pwd', 'echo',
+    'test', '[', 'true', 'false', 'sha256sum', 'sha1sum', 'md5sum', 'shasum', 'cmp', 'jq', 'tar', 'zip', 'unzip',
+    'gzip', 'cp', 'mv', 'mkdir', 'rm', 'touch', 'python', 'python3', 'uv', 'make', 'npm', 'bun', 'node'}
+SET_OPTIONS = r'(?:\s+(?:[-+][euxo]+|pipefail|errexit|nounset|xtrace))*'
+# The shell itself sets these (`cd` sets `PWD`), so a literal assignment does not fix their value.
+SHELL_SET = re.compile(r'(?:PWD|OLDPWD|DIRSTACK|REPLY|MAPFILE|OPTARG|OPTIND|FUNCNAME|COPROC|MATCH|MBEGIN|MEND'
+                       r'|(?:BASH|ZSH|COMP_|READLINE_|HIST)\w*)')
+
+
+def single_quoted_spans(text):
+    """Split shell text into `(span, single_quoted)` pairs, or return None for an unbalanced quote."""
+    spans, start, double, index = [], 0, False, 0
+    while index < len(text):
+        if text[index] == '"':
+            double = not double
+        elif text[index] == "'" and not double:
+            end = text.find("'", index + 1)
+            if end < 0:
+                return None
+            spans += [(text[start:index], False), (text[index:end + 1], True)]
+            start = index = end + 1
+            continue
+        index += 1
+    return None if double else spans + [(text[start:], False)]
+
+
+def literal_variables(command):
+    """Replace `$NAME` and `${NAME}` with the value of a leading literal assignment such as `W=/repo/wt;`.
+
+    An unquoted variable word-splits (`W='. push'` turns `git -C $W status` into a push), so its value must be known.
+    It is known when the script, or the single-quoted script of a whole-command `bash -c`, starts with
+    `NAME=value` statements joined by `;` or `&&`, nothing later mentions NAME except as `$NAME` or `${NAME}`, and no later command can
+    assign a variable. Single-quoted text keeps `$NAME`, because a nested shell reads it without the value.
+    """
+    wrapped = re.fullmatch(r"(\s*(?:\S*/)?(?:ba|z)?sh +-l?c +')([^']*)('\s*)", command)
+    head, script, tail = wrapped.groups() if wrapped else ('', command, '')
+    if re.search(r'\$[(\'"$]|[`\\#]|[<>]\(|<<|IFS|\b(?:eval|exec|source|alias)\b', script):
+        return command
+    values, start = {}, 0
+    for statement in re.split(r'(?<=[;\n])|(?<=&&)', script):
+        body = re.sub(r'(?:;|\n|&&)$', '', statement).strip()
+        if body and not re.fullmatch(rf'set{SET_OPTIONS}|(?:export\s+)?{ASSIGNMENT}(?:\s+{ASSIGNMENT})*', body):
+            break
+        for name, _, value in re.findall(ASSIGNMENT, body):
+            values.setdefault(name, set()).add(value)
+        start += len(statement)
+    # zsh sets many lowercase names itself (`argv`, `dirstack`, `jobtexts`), so only uppercase names qualify.
+    names = {name for name, found in values.items() if re.fullmatch(r'[A-Z][A-Z0-9_]*', name)
+             and not SHELL_SET.fullmatch(name) and len(found) == 1 and 'push' not in next(iter(found)).lower()}
+    rest = script[start:]
+    spans = single_quoted_spans(rest)
+    if not names or spans is None:
+        return command
+    # Single-quoted spans are literal here, so only the text outside them names or assigns this shell's variables.
+    outside = ''.join("''" if single else span for span, single in spans)
+    for name in names:
+        for found in re.finditer(rf'(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])', outside):
+            before, after = outside[:found.start()], outside[found.end():]
+            # zsh reads `$W[1]` and `$W:s/x/y/` as a subscript and a modifier, so only a whole value qualifies.
+            if not (before.endswith('$') and not after.startswith(('[', ':'))
+                    or before.endswith('${') and after.startswith('}') and not after[1:].startswith(('[', ':'))):
+                return command
+    checked = re.sub(r'\d*[<>]\|?&?\d*-?', ' ', re.sub(r'\$\{([A-Za-z_]\w*)\}', r'$\1', outside))
+    for segment in re.split(r'[;&|\n(){}]+', checked):
+        words = re.sub(rf'^\s*(?:{ASSIGNMENT}(?:\s+|$))*', '', segment).split()
+        if not words:
+            continue
+        if words[0] == 'set' and re.fullmatch(f'set{SET_OPTIONS}', ' '.join(words)):
+            continue
+        if words[0] == 'export' and all(re.fullmatch(ASSIGNMENT, word) for word in words[1:]):
+            continue
+        if os.path.basename(words[0]) not in LITERAL_STARTS:
+            return command
+
+    def expand(use):
+        name = use[1] or use[2]
+        return next(iter(values[name])) if name in names else use[0]
+
+    expanded = ''.join(span if single else re.sub(r'\$(?:([A-Za-z_]\w*)(?!\w)|\{([A-Za-z_]\w*)\})', expand, span)
+                       for span, single in spans)
+    return head + script[:start] + expanded + tail
 
 
 # One left-to-right scan: a single-quoted span, a standalone `"$NAME"` word, or another double-quoted span.
@@ -483,7 +583,7 @@ def shell_git_push(command):
                 return True
             continue
         # An expansion or glob can assemble the executable (`$'git' $'push'`), so with any
-        # `push` spelling it denies. Exclude only the literal receipt key `pushed:` before
+        # `push` spelling it denies. Exclude only the literal receipt keys `pushed:` and `pushes:` before
         # normalization; brace lists must retain the conservative substring check.
         # A rare false denial remains, for example `echo $X; git stash push`.
         # Plain `$NAME` expansions under the default IFS cannot slice or split a word, so only a whole `push`
@@ -498,11 +598,12 @@ def shell_git_push(command):
         plain = plain and all(part.split()[0] in READ_ONLY_STARTS
                               for part in re.split(r'[;&|\n]+', words) if part.strip())
         if plain:
-            spelled = re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])',
-                                re.sub(r'(?<!\w)pushed(?=\s*:)', '', words))
+            # `pre-push` or `--push` joins literal word text, which no plain expansion can split off.
+            spelled = re.search(r'(?<![\w./-])push(?![\w./-])',
+                                re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', words))
         else:
-            spelled = any('push' in re.sub(r'(?<!\w)pushed(?=\s*:)', '', token).translate(expansion)
-                          for token in tokens)
+            spelled = any('push' in token.translate(expansion) and ('IFS' in text or not joined_push(token))
+                          for token in (re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', token) for token in tokens))
         if any(set(token) & set('$`*?[{') for token in tokens) and spelled:
             return True
         expect_subcommand = skip_value = folder_value = False
@@ -538,11 +639,26 @@ def shell_git_push(command):
                 # Options and other non-word tokens stay pending; a plain word is the subcommand.
                 if re.fullmatch(r'[a-z][a-z0-9-]*', token):
                     expect_subcommand = False
+            # `git-push` runs a push, and an expansion or glob before `-push` can spell that name.
+            base = os.path.basename(token)
+            if base == 'git-push' or base.endswith('-push') and set(base) & set('$`*?[{'):
+                return True
             if os.path.basename(token) == 'git':
                 expect_subcommand = True
                 git_command = command_start
             command_start = (not token.strip(';&|(') or command_start and re.match(r'[A-Za-z_]\w*=', token) is not None)
     return False
+
+
+def joined_push(token):
+    """Whether each `push` in a token joins a literal `-`, `.` or `/`, so no glob in it can yield the word `push`.
+
+    `'*pre-push*'`, `--push` and `remote.origin.pushurl` qualify; `pu?h`, `p*sh`, `${X}push` and `rpush` do not."""
+    found = [match.start() for match in re.finditer('push', token)]
+    return (not set(token) & set('$`{}[]\\,')
+            and len(found) == token.translate(str.maketrans('', '', '*?')).count('push')
+            and all(re.search(r'[./-]', token[max(index - 1, 0):index] + token[index + 4:index + 5])
+                    for index in found))
 
 
 def role(data, name):
@@ -681,7 +797,8 @@ def pre(data):
         if tool == 'Bash' and (git_push(tin.get('command', ''))
                                or WRITER_BASH.search(file_text_removed)):
             deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
-                 'commit grants permit local base-branch merges into their own lane branch.')
+                 'commit grants permit local base-branch merges into their own lane branch. '
+                 'Return this step to your driver; the driver may run it.')
         if tool == 'Bash':
             reason = writer_gh_denial(file_text_removed)
             if reason:
