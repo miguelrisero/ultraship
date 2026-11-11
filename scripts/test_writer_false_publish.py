@@ -74,7 +74,7 @@ class WriterFalsePublishTests(unittest.TestCase):
             "python3 - <<'PY'\n" + GIT_HELPER + "git('push', 'origin', 'HEAD')\nPY",
             '/usr/lib/git-core/git-push origin HEAD', '"$G"-push origin HEAD', '${G}-push origin HEAD',
             "sleep 2 && bash f.sh & true && python3 - <<'PY'\nopen('f.sh', 'w').write('git push')\nPY",
-            'git -C /w ls-files *push', "git -C /w ls-files '*pre-push*'")
+            'git -C /w ls-files *push')
 
     def test_variables_the_scan_cannot_fix_stay_denied(self):
         self.assertDenied(
@@ -153,6 +153,31 @@ class WriterFalsePublishTests(unittest.TestCase):
             'export X=1')))
         self.assertAdmitted(*(f'W=/w; {command} x; git -C $W log' for command in (
             'git', 'ls', 'cat', 'grep', 'rg', 'head', 'tail', 'wc', 'test -f')))
+
+    def test_quoted_pathspec_glob_in_read_only_git_is_admitted(self):
+        # The refused Teams-lane source read: `'*pre-push*'` is a quoted pathspec, so the shell never globs it.
+        lane = 'git -C /home/miguel/.vk-worktrees/.bettercoding-workspaces/ada6-pati-teams-parit/lanes/teams-credits'
+        self.assertAdmitted(
+            f"{lane} grep -n -A 17 'function readChatPlatform' -- frontend/app/src/lib/chatPlatform.ts; "
+            f"{lane} ls-files '*pre-commit*' '*pre-push*' '*lefthook*' '*husky*' '*hooks*' "
+            "':!:backend/api/tests/mutation/**' ':!:*.toml' | head -35",
+            "git -C /w ls-files '*pre-push*'")
+
+    def test_quoted_pathspec_glob_beside_a_runner_or_expansion_stays_denied(self):
+        self.assertDenied(
+            'git ls-files *pre-push*', 'git ls-files \'*pre-push*\' "*push*"', "git ls-files x'*push*'",
+            "git ls-files '*pre-push*'; git push origin HEAD", "git ls-files '*pre-push*' | xargs git",
+            "git ls-files '*pre-push*' && bash run.sh", "git ls-files '*pre-push*' $X", "eval git 'pu*'",
+            "git 'pu*'", "git grep '--open-files-in-pager=*push*' x", "git -c 'core.pager=*push*' log",
+            "echo '*push*' | xargs git", "sh -c '*push*'", "git difftool --extcmd '*push*' HEAD",
+            "git rebase -x '*push*' HEAD~1", "git -c 'core.pager=less' log '*push*'", "git -C /w log <(x) '*push*'",
+            "git -C /w log >(x) '*push*'", "git -C /w log =(x) '*push*'", "git ls-files '*push*' > f",
+            "git ls-files '*push*;x'", "cd /w && git ls-files '*pre-push*' && git -C /w difftool -x '*push*'",
+            "git grep -O./x y '*push*'", "git grep --open-files-in-pager=./x y '*push*'",
+            "cat '*push*'; git 'diff;cat'", "cat '*push*' 'a;git'", "git log '*push*'",
+            "git diff --ext-diff '*push*'", "git ls-files '*push*' \"x\"", 'git ls-files ~ \'*push*\' $(x)',
+            "cat '*push*'; git 'grep -n' x", "'cat -n' '*push*'", "git ls-files '*push*'\ngit status",
+            "git -C '/w x' ls-files '*push*'")
 
     def test_publish_commands_stay_denied(self):
         self.assertDenied('gh pr merge 3 --squash', 'gh pr create --fill', "gh pr comment 3 --body '/merge fix(x): y'",
