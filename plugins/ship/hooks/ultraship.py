@@ -294,9 +294,8 @@ def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
-    # A quote-free, expansion-free shell prefix (`cd /w && make x > log 2>&1 && `) stays in the header line,
-    # so the push scan still reads it.
-    header = re.compile(r"^(?P<lead>[ \t]*(?:[\w ./=:,+@%>&|-]*?(?:&&|;) *)?(?:[A-Z_][A-Z0-9_]*=[\w./-]* +)*)"
+    # Only a literal `cd` and literal assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the interpreter.
+    header = re.compile(r"^(?P<lead>[ \t]*(?:cd +[\w./-]+ +&& +)?(?:[A-Z_][A-Z0-9_]*=[\w./-]* +)*)"
                         r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
                         r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
                         r"[ \t]*\n$")
@@ -328,10 +327,26 @@ def python_heredoc_shell(command, inert_only=False):
             except (SyntaxError, ValueError):
                 return command
             # A Python helper named `git` (`def git(*a)`, `git('status')`) is no shell command, so it is renamed
-            # before the scan; string arguments such as `'git'` keep the scan.
+            # before the scan; string arguments such as `'git'` keep the scan. Only one local `def git` qualifies,
+            # called by name: a rebind, an import, an attribute or any other use of the name keeps the full scan.
+            calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
+            defs = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == 'git']
+            if defs and (len(defs) != 1 or any(
+                    isinstance(node, ast.Name) and node.id == 'git' and (
+                        not isinstance(node.ctx, ast.Load) or id(node) not in calls)
+                    or isinstance(node, ast.Attribute) and node.attr == 'git'
+                    or isinstance(node, ast.arg) and node.arg == 'git'
+                    or isinstance(node, (ast.Import, ast.ImportFrom))
+                    and any((alias.asname or alias.name).split('.')[0] == 'git' for alias in node.names)
+                    or isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.ExceptHandler))
+                    and node.name == 'git'
+                    or isinstance(node, (ast.Global, ast.Nonlocal)) and 'git' in node.names
+                    or isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == 'git'
+                    for node in ast.walk(tree))):
+                return command
             body_lines = [line.encode() for line in body.splitlines(keepends=True)]
             names = sorted(((node.lineno, node.col_offset) for node in ast.walk(tree)
-                            if isinstance(node, ast.Name) and node.id == 'git'), reverse=True)
+                            if defs and isinstance(node, ast.Name) and node.id == 'git'), reverse=True)
             for lineno, column in names:
                 line = body_lines[lineno - 1] if lineno <= len(body_lines) else b''
                 if line[column:column + 3] == b'git':
@@ -440,10 +455,11 @@ def git_push(command):
 SAFE_VALUE = r'[\w./@%+:,-]+'
 ASSIGNMENT = rf'([A-Za-z_]\w*)=(["\']?)({SAFE_VALUE})\2'
 # Commands that cannot assign a shell variable, so a literal assignment keeps its value for the whole script.
+# A command that runs other code (`xargs`, `find -exec`, `sed e`, `make`, `python`) does not qualify.
 LITERAL_STARTS = READ_ONLY_STARTS | {
-    'rg', 'sed', 'awk', 'sort', 'uniq', 'cut', 'tr', 'tee', 'find', 'xargs', 'stat', 'file', 'date', 'pwd', 'echo',
-    'test', '[', 'true', 'false', 'sha256sum', 'sha1sum', 'md5sum', 'shasum', 'cmp', 'jq', 'tar', 'zip', 'unzip',
-    'gzip', 'cp', 'mv', 'mkdir', 'rm', 'touch', 'python', 'python3', 'uv', 'make', 'npm', 'bun', 'node'}
+    'rg', 'sort', 'uniq', 'cut', 'tr', 'tee', 'stat', 'file', 'date', 'pwd', 'echo', 'test', '[', 'true', 'false',
+    'sha256sum', 'sha1sum', 'md5sum', 'shasum', 'cmp', 'jq', 'tar', 'zip', 'unzip', 'gzip', 'cp', 'mv', 'mkdir',
+    'rm', 'touch'}
 SET_OPTIONS = r'(?:\s+(?:[-+][euxo]+|pipefail|errexit|nounset|xtrace))*'
 # The shell itself sets these (`cd` sets `PWD`), so a literal assignment does not fix their value.
 SHELL_SET = re.compile(r'(?:PWD|OLDPWD|DIRSTACK|REPLY|MAPFILE|OPTARG|OPTIND|FUNCNAME|COPROC|MATCH|MBEGIN|MEND'
@@ -651,14 +667,15 @@ def shell_git_push(command):
 
 
 def joined_push(token):
-    """Whether each `push` in a token joins a literal `-`, `.` or `/`, so no glob in it can yield the word `push`.
+    """Whether each `push` in a token joins a literal `-`, `.` or `/` that itself joins literal text.
 
-    `'*pre-push*'`, `--push` and `remote.origin.pushurl` qualify; `pu?h`, `p*sh`, `${X}push` and `rpush` do not."""
+    No glob in the token can then yield the word `push` or a `git-push` name. `'*pre-push*'`, `--push` and
+    `remote.origin.pushurl` qualify; `*-push`, `*/push`, `pu?h`, `p*sh`, `${X}push` and `rpush` do not."""
     found = [match.start() for match in re.finditer('push', token)]
     return (not set(token) & set('$`{}[]\\,')
             and len(found) == token.translate(str.maketrans('', '', '*?')).count('push')
-            and all(re.search(r'[./-]', token[max(index - 1, 0):index] + token[index + 4:index + 5])
-                    for index in found))
+            and all(re.fullmatch(r'[^*?][./-]', token[max(index - 2, 0):index])
+                    or re.fullmatch(r'[./-][^*?]', token[index + 4:index + 6]) for index in found))
 
 
 def role(data, name):
