@@ -289,6 +289,19 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
 print('ultraship hooks: ok')
 
 
+class PythonHeredocGuardTests(unittest.TestCase):
+    def test_python_heredoc_executable_remainder_is_refused(self):
+        cases = (
+            ('import subprocess', 'wt switch --create lane', True),
+            ('import subprocess', 'cat receipt.txt', False),
+            ('pass', 'wt switch --create lane', False),
+        )
+        for body, remainder, expected in cases:
+            with self.subTest(body=body, remainder=remainder):
+                command = f"set -e && python3 -I - <<'PY'\n{body}\nPY\n{remainder}\n"
+                self.assertEqual(ultraship.runs_heredoc_output(command), expected)
+
+
 class WriterGitHubGuardTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
