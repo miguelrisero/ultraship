@@ -57,10 +57,10 @@ esac
                 calls.write_text('')
                 row = f'{bucket}\tbuild\thttps://github.com/example/repo/actions/runs/123' if bucket else ''
                 env = {**os.environ, 'PATH': f'{directory}{os.pathsep}{os.environ["PATH"]}',
-                       'CALLS': str(calls), 'ROWS': row}
+                       'CALLS': str(calls), 'ROWS': row, 'WATCH_CHECKS_IGNORE': ''}
                 result = subprocess.run(
                     ['bash', str(SHIP / 'skills/ship/scripts/watch-checks.sh'), '123', '0', '0'],
-                    env=env, capture_output=True, text=True,
+                    env=env, capture_output=True, text=True, timeout=10,
                 )
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual(calls.read_text(), 'read\n')

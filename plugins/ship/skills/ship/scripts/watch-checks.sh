@@ -23,8 +23,21 @@ if [ -z "$repo" ] || [ -z "$base" ]; then
   exit 4
 fi
 # Read both protection sources once; polling stays on GraphQL.
-if ! classic="$(gh api "repos/$repo/branches/$base/protection/required_status_checks" --jq '.contexts[]' 2>/dev/null)"; then classic=; fi
-if ! rules="$(gh api "repos/$repo/rules/branches/$base" --paginate --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>/dev/null)"; then rules=; fi
+err="$(mktemp)"
+trap 'rm -f "$err"' EXIT
+# Only a 404 for absent classic protection means an empty classic set; every other error is unknown.
+if ! classic="$(gh api "repos/$repo/branches/$base/protection/required_status_checks" --jq '.contexts[]' 2>"$err")"; then
+  if grep -q 'HTTP 404' "$err" && grep -qE 'Branch not protected|Required status checks not enabled' "$err"; then
+    classic=
+  else
+    echo "cannot determine required contexts: classic protection read failed: $(head -n 1 "$err")"
+    exit 4
+  fi
+fi
+if ! rules="$(gh api "repos/$repo/rules/branches/$base" --paginate --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>"$err")"; then
+  echo "cannot determine required contexts: branch rules read failed: $(head -n 1 "$err")"
+  exit 4
+fi
 required="$(printf '%s\n' "$classic" "$rules" | sed '/^$/d' | sort -u)"
 if [ -z "$required" ]; then
   echo "cannot determine required contexts for $repo base $base: protection APIs returned no contexts"
@@ -59,7 +72,8 @@ while :; do
       printf '%s\n' "$rows"
       exit 1
     fi
-    if ! grep -qvx pass <<<"$buckets"; then
+    # gh puts skipped and neutral conclusions in `skipping`; GitHub accepts both for a required check.
+    if ! grep -qvxE 'pass|skipping' <<<"$buckets"; then
       printf '%s\n' "$rows"
       exit 0
     fi
