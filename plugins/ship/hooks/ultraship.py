@@ -343,18 +343,25 @@ def starts_no_process(tree):
         node, (ast.ExceptHandler, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name]
     stores += [(alias.asname or alias.name).split('.')[0] for node in ast.walk(tree)
                if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names]
+    # A `match` capture binds a name that `stores` cannot count.
+    if any(isinstance(node, ast.Match) for node in ast.walk(tree)):
+        return False
     top = {}
     for statement in tree.body:
         if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
                 and isinstance(statement.targets[0], ast.Name)):
             top.setdefault(statement.targets[0].id, []).append(statement.value)
+    # `Path` is pathlib's only when its pathlib imports are its only bindings.
+    pathlib_path = stores.count('Path') == sum(
+        alias.name == 'Path' and alias.asname is None for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == 'pathlib' for alias in node.names)
 
     def paths(node, seen=()):
         """Every literal path `node` may hold (`'a'`, `Path('a')`, `base / 'b'`), or None."""
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return [node.value]
-        if (isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'Path' and len(node.args) == 1
-                and not node.keywords):
+        if (pathlib_path and isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'Path'
+                and len(node.args) == 1 and not node.keywords):
             return paths(node.args[0], seen)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
             left, right = paths(node.left, seen), paths(node.right, seen)

@@ -230,6 +230,11 @@ class WriterFalsePublishTests(unittest.TestCase):
             f"o = open\no('difflib.py', 'w').write('{payload}')\nimport difflib\nprint('git(|)')",
             f"from pathlib import Path\nw = Path('difflib.py').write_text\nw('{payload}')\nimport difflib\nprint('git(|)')",
             f"from pathlib import Path\nPath('a.txt').write_text('{payload}')\nPath('a.txt').replace('difflib.py')\n"
+            "import difflib\nprint('git(|)')",
+            f"p = 'a.txt'\nmatch 'difflib.py':\n    case p:\n        pass\nopen(p, 'w').write('{payload}')\n"
+            "import difflib\nprint('git(|)')",
+            f"Path = lambda p: 'difflib.py'\nopen(Path('a.txt'), 'w').write('{payload}')\nimport difflib\nprint('git(|)')",
+            f"from pathlib import Path\ndef Path(p):\n    return 'difflib.py'\nopen(Path('a.txt'), 'w').write('{payload}')\n"
             "import difflib\nprint('git(|)')")))
         # A starred path also denies in this check, whatever the shell scan reads.
         tree = ultraship.ast.parse("open(*('difflib.py', 'w')).write('x')\nprint('git(|)')")
