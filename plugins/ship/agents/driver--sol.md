@@ -72,7 +72,6 @@ An authoritative mismatch blocks access and cannot use fallback.
 Require CoC naming of exact row-file paths and unique row IDs from that PR's failing anchor CI log.
 Require the recorded base/head diff to show that the PR itself breaks each named row.
 Limit reads to those exact named files and rows; read no unrelated rows or whole protected files.
-Preserve all category 5 source identities, CI evidence, route requirements, and applicable execution admission.
 Require the reviewer to differ from the PR author and applying writer.
 Preserve the same designated test and guarantee, equivalent mutant semantics, assertions, bounds, and every unrelated field.
 Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.

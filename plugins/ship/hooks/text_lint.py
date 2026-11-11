@@ -5,6 +5,10 @@ import json
 import re
 import sys
 
+# Short word-number fusions such as `deadline2026` or `by8November00`; hex digests and `b1a2c3d4e` task IDs pass.
+GLUED = re.compile(r'[a-z]{3}[0-9]|[0-9][a-z]{3}')
+HOLD_WORDS = re.compile(r'\b(preserv\w*|holds?|receipts?|custody|custodian|admission|admits?|admitted|authority|zero|provenance|refusals?)\b', re.I)
+
 
 class VisibleText(HTMLParser):
     BLOCKS = {'address', 'article', 'aside', 'blockquote', 'br', 'div', 'dl', 'dt', 'dd',
@@ -48,13 +52,19 @@ class VisibleText(HTMLParser):
             self.parts.append(data)
 
 
+def glued(tokens):
+    words = {t.strip('.,;:()[]!?"\'*') for t in tokens if not re.search(r'[_-]', t)}
+    return {w for w in words if len(w) >= 7 and w.isalnum() and GLUED.search(w)
+            and not re.fullmatch(r'[0-9a-f]+|b[a-z0-9]{8}|sha256sum|python3', w)}
+
+
 def check(text, kind='result'):
     plain = ''.join(VisibleText(text).parts)
     prose = re.sub(r'`[^`]*`', '', plain)
     tokens = [t for t in prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
     long = [t for t in tokens if len(t) >= 22]
     errors = []
-    if len(long) >= 3 or (tokens and len(long) / len(tokens) >= 0.08):
+    if len(long) >= 3 or (tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2:
         errors.append('Separate glued words with spaces; remove compressed shorthand.')
     sentences = re.split(r'(?<=[.!?])\s+|\n+', prose)
     if any(len(s.split()) > 25 for s in sentences):
@@ -74,6 +84,8 @@ def outgoing(event):
         text = args.get('message') or args.get('content') or ''
         if text:  # Native subscriptions and lifecycle controls can have no prose body.
             check(text, 'peer')
+            if len(HOLD_WORDS.findall(re.sub(r'`[^`]*`', '', text))) >= 6:
+                raise ValueError('Drop restated holds, receipts and authority limits; send what changed and the next action.')
     elif tool.endswith(('create_input', 'update_input')):
         content = args.get('content')
         if content is None:  # Metadata-only writes carry no new owner text.
@@ -98,7 +110,16 @@ def self_test():
     outgoing({'tool_name': 'SendMessage', 'tool_input': {'to': 'peer'}})
     check('https://example.test/averylongsourceidentifier /absolute/long-source-path `averylongloadbearingidentifier` ' + 'a' * 40)
     check(' '.join(['z' * 22] + ['word'] * 12))  # One long token in 13 stays below 8%.
+    check('Run python3 on template0 at 18:00 UTC; task b7re019f0 uses sha256sum.')  # One fusion and exempt IDs pass.
+    wall = peer.replace('The checks pass.', 'Preserve every hold, receipt, custody, admission and zero authority. Preserve it.')
+    try:
+        outgoing({'tool_name': 'SendMessage', 'tool_input': {'to': 'peer', 'message': wall}})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('lint accepted a restated-hold wall')
     for text, kind in [('Newglobaldiskpolicyacceptedtoday', 'result'),
+                       ('Send the deadline2026 note by8November00 today.', 'result'),
                        (' '.join(['z' * 22] + ['word'] * 11), 'result'),
                        (' '.join(['word'] * 26) + '.', 'result'),
                        (peer.replace('Facts:', 'Evidence:'), 'peer'),

@@ -49,7 +49,6 @@ The ship plugin's PreToolUse source hook checks outgoing `SendMessage`, `create_
 Native completion channels and sends outside loaded plugin hooks retain an instruction-only enforcement gap.
 Full-sentence meaning, option effects, accountable ownership, and UTC accuracy still require the sending driver's review.
 Future targets over 48 Sol hours are compressed peer text at 5% or less and decision Inputs with options plus recommendation at 85% or more.
-Measure these targets through the retrospective `models.py`; local source checks establish zero runtime benchmark results.
 Copy this output contract with the native peer routing contract into every child, timer, and recovery brief.
 
 ## Mutation-command boundary

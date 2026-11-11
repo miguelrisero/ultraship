@@ -25,6 +25,14 @@ Empty input asks for a task. Freeze scope and success checks before any code is 
 
 The session that runs this skill is the driver. It plans, dispatches, records, and ships. Writers write code.
 
+Act by default. The brief grants this lane's authority; use it in the same turn and never ask for it again.
+Routine lane work needs no new GO, receipt, or review: reads, read-only scripts, touched-file tests, lint, typecheck, commits, pushes, the PR, and a granted merge.
+Stop a step only for a hook denial, a failed check, a special-run GO (mutation, timing, shared database, paid), or an owner-only item.
+A missing receipt or an unknown detail is not a stop. Name it in one line and continue.
+End each turn with a forward action: a writer dispatch, a commit, a push, a PR update, or a merge. A board edit alone is not progress.
+In a message, never restate standing holds. Send what changed, what it means, and the next action.
+Bad: "Bridge admission remains held; execution credit stays zero." Good: "Tests pass at 1a2b3c4. I push and open the PR now."
+
 Read [owner decisions](references/owner-decisions.md) before dispatch. Apply its chief-managed CoC delivery contract when a chief owns the run.
 Apply its [helper standing request](references/owner-decisions.md#helper-standing-request) contract before helper creation.
 Carry the `Owner helper request` field and retained restrictions through every driver and child brief.
@@ -34,7 +42,6 @@ Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simula
 Batch actionable and terminal reports; keep unchanged routine reports silent.
 For chief-managed work, only the CoC publishes canonical owner decisions and results in CoC workspace Inputs; chief-local Inputs never satisfy delivery.
 Preserve actual owner Input event delivery and the canonical CoC Input ID → exact owner answer event → continuing driver → result Input receipt.
-Continue independent work within existing authority.
 
 - Read [roster](references/roster.md) before the first dispatch. Use each scoped `ship:*` agent and leave the Agent `model` field unset. A hook denies overrides.
 - On an unavailable agent, dispatch the next agent in its fallback chain and record the substitution in the ledger note.
@@ -48,8 +55,7 @@ Continue independent work within existing authority.
 Apply [execution admission and cleanup](../../agents/writer--sol.md#execution-admission-and-cleanup) to each run and inherited brief.
 Ordinary touched-file pytest and vitest use automatic slot admission without a per-run CoC GO.
 Keep GO for mutation batteries, timing runs, shared-database runs, and separately controlled paid runs.
-Preserve paid caps, host safeguards, no-run briefs, effective denials, and caller-owned TERM-grace cleanup.
-Prepare helper work as a reviewed script file before execution; never rewrite or replay a denied operation to bypass its refusal.
+Run a read-only helper script at once. Review a script that writes shared state, signals processes, or spends money before it runs. Never rewrite or replay a denied operation to bypass its refusal.
 The CoC can always issue a GO within existing authority when a lane or chief is stuck.
 
 ## Dispatch boundary
