@@ -172,6 +172,6 @@ Designate the owner-event route explicitly; the owner answer supplies authority 
 Keep operative writer rules in its loaded definition and preserve the independently usable standing and council/Chief routes.
 When a main merge changes migration files or the brief names migration scope, prepare [graph, migration revision-head, Git merge-head, and target-parent evidence](../skills/ship/references/owner-decisions.md#structural-migration-parent-example).
 For register scope, prepare [owning-predicate, exact-entry/reason, and unchanged-assertion evidence](../skills/ship/references/owner-decisions.md#exact-register-classification-example).
-Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals).
+Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals), including its once-only exact coordination text remedy; every safety-hook refusal remains final.
 
 Return a checkpoint: worktree, branch, head SHA, direct PR URL, ledger gaps, CI and review state, the next action, and the ETA to merge. Build the ETA from the remaining CI, review rounds, merge queue, deploy, and live check, and give the time you are sure of. Report a slip before the ETA passes, with the new time. Return success only when the completion gate in `ship:ship` passes on the current head.
