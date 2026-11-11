@@ -74,7 +74,7 @@ class WriterFalsePublishTests(unittest.TestCase):
             "python3 - <<'PY'\n" + GIT_HELPER + "git('push', 'origin', 'HEAD')\nPY",
             '/usr/lib/git-core/git-push origin HEAD', '"$G"-push origin HEAD', '${G}-push origin HEAD',
             "sleep 2 && bash f.sh & true && python3 - <<'PY'\nopen('f.sh', 'w').write('git push')\nPY",
-            'git -C /w ls-files *push', "git -C /w ls-files '*pre-push*'")
+            'git -C /w ls-files *push')
 
     def test_variables_the_scan_cannot_fix_stay_denied(self):
         self.assertDenied(
@@ -169,7 +169,10 @@ class WriterFalsePublishTests(unittest.TestCase):
             "git ls-files '*pre-push*'; git push origin HEAD", "git ls-files '*pre-push*' | xargs git",
             "git ls-files '*pre-push*' && bash run.sh", "git ls-files '*pre-push*' $X", "eval git 'pu*'",
             "git 'pu*'", "git grep '--open-files-in-pager=*push*' x", "git -c 'core.pager=*push*' log",
-            "echo '*push*' | xargs git", "sh -c '*push*'")
+            "echo '*push*' | xargs git", "sh -c '*push*'", "git difftool --extcmd '*push*' HEAD",
+            "git rebase -x '*push*' HEAD~1", "git -c 'core.pager=less' log '*push*'", "git -C /w log <(x) '*push*'",
+            "git -C /w log >(x) '*push*'", "git -C /w log =(x) '*push*'", "git ls-files '*push*' > f",
+            "git ls-files '*push*;x'", "cd /w && git ls-files '*pre-push*' && git -C /w difftool -x '*push*'")
 
     def test_publish_commands_stay_denied(self):
         self.assertDenied('gh pr merge 3 --squash', 'gh pr create --fill', "gh pr comment 3 --body '/merge fix(x): y'",

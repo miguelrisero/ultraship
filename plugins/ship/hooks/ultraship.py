@@ -652,11 +652,14 @@ def shell_git_push(command):
         read_only_starts = all(part.split()[0] in READ_ONLY_STARTS
                                for part in re.split(r'[;&|\n]+', words) if part.strip())
         plain = plain and read_only_starts
-        # Single quotes keep a glob literal and no read-only start re-reads its arguments, so a quoted pathspec
-        # (`git ls-files '*pre-push*'`) is file text when no other glob, expansion or escape is in the text.
-        # An option or `key=value` word can name a command that git runs through a shell, so it keeps the scan.
-        literal_globs = read_only_starts and not re.search(
-            r'[*?[{$`\\]', re.sub(r"(?<![^\s;&|])'(?!-)[^'\s$`\\=]*'(?![^\s;&|])", "''", text))
+        # Single quotes keep a glob literal, so a quoted pathspec (`git ls-files '*pre-push*'`) is file text when
+        # every command is a read whose arguments run nothing. A process substitution, redirect or other glob or
+        # expansion keeps the scan, and git may take only `-C` before a subcommand that never runs a command.
+        unquoted = re.sub(r"(?<![^\s;&|])'(?!-)[\w./:!*?@%+,^~-]*'(?![^\s;&|])", "''", text)
+        literal_globs = (read_only_starts and not re.search(r'[*?[\]{}$`\\()<>]', unquoted) and all(
+            re.fullmatch(r'git(?: +-C +[\w./-]+| +--no-pager)* +(?:ls-files|ls-tree|grep|log|show|status|diff)(?: .*)?',
+                         part.strip())
+            for part in re.split(r'[;&|\n]+', words) if part.split() and part.split()[0] == 'git'))
         if plain:
             spelled = re.search(r'(?<![A-Za-z0-9_])(?:push|send-pack)(?![A-Za-z0-9_])',
                                 re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', words))
