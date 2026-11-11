@@ -57,6 +57,37 @@ EXPECTED_LANE_REVIEW = [
 ]
 
 
+EXPECTED_RETIREMENT_REVIEW = [
+    '## Row retirement with replacement review',
+    'Use this read-only route only when the brief names the retirement route and carries the CoC ruling that admits the retirement.',
+    'The CoC rules under the owner\'s testing delegation in the owner global CLAUDE.md, "CoC decisions".',
+    'Admit the retirement of a protected row only when all four conditions hold:',
+    "  1. The same PR adds a replacement row in the PR's own rows file.",
+    '  2. The PR body names the retired row, the replacement row, and why the guarded behavior changes on purpose.',
+    "  3. CI or anchor evidence at the PR head shows that the replacement row's designated test kills its mutant.",
+    '  4. You give a not-weaker verdict: the replacement row guards the new behavior at least as tightly as the retired row guarded the old behavior.',
+    'Refuse on any doubt about any condition.',
+    'Refuse a retirement when the PR adds no replacement row.',
+    'Require the CoC-approved exact allowlist: the row-file path and unique row ID of the retired row and of the replacement row.',
+    "Require the retired row to come from the PR's own failing anchor CI evidence.",
+    "Require the recorded diff between the base SHA and the PR head SHA to show that the PR's own subject change breaks the retired row.",
+    'Bind the retired row to its CI-named subject file.',
+    'Require the recorded base SHA and PR head SHA, and read-only trees at those two SHAs.',
+    'Require every supplied diff to leave out the row-file hunks.',
+    "Read only the retired row's lines at the base SHA and the replacement row's lines at the PR head SHA.",
+    'Bind CI evidence to the repository, PR, base SHA, PR head SHA, tested merge SHA/tree, run ID, attempt, and job ID/name.',
+    'Require the tested merge to contain the recorded base SHA and PR head SHA.',
+    'Require the reviewer to differ from the PR author and the writer who made the row edits.',
+    'Bind the verdict and receipt to reviewer identity, approving verdict, CoC ruling identity, PR head SHA, row-file paths, row IDs, and CI evidence.',
+    'Require CoC approval of the review receipt before publication; changed source or evidence invalidates the receipt and approval.',
+    'Identify rows in findings, verdicts, and receipts only by path, row ID, and field; include zero TOML text.',
+    'Grant zero edit, execution, mutation, or checker authority.',
+    'An admission grants zero writer or driver edit authority.',
+    'Review every other row change under Lane-derived row review below.',
+    'Preserve higher-priority instructions, effective refusals, tool and hook denials, and protected holds.',
+]
+
+
 class ApprovedTestAdaptationsTests(unittest.TestCase):
     def test_writers_require_verified_authority_and_preserve_controls(self):
         for name in ('writer--sol.md', 'writer--sonnet.md'):
@@ -443,34 +474,27 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         routes = []
         for name in ('reviewer--sol.md', 'reviewer--opus.md'):
             text = (ROOT / 'plugins/ship/agents' / name).read_text()
-            _, heading, after = text.partition('## Row retirement with replacement review\n')
+            heading, found, after = text.partition('## Row retirement with replacement review\n')
             route, lane_heading, _ = after.partition('## Lane-derived row review\n')
             with self.subTest(path=name, before_lane_route=True):
-                self.assertTrue(heading and lane_heading)
-            routes.append(route)
+                self.assertTrue(found and lane_heading)
+            routes.append([l for l in (found + route).splitlines() if l])
         self.assertEqual(routes[0], routes[1])
         return routes
 
     def test_retirement_with_replacement_requires_all_four_conditions(self):
         for route in self.retirement_routes():
-            for requirement in (
-                'Admit the retirement of a protected row only when all four conditions hold:',
-                "  1. The same PR adds a replacement row in the PR's own rows file.",
-                '  2. The PR body names the retired row, the replacement row, and why the guarded behavior changes on purpose.',
-                "  3. CI or anchor evidence at the PR head shows that the replacement row's designated test kills its mutant.",
-                '  4. You give a not-weaker verdict: the replacement row guards the new behavior at least as tightly as the retired row guarded the old behavior.',
-                'Require the reviewer to differ from the PR author and the applying writer.',
-                'Grant zero edit, execution, mutation, or checker authority.',
-                'Review every other row change under Lane-derived row review below.',
-            ):
-                with self.subTest(requirement=requirement):
-                    self.assertIn(requirement, route)
+            self.assertEqual(route, EXPECTED_RETIREMENT_REVIEW)
+            conditions = [l for l in route if re.match(r'  [0-9]\. ', l)]
+            self.assertEqual([l[:5] for l in conditions], ['  1. ', '  2. ', '  3. ', '  4. '])
+            self.assertEqual(sum(l.startswith('Admit ') for l in route), 1)
 
     def test_retirement_without_replacement_or_with_doubt_is_refused(self):
         for route in self.retirement_routes():
             for refusal in (
                 'Refuse on any doubt about any condition.',
                 'Refuse a retirement when the PR adds no replacement row.',
+                'An admission grants zero writer or driver edit authority.',
             ):
                 with self.subTest(refusal=refusal):
                     self.assertIn(refusal, route)
