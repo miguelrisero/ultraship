@@ -1,4 +1,4 @@
-"""Writer push decisions for local reads, checksums and merges, and for every real publish form."""
+"""Writer push decisions for local reads and merges, and for every real publish form."""
 import contextlib
 import importlib.util
 import io
@@ -40,49 +40,20 @@ class WriterFalsePublishTests(unittest.TestCase):
 
     def test_png_identity_check_during_a_staged_merge_is_admitted(self):
         self.assertAdmitted(
-            "cd /w/lane && python3 -I - <<'PY'\n" + GIT_HELPER +
-            "assert git('rev-parse', 'MERGE_HEAD') == 'ffe8743830889df4a166f63ec743fed30124a889'\n"
-            "path = 'docs/screens/onboarding.png'\n"
-            "assert git('rev-parse', f':{path}') == git('rev-parse', f'MERGE_HEAD:{path}')\n"
-            "print(f'DELTA={git(\"diff\", \"--cached\", \"--name-status\", \"MERGE_HEAD\", \"--\", path) or \"none\"}')\n"
-            "PY",
+            "cd /w/lane && python3 -I - <<'PY'\nimport subprocess\npath = 'docs/screens/onboarding.png'\n"
+            "staged = subprocess.check_output(['git', 'rev-parse', f':{path}'], text=True)\n"
+            "incoming = subprocess.check_output(['git', 'rev-parse', f'MERGE_HEAD:{path}'], text=True)\n"
+            "print({'same': staged == incoming})\nPY",
             'git -C "$WT" diff --cached MERGE_HEAD -- docs/screens/onboarding.png',
             'WT=/w/lane; git -C $WT ls-tree MERGE_HEAD -- docs/screens/onboarding.png',
-            'WT=/w/lane; git -C $WT cat-file -p MERGE_HEAD:docs/screens/onboarding.png | sha256sum')
+            'WT=/w/lane; git -C $WT cat-file -p MERGE_HEAD:docs/screens/onboarding.png | wc -c')
 
-    def test_source_read_that_lists_hook_paths_is_admitted(self):
+    def test_local_checksum_wrapper_and_merge_commit_are_admitted(self):
         self.assertAdmitted(
-            "git -C /w/lane grep -n -A 17 'function readChatPlatform' -- src/lib/chatPlatform.ts; "
-            "git -C /w/lane ls-files '*pre-commit*' '*pre-push*' '*lefthook*' '*husky*' '*hooks*' "
-            "':!:tests/mutation/**' ':!:*.toml' | head -35",
-            'git -C "$W" ls-files \'*pre-push*\'',
-            'git -C "$W" config --get remote.origin.pushurl')
-
-    def test_local_packaging_and_checksum_step_is_admitted(self):
-        self.assertAdmitted(
-            'cd /w/plugin-wt && PYTHONDONTWRITEBYTECODE=1 python3 scripts/check-plugins.py --base 7498dfd5 '
-            '> ../verify/final-packaging.log 2>&1 && git diff --check > ../verify/final-diff-check.log 2>&1',
-            "cd /w/plugin-wt && PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'\n"
-            "import hashlib, json, subprocess\nfrom pathlib import Path\nroot = Path.cwd()\n"
-            "def git(*args):\n    return subprocess.check_output(['git', '-C', str(root), *args])\n"
-            "diff = git('diff', '--binary', 'HEAD')\n"
-            "print(json.dumps({'head': git('rev-parse', 'HEAD').decode().strip(), "
-            "'sha256': hashlib.sha256(diff).hexdigest()}))\n"
-            "PY",
-            "/usr/bin/bash -c 'set -euo pipefail; W=/w/wt; cd \"$W\"; export GIT_OPTIONAL_LOCKS=0; "
-            "git -c core.fsmonitor=false -C \"$W\" rev-parse HEAD; sha256sum -- \"$W/.github/a.yml\" \"$W/b.mjs\"; "
-            "git -C \"$W\" diff --binary HEAD -- . \":!tests/mutation/\" | sha256sum; "
-            "git -C \"$W\" config --get core.hooksPath || test \"$?\" = 1'")
-
-    def test_local_merge_commit_of_main_into_the_lane_branch_is_admitted(self):
-        self.assertAdmitted(
-            "cd /w/lane && python3 -I - <<'PY'\n" + GIT_HELPER +
-            "assert git('branch', '--show-current') == 'mr/lane'\nassert not git('status', '--porcelain')\nPY\n"
-            "git -c user.name='Miguel Rasero' -c user.email=m@example.com merge --no-ff origin/main "
-            "-m 'merge(frontend): integrate main'",
+            "/usr/bin/bash -c 'W=/w/wt; git -c core.fsmonitor=false -C \"$W\" rev-parse HEAD; "
+            "git -C \"$W\" diff --binary HEAD -- . \":!tests/mutation/\" | wc -c; git -C $W status --short'",
             'W=/w/lane; git -C $W merge --no-ff -m "merge main" origin/main && git -C $W log -1',
-            'W=/w/lane && git -C $W merge --no-edit origin/main',
-            'WT=/w/lane; git -C $WT commit --no-edit')
+            'W=/w/lane && git -C $W merge --no-edit origin/main', 'WT=/w/lane; git -C $WT commit --no-edit')
 
     def test_every_push_form_stays_denied(self):
         self.assertDenied(
@@ -91,11 +62,9 @@ class WriterFalsePublishTests(unittest.TestCase):
             "cd /w && python3 - <<'PY'\nprint(1)\nPY\ngit push origin HEAD",
             "python3 - <<'PY'\nimport subprocess\nsubprocess.run(['git', 'push'])\nPY",
             "python3 - <<'PY'\n" + GIT_HELPER + "git('push', 'origin', 'HEAD')\nPY",
-            "python3 - <<'PY'\n" + GIT_HELPER + "git('pu' 'sh')\nprint(f'{1}')\nPY\n:; git p{u,}sh",
-            '/usr/lib/git-core/git-push origin HEAD', '/usr/lib/git-core/g?t-push origin HEAD',
-            '"$G"-push origin HEAD', '${G}-push origin HEAD',
+            '/usr/lib/git-core/git-push origin HEAD', '"$G"-push origin HEAD', '${G}-push origin HEAD',
             "sleep 2 && bash f.sh & true && python3 - <<'PY'\nopen('f.sh', 'w').write('git push')\nPY",
-            'git -C /w ls-files *push')
+            'git -C /w ls-files *push', "git -C /w ls-files '*pre-push*'")
 
     def test_variables_the_scan_cannot_fix_stay_denied(self):
         self.assertDenied(
@@ -109,30 +78,24 @@ class WriterFalsePublishTests(unittest.TestCase):
             'W=/w; X=$(printf ". pu%s" sh); git -C $W $X', 'W=/w & git -C $W log push',
             "W=/w; true # it's\nread W <f; true # '\ngit -C $W log push")
 
-    def test_python_heredoc_lead_is_only_a_literal_cd_or_assignment(self):
-        helper = GIT_HELPER + "git('status')\nPY"
-        self.assertAdmitted("cd /w && X=1 python3 - <<'PY'\n" + helper)
-        self.assertDenied(*(lead + "python3 - <<'PY'\n" + helper for lead in (
-            'make x && ', 'true; ', 'sleep 2 && bash f.sh & true && ', 'cd /w; ', 'cd /w && make x && ')))
+    def test_adjacent_python_literals_after_a_git_helper_stay_denied(self):
+        self.assertDenied(*("python3 - <<'PY'\n" + GIT_HELPER + call + "\nPY" for call in (
+            "git('pu' 'sh')", "git('pu' 'sh', 'origin', 'HEAD')", "print(f'{1}')\ngit('pu' \"sh\")",
+            "git('status')")))
 
-    def test_python_git_helper_is_renamed_only_for_one_local_def(self):
-        call = "git('status')\nPY"
-        self.assertAdmitted("python3 - <<'PY'\n" + GIT_HELPER + call)
-        self.assertDenied(*("python3 - <<'PY'\n" + body + call for body in (
-            "import sh as git\n", "from sh import git\n", "import subprocess\ngit = subprocess.run\n",
-            GIT_HELPER + "git = print\n", GIT_HELPER + "run = git\n", GIT_HELPER + "import sh\nsh.git\n",
-            GIT_HELPER + "def git(*a):\n    pass\n", GIT_HELPER + "for git in [1]:\n    pass\n",
-            GIT_HELPER + "class git:\n    pass\n", "import sh\nsh.git('x')\n")))
+    def test_executable_glob_or_expansion_matching_git_push_stays_denied(self):
+        self.assertDenied('/usr/lib/git-core/git-pu* origin HEAD', '/usr/lib/git-core/git-p?sh origin HEAD',
+                          '/usr/lib/git-core/g*-push origin HEAD', '/usr/lib/git-core/g?t-push origin HEAD',
+                          '/usr/lib/git-core/git-pus[h] origin HEAD', 'env /usr/lib/git-core/git-pu* origin HEAD')
+        self.assertAdmitted('ls *.py', 'git -C "$W" status')
 
-    def test_code_running_commands_do_not_fix_a_literal_variable(self):
+    def test_only_read_only_commands_keep_a_literal_variable_fixed(self):
         self.assertDenied(*(f'W=/w; {command} x; git -C $W log' for command in (
-            'python', 'python3', 'uv', 'make', 'npm', 'bun', 'node', 'xargs', 'find', 'awk', 'sed')))
-        self.assertAdmitted('W=/w; sha256sum x; git -C $W log')
-
-    def test_glob_next_to_a_joined_push_keeps_the_denial(self):
-        self.assertDenied('git -C /w ls-files *-push', 'git -C /w ls-files */push', "git -C /w ls-files '*.push*'",
-                          'ls -d *-push x/?-push')
-        self.assertAdmitted("git -C /w ls-files '*pre-push*'", "git -C /w ls-files 'hooks/pre-push*'")
+            'tar -xf a.tar --to-command=sh', 'zip -T -TT sh a.zip', 'unzip', 'cd', 'sha256sum', 'echo', 'cp',
+            'python3', 'uv', 'make', 'npm', 'bun', 'node', 'xargs', 'find', 'awk', 'sed', 'set -e',
+            'export X=1')))
+        self.assertAdmitted(*(f'W=/w; {command} x; git -C $W log' for command in (
+            'git', 'ls', 'cat', 'grep', 'rg', 'head', 'tail', 'wc', 'test -f')))
 
     def test_publish_commands_stay_denied(self):
         self.assertDenied('gh pr merge 3 --squash', 'gh pr create --fill', "gh pr comment 3 --body '/merge fix(x): y'",

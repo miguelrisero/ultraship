@@ -2,6 +2,7 @@
 """Ultraship hooks. Usage: ultraship.py pre|subagent-stop|stop|compact < hook-input.json"""
 import ast
 import fcntl
+import fnmatch
 import hashlib
 import importlib.util
 import json
@@ -326,36 +327,13 @@ def python_heredoc_shell(command, inert_only=False):
                 tree = ast.parse(body)
             except (SyntaxError, ValueError):
                 return command
-            # A Python helper named `git` (`def git(*a)`, `git('status')`) is no shell command, so it is renamed
-            # before the scan; string arguments such as `'git'` keep the scan. Only one local `def git` qualifies,
-            # called by name: a rebind, an import, an attribute or any other use of the name keeps the full scan.
-            calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
-            defs = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == 'git']
-            if defs and (len(defs) != 1 or any(
-                    isinstance(node, ast.Name) and node.id == 'git' and (
-                        not isinstance(node.ctx, ast.Load) or id(node) not in calls)
-                    or isinstance(node, ast.Attribute) and node.attr == 'git'
-                    or isinstance(node, ast.arg) and node.arg == 'git'
-                    or isinstance(node, (ast.Import, ast.ImportFrom))
-                    and any((alias.asname or alias.name).split('.')[0] == 'git' for alias in node.names)
-                    or isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.ExceptHandler))
-                    and node.name == 'git'
-                    or isinstance(node, (ast.Global, ast.Nonlocal)) and 'git' in node.names
-                    or isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == 'git'
-                    for node in ast.walk(tree))):
-                return command
-            body_lines = [line.encode() for line in body.splitlines(keepends=True)]
-            names = sorted(((node.lineno, node.col_offset) for node in ast.walk(tree)
-                            if defs and isinstance(node, ast.Name) and node.id == 'git'), reverse=True)
-            for lineno, column in names:
-                line = body_lines[lineno - 1] if lineno <= len(body_lines) else b''
-                if line[column:column + 3] == b'git':
-                    body_lines[lineno - 1] = line[:column] + b'_git_helper' + line[column + 3:]
+            body_lines = body.splitlines(keepends=True)
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef) and node.name == 'git':
-                    body_lines[node.lineno - 1] = re.sub(rb'^(\s*def )git(?=\s*\()', rb'\1_git_helper',
-                                                         body_lines[node.lineno - 1], count=1)
-            if shell_git_push(b''.join(body_lines).decode()):
+                    line = body_lines[node.lineno - 1]
+                    body_lines[node.lineno - 1] = re.sub(r'^(\s*def )git(?=\s*\()',
+                                                       r'\1_git_helper', line, count=1)
+            if shell_git_push(''.join(body_lines)):
                 return command
             # The remainder stays in the result, so the push scan reads it as shell.
             return lines[0] + remainder
@@ -455,11 +433,8 @@ def git_push(command):
 SAFE_VALUE = r'[\w./@%+:,-]+'
 ASSIGNMENT = rf'([A-Za-z_]\w*)=(["\']?)({SAFE_VALUE})\2'
 # Commands that cannot assign a shell variable, so a literal assignment keeps its value for the whole script.
-# A command that runs other code (`xargs`, `find -exec`, `sed e`, `make`, `python`) does not qualify.
-LITERAL_STARTS = READ_ONLY_STARTS | {
-    'rg', 'sort', 'uniq', 'cut', 'tr', 'tee', 'stat', 'file', 'date', 'pwd', 'echo', 'test', '[', 'true', 'false',
-    'sha256sum', 'sha1sum', 'md5sum', 'shasum', 'cmp', 'jq', 'tar', 'zip', 'unzip', 'gzip', 'cp', 'mv', 'mkdir',
-    'rm', 'touch'}
+# Only read-only commands qualify; `tar`, `zip`, `xargs`, `find -exec` and `sed e` can launch other code.
+LITERAL_STARTS = {'git', 'ls', 'cat', 'grep', 'rg', 'head', 'tail', 'wc', 'test'}
 SET_OPTIONS = r'(?:\s+(?:[-+][euxo]+|pipefail|errexit|nounset|xtrace))*'
 # The shell itself sets these (`cd` sets `PWD`), so a literal assignment does not fix their value.
 SHELL_SET = re.compile(r'(?:PWD|OLDPWD|DIRSTACK|REPLY|MAPFILE|OPTARG|OPTIND|FUNCNAME|COPROC|MATCH|MBEGIN|MEND'
@@ -523,10 +498,6 @@ def literal_variables(command):
     for segment in re.split(r'[;&|\n(){}]+', checked):
         words = re.sub(rf'^\s*(?:{ASSIGNMENT}(?:\s+|$))*', '', segment).split()
         if not words:
-            continue
-        if words[0] == 'set' and re.fullmatch(f'set{SET_OPTIONS}', ' '.join(words)):
-            continue
-        if words[0] == 'export' and all(re.fullmatch(ASSIGNMENT, word) for word in words[1:]):
             continue
         if os.path.basename(words[0]) not in LITERAL_STARTS:
             return command
@@ -614,12 +585,11 @@ def shell_git_push(command):
         plain = plain and all(part.split()[0] in READ_ONLY_STARTS
                               for part in re.split(r'[;&|\n]+', words) if part.strip())
         if plain:
-            # `pre-push` or `--push` joins literal word text, which no plain expansion can split off.
-            spelled = re.search(r'(?<![\w./-])push(?![\w./-])',
+            spelled = re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])',
                                 re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', words))
         else:
-            spelled = any('push' in token.translate(expansion) and ('IFS' in text or not joined_push(token))
-                          for token in (re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', token) for token in tokens))
+            spelled = any('push' in re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', token).translate(expansion)
+                          for token in tokens)
         if any(set(token) & set('$`*?[{') for token in tokens) and spelled:
             return True
         expect_subcommand = skip_value = folder_value = False
@@ -655,27 +625,16 @@ def shell_git_push(command):
                 # Options and other non-word tokens stay pending; a plain word is the subcommand.
                 if re.fullmatch(r'[a-z][a-z0-9-]*', token):
                     expect_subcommand = False
-            # `git-push` runs a push, and an expansion or glob before `-push` can spell that name.
-            base = os.path.basename(token)
-            if base == 'git-push' or base.endswith('-push') and set(base) & set('$`*?[{'):
+            # `git-push` runs a push, and a glob or an expansion in the name (`git-pu*`, `$G-push`) can match it.
+            base = os.path.basename(re.sub(r'\$(?:[A-Za-z_]\w*|\{[^}]*\})', '*', token))
+            if base == 'git-push' or (set(base) & set('*?[') and base.strip('*?')
+                                      and fnmatch.fnmatchcase('git-push', base)):
                 return True
             if os.path.basename(token) == 'git':
                 expect_subcommand = True
                 git_command = command_start
             command_start = (not token.strip(';&|(') or command_start and re.match(r'[A-Za-z_]\w*=', token) is not None)
     return False
-
-
-def joined_push(token):
-    """Whether each `push` in a token joins a literal `-`, `.` or `/` that itself joins literal text.
-
-    No glob in the token can then yield the word `push` or a `git-push` name. `'*pre-push*'`, `--push` and
-    `remote.origin.pushurl` qualify; `*-push`, `*/push`, `pu?h`, `p*sh`, `${X}push` and `rpush` do not."""
-    found = [match.start() for match in re.finditer('push', token)]
-    return (not set(token) & set('$`{}[]\\,')
-            and len(found) == token.translate(str.maketrans('', '', '*?')).count('push')
-            and all(re.fullmatch(r'[^*?][./-]', token[max(index - 2, 0):index])
-                    or re.fullmatch(r'[./-][^*?]', token[index + 4:index + 6]) for index in found))
 
 
 def role(data, name):
