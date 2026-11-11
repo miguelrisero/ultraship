@@ -2,6 +2,7 @@
 """Ultraship hooks. Usage: ultraship.py pre|subagent-stop|stop|compact < hook-input.json"""
 import ast
 import fcntl
+import fnmatch
 import hashlib
 import importlib.util
 import json
@@ -27,6 +28,25 @@ WRITER_BASH = re.compile(r"""(^|[;&|(`\s])(
     terraform\s+(apply|destroy) | kubectl\s+(apply|delete|rollout) | helm\s+(install|upgrade|uninstall) |
     vercel(\s+\S+)*\s+--prod | vercel\s+deploy | wrangler\s+(deploy|publish) | fly(ctl)?\s+deploy | docker\s+push
 )\b""", re.X)
+# Git subcommands and executables that write refs on a remote.
+REMOTE_WRITERS = {'push', 'send-pack', 'http-push'}
+REMOTE_WRITER_NAMES = {f'git-{name}' for name in REMOTE_WRITERS}
+# Commands that run their first non-option, non-assignment argument, and the options that take a value.
+WRAPPERS = {'env': {'-u', '--unset', '-C', '--chdir', '-S', '--split-string'}, 'command': set(),
+            'exec': {'-a'}, 'nice': {'-n', '--adjustment'}, 'nohup': set(),
+            'timeout': {'-s', '--signal', '-k', '--kill-after'},
+            'xargs': {'-a', '--arg-file', '-d', '--delimiter', '-E', '-e', '-I', '-i', '-L', '-l', '-n',
+                      '--max-args', '-P', '--max-procs', '-s', '--max-chars'},
+            'sudo': {'-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt', '-C', '--close-from',
+                     '-U', '--other-user', '-r', '--role', '-t', '--type', '-D', '--chdir', '-R', '--chroot',
+                     '-T', '--command-timeout'}}
+
+
+def alias_runs_writer(setting):
+    """Whether a `-c` setting defines an alias that runs a shell command or names a remote writer."""
+    key, _, value = setting.partition('=')
+    return key.lower().startswith('alias.') and (
+        value.lstrip().startswith('!') or any(word in value for word in REMOTE_WRITERS))
 GH_METHOD = re.compile(r'^(?:--method(?:=(.*))?|-[ip]*X(.*))$')
 GH_FIELD = re.compile(r'^(?:--(?:field|raw-field|input)(?:=.*)?|-[ip]*[fF].*)$')
 HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
@@ -294,29 +314,34 @@ def python_heredoc_shell(command, inert_only=False):
     # Only a literal Python stdin command establishes a non-shell script body.
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
-    header = re.compile(r"^[ \t]*(?:cd +[\w./-]+ +&& +)?(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(-?)[ \t]*"
-                        r"('[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
+    # Only a literal `cd` and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the interpreter;
+    # a `GIT_CONFIG_*` lead could alias a git read to a push.
+    header = re.compile(r"^(?P<lead>[ \t]*(?:cd +[\w./-]+ +&& +)?(?:PYTHON[A-Z0-9_]*=[\w./-]* +)*)"
+                        r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
+                        r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)"
                         r"[ \t]*\n$")
     lines = command.splitlines(keepends=True)
     match = header.fullmatch(lines[0]) if lines else None
     if not match:
         return command
-    delimiter = shlex.split(match[2])[0]
+    delimiter = shlex.split(match['delimiter'])[0]
     for end in range(1, len(lines)):
-        candidate = lines[end].lstrip('\t') if match[1] else lines[end]
+        candidate = lines[end].lstrip('\t') if match['tabs'] else lines[end]
         if candidate.removesuffix('\n') == delimiter:
             remainder = ''.join(lines[end + 1:])
-            if not read_only_shell(remainder):
-                return command
-            body = ''.join(line.lstrip('\t') if match[1] else line for line in lines[1:end])
+            body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
-            if match[2][0] in '\'"\\' and inert_python(body):
-                return lines[0] + ''.join(lines[end + 1:])
+            # Only a `cd` may lead it and only a read-only remainder may follow it, because another command could
+            # run the file it writes.
+            if (re.fullmatch(r'[ \t]*(?:cd +[\w./-]+ +&& +)?', match['lead']) and read_only_shell(remainder)
+                    and match['delimiter'][0] in '\'"\\' and inert_python(body)):
+                return lines[0] + remainder
             if inert_only:
                 return command
             if 'push' in body or '\\\n' in body:
                 return command
-            if any(c in body for c in '$`{}'):
+            # An unquoted delimiter lets the shell expand the body; a quoted one keeps f-strings and dicts as text.
+            if match['delimiter'][0] not in '\'"\\' and any(c in body for c in '$`{}'):
                 return command
             try:
                 tree = ast.parse(body)
@@ -330,7 +355,8 @@ def python_heredoc_shell(command, inert_only=False):
                                                        r'\1_git_helper', line, count=1)
             if shell_git_push(''.join(body_lines)):
                 return command
-            return lines[0] + ''.join(lines[end + 1:])
+            # The remainder stays in the result, so the push scan reads it as shell.
+            return lines[0] + remainder
     return command
 
 
@@ -415,13 +441,94 @@ def cat_heredoc_data(command):
 
 
 def git_push(command):
-    reduced = literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command)))
+    reduced = literal_variables(literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command))))
     try:
         shlex.split(reduced.replace('\\\n', ''), comments=False, posix=True)
     except ValueError:
         # A reduction that leaves unbalanced quotes misread the shell, so the original command is scanned.
         reduced = command
     return shell_git_push(reduced)
+
+
+SAFE_VALUE = r'[\w./@%+:,-]+'
+ASSIGNMENT = rf'([A-Za-z_]\w*)=(["\']?)({SAFE_VALUE})\2'
+# Commands that cannot assign a shell variable, so a literal assignment keeps its value for the whole script.
+# Only read-only commands qualify; `tar`, `zip`, `xargs`, `find -exec` and `sed e` can launch other code.
+LITERAL_STARTS = {'git', 'ls', 'cat', 'grep', 'rg', 'head', 'tail', 'wc', 'test'}
+SET_OPTIONS = r'(?:\s+(?:[-+][euxo]+|pipefail|errexit|nounset|xtrace))*'
+# The shell itself sets these (`cd` sets `PWD`), so a literal assignment does not fix their value.
+SHELL_SET = re.compile(r'(?:PWD|OLDPWD|DIRSTACK|REPLY|MAPFILE|OPTARG|OPTIND|FUNCNAME|COPROC|MATCH|MBEGIN|MEND'
+                       r'|(?:BASH|ZSH|COMP_|READLINE_|HIST)\w*)')
+
+
+def single_quoted_spans(text):
+    """Split shell text into `(span, single_quoted)` pairs, or return None for an unbalanced quote."""
+    spans, start, double, index = [], 0, False, 0
+    while index < len(text):
+        if text[index] == '"':
+            double = not double
+        elif text[index] == "'" and not double:
+            end = text.find("'", index + 1)
+            if end < 0:
+                return None
+            spans += [(text[start:index], False), (text[index:end + 1], True)]
+            start = index = end + 1
+            continue
+        index += 1
+    return None if double else spans + [(text[start:], False)]
+
+
+def literal_variables(command):
+    """Replace `$NAME` and `${NAME}` with the value of a leading literal assignment such as `W=/repo/wt;`.
+
+    An unquoted variable word-splits (`W='. push'` turns `git -C $W status` into a push), so its value must be known.
+    It is known when the script, or the single-quoted script of a whole-command `bash -c`, starts with
+    `NAME=value` statements joined by `;` or `&&`, nothing later mentions NAME except as `$NAME` or `${NAME}`, and no later command can
+    assign a variable. Single-quoted text keeps `$NAME`, because a nested shell reads it without the value.
+    """
+    wrapped = re.fullmatch(r"(\s*(?:\S*/)?(?:ba|z)?sh +-l?c +')([^']*)('\s*)", command)
+    head, script, tail = wrapped.groups() if wrapped else ('', command, '')
+    if re.search(r'\$[(\'"$]|[`\\#]|[<>]\(|<<|IFS|\b(?:eval|exec|source|alias)\b', script):
+        return command
+    values, start = {}, 0
+    for statement in re.split(r'(?<=[;\n])|(?<=&&)', script):
+        body = re.sub(r'(?:;|\n|&&)$', '', statement).strip()
+        if body and not re.fullmatch(rf'set{SET_OPTIONS}|(?:export\s+)?{ASSIGNMENT}(?:\s+{ASSIGNMENT})*', body):
+            break
+        for name, _, value in re.findall(ASSIGNMENT, body):
+            values.setdefault(name, set()).add(value)
+        start += len(statement)
+    # zsh sets many lowercase names itself (`argv`, `dirstack`, `jobtexts`), so only uppercase names qualify.
+    names = {name for name, found in values.items() if re.fullmatch(r'[A-Z][A-Z0-9_]*', name)
+             and not SHELL_SET.fullmatch(name) and len(found) == 1 and 'push' not in next(iter(found)).lower()}
+    rest = script[start:]
+    spans = single_quoted_spans(rest)
+    if not names or spans is None:
+        return command
+    # Single-quoted spans are literal here, so only the text outside them names or assigns this shell's variables.
+    outside = ''.join("''" if single else span for span, single in spans)
+    for name in names:
+        for found in re.finditer(rf'(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])', outside):
+            before, after = outside[:found.start()], outside[found.end():]
+            # zsh reads `$W[1]` and `$W:s/x/y/` as a subscript and a modifier, so only a whole value qualifies.
+            if not (before.endswith('$') and not after.startswith(('[', ':'))
+                    or before.endswith('${') and after.startswith('}') and not after[1:].startswith(('[', ':'))):
+                return command
+    checked = re.sub(r'\d*[<>]\|?&?\d*-?', ' ', re.sub(r'\$\{([A-Za-z_]\w*)\}', r'$\1', outside))
+    for segment in re.split(r'[;&|\n(){}]+', checked):
+        words = re.sub(rf'^\s*(?:{ASSIGNMENT}(?:\s+|$))*', '', segment).split()
+        if not words:
+            continue
+        if os.path.basename(words[0]) not in LITERAL_STARTS:
+            return command
+
+    def expand(use):
+        name = use[1] or use[2]
+        return next(iter(values[name])) if name in names else use[0]
+
+    expanded = ''.join(span if single else re.sub(r'\$(?:([A-Za-z_]\w*)(?!\w)|\{([A-Za-z_]\w*)\})', expand, span)
+                       for span, single in spans)
+    return head + script[:start] + expanded + tail
 
 
 # One left-to-right scan: a single-quoted span, a standalone `"$NAME"` word, or another double-quoted span.
@@ -479,11 +586,14 @@ def shell_git_push(command):
             lexer.commenters = ''
             tokens = list(lexer)
         except ValueError:
-            if re.search(r'\bgit\b', text) and re.search(r'\bpush\b', text.translate(str.maketrans('', '', '$`*?[]{},'))):
+            # The text cannot be split, so `git` with a writer word or any expansion or escape denies.
+            if re.search(r'\bgit\b', text) and (
+                    re.search(r'\b(?:push|send-pack|http-push)\b', text.translate(str.maketrans('', '', '$`*?[]{},')))
+                    or re.search(r'[$`\\]', text)):
                 return True
             continue
         # An expansion or glob can assemble the executable (`$'git' $'push'`), so with any
-        # `push` spelling it denies. Exclude only the literal receipt key `pushed:` before
+        # `push` spelling it denies. Exclude only the literal receipt keys `pushed:` and `pushes:` before
         # normalization; brace lists must retain the conservative substring check.
         # A rare false denial remains, for example `echo $X; git stash push`.
         # Plain `$NAME` expansions under the default IFS cannot slice or split a word, so only a whole `push`
@@ -498,18 +608,31 @@ def shell_git_push(command):
         plain = plain and all(part.split()[0] in READ_ONLY_STARTS
                               for part in re.split(r'[;&|\n]+', words) if part.strip())
         if plain:
-            spelled = re.search(r'(?<![A-Za-z0-9_])push(?![A-Za-z0-9_])',
-                                re.sub(r'(?<!\w)pushed(?=\s*:)', '', words))
+            spelled = re.search(r'(?<![A-Za-z0-9_])(?:push|send-pack)(?![A-Za-z0-9_])',
+                                re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', words))
         else:
-            spelled = any('push' in re.sub(r'(?<!\w)pushed(?=\s*:)', '', token).translate(expansion)
-                          for token in tokens)
+            spelled = any(word in re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', token).translate(expansion)
+                          for token in tokens for word in ('push', 'send-pack'))
         if any(set(token) & set('$`*?[{') for token in tokens) and spelled:
             return True
         expect_subcommand = skip_value = folder_value = False
         # Only a `git` that starts a command reads its own arguments; `eval git -C "$W"` or `watch git ...`
         # re-reads them, where a quoted value can split again.
         command_start = git_command = True
+        wrapper, wrapper_value, value_option = None, False, None
         for token in tokens:
+            # A wrapper (`env`, `nohup`, `xargs`, `sudo`) runs its first non-option argument as the command word.
+            command_word = command_start
+            if set(token) & set(';&|()'):
+                wrapper = None
+            elif wrapper and not command_start:
+                if wrapper_value:
+                    wrapper_value = False
+                elif token.startswith('-'):
+                    wrapper_value = token in WRAPPERS[wrapper]
+                elif not (re.match(r'[A-Za-z_]\w*=', token)
+                          or wrapper == 'timeout' and re.fullmatch(r'[\d.]+[smhd]?', token)):
+                    command_word, wrapper = True, None
             if any(char.isspace() for char in token):
                 pending.append(token)
                 if re.match(r'[A-Za-z_]\w*=', token):
@@ -520,24 +643,49 @@ def shell_git_push(command):
                 git_command = False
             if folder_value and git_command and quoted_variable(command, token):
                 skip_value = folder_value = False
+                value_option = None
                 continue
             # An expansion, glob, quoting form, or redirection before the subcommand can hide it,
             # so it denies. Writers write `git -C . status 2>&1`, never `git $'push'` or `git {push,}`.
             if expect_subcommand and set(token) & set('(`<>${*?['):
                 return True
+            # An alias that runs a shell command (`!sh`) or a remote writer turns any subcommand into a push.
+            if expect_subcommand and (
+                    value_option == '-c' and alias_runs_writer(token)
+                    or token.startswith('-c') and token != '-c' and alias_runs_writer(token[2:])
+                    or value_option == '--config-env' and token.lower().startswith('alias.')
+                    or token.lower().startswith('--config-env=alias.')):
+                return True
             if skip_value:
                 skip_value = folder_value = False
+                value_option = None
                 continue
             if expect_subcommand:
                 if token in values:
                     skip_value = True
                     folder_value = token in folders
+                    value_option = token
                     continue
-                if token == 'push':
+                if token in REMOTE_WRITERS:
                     return True
                 # Options and other non-word tokens stay pending; a plain word is the subcommand.
                 if re.fullmatch(r'[a-z][a-z0-9-]*', token):
                     expect_subcommand = False
+            # `git-push` runs a push. A glob or an expansion in the command word (`git-pu*`, `$G-push`) can match it;
+            # in an argument it is only a file name (`ls g*`).
+            base = os.path.basename(re.sub(r'\$(?:[A-Za-z_]\w*|\{[^}]*\})', '*', token))
+            if base in REMOTE_WRITER_NAMES or command_word and set(base) & set('*?[') and base.strip('*?') and any(
+                    fnmatch.fnmatchcase(name, base) for name in REMOTE_WRITER_NAMES):
+                return True
+            if command_word and base in WRAPPERS:
+                wrapper, wrapper_value = base, False
+            # Git reads `GIT_CONFIG_*` from the environment, so a value that spells a remote writer can alias one,
+            # and a key or parameter list that defines an alias can, whatever the value.
+            if re.match(r'GIT_\w*=', token) and any(word in token for word in REMOTE_WRITERS):
+                return True
+            if (re.match(r'GIT_CONFIG_(?:KEY_\w*|PARAMETERS)=', token)
+                    and (re.search(r'alias', token, re.I) or set(token) & set('$`\\'))):
+                return True
             if os.path.basename(token) == 'git':
                 expect_subcommand = True
                 git_command = command_start
@@ -681,7 +829,8 @@ def pre(data):
         if tool == 'Bash' and (git_push(tin.get('command', ''))
                                or WRITER_BASH.search(file_text_removed)):
             deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
-                 'commit grants permit local base-branch merges into their own lane branch.')
+                 'commit grants permit local base-branch merges into their own lane branch. '
+                 'Return this step to your driver; the driver may run it.')
         if tool == 'Bash':
             reason = writer_gh_denial(file_text_removed)
             if reason:
