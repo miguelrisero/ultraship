@@ -161,7 +161,7 @@ class WriterFalsePublishTests(unittest.TestCase):
             f"{lane} grep -n -A 17 'function readChatPlatform' -- frontend/app/src/lib/chatPlatform.ts; "
             f"{lane} ls-files '*pre-commit*' '*pre-push*' '*lefthook*' '*husky*' '*hooks*' "
             "':!:backend/api/tests/mutation/**' ':!:*.toml' | head -35",
-            "git -C /w ls-files '*pre-push*' && git -C /w status --short")
+            "git -C /w ls-files '*pre-push*'")
 
     def test_quoted_pathspec_glob_beside_a_runner_or_expansion_stays_denied(self):
         self.assertDenied(
@@ -172,7 +172,10 @@ class WriterFalsePublishTests(unittest.TestCase):
             "echo '*push*' | xargs git", "sh -c '*push*'", "git difftool --extcmd '*push*' HEAD",
             "git rebase -x '*push*' HEAD~1", "git -c 'core.pager=less' log '*push*'", "git -C /w log <(x) '*push*'",
             "git -C /w log >(x) '*push*'", "git -C /w log =(x) '*push*'", "git ls-files '*push*' > f",
-            "git ls-files '*push*;x'", "cd /w && git ls-files '*pre-push*' && git -C /w difftool -x '*push*'")
+            "git ls-files '*push*;x'", "cd /w && git ls-files '*pre-push*' && git -C /w difftool -x '*push*'",
+            "git grep -O./x y '*push*'", "git grep --open-files-in-pager=./x y '*push*'",
+            "cat '*push*'; git 'diff;cat'", "cat '*push*' 'a;git'", "git log '*push*'",
+            "git diff --ext-diff '*push*'", "git ls-files '*push*' \"x\"", 'git ls-files ~ \'*push*\' $(x)')
 
     def test_publish_commands_stay_denied(self):
         self.assertDenied('gh pr merge 3 --squash', 'gh pr create --fill', "gh pr comment 3 --body '/merge fix(x): y'",

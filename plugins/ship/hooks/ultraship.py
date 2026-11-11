@@ -653,12 +653,14 @@ def shell_git_push(command):
                                for part in re.split(r'[;&|\n]+', words) if part.strip())
         plain = plain and read_only_starts
         # Single quotes keep a glob literal, so a quoted pathspec (`git ls-files '*pre-push*'`) is file text when
-        # every command is a read whose arguments run nothing. A process substitution, redirect or other glob or
-        # expansion keeps the scan, and git may take only `-C` before a subcommand that never runs a command.
-        unquoted = re.sub(r"(?<![^\s;&|])'(?!-)[\w./:!*?@%+,^~-]*'(?![^\s;&|])", "''", text)
-        literal_globs = (read_only_starts and not re.search(r'[*?[\]{}$`\\()<>]', unquoted) and all(
-            re.fullmatch(r'git(?: +-C +[\w./-]+| +--no-pager)* +(?:ls-files|ls-tree|grep|log|show|status|diff)(?: .*)?',
-                         part.strip())
+        # every command is a plain read. Every quoted word must be a pathspec or plain text, and no process
+        # substitution, redirect, other quote, glob or expansion may remain. Git may take only `-C`, then
+        # `ls-files`, `ls-tree` or `grep` with listed options, so no argument picks a pager or helper; configured
+        # helpers apply to the same reads without a glob, so this exception adds none.
+        unquoted = re.sub(r"(?<![^\s;&|])'(?:(?!-)[\w./:!*?@%+,^~-]*|(?![- ])[\w ./:@%+,^~-]*)'(?![^\s;&|])", '_', text)
+        literal_globs = (read_only_starts and not re.search(r'[*?[\]{}$`\\()<>\'"]', unquoted) and all(
+            re.fullmatch(r'git(?: +-C +[\w./-]+)* +(?:ls-files|ls-tree|grep)'
+                         r'(?: +(?:-[nilwEFvz]+|-[ABC] *[0-9]+|--|[^-\s]\S*))*', part.strip())
             for part in re.split(r'[;&|\n]+', words) if part.split() and part.split()[0] == 'git'))
         if plain:
             spelled = re.search(r'(?<![A-Za-z0-9_])(?:push|send-pack)(?![A-Za-z0-9_])',
