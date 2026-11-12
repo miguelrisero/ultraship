@@ -387,6 +387,10 @@ PY
         command = self.LOOP_EDIT.replace("('writer.md', 'driver.md')", "('writer.md', 'driver.py')")
         self.assertTrue(self.denied(command))
 
+    def test_loop_key_concatenation_keeps_git_paths_denied(self):
+        command = self.LOOP_EDIT.replace("'plugins/ship/agents/' + name", "'.gi' + 't/config'")
+        self.assertTrue(self.denied(command))
+
     def test_loop_edits_allow_only_scoped_diff_remainders(self):
         body = self.LOOP_EDIT.split('PY\n git diff')[0] + 'PY\n'
         for remainder in ('git diff --check', 'git diff --stat', 'git diff --check a.md',

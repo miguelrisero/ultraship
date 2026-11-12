@@ -307,7 +307,10 @@ def inert_paths(tree, literals, bound):
             return [path]
         # Loop paths need statically known writable values because Python can load a file the script writes.
         values = loop_values(argument) if isinstance(argument, ast.Name) else None
-        return list(values) if values and all(writable(value) for value in values) else [None]
+        return list(values) if values and all(
+            writable(value) and not re.search(r'^__|[.\[]__', value)
+            and '.git/' not in value and '.git\\' not in value and not value.endswith('.git')
+            for value in values) else [None]
 
     imported = sum(alias.name == 'Path' for node in ast.walk(tree)
                    if isinstance(node, ast.ImportFrom) and node.module == 'pathlib' for alias in node.names)
