@@ -434,6 +434,27 @@ PY
                            "    path.write_text('git push')\nEOF\n && git push origin HEAD")
                 self.assertTrue(self.denied(command))
 
+    def test_loop_key_product_limit_accepts_256_and_refuses_512(self):
+        def balanced(count):
+            if count == 1:
+                return 'n'
+            left = count // 2
+            return f'({balanced(left)} + {balanced(count - left)})'
+
+        for count, expected in ((8, True), (9, False)):
+            with self.subTest(count=count):
+                body = ("from pathlib import Path\nedits = {'a.md': []}\n"
+                        f"for n in ('a', 'b'):\n    edits[{balanced(count)}] = []\n"
+                        'for name, pairs in edits.items():\n    path = Path(name)\n'
+                        "    path.write_text('git push')\n")
+                self.assertEqual(ultraship.inert_python(body), expected)
+
+    def test_writer_bash_classifier_exception_denies_plain_command(self):
+        from unittest.mock import patch
+
+        with patch.object(ultraship, 'python_heredoc_shell', side_effect=ValueError('classifier failed')):
+            self.assertTrue(self.denied('echo hi'))
+
     def test_read_only_loop_paths_are_file_text(self):
         command = ("python3 - <<'EOF'\nfrom pathlib import Path\n"
                    "for name in ('plugins/ship/hooks/ultraship.py', 'scripts/test_writer_heredoc.py'):\n"
