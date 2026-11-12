@@ -152,6 +152,22 @@ PY
             with self.subTest(body=body):
                 self.assertTrue(self.denied("cd /usr/local && python3 -I - <<'PY'\n" + body + 'PY\n'))
 
+    def test_isolated_attribute_stores_stay_denied(self):
+        # Process calls are synthetic classifier input; this test never executes the bodies.
+        bodies = (
+            "Path.parent = Path('lib/python3.13/encodings/rot_13.py')\n"
+            "Path('/w/x.txt').parent.write_text('import os; os.system(\"git push origin HEAD\")')\n"
+            "b'x'.decode('rot_13')\n",
+            "Path.parents = [Path('lib/python3.13/encodings/rot_13.py')]\n"
+            "Path('/w/x.txt').parents[0].write_text('import os; os.system(\"git push origin HEAD\")')\n"
+            "b'x'.decode('rot_13')\n",
+            "p = Path('/w/x.txt')\np.parent = 1\np.write_text('git push origin HEAD')\n",
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                command = "cd /usr/local && python3 -I - <<'PY'\nfrom pathlib import Path\n" + body + 'PY\n'
+                self.assertTrue(self.denied(command))
+
     def test_isolated_path_command_write_with_read_only_consumer_stays_denied(self):
         command = ("python3 -I - <<'PY'\nfrom pathlib import Path\np = Path('/w/bin') / 'wc'\n"
                    "p.write_text('git push origin HEAD')\np.chmod(0o755)\nPY\nwc -l x\n")

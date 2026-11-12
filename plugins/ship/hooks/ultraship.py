@@ -219,6 +219,8 @@ def isolated_writes(tree, bound):
     calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
     targets = []
     for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            return False
         if isinstance(node, ast.Name) and node.id == 'open' and id(node) not in calls:
             return False
         if isinstance(node, ast.Attribute) and node.attr in {
