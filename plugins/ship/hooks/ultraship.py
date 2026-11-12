@@ -351,7 +351,7 @@ def runs_heredoc_output(command):
     return False
 
 
-PYTHON_STDIN = (r"(?:python|python3(?:\.\d+)?)(?: +-I)? +- +<<(?P<tabs>-?)[ \t]*"
+PYTHON_STDIN = (r"(?:python|python3(?:\.\d+)?)(?: +-[IB]+)* +- +<<(?P<tabs>-?)[ \t]*"
                 r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)[ \t]*\n$")
 # Only literal `cd` and `date` steps and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the
 # interpreter; a `GIT_CONFIG_*` lead could alias a git read to a push.

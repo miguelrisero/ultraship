@@ -13,6 +13,8 @@ spec.loader.exec_module(ultraship)
 
 
 class WriterHeredocTests(unittest.TestCase):
+    BYTECODE_FLAGS = ('-I -B', '-B -I', '-B', '-IB', '-BI')
+
     def denied(self, command):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -42,6 +44,37 @@ class WriterHeredocTests(unittest.TestCase):
                        "cd /w/lane-1 && python3 - <<'EOF'"):
             with self.subTest(header=header):
                 self.assertFalse(self.denied(f'{header}\nimport re, json\n{body}EOF\n'))
+
+    def test_bytecode_flags_keep_inert_publication_words_as_file_text(self):
+        for flags in self.BYTECODE_FLAGS:
+            with self.subTest(flags=flags):
+                command = (f"python3 {flags} - <<'EOF'\nfrom pathlib import Path\n"
+                           "Path('notes.txt').write_text('git push; npm publish; gh pr merge')\nEOF\n")
+                self.assertFalse(self.denied(command))
+
+    def test_bytecode_flags_keep_process_capable_bodies_denied(self):
+        for flags in self.BYTECODE_FLAGS:
+            with self.subTest(flags=flags):
+                command = (f"python3 {flags} - <<'EOF'\nimport subprocess\n"
+                           "subprocess.run(['git', 'push'])\nEOF\n")
+                self.assertTrue(self.denied(command))
+
+    def test_bytecode_flag_write_then_execute_stays_denied(self):
+        command = ("python3 -I -B - <<'EOF'\n"
+                   "open('x.sh', 'w').write('git ' + 'pu' + 'sh')\nEOF\nsh x.sh\n")
+        self.assertTrue(self.denied(command))
+
+    def test_unlisted_python_options_keep_the_full_scan(self):
+        for flags in ('-X dev', '-c', '-m', '-IBX dev', '-O', '-IS', '-i'):
+            with self.subTest(flags=flags):
+                command = (f"python3 {flags} - <<'EOF'\n"
+                           "open('notes.txt', 'w').write('git push')\nEOF\n")
+                self.assertTrue(self.denied(command))
+
+    def test_bytecode_flags_keep_non_inert_publication_text_denied(self):
+        command = ("python3 -I -B - <<'EOF'\nimport os\n"
+                   "print('gh pr merge; npm publish')\nEOF\n")
+        self.assertTrue(self.denied(command))
 
     def test_python_that_can_reach_a_process_keeps_the_scan(self):
         for body in ("__import__('os').system('git push')", "import sys\nsys.modules['os'].system('git push')",
