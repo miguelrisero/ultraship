@@ -13,6 +13,8 @@ spec.loader.exec_module(ultraship)
 
 
 class WriterHeredocTests(unittest.TestCase):
+    BYTECODE_FLAGS = ('-I -B', '-B -I', '-B', '-IB', '-BI')
+
     def denied(self, command):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -44,14 +46,14 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertFalse(self.denied(f'{header}\nimport re, json\n{body}EOF\n'))
 
     def test_bytecode_flags_keep_inert_publication_words_as_file_text(self):
-        for flags in ('-I -B', '-B -I', '-B', '-IB', '-BI'):
+        for flags in self.BYTECODE_FLAGS:
             with self.subTest(flags=flags):
                 command = (f"python3 {flags} - <<'EOF'\nfrom pathlib import Path\n"
                            "Path('notes.txt').write_text('git push; npm publish; gh pr merge')\nEOF\n")
                 self.assertFalse(self.denied(command))
 
     def test_bytecode_flags_keep_process_capable_bodies_denied(self):
-        for flags in ('-I -B', '-B -I', '-B', '-IB', '-BI'):
+        for flags in self.BYTECODE_FLAGS:
             with self.subTest(flags=flags):
                 command = (f"python3 {flags} - <<'EOF'\nimport subprocess\n"
                            "subprocess.run(['git', 'push'])\nEOF\n")
@@ -63,7 +65,7 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied(command))
 
     def test_unlisted_python_options_keep_the_full_scan(self):
-        for flags in ('-X dev', '-c', '-m', '-IBX dev'):
+        for flags in ('-X dev', '-c', '-m', '-IBX dev', '-O', '-IS', '-i'):
             with self.subTest(flags=flags):
                 command = (f"python3 {flags} - <<'EOF'\n"
                            "open('notes.txt', 'w').write('git push')\nEOF\n")
