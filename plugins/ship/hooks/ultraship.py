@@ -199,17 +199,128 @@ def inert_paths(tree, literals, bound):
                 and all(keyword.arg in {'encoding', 'errors', 'newline'} for keyword in call.keywords)
                 and all(writable(path) for path in paths))
 
+    def literal_strings(node):
+        if isinstance(node, (ast.Tuple, ast.List, ast.Set)) and all(
+                isinstance(value, ast.Constant) and isinstance(value.value, str) for value in node.elts):
+            return {value.value for value in node.elts}
+        return None
+
+    def loop_values(node, literal_only=False):
+        loop = parents.get(node)
+        while loop is not None and not isinstance(loop, ast.For):
+            if isinstance(loop, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef,
+                                 ast.comprehension, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                return None
+            loop = parents.get(loop)
+        if loop is None:
+            return None
+        child = node
+        while parents.get(child) is not loop:
+            child = parents.get(child)
+        if child not in loop.body:
+            return None
+        target = loop.target
+        iterator = loop.iter
+        items = (isinstance(iterator, ast.Call) and isinstance(iterator.func, ast.Attribute)
+                 and iterator.func.attr == 'items')
+        if items:
+            if not isinstance(target, ast.Tuple) or len(target.elts) != 2:
+                return None
+            target = target.elts[0]
+        if not isinstance(target, ast.Name) or target.id != node.id:
+            return None
+        targets = [child for statement in ast.walk(tree) if isinstance(statement, ast.For)
+                   for child in ast.walk(statement.target) if isinstance(child, ast.Name) and child.id == node.id]
+        if bound.count(node.id) != len(targets):
+            return None
+        for child in ast.walk(loop):
+            if (isinstance(child, ast.Name) and child.id == node.id and child is not target
+                    and not isinstance(child.ctx, ast.Load)
+                    or isinstance(child, ast.arg) and child.arg == node.id
+                    or isinstance(child, (ast.Global, ast.Nonlocal)) and node.id in child.names
+                    or isinstance(child, (ast.ExceptHandler, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                    and child.name == node.id
+                    or isinstance(child, (ast.Import, ast.ImportFrom)) and any(
+                        (alias.asname or alias.name).split('.')[0] == node.id for alias in child.names)):
+                return None
+        values = literal_strings(iterator)
+        if values is not None or literal_only:
+            return values
+        if isinstance(iterator, ast.Call):
+            if (iterator.args or iterator.keywords or not isinstance(iterator.func, ast.Attribute)
+                    or iterator.func.attr not in {'items', 'keys'}):
+                return None
+            iterator = iterator.func.value
+        if not isinstance(iterator, ast.Name):
+            return None
+        return dict_keys(iterator.id)
+
+    def key_values(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return {node.value}
+        if isinstance(node, ast.Name):
+            return loop_values(node, literal_only=True)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, right = key_values(node.left), key_values(node.right)
+            return {a + b for a in left for b in right} if left and right else None
+        return None
+
+    def dict_keys(name):
+        assignments = [statement for statement in tree.body if isinstance(statement, ast.Assign)
+                       and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name)
+                       and statement.targets[0].id == name and isinstance(statement.value, ast.Dict)]
+        if len(assignments) != 1 or bound.count(name) != 1:
+            return None
+        assignment = assignments[0]
+        keys = list(assignment.value.keys)
+        for use in ast.walk(tree):
+            if not isinstance(use, ast.Name) or use.id != name or use is assignment.targets[0]:
+                continue
+            parent = parents.get(use)
+            if isinstance(parent, ast.Subscript) and parent.value is use and isinstance(parent.ctx, ast.Store):
+                if not isinstance(parents.get(parent), ast.Assign):
+                    return None
+                keys.append(parent.slice)
+            elif isinstance(parent, ast.For) and parent.iter is use:
+                continue
+            elif (isinstance(parent, ast.Attribute) and parent.value is use and parent.attr in {'items', 'keys'}
+                  and isinstance(parents.get(parent), ast.Call)):
+                call = parents[parent]
+                owner = parents.get(call)
+                if call.func is not parent or call.args or call.keywords or not isinstance(owner, ast.For) or owner.iter is not call:
+                    return None
+            else:
+                return None
+        values = set()
+        for key in keys:
+            found = key_values(key)
+            if not found:
+                return None
+            values.update(found)
+        return values
+
     def constructed(node):
         argument = node.args[0] if len(node.args) == 1 and not node.keywords else None
-        return (argument.value if isinstance(argument, ast.Constant) and isinstance(argument.value, str) else
+        path = (argument.value if isinstance(argument, ast.Constant) and isinstance(argument.value, str) else
                 literals.get(argument.id) if isinstance(argument, ast.Name) else None)
+        if path is not None:
+            return [path]
+        # Loop paths need statically known writable values because Python can load a file the script writes.
+        values = loop_values(argument) if isinstance(argument, ast.Name) else None
+        return list(values) if values and all(writable(value) for value in values) else [None]
 
     imported = sum(alias.name == 'Path' for node in ast.walk(tree)
                    if isinstance(node, ast.ImportFrom) and node.module == 'pathlib' for alias in node.names)
     holders = {}
-    for statement in tree.body:
+    for statement in ast.walk(tree):
         if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
                 and isinstance(statement.targets[0], ast.Name) and isinstance(statement.value, ast.Call)):
+            if statement not in tree.body and not (
+                    len(statement.value.args) == 1 and isinstance(statement.value.args[0], ast.Name)
+                    and loop_values(statement.value.args[0])
+                    and all(writable(path) for path in constructed(statement.value))
+                    and bound.count(statement.targets[0].id) == 1):
+                continue
             holders.setdefault(statement.targets[0].id, []).append(statement)
     for node in ast.walk(tree):
         named = (node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else None)
@@ -220,21 +331,24 @@ def inert_paths(tree, literals, bound):
             return False
         if call.keywords or len(call.args) != 1:
             return False
+        if (isinstance(call.args[0], ast.Name) and literals.get(call.args[0].id) is None
+                and constructed(call) == [None]):
+            return False
         owner = parents.get(call)
         if isinstance(owner, ast.Attribute):
-            if not used(call, [constructed(call)]):
+            if not used(call, constructed(call)):
                 return False
             continue
         name = (owner.targets[0].id if isinstance(owner, ast.Assign)
                 and owner in holders.get(getattr(owner.targets[0], 'id', None), []) else None)
-        # Every binding of the name must be a top-level `name = Path(...)`, so each load holds one of those paths.
+        # Every binding must construct a checked Path, so each load holds one of those paths.
         assignments = holders.get(name, [])
         if (not name or bound.count(name) != len(assignments)
                 or not all(isinstance(assignment.value.func, (ast.Name, ast.Attribute))
                            and getattr(assignment.value.func, 'id', getattr(assignment.value.func, 'attr', None)) == 'Path'
                            for assignment in assignments)):
             return False
-        paths = [constructed(assignment.value) for assignment in assignments]
+        paths = [path for assignment in assignments for path in constructed(assignment.value)]
         if not all(used(load, paths) for load in ast.walk(tree)
                    if isinstance(load, ast.Name) and load.id == name and isinstance(load.ctx, ast.Load)):
             return False
@@ -302,6 +416,9 @@ def read_only_shell(command):
     if current:
         parts.append(current)
     for words in parts:
+        if (words[:2] == ['git', 'diff'] and words[2:3] in (['--check'], ['--stat'])
+                and all(re.fullmatch(r'(?!-)[\w./-]+', path) for path in words[3:])):
+            continue
         if words[0] not in READ_ONLY_COMMANDS:
             return False
         if words[0] == 'sed' and not (

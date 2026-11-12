@@ -272,6 +272,133 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
 
+    LOOP_EDIT = ("cd /w/lane-1 && python3 - <<'PY'\nfrom pathlib import Path\n"
+                 "edits = {'a.md': [('old push', 'new push')], 'b.md': [('a', 'push')]}\n"
+                 "for name in ('writer.md', 'driver.md'):\n"
+                 "    edits['plugins/ship/agents/' + name] = [('old', 'push')]\n"
+                 "for name, pairs in edits.items():\n"
+                 "    path = Path(name)\n"
+                 "    text = path.read_text()\n"
+                 "    for old, new in pairs:\n"
+                 "        assert text.count(old) == 1, (name, old)\n"
+                 "        text = text.replace(old, new)\n"
+                 "    path.write_text(text)\nPY\n git diff --check && git diff --stat\n")
+
+    def test_loop_built_file_edits_are_file_text(self):
+        self.assertFalse(self.denied(self.LOOP_EDIT))
+
+    def test_exact_denied_loop_edit_is_file_text(self):
+        command = r"""cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/b8fe-chief-coc-27-oct/.scratch/plugin-pr-speed/ultraship && python3 - <<'PY'
+from pathlib import Path
+edits = {
+'plugins/ship/skills/ship/references/pipeline.md': [
+("3. At the lane's first commit, push it with the [resolved destination preflight](#9-push-and-pr) and open a draft PR at once, so CI and review run while the lane builds.", "3. At the lane's first commit, push it with the [resolved destination preflight](#9-push-and-pr) and open a draft PR, so CI starts while the lane builds."),
+('4. Update the draft PR from step 3, or open it now if none exists. Put scope, behavior, verification steps, and risks in the body. Mark it ready after the last code commit and any row update.', '4. Update the draft PR from [step 3](#3-slices), or open it now if none exists. Put scope, behavior, verification steps, and risks in the body. Mark it ready right after this push, before step 10, unless the brief holds the lane draft-only.')],
+'plugins/ship/skills/ship/SKILL.md': [
+('Batch actionable and terminal reports; keep unchanged routine reports silent, except one: from the first push until merge, report to the parent every 15 minutes, day and night, even when nothing changed.\nKeep one background `watchers.py wait` on the PR armed with `--max-seconds 900` or less, so the driver wakes to report.', 'Batch actionable and terminal reports; keep unchanged routine reports silent.'),
+('Repeat only when a later fix or a main merge moves an anchored line.', 'Repeat only when a later commit moves an anchored line.')],
+'plugins/ship/skills/ship/references/ci-and-locks.md': [
+('--max-seconds <remaining-stage-seconds>', '--max-seconds <the smaller of 600 and the remaining stage seconds>'),
+('Messages contain only a state transition, a blocker, or a decision need.', "Messages contain only a state transition, a blocker, a decision need, or a driver's timed report.")],
+'plugins/ship/skills/babysit/SKILL.md': [
+('Messages contain only transitions, blockers, or decision needs.', "Messages contain only transitions, blockers, decision needs, or the driver's timed report."),
+('Send all `real` items to `ship:writer--sol` as one batch within 1 hour of the review; checks still pending then join the next round.', 'Send all `real` items to `ship:writer--sol` as one batch, and push the fix within 1 hour of the review that raised them. Stop the step 2 wait in time for that deadline; checks still pending then join the next round.')],
+'plugins/chief/skills/run/SKILL.md': [
+('Replace a PR driver that sends no report for 15 minutes: stop it by its recorded identity, then dispatch `ship:driver` on the same lane in that turn. Keep a harness-supported wake within 15 minutes while a PR driver runs.', 'Replace a PR driver that sends no report for 15 minutes before merge: stop it, its writers, and its wait by recorded identity, apply [WIP recovery](references/state.md#wip-recovery), then dispatch `ship:driver` on the same lane in the same turn. An unchanged report needs no other chief action. Arm one single-shot background wake for the earliest time a PR driver turns silent, and rearm it after each report; this liveness timer reads no GitHub state.')],
+'plugins/chief/skills/run/references/dispatch.md': [
+('Batch actionable and terminal reports per recipient; keep unchanged routine reports silent.', "Batch actionable and terminal reports per recipient; keep unchanged routine reports silent. A PR driver's timed report under the ship driver definition is the one exception.")],
+'plugins/ship/README.md': [
+('3. Write each slice, test it, and review it.', '3. Write each slice, test it, and review it. The first commit opens a draft PR.'),
+('9. Merge main, run full checks, push, open the PR.', '9. Merge main, run full checks, push, mark the PR ready.')],
+'README.md': [
+('├─ ship:writer--sol writes each slice', '├─ ship:writer--sol writes each slice; the first commit opens a draft PR'),
+('├─ push, PR, /ship:babysit (CI + Better Review)', '├─ push, mark the PR ready, /ship:babysit (CI + Better Review)')],
+}
+for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+    edits['plugins/ship/agents/' + name] = [("- Commit only when the brief grants commits. Before every commit, auto-format the changed files with the repository's formatters, such as `ruff format` for Python and Prettier for frontend files. Follow the repository's commit style and attribution rules.", "- Commit only when the brief grants commits. Before every commit except a base merge, auto-format the hand-written files you changed with the formatters that the repository's CI or hooks check, such as `ruff format` and the frontend formatter. Never format generated files. Follow the repository's commit style and attribution rules.")]
+paragraph = "From the first push until merge, report to your parent at least every 15 minutes, day and night, even when nothing changed; this report overrides every silent-report and message-content rule. Run helpers and long commands in the background, and keep one [`watchers.py wait`](../skills/ship/references/ci-and-locks.md#github-quota) on the PR armed, so you wake in time."
+for name in ('driver.md', 'driver--sol.md'):
+    edits['plugins/ship/agents/' + name] = [('\nReturn a checkpoint:', '\n' + paragraph + '\n\nReturn a checkpoint:')]
+for name, pairs in edits.items():
+    path = Path(name)
+    text = path.read_text()
+    for old, new in pairs:
+        assert text.count(old) == 1, (name, old)
+        text = text.replace(old, new)
+    path.write_text(text)
+PY
+ git diff --check && git diff --stat
+"""
+        self.assertFalse(self.denied(command))
+
+    def test_loop_paths_accept_only_known_writable_values(self):
+        for iterator in ("('a.md', 'b.md')", "['a.md', 'b.md']", "{'a.md', 'b.md'}",
+                         'edits', 'edits.keys()'):
+            with self.subTest(iterator=iterator):
+                command = self.LOOP_EDIT.replace('for name, pairs in edits.items():', f'for name in {iterator}:')
+                self.assertFalse(self.denied(command))
+        for command in (
+            self.LOOP_EDIT.replace("'plugins/ship/agents/' + name", "'x' + '.py'"),
+            self.LOOP_EDIT.replace("'a.md'", "'sitecustomize.py'"),
+            self.LOOP_EDIT.replace('for name, pairs', "other = edits\nother['a.py'] = []\nfor name, pairs"),
+            self.LOOP_EDIT.replace('for name, pairs', "edits |= {'a.py': []}\nfor name, pairs"),
+            self.LOOP_EDIT.replace('for name, pairs in edits.items():',
+                                   "for name in open('list.txt').read().split():"),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
+    def test_loop_edits_keep_executable_publication_denied(self):
+        self.assertTrue(self.denied(self.LOOP_EDIT + ' && git push origin HEAD'))
+        self.assertTrue(self.denied(self.LOOP_EDIT.replace('from pathlib import Path',
+                                                          'from pathlib import Path\nimport subprocess')))
+
+    def test_loop_dict_uses_keep_unknown_keys_denied(self):
+        for statement in ("edits = {'c.md': []}", 'print(edits)', "del edits['a.md']",
+                          'edits.clear()', 'alias = edits.items', "edits['a.md'] += []",
+                          "edits[unknown] = []", "edits[('a.md',)] = []"):
+            with self.subTest(statement=statement):
+                self.assertTrue(self.denied(self.LOOP_EDIT.replace('for name, pairs', statement + '\nfor name, pairs')))
+
+    def test_loop_targets_and_holders_keep_rebinding_denied(self):
+        for command in (
+            self.LOOP_EDIT.replace('    path = Path(name)', "    name = 'a.py'\n    path = Path(name)"),
+            self.LOOP_EDIT.replace('    path = Path(name)', "    path = Path(name)\n    path = Path('a.md')"),
+            self.LOOP_EDIT.replace('    text = path.read_text()', '    alias = path\n    text = path.read_text()'),
+            self.LOOP_EDIT.replace('for name, pairs in edits.items():', 'for (name,), pairs in edits.items():'),
+            self.LOOP_EDIT.replace('path.write_text(text)', 'path.write_text(text, **options)'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
+    def test_loop_paths_refuse_unknown_or_empty_values(self):
+        for iterator in ('()', "('a.md', 1)", "('a.py',)", 'edits.items()', 'unknown',
+                         "[name for name in ('a.md',)]"):
+            with self.subTest(iterator=iterator):
+                command = self.LOOP_EDIT.replace('for name, pairs in edits.items():', f'for name in {iterator}:')
+                self.assertTrue(self.denied(command))
+        command = self.LOOP_EDIT.replace("'a.md': [('old push', 'new push')], 'b.md': [('a', 'push')]", '')
+        command = command.replace("    edits['plugins/ship/agents/' + name] = [('old', 'push')]", '    pass')
+        self.assertTrue(self.denied(command))
+
+    def test_loop_key_concatenation_checks_every_combination(self):
+        command = self.LOOP_EDIT.replace("'plugins/ship/agents/' + name", "'plugins/' + name + '.md'")
+        self.assertFalse(self.denied(command))
+        command = self.LOOP_EDIT.replace("('writer.md', 'driver.md')", "('writer.md', 'driver.py')")
+        self.assertTrue(self.denied(command))
+
+    def test_loop_edits_allow_only_scoped_diff_remainders(self):
+        body = self.LOOP_EDIT.split('PY\n git diff')[0] + 'PY\n'
+        for remainder in ('git diff --check', 'git diff --stat', 'git diff --check a.md',
+                          'git diff --stat plugins/ship/agents/a.md'):
+            with self.subTest(remainder=remainder):
+                self.assertFalse(self.denied(body + remainder))
+        for remainder in ('git diff', 'git diff --ext-diff', 'git status', 'git log',
+                          'git diff --stat > out.txt', 'git -c core.pager=cat diff --stat',
+                          'git diff --stat --ext-diff'):
+            with self.subTest(remainder=remainder):
+                self.assertTrue(self.denied(body + remainder))
+
     def test_python_writes_that_python_can_import_keep_the_scan(self):
         for path in ('traceback.py', 'traceback/__init__.py', 'Traceback/__init__.py', 'json/decoder.py',
                      '../traceback.py', 'x/../traceback.py', '/tmp/w/traceback.py', 'lib/site.pth', 'x/y.so'):
