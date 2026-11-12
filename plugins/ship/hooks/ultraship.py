@@ -75,13 +75,18 @@ INERT_ATTRIBUTES = {
     'items', 'keys', 'values', 'group', 'groups', 'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape',
     'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest', 'unlink',
 }
+PROCESS_FREE_ATTRIBUTES = INERT_ATTRIBUTES | {'parents', 'chmod', 'mkdir'}
+GIT_CHECKS = {
+    'status': {'--porcelain', '--short', '-s', '--branch', '-b'},
+    'diff': {'--numstat', '--stat', '--shortstat', '--name-only', '--name-status', '--check', '--cached', '--staged'},
+}
 READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true', 'date'}
 READ_ONLY_STARTS = {'cat', 'grep', 'head', 'tail', 'ls', 'wc', 'diff', 'cd', 'git'}
 REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
               'help', 'input'}
 
 
-def inert_python(body):
+def inert_python(body, paths=True):
     """Whether a Python script can only compute and read or write files, so its words are file text, not commands."""
     try:
         tree = ast.parse(body)
@@ -117,7 +122,7 @@ def inert_python(body):
         if isinstance(node, ast.Name) and (node.id in REFLECTION or node.id.startswith('__')):
             return False
         if isinstance(node, ast.Attribute):
-            if node.attr not in INERT_ATTRIBUTES:
+            if node.attr not in (INERT_ATTRIBUTES if paths else PROCESS_FREE_ATTRIBUTES):
                 return False
             if (isinstance(node.value, ast.Name) and node.value.id in modules
                     and node.attr not in INERT_MEMBERS[modules[node.value.id]]):
@@ -129,6 +134,8 @@ def inert_python(body):
                 return False
         if isinstance(node, ast.Match):
             return False
+    if not paths:
+        return True
     # The interpreter imports modules from the current folder (Python 3.13 imports `traceback` on any uncaught
     # error), so a write must name a literal path that Python cannot load.
     # A name keeps its literal only when nothing else in the script binds it.
@@ -450,6 +457,26 @@ def check_only_shell(command):
         read_only_shell(segment) or re.fullmatch(r'(?:ba|z)?sh +-n +[\w./][\w./-]*', segment) for segment in segments)
 
 
+def git_check_shell(command):
+    segments = [part.strip() for part in re.split(r'&&|;|\n', command) if part.strip()]
+    for segment in segments:
+        if read_only_shell(segment):
+            continue
+        if not re.fullmatch(r'[\w ./:=@%+,-]+', segment):
+            return False
+        words = segment.split()
+        if not words or words.pop(0) != 'git':
+            return False
+        while len(words) >= 2 and words[0] == '-C' and re.fullmatch(r'[\w./-]+', words[1]):
+            words = words[2:]
+        if not words or words[0] not in GIT_CHECKS:
+            return False
+        options = GIT_CHECKS[words[0]]
+        if any(word != '--' and word not in options and word.startswith('-') for word in words[1:]):
+            return False
+    return bool(segments)
+
+
 def runs_heredoc_output(command):
     """Whether a Python heredoc that can write files is followed by a command that can run one.
 
@@ -465,6 +492,16 @@ def runs_heredoc_output(command):
             # The written files exist only after the script, so only a later or a background command can run them.
             if check_only_shell(''.join(lines[end + 1:])) and not re.search(r'(?<!&)&(?![&>])', match['lead']):
                 return False
+            try:
+                tree = ast.parse(body)
+            except SyntaxError:
+                tree = None
+            # The body can already start any process; a trailing literal Git check adds nothing and keeps the shell scan.
+            if (tree is not None and any(isinstance(node, ast.Import) and any(
+                    alias.name == 'subprocess' for alias in node.names) for node in tree.body)
+                    and git_check_shell(''.join(lines[end + 1:]))
+                    and not re.search(r'(?<!&)&(?![&>])', match['lead'])):
+                return False
             if not inert_python(body):
                 return True
             # An inert script writes only through `open` with a write mode or a `Path` write method.
@@ -476,7 +513,7 @@ def runs_heredoc_output(command):
     return False
 
 
-PYTHON_STDIN = (r"(?:python|python3(?:\.\d+)?)(?: +-[IB]+)* +- +<<(?P<tabs>-?)[ \t]*"
+PYTHON_STDIN = (r"(?:python|python3(?:\.\d+)?)(?P<flags>(?: +-[IB]+)*) +- +<<(?P<tabs>-?)[ \t]*"
                 r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)[ \t]*\n$")
 # Only literal `cd` and `date` steps and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the
 # interpreter; a `GIT_CONFIG_*` lead could alias a git read to a push.
@@ -502,8 +539,10 @@ def python_heredoc_shell(command, inert_only=False):
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
             # Only a `cd` or `date` may lead it and only a read-only remainder may follow it, because another command
             # could run the file it writes.
+            # Isolated mode excludes current-folder imports; process-free bodies write file text through computed paths.
             if (re.fullmatch(rf'[ \t]*{PYTHON_LEAD}', match['lead']) and read_only_shell(remainder)
-                    and match['delimiter'][0] in '\'"\\' and inert_python(body)):
+                    and match['delimiter'][0] in '\'"\\'
+                    and (inert_python(body) or 'I' in match['flags'] and inert_python(body, paths=False))):
                 return lines[0] + remainder
             if inert_only:
                 return command

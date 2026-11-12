@@ -45,6 +45,109 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(header=header):
                 self.assertFalse(self.denied(f'{header}\nimport re, json\n{body}EOF\n'))
 
+    CLEANUP_SCRIPT = r"""cd /w/ws && python3 -I - <<'PY'
+from pathlib import Path
+s=Path('/w/ws/.scratch/ship-video/ui-gate')
+r=s.parents[2]
+t=(r/'.scratch/ship-video/battery-template-s1.sh').read_text().splitlines()
+h='\n'.join(t[:24]).replace('ROOT='+str(r/'wt-video'),'ROOT='+str(r))
+b=h+'''
+for project in video-ui-before video-ui-after; do
+ test -z "$(docker ps -aq --filter label=com.docker.compose.project=$project)"
+done
+git -C "$ROOT/wt-ui-before" status --porcelain
+git -C /w/repo worktree remove "$ROOT/wt-ui-before"
+echo 'capture worktrees=0'
+'''
+p=s/'battery-ui-cleanup.sh';p.write_text(b);p.chmod(0o755)
+PY
+"""
+    TOML_APPEND = r"""cd /w/wt && python3 -I - <<'PY'
+from pathlib import Path
+import subprocess
+import tomllib
+root = Path('/w/wt')
+subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True)
+subprocess.check_output(['git', '-C', str(root), 'branch', '--show-current'], text=True)
+subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain'], text=True)
+text = '\n[[retired]]\nid = "XX01"\nreason = "synthetic"\n'
+tomllib.loads(text)
+with open(root / 'backend/api/tests/mutation/benchmark-ads.toml', 'ab') as f:
+    f.write(text.encode())
+PY
+
+"""
+    TOML_DIFF = 'git -C /w/wt diff --numstat -- backend/api/tests/mutation/benchmark-ads.toml'
+
+    def test_isolated_cleanup_script_is_file_text(self):
+        self.assertFalse(self.denied(self.CLEANUP_SCRIPT))
+        start = self.CLEANUP_SCRIPT.index("b=h+'''")
+        end = self.CLEANUP_SCRIPT.index("'''\np=s/")
+        publication_text = ('gh release create v1\nnpm publish\nvercel deploy --prod\n'
+                            'git push origin HEAD\n')
+        command = self.CLEANUP_SCRIPT[:start] + "b='''\n" + publication_text + self.CLEANUP_SCRIPT[end:]
+        self.assertFalse(self.denied(command))
+
+    def test_cleanup_script_requires_isolation_and_read_only_remainder(self):
+        self.assertTrue(self.denied(self.CLEANUP_SCRIPT.replace('python3 -I -', 'python3 -')))
+        for remainder in ('sh /w/ws/.scratch/ship-video/ui-gate/battery-ui-cleanup.sh',
+                          'git status', 'git diff --stat'):
+            with self.subTest(remainder=remainder):
+                self.assertTrue(self.denied(self.CLEANUP_SCRIPT + remainder))
+
+    def test_isolated_computed_paths_keep_reflection_denied(self):
+        for expression in ("getattr(p, 'write_text')('git push origin HEAD')",
+                           "p.__class__  # git push origin HEAD"):
+            with self.subTest(expression=expression):
+                command = ("python3 -I - <<'PY'\nfrom pathlib import Path\n"
+                           "p = Path('/w') / 'x.sh'\np.chmod(0o755)\n" + expression + '\nPY\n')
+                self.assertTrue(self.denied(command))
+
+    def test_subprocess_toml_append_allows_literal_git_check(self):
+        self.assertFalse(self.denied(self.TOML_APPEND + self.TOML_DIFF))
+
+    def test_subprocess_toml_append_keeps_other_consumers_denied(self):
+        for remainder in ('sh x.sh', 'make', 'git -c core.pager=cat diff --stat',
+                          'git diff --ext-diff', 'git diff --stat > out.txt',
+                          'git push origin HEAD', 'git status && sh x.sh'):
+            with self.subTest(remainder=remainder):
+                self.assertTrue(self.denied(self.TOML_APPEND + remainder))
+
+    def test_nested_subprocess_import_keeps_git_check_denied(self):
+        command = self.TOML_APPEND.replace('import subprocess\n', 'if True:\n    import subprocess\n')
+        self.assertTrue(self.denied(command + self.TOML_DIFF))
+
+    def test_writer_publication_commands_stay_denied(self):
+        for command in ('git push origin HEAD:refs/heads/x', 'gh pr merge 1 --squash',
+                        "gh pr comment 1 --body '/merge fix: x'", 'npm publish',
+                        'vercel deploy --prod', 'gh release create v1.0.0'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
+    def test_git_check_shell_requires_a_literal_check(self):
+        self.assertFalse(ultraship.git_check_shell(''))
+        self.assertTrue(ultraship.git_check_shell('git -C /w diff --numstat -- a.toml'))
+        for command in ('git status --porcelain', 'git -C /w -C sub diff --check; echo done',
+                        'git diff --cached --name-only\n\ngit status -s -b',
+                        'git diff --stat && git status --short'):
+            with self.subTest(command=command):
+                self.assertTrue(ultraship.git_check_shell(command))
+        for command in ('git status -sb', 'git -C /w', 'git -C "$ROOT" diff --stat', 'git diff --ext-diff',
+                        'git diff --stat > out.txt', 'git -c core.pager=cat diff --stat',
+                        'git status && sh x.sh', 'git push origin HEAD'):
+            with self.subTest(command=command):
+                self.assertFalse(ultraship.git_check_shell(command))
+
+    def test_subprocess_git_check_preserves_body_and_lead_scan(self):
+        for command in (
+            self.TOML_APPEND.replace("tomllib.loads(text)", "subprocess.run(['git', 'push', 'origin', 'HEAD'])")
+            + self.TOML_DIFF,
+            self.TOML_APPEND.replace('cd /w/wt &&', 'sh x.sh &') + self.TOML_DIFF,
+            self.TOML_APPEND.replace('tomllib.loads(text)', 'invalid syntax !') + self.TOML_DIFF,
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
     def test_bytecode_flags_keep_inert_publication_words_as_file_text(self):
         for flags in self.BYTECODE_FLAGS:
             with self.subTest(flags=flags):
