@@ -168,6 +168,15 @@ PY
                 command = "cd /usr/local && python3 -I - <<'PY'\nfrom pathlib import Path\n" + body + 'PY\n'
                 self.assertTrue(self.denied(command))
 
+    def test_isolated_normalized_path_string_joins_stay_denied(self):
+        for body in (
+            "open(str(Path('/w/repo/.gi/')) + 't/config', 'a').write('git push origin HEAD')",
+            "open(str(Path('/w/traceback.p/')) + 'y', 'w').write('git push origin HEAD')",
+        ):
+            with self.subTest(body=body):
+                command = "cd /usr/local && python3 -I - <<'PY'\nfrom pathlib import Path\n" + body + '\nPY\n'
+                self.assertTrue(self.denied(command))
+
     def test_isolated_path_command_write_with_read_only_consumer_stays_denied(self):
         command = ("python3 -I - <<'PY'\nfrom pathlib import Path\np = Path('/w/bin') / 'wc'\n"
                    "p.write_text('git push origin HEAD')\np.chmod(0o755)\nPY\nwc -l x\n")

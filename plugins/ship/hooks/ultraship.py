@@ -186,11 +186,12 @@ def resolved_path(node, assigned, depth=0):
         return resolve(assigned[node.id])
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {'Path', 'str'}
             and len(node.args) == 1 and not node.keywords):
-        return resolve(node.args[0])
-    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
+        path = resolve(node.args[0])
+        return str(PurePosixPath(path)) if path is not None and node.func.id == 'Path' else path
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         left, right = resolve(node.left), resolve(node.right)
         if left is not None and right is not None:
-            return str(PurePosixPath(left) / right) if isinstance(node.op, ast.Div) else left + right
+            return str(PurePosixPath(left) / right)
     if isinstance(node, ast.Attribute) and node.attr == 'parent':
         path = resolve(node.value)
         if path is not None:
