@@ -103,19 +103,15 @@ PY
                            "p = Path('/w') / 'x.sh'\np.chmod(0o755)\n" + expression + '\nPY\n')
                 self.assertTrue(self.denied(command))
 
-    def test_subprocess_toml_append_allows_literal_git_check(self):
-        self.assertFalse(self.denied(self.TOML_APPEND + self.TOML_DIFF))
+    def test_subprocess_toml_append_with_git_check_stays_denied(self):
+        self.assertTrue(self.denied(self.TOML_APPEND + self.TOML_DIFF))
 
-    def test_subprocess_toml_append_keeps_other_consumers_denied(self):
-        for remainder in ('sh x.sh', 'make', 'git -c core.pager=cat diff --stat',
-                          'git diff --ext-diff', 'git diff --stat > out.txt',
-                          'git push origin HEAD', 'git status && sh x.sh'):
-            with self.subTest(remainder=remainder):
-                self.assertTrue(self.denied(self.TOML_APPEND + remainder))
-
-    def test_nested_subprocess_import_keeps_git_check_denied(self):
-        command = self.TOML_APPEND.replace('import subprocess\n', 'if True:\n    import subprocess\n')
-        self.assertTrue(self.denied(command + self.TOML_DIFF))
+    def test_isolated_computed_git_config_with_status_stays_denied(self):
+        command = ("python3 -I - <<'PY'\nfrom pathlib import Path\n"
+                   "p = Path('/w/wt/.gi' + 't/config')\n"
+                   "p.write_text('[core]\\n    fsmonitor = sh x.sh\\n')\nPY\n"
+                   'git status --porcelain\n')
+        self.assertTrue(self.denied(command))
 
     def test_writer_publication_commands_stay_denied(self):
         for command in ('git push origin HEAD:refs/heads/x', 'gh pr merge 1 --squash',
@@ -123,20 +119,6 @@ PY
                         'vercel deploy --prod', 'gh release create v1.0.0'):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-
-    def test_git_check_shell_requires_a_literal_check(self):
-        self.assertFalse(ultraship.git_check_shell(''))
-        self.assertTrue(ultraship.git_check_shell('git -C /w diff --numstat -- a.toml'))
-        for command in ('git status --porcelain', 'git -C /w -C sub diff --check; echo done',
-                        'git diff --cached --name-only\n\ngit status -s -b',
-                        'git diff --stat && git status --short'):
-            with self.subTest(command=command):
-                self.assertTrue(ultraship.git_check_shell(command))
-        for command in ('git status -sb', 'git -C /w', 'git -C "$ROOT" diff --stat', 'git diff --ext-diff',
-                        'git diff --stat > out.txt', 'git -c core.pager=cat diff --stat',
-                        'git status && sh x.sh', 'git push origin HEAD'):
-            with self.subTest(command=command):
-                self.assertFalse(ultraship.git_check_shell(command))
 
     def test_subprocess_git_check_preserves_body_and_lead_scan(self):
         for command in (

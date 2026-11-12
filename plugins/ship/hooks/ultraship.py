@@ -76,10 +76,6 @@ INERT_ATTRIBUTES = {
     'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest', 'unlink',
 }
 PROCESS_FREE_ATTRIBUTES = INERT_ATTRIBUTES | {'parents', 'chmod', 'mkdir'}
-GIT_CHECKS = {
-    'status': {'--porcelain', '--short', '-s', '--branch', '-b'},
-    'diff': {'--numstat', '--stat', '--shortstat', '--name-only', '--name-status', '--check', '--cached', '--staged'},
-}
 READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true', 'date'}
 READ_ONLY_STARTS = {'cat', 'grep', 'head', 'tail', 'ls', 'wc', 'diff', 'cd', 'git'}
 REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
@@ -457,26 +453,6 @@ def check_only_shell(command):
         read_only_shell(segment) or re.fullmatch(r'(?:ba|z)?sh +-n +[\w./][\w./-]*', segment) for segment in segments)
 
 
-def git_check_shell(command):
-    segments = [part.strip() for part in re.split(r'&&|;|\n', command) if part.strip()]
-    for segment in segments:
-        if read_only_shell(segment):
-            continue
-        if not re.fullmatch(r'[\w ./:=@%+,-]+', segment):
-            return False
-        words = segment.split()
-        if not words or words.pop(0) != 'git':
-            return False
-        while len(words) >= 2 and words[0] == '-C' and re.fullmatch(r'[\w./-]+', words[1]):
-            words = words[2:]
-        if not words or words[0] not in GIT_CHECKS:
-            return False
-        options = GIT_CHECKS[words[0]]
-        if any(word != '--' and word not in options and word.startswith('-') for word in words[1:]):
-            return False
-    return bool(segments)
-
-
 def runs_heredoc_output(command):
     """Whether a Python heredoc that can write files is followed by a command that can run one.
 
@@ -491,16 +467,6 @@ def runs_heredoc_output(command):
             body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
             # The written files exist only after the script, so only a later or a background command can run them.
             if check_only_shell(''.join(lines[end + 1:])) and not re.search(r'(?<!&)&(?![&>])', match['lead']):
-                return False
-            try:
-                tree = ast.parse(body)
-            except SyntaxError:
-                tree = None
-            # The body can already start any process; a trailing literal Git check adds nothing and keeps the shell scan.
-            if (tree is not None and any(isinstance(node, ast.Import) and any(
-                    alias.name == 'subprocess' for alias in node.names) for node in tree.body)
-                    and git_check_shell(''.join(lines[end + 1:]))
-                    and not re.search(r'(?<!&)&(?![&>])', match['lead'])):
                 return False
             if not inert_python(body):
                 return True
