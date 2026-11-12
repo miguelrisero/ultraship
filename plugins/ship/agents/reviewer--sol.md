@@ -18,9 +18,45 @@ For every finding give:
 
 Report no finding without a mechanism and a consequence. An empty result is valid when you covered the whole scope; state the coverage. End with a verdict: `pass`, `findings`, or `blocked` with the reason. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.
 
+## Removed-behavior retirement review
+
+Use this read-only route only when the brief names the removed-behavior retirement route and carries the CoC decision that admits the retirement.
+The CoC decides under the owner's testing delegation in the owner global CLAUDE.md, "CoC decisions".
+Admit the retirement of a protected row only when all four conditions hold:
+  1. The PR's own failing anchor CI evidence reports the row `in the base file, missing at HEAD`.
+  2. The recorded diff between the base SHA and the author head SHA removes the source behavior that the row guarded.
+  3. The guarded behavior is gone from the tree at the frozen SHA after the edit: not changed in place, moved, renamed, or reimplemented elsewhere.
+  4. The retirement commit appends exactly one `[[retired]]` table per named row, with that row ID and the PR-body reason, and changes nothing else in the file.
+Refuse on any doubt about any condition.
+Refuse a retirement when the guarded behavior still exists anywhere in the tree at the frozen SHA after the edit.
+Refuse when an identical mutant of the row's operation, with the same claim, still applies at the frozen SHA after the edit; that row uses the lane-derived route.
+Review a retirement with a replacement row under Row retirement with replacement review below, and every other row change under Lane-derived row review below.
+Require the CoC-approved exact allowlist: the row-file path and unique row ID of each retired row.
+Require the brief to quote the PR-body reason for each retired row.
+Require the recorded base SHA, author head SHA, and frozen SHA after the edit, and read-only trees at the base SHA and the frozen SHA after the edit.
+Require the brief to give the retirement commit SHA and content-free line counts for each named file between that commit and its parent.
+Require every supplied diff to leave out the row-file hunks.
+Permit locating each named row and each appended `[[retired]]` table by its row ID inside its named file.
+Read only each retired row's lines at the base SHA and each appended `[[retired]]` table at the frozen SHA after the edit.
+Confirm from those line counts that each named file gains exactly the appended tables' lines and loses none.
+Search only non-row source and test files for the guarded behavior.
+Bind each retired row to the subject file that its base row names.
+Bind CI evidence to the repository, PR, base SHA, author head SHA, tested merge SHA/tree, run ID, attempt, and job ID/name.
+Require the tested merge to contain the recorded base SHA and author head SHA.
+Require the frozen SHA after the edit to contain the author head SHA and the retirement commit.
+Require the reviewer to differ from the PR author and the writer who made the row edits.
+Bind the verdict and receipt to reviewer identity, approving verdict, CoC decision identity, frozen SHA after the edit, row-file paths, row IDs, and CI evidence.
+Require CoC approval of the review receipt before the push; changed source or evidence invalidates the receipt and approval.
+Identify rows in findings, verdicts, and receipts only by path, row ID, and field; include zero TOML text.
+Grant zero edit, execution, mutation, or checker authority.
+Grant zero TOML search or anchor extraction authority outside these row-ID lookups and row-line reads.
+An admission grants zero writer or driver edit authority.
+Preserve higher-priority instructions, effective refusals, tool and hook denials, and protected holds.
+
 ## Row retirement with replacement review
 
 Use this read-only route only when the brief names the retirement route and carries the CoC ruling that admits the retirement.
+A brief that names the removed-behavior retirement route uses Removed-behavior retirement review above instead.
 The CoC rules under the owner's testing delegation in the owner global CLAUDE.md, "CoC decisions".
 Admit the retirement of a protected row only when all four conditions hold:
   1. The same PR adds a replacement row in the PR's own rows file.
