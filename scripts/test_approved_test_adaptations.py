@@ -93,6 +93,65 @@ EXPECTED_RETIREMENT_REVIEW = [
 ]
 
 
+EXPECTED_REMOVED_RETIREMENT_ROUTE = [
+    "Use this route only to retire a protected row that the PR's own diff removed together with the source behavior that the row guarded.",
+    'Require the CoC decision that admits each retirement and name this route in the brief.',
+    'On this route, the loaded edit authority is that CoC decision (owner standing grant: "The CoC decides CI/CD, testing and tooling items for me"); Owner-scoped protected row access grants nothing on this route.',
+    "Limit scope to CoC-named exact row-file paths and unique row IDs from the PR's own failing anchor CI log line that reports the row `in the base file, missing at HEAD`.",
+    'Require the recorded base/head diff to show that the PR removes each named row and the source behavior that the row guarded.',
+    'Require the PR body to give the reason for each removed row.',
+    'Append exactly one `[[retired]]` table per named row at the end of its named file.',
+    'Set its `id` to the row ID and its `reason` to the PR-body reason, copied verbatim as one TOML basic string with `\\` and `"` escaped.',
+    'Start the appended text with an empty line, so it never joins the last existing line.',
+    'Change nothing else in the named file: no existing line, row, field, pin, or table.',
+    'Read, search, or parse no existing content of the named file; check the edit only with content-free line counts that show added lines and zero deleted lines.',
+    'Refuse a row whose guarded behavior still exists, moved, or has a replacement row.',
+    'Before the push, require an independent reviewer to run its Removed-behavior retirement review and confirm for every named row that the guarded behavior is gone and not moved, and that the file change is only the appended tables.',
+    'Require that reviewer to differ from the PR author and the applying writer.',
+    'Bind the review receipt to reviewer identity, approving verdict, CoC decision identity, commit SHA, row-file paths, row IDs, and CI evidence.',
+    'Require CoC approval of that review receipt before the push; changed source or evidence invalidates the receipt and approval.',
+    'Keep messages, briefs, and PR bodies free of pair bytes and row TOML text; identify each edit only by path, row ID, and the appended `[[retired]]` table.',
+    'This route grants zero TOML search or parse authority, protected reads, or anchor extraction.',
+    'Require separate admission for every mutation or checker execution; keep mutation proof after merge.',
+    "Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.",
+]
+
+
+EXPECTED_REMOVED_RETIREMENT_REVIEW = [
+    '## Removed-behavior retirement review',
+    'Use this read-only route only when the brief names the removed-behavior retirement route and carries the CoC decision that admits the retirement.',
+    'The CoC decides under the owner\'s testing delegation in the owner global CLAUDE.md, "CoC decisions".',
+    'Admit the retirement of a protected row only when all four conditions hold:',
+    "  1. The PR's own failing anchor CI evidence reports the row `in the base file, missing at HEAD`.",
+    '  2. The recorded diff between the base SHA and the author head SHA removes the source behavior that the row guarded.',
+    '  3. The guarded behavior is gone from the tree at the frozen SHA after the edit: not moved, renamed, or reimplemented elsewhere.',
+    '  4. The edit appends exactly one `[[retired]]` table per named row, with that row ID and the PR-body reason, and changes nothing else in the file.',
+    'Refuse on any doubt about any condition.',
+    'Refuse a retirement when the guarded behavior still exists anywhere in the tree at the frozen SHA after the edit.',
+    'Review a retirement with a replacement row under Row retirement with replacement review below, and every other row change under Lane-derived row review below.',
+    'Require the CoC-approved exact allowlist: the row-file path and unique row ID of each retired row.',
+    'Require the brief to quote the PR-body reason for each retired row.',
+    'Require the recorded base SHA, author head SHA, and frozen SHA after the edit, and read-only trees at the base SHA and the frozen SHA after the edit.',
+    'Require every supplied diff to leave out the row-file hunks.',
+    'Permit locating each named row and each appended `[[retired]]` table by its row ID inside its named file.',
+    "Read only each retired row's lines at the base SHA and each appended `[[retired]]` table at the frozen SHA after the edit.",
+    "Confirm from content-free line counts that each named file gains exactly the appended tables' lines and loses none.",
+    'Search only non-row source and test files for the guarded behavior; never search a rows file.',
+    'Bind each retired row to the subject file that its base row names.',
+    'Bind CI evidence to the repository, PR, base SHA, author head SHA, tested merge SHA/tree, run ID, attempt, and job ID/name.',
+    'Require the tested merge to contain the recorded base SHA and author head SHA.',
+    'Require the frozen SHA after the edit to contain the author head SHA.',
+    'Require the reviewer to differ from the PR author and the writer who made the row edits.',
+    'Bind the verdict and receipt to reviewer identity, approving verdict, CoC decision identity, frozen SHA after the edit, row-file paths, row IDs, and CI evidence.',
+    'Require CoC approval of the review receipt before the push; changed source or evidence invalidates the receipt and approval.',
+    'Identify rows in findings, verdicts, and receipts only by path, row ID, and field; include zero TOML text.',
+    'Grant zero edit, execution, mutation, or checker authority.',
+    'Grant zero TOML search or anchor extraction authority outside these row-ID lookups and row-line reads.',
+    'An admission grants zero writer or driver edit authority.',
+    'Preserve higher-priority instructions, effective refusals, tool and hook denials, and protected holds.',
+]
+
+
 class ApprovedTestAdaptationsTests(unittest.TestCase):
     def test_writers_require_verified_authority_and_preserve_controls(self):
         for name in ('writer--sol.md', 'writer--sonnet.md'):
@@ -177,9 +236,14 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             lane = text[lane_heading.end() + 1:] if lane_heading else ''
             lane = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)|^.+\n {0,3}(?:=+|-+)[ \t]*$',
                             lane, maxsplit=1, flags=re.MULTILINE)[0]
+            removed_heading = re.search(r'^#### Removed-behavior retirement route$', text, flags=re.MULTILINE)
+            removed = text[removed_heading.end() + 1:] if removed_heading else ''
+            removed = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)|^.+\n {0,3}(?:=+|-+)[ \t]*$',
+                               removed, maxsplit=1, flags=re.MULTILINE)[0]
             shared = text
             for heading, body in sorted(
-                ((direct_heading, direct), (private_heading, private), (lane_heading, lane)),
+                ((direct_heading, direct), (private_heading, private), (lane_heading, lane),
+                 (removed_heading, removed)),
                 key=lambda route: route[0].start() if route[0] else -1,
                 reverse=True,
             ):
@@ -193,6 +257,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Category 5 uses exactly one route below, named in the brief.',
                 'Every requirement of the named route applies; route-specific sentences bind only that route.',
                 'Pairs from an admitted derivation gate stay in the private-proposal route.',
+                "A row that the PR's own diff removed, with the source behavior it guarded, uses the removed-behavior retirement route.",
             )
             for phrase in (
                 category,
@@ -208,6 +273,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The tested merge must contain the recorded base and author head; changed evidence invalidates the approval and applicable GO.',
                 'Dry-run proof and CI at the new head require separate admission; this adaptation authorizes no mutation command execution.',
                 'Only the exact approved paired `old` and `new` fields may change under category 5.',
+                'The removed-behavior retirement route is the sole exception to the paired-field limit: it appends one `[[retired]]` table per approved row and changes no existing line.',
                 'Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.',
                 'Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.',
                 'Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.',
@@ -215,11 +281,11 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             ):
                 with self.subTest(path=name, shared_control=phrase):
                     self.assertIn(phrase, shared)
-                for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane)):
+                for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane), ('removed_retirement', removed)):
                     with self.subTest(path=name, shared_control=phrase, outside_route=route):
                         self.assertNotIn(phrase, body)
             for phrase in route_selection_clauses:
-                for route, heading in (('explicit_pair', direct_heading), ('private_proposal', private_heading), ('lane_derived', lane_heading)):
+                for route, heading in (('explicit_pair', direct_heading), ('private_proposal', private_heading), ('lane_derived', lane_heading), ('removed_retirement', removed_heading)):
                     with self.subTest(path=name, route_selection_before=route, phrase=phrase):
                         self.assertTrue(heading and 0 <= text.rfind(phrase) < heading.start())
             for phrase in (
@@ -234,7 +300,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 with self.subTest(path=name, route='explicit_pair', phrase=phrase):
                     self.assertIn(phrase, direct)
                 with self.subTest(path=name, route='explicit_pair_only', phrase=phrase):
-                    self.assertNotIn(phrase, shared + '\n' + private + '\n' + lane)
+                    self.assertNotIn(phrase, shared + '\n' + private + '\n' + lane + '\n' + removed)
             for phrase in (
                 'Use the private-proposal route only with separately authorized and admitted derivation before any protected access.',
                 'Freeze exact current/replacement pairs privately with source identity and the exact approved row scope.',
@@ -274,7 +340,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The brief and PR body contain zero pair bytes.',
             ):
                 with self.subTest(path=name, route='private_proposal_only', phrase=phrase):
-                    self.assertNotIn(phrase, shared + '\n' + direct + '\n' + lane)
+                    self.assertNotIn(phrase, shared + '\n' + direct + '\n' + lane + '\n' + removed)
             if Path(name).name.startswith('writer--'):
                 with self.subTest(path=name, route='private_proposal', report_before_application=True):
                     self.assertIn(
@@ -309,10 +375,10 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 for phrase in standing_controls:
                     with self.subTest(path=name, standing_control=phrase):
                         self.assertIn(phrase, shared)
-                    for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane)):
+                    for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane), ('removed_retirement', removed)):
                         with self.subTest(path=name, standing_control=phrase, outside_route=route):
                             self.assertNotIn(phrase, body)
-                for route, heading in (('explicit_pair', direct_heading), ('private_proposal', private_heading), ('lane_derived', lane_heading)):
+                for route, heading in (('explicit_pair', direct_heading), ('private_proposal', private_heading), ('lane_derived', lane_heading), ('removed_retirement', removed_heading)):
                     with self.subTest(path=name, standing_route_placement=route):
                         self.assertTrue(
                             heading
@@ -329,14 +395,14 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                         self.assertIn(phrase, text if phrase == 'five-category list' else direct)
                     if phrase != 'five-category list':
                         with self.subTest(path=name, route='explicit_pair_only', phrase=phrase):
-                            self.assertNotIn(phrase, shared + '\n' + private + '\n' + lane)
+                            self.assertNotIn(phrase, shared + '\n' + private + '\n' + lane + '\n' + removed)
                 with self.subTest(path=name, category=5):
                     self.assertIn('  5. ' + category, text.splitlines())
             elif Path(name).name.startswith('driver'):
                 phrase = 'Do not treat driver evidence preparation as authority to apply the writer edit.'
                 with self.subTest(path=name, shared_role=phrase):
                     self.assertIn(phrase, shared)
-                for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane)):
+                for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane), ('removed_retirement', removed)):
                     with self.subTest(path=name, shared_role=phrase, outside_route=route):
                         self.assertNotIn(phrase, body)
                 for phrase in (
@@ -348,14 +414,14 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                         self.assertIn(phrase, text if phrase == 'five test adaptations' else direct)
                     if phrase != 'five test adaptations':
                         with self.subTest(path=name, route='explicit_pair_only', phrase=phrase):
-                            self.assertNotIn(phrase, shared + '\n' + private + '\n' + lane)
+                            self.assertNotIn(phrase, shared + '\n' + private + '\n' + lane + '\n' + removed)
             else:
                 with self.subTest(path=name, skill_contract='category_count'):
                     self.assertIn('five standing test adaptations', text)
                 phrase = 'Drivers prepare category 5 evidence; writers verify it and apply only separately permitted exact edits.'
                 with self.subTest(path=name, skill_contract='category_roles'):
                     self.assertIn(phrase, shared)
-                for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane)):
+                for route, body in (('explicit_pair', direct), ('private_proposal', private), ('lane_derived', lane), ('removed_retirement', removed)):
                     with self.subTest(path=name, skill_contract='shared_category_roles', outside_route=route):
                         self.assertNotIn(phrase, body)
                 with self.subTest(path=name, skill_contract='command_free_brief'):
@@ -371,7 +437,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 with self.subTest(path=name, skill_contract='explicit_pair_only'):
                     self.assertNotIn(
                         'Drivers document separate applicable loaded edit/access authority and both current/replacement pairs; writers verify them before any category 5 edit.',
-                        shared + '\n' + private + '\n' + lane,
+                        shared + '\n' + private + '\n' + lane + '\n' + removed,
                     )
                 with self.subTest(path=name, skill_contract='obsolete_closed_list'):
                     self.assertNotIn(
@@ -379,6 +445,53 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                         'a race-helper timeout replacement, or a setup-only fixture change when the CoC or the topic Chief approved that exact edit.',
                         text,
                     )
+
+    def test_removed_behavior_retirement_route_appends_only_retired_tables(self):
+        for name in (
+            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/writer--fable52.md', 'plugins/ship/agents/driver.md',
+            'plugins/ship/agents/driver--sol.md', 'plugins/ship/skills/ship/SKILL.md',
+        ):
+            text = (ROOT / name).read_text()
+            _, heading, after = text.partition('#### Removed-behavior retirement route\n')
+            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after,
+                             maxsplit=1, flags=re.MULTILINE)[0]
+            if Path(name).name.startswith('writer--'):
+                role = 'Send the driver the CoC decision, named rows, quoted CI log lines, and PR-body reasons before you append the tables.'
+            elif Path(name).name.startswith('driver'):
+                role = 'Prepare the retirement writer brief with the CoC decision, named row-file paths and row IDs, quoted CI log lines, recorded base/head diff, and each PR-body reason.'
+            else:
+                role = 'Drivers prepare retirement evidence; writers append only the named `[[retired]]` tables.'
+            with self.subTest(path=name):
+                self.assertTrue(heading)
+                self.assertLess(text.index('Category 5 uses exactly one route below, named in the brief.'),
+                                text.index(heading))
+                self.assertLess(text.index('#### Lane-derived route\n'), text.index(heading))
+                self.assertEqual([line for line in route.splitlines() if line],
+                                 EXPECTED_REMOVED_RETIREMENT_ROUTE + [role])
+                self.assertNotIn('Replace only the paired `old` and `new` fields', route)
+
+    def test_removed_behavior_retirement_review_requires_all_four_conditions(self):
+        routes = []
+        for name in ('reviewer--sol.md', 'reviewer--opus.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            _, heading, after = text.partition('## Removed-behavior retirement review\n')
+            route, next_heading, _ = after.partition('## Row retirement with replacement review\n')
+            routes.append(heading + route)
+            lines = [line for line in (heading + route).splitlines() if line]
+            with self.subTest(path=name):
+                self.assertTrue(heading and next_heading)
+                self.assertEqual(lines, EXPECTED_REMOVED_RETIREMENT_REVIEW)
+                conditions = [line for line in lines if re.match(r'  [0-9]\. ', line)]
+                self.assertEqual([line[:5] for line in conditions], ['  1. ', '  2. ', '  3. ', '  4. '])
+                self.assertEqual(sum(line.startswith('Admit ') for line in lines), 1)
+                for refusal in (
+                    'Refuse on any doubt about any condition.',
+                    'Refuse a retirement when the guarded behavior still exists anywhere in the tree at the frozen SHA after the edit.',
+                    'An admission grants zero writer or driver edit authority.',
+                ):
+                    self.assertIn(refusal, lines)
+        self.assertEqual(routes[0], routes[1])
 
     def test_owner_scoped_protected_row_access_requires_verified_exact_scope(self):
         for name in (

@@ -78,6 +78,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
      Category 5 uses exactly one route below, named in the brief.
      Every requirement of the named route applies; route-specific sentences bind only that route.
      Pairs from an admitted derivation gate stay in the private-proposal route.
+     A row that the PR's own diff removed, with the source behavior it guarded, uses the removed-behavior retirement route.
      Category 5 requires loaded edit/access authority before any writer edit. On its named route, Owner-scoped protected row access below is that authority when all its requirements hold, including an identical mutant edit and an independent not-weaker review.
      Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
      The PR author product diff supplies supporting evidence only at the CI-named subject file.
@@ -88,6 +89,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
      The tested merge must contain the recorded base and author head; changed evidence invalidates the approval and applicable GO.
      Dry-run proof and CI at the new head require separate admission; this adaptation authorizes no mutation command execution.
      Only the exact approved paired `old` and `new` fields may change under category 5.
+     The removed-behavior retirement route is the sole exception to the paired-field limit: it appends one `[[retired]]` table per approved row and changes no existing line.
      Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.
      Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
      Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
@@ -199,6 +201,30 @@ The CoC supplies no pair bytes on this route.
 Keep messages, briefs, and PR bodies free of pair bytes and TOML text; identify edits only by path, row ID, and field.
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
+
+#### Removed-behavior retirement route
+
+Use this route only to retire a protected row that the PR's own diff removed together with the source behavior that the row guarded.
+Require the CoC decision that admits each retirement and name this route in the brief.
+On this route, the loaded edit authority is that CoC decision (owner standing grant: "The CoC decides CI/CD, testing and tooling items for me"); Owner-scoped protected row access grants nothing on this route.
+Limit scope to CoC-named exact row-file paths and unique row IDs from the PR's own failing anchor CI log line that reports the row `in the base file, missing at HEAD`.
+Require the recorded base/head diff to show that the PR removes each named row and the source behavior that the row guarded.
+Require the PR body to give the reason for each removed row.
+Append exactly one `[[retired]]` table per named row at the end of its named file.
+Set its `id` to the row ID and its `reason` to the PR-body reason, copied verbatim as one TOML basic string with `\` and `"` escaped.
+Start the appended text with an empty line, so it never joins the last existing line.
+Change nothing else in the named file: no existing line, row, field, pin, or table.
+Read, search, or parse no existing content of the named file; check the edit only with content-free line counts that show added lines and zero deleted lines.
+Refuse a row whose guarded behavior still exists, moved, or has a replacement row.
+Before the push, require an independent reviewer to run its Removed-behavior retirement review and confirm for every named row that the guarded behavior is gone and not moved, and that the file change is only the appended tables.
+Require that reviewer to differ from the PR author and the applying writer.
+Bind the review receipt to reviewer identity, approving verdict, CoC decision identity, commit SHA, row-file paths, row IDs, and CI evidence.
+Require CoC approval of that review receipt before the push; changed source or evidence invalidates the receipt and approval.
+Keep messages, briefs, and PR bodies free of pair bytes and row TOML text; identify each edit only by path, row ID, and the appended `[[retired]]` table.
+This route grants zero TOML search or parse authority, protected reads, or anchor extraction.
+Require separate admission for every mutation or checker execution; keep mutation proof after merge.
+Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
+Send the driver the CoC decision, named rows, quoted CI log lines, and PR-body reasons before you append the tables.
 
 ### Same-strength adaptations
 

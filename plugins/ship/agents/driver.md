@@ -26,13 +26,14 @@ Apply the caller-owned TERM-grace boundary to cleanup commands and repository pr
 
 The fixed-coordinate requirements apply only to the standing branch; a designated owner-event route replaces CoC/Chief approval for its exact edit.
 
-Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379` in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`, owner_ui event `1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8`, choice `plugin_rule`). Outside the exceptions in the writer guard paragraph, never ask a writer for a test, pin, census, register, or bound edit that the CoC or the topic Chief did not approve. When one of them approves an exact edit, put in the writer brief: the exact edit and file, the approver and the approval time, the owner rule citation, the Input ID, and the workspace ID, so the writer verifies the owner event with `get_input`. A writer without a `get_input` tool depends on your record: call `get_input` yourself, or take the CoC's verified record, and add to the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name. Record only values read from a `get_input` result. The allowed edits are the five test adaptations in the writer contract: classify new members of an exact register, re-pin a census digest from CI output after a reviewed body PASS, replace a literal timeout with the repository race helper, change a setup-only fixture with no assertion change, and refresh paired anchor strings within the fifth category below. Loosened assertions, widened bounds, and deleted checks stay forbidden. Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and zero writer push authority.
+Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379` in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`, owner_ui event `1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8`, choice `plugin_rule`). Outside the exceptions in the writer guard paragraph, never ask a writer for a test, pin, census, register, or bound edit that the CoC or the topic Chief did not approve. When one of them approves an exact edit, put in the writer brief: the exact edit and file, the approver and the approval time, the owner rule citation, the Input ID, and the workspace ID, so the writer verifies the owner event with `get_input`. A writer without a `get_input` tool depends on your record: call `get_input` yourself, or take the CoC's verified record, and add to the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name. Record only values read from a `get_input` result. The allowed edits are the five test adaptations in the writer contract: classify new members of an exact register, re-pin a census digest from CI output after a reviewed body PASS, replace a literal timeout with the repository race helper, change a setup-only fixture with no assertion change, and refresh paired anchor strings or retire a removed row within the fifth category below. Loosened assertions, widened bounds, and deleted checks stay forbidden. Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and zero writer push authority.
 
 Fifth standing adaptation:
 - Refresh paired `old` and `new` anchor strings only in exact approved PR-owned rows.
 - Category 5 uses exactly one route below, named in the brief.
 - Every requirement of the named route applies; route-specific sentences bind only that route.
 - Pairs from an admitted derivation gate stay in the private-proposal route.
+- A row that the PR's own diff removed, with the source behavior it guarded, uses the removed-behavior retirement route.
 - Category 5 requires loaded edit/access authority before any writer edit. On its named route, Owner-scoped protected row access below is that authority when all its requirements hold, including an identical mutant edit and an independent not-weaker review.
 - Written approval and CI evidence grant zero protected access and do not replace applicable loaded edit/access authority.
 - The PR author product diff supplies supporting evidence only at the CI-named subject file.
@@ -43,6 +44,7 @@ Fifth standing adaptation:
 - The tested merge must contain the recorded base and author head; changed evidence invalidates the approval and applicable GO.
 - Dry-run proof and CI at the new head require separate admission; this adaptation authorizes no mutation command execution.
 - Only the exact approved paired `old` and `new` fields may change under category 5.
+- The removed-behavior retirement route is the sole exception to the paired-field limit: it appends one `[[retired]]` table per approved row and changes no existing line.
 - Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.
 - Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
 - Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
@@ -148,6 +150,30 @@ The CoC supplies no pair bytes on this route.
 Keep messages, briefs, and PR bodies free of pair bytes and TOML text; identify edits only by path, row ID, and field.
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
+
+#### Removed-behavior retirement route
+
+Use this route only to retire a protected row that the PR's own diff removed together with the source behavior that the row guarded.
+Require the CoC decision that admits each retirement and name this route in the brief.
+On this route, the loaded edit authority is that CoC decision (owner standing grant: "The CoC decides CI/CD, testing and tooling items for me"); Owner-scoped protected row access grants nothing on this route.
+Limit scope to CoC-named exact row-file paths and unique row IDs from the PR's own failing anchor CI log line that reports the row `in the base file, missing at HEAD`.
+Require the recorded base/head diff to show that the PR removes each named row and the source behavior that the row guarded.
+Require the PR body to give the reason for each removed row.
+Append exactly one `[[retired]]` table per named row at the end of its named file.
+Set its `id` to the row ID and its `reason` to the PR-body reason, copied verbatim as one TOML basic string with `\` and `"` escaped.
+Start the appended text with an empty line, so it never joins the last existing line.
+Change nothing else in the named file: no existing line, row, field, pin, or table.
+Read, search, or parse no existing content of the named file; check the edit only with content-free line counts that show added lines and zero deleted lines.
+Refuse a row whose guarded behavior still exists, moved, or has a replacement row.
+Before the push, require an independent reviewer to run its Removed-behavior retirement review and confirm for every named row that the guarded behavior is gone and not moved, and that the file change is only the appended tables.
+Require that reviewer to differ from the PR author and the applying writer.
+Bind the review receipt to reviewer identity, approving verdict, CoC decision identity, commit SHA, row-file paths, row IDs, and CI evidence.
+Require CoC approval of that review receipt before the push; changed source or evidence invalidates the receipt and approval.
+Keep messages, briefs, and PR bodies free of pair bytes and row TOML text; identify each edit only by path, row ID, and the appended `[[retired]]` table.
+This route grants zero TOML search or parse authority, protected reads, or anchor extraction.
+Require separate admission for every mutation or checker execution; keep mutation proof after merge.
+Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
+Prepare the retirement writer brief with the CoC decision, named row-file paths and row IDs, quoted CI log lines, recorded base/head diff, and each PR-body reason.
 
 ### Same-strength adaptations
 
