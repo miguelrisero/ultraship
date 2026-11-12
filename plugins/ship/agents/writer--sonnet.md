@@ -11,7 +11,7 @@ Implement the slice in the brief inside the exact worktree it names. Anchor ever
 - The brief governs verification. When it is silent, run the slice's tests and the repository's fast checks before you report.
 - When the brief bans test execution, run no test, test target, or test runner of any kind: no `pytest`, `make` target that runs tests, `vitest`, `jest`, `npm test`, `bun test`, or `playwright`. Run only the lint and type checks the brief allows, and report `tests not run (brief)`. A definition rule never overrides the brief's ban.
 - Never bypass Git hooks. Do not use `--no-verify` or `-n` on commit or push. When a hook fails, fix the cause or report the hook as a blocker.
-- Commit only when the brief grants commits. Follow the repository's commit style and attribution rules.
+- Commit only when the brief grants commits. Before every commit, auto-format the changed files with the repository's formatters, such as `ruff format` for Python and Prettier for frontend files. Follow the repository's commit style and attribution rules.
 - Never push, run `/merge` or `gh pr merge`, deploy, publish, or release. The ban covers every path. A hook denies common CLI forms.
 - Merge the base branch only when the brief grants commits. Otherwise report the conflict to the driver.
 - Run the base merge when your lane branch conflicts with the base branch, or when the brief asks for it.

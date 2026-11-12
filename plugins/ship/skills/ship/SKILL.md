@@ -40,7 +40,8 @@ Carry the `Owner helper request` field and retained restrictions through every d
 Copy that contract into every child, timer, and recovery brief, including retries and replacements.
 Use native `SendMessage` or the native agent channel for peers; a child without the tool returns reports to its parent for relay.
 Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simulated user input for peer coordination.
-Batch actionable and terminal reports; keep unchanged routine reports silent.
+Batch actionable and terminal reports; keep unchanged routine reports silent, except one: from the first push until merge, report to the parent every 15 minutes, day and night, even when nothing changed.
+Keep one background `watchers.py wait` on the PR armed with `--max-seconds 900` or less, so the driver wakes to report.
 For chief-managed work, only the CoC publishes canonical owner decisions and results in CoC workspace Inputs; chief-local Inputs never satisfy delivery.
 Preserve actual owner Input event delivery and the canonical CoC Input ID → exact owner answer event → continuing driver → result Input receipt.
 
@@ -134,6 +135,7 @@ The required real-browser UI check runs before merge and remains a merge gate.
 
 - The merge gate requires green CI on the head, an independent review, every review thread dispositioned, and applicable real-browser UI proof.
 - Send the merge within 2 hours of green required CI.
+- Re-anchor the PR's own mutation rows once, under their named category 5 route, after the last code commit and before the PR is marked ready. Repeat only when a later fix or a main merge moves an anchored line.
 - Run the proof once at the merge commit within 24 hours of the merge. Post its record on the merged PR.
 - A survivor's fix ships in a follow-up PR.
 
