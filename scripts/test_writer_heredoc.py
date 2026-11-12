@@ -24,6 +24,7 @@ class WriterHeredocTests(unittest.TestCase):
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
+        self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
     def test_python_helper_in_heredoc_is_data(self):
@@ -33,7 +34,148 @@ class WriterHeredocTests(unittest.TestCase):
                                             ('<<-', "'EOF'", '\t')):
             with self.subTest(operator=operator, delimiter=delimiter):
                 script = indent + body.replace('\n', '\n' + indent).rstrip('\t')
-                self.assertFalse(self.denied(f'python3 - {operator}{delimiter}\n{script}{indent}EOF\n'))
+                self.assertTrue(self.denied(f'python3 - {operator}{delimiter}\n{script}{indent}EOF\n'))
+
+    W14 = r'''cd /w/wt-inbox && git add -- backend/api/tests/test_loop_result_provenance_census.py && python3 -I - <<'PY'
+import hashlib
+import subprocess
+from pathlib import Path
+root = '/w/wt-inbox'
+p = 'backend/api/tests/test_loop_result_provenance_census.py'
+def git(*args):
+    return subprocess.check_output(['git', '-C', root, *args])
+assert git('branch', '--show-current').strip() == b'drv/inbox-6943-int'
+assert git('rev-parse', 'HEAD').strip() == b'e57ccb0b1494ee72e4b840afa2ece96788ec19e9'
+assert git('diff', '--cached', '--name-only', '-z') == p.encode() + b'\0'
+before = git('show', 'HEAD:' + p)
+staged = git('show', ':' + p)
+lines = before.splitlines(keepends=True)
+assert lines[269] == b'        "fbde5af8b0bd0d664b737d760a339cc94902c7d50dc48fdc27483c8b1c7ba4b4",\n'
+lines[269] = b'        "3e2c44fa1bbe4f811bceb26e102fccca7d81cf3cf2c6a1f98a1ee56fa8fd536a",\n'
+assert staged == b''.join(lines)
+assert Path(root, p).read_bytes() == staged
+assert hashlib.sha256(staged).hexdigest() == 'a5e96776c9941ec83cfb3b40f5baebeb45c3ddfe1b152854fa15e2af60c76fb5'
+print('PASS: staged content equals the exact approved one-line edit')
+PY
+if [ "$?" -eq 0 ]; then git commit -m "test(census): re-pin the task offer forecast closure"; else exit 1; fi
+'''
+
+    def test_w14_requires_fsmonitor_pair(self):
+        self.assertTrue(self.denied(self.W14))
+        self.assertIn('fsmonitor rule', self.reason)
+        amended = self.W14.replace("root, *args", "root, '-c', 'core.fsmonitor=false', *args")
+        self.assertFalse(self.denied(amended))
+        self.assertFalse(ultraship.runs_heredoc_output(amended))
+        self.assertNotEqual(ultraship.python_heredoc_shell(amended, inert_only=True), amended)
+
+    def test_literal_git_read_commands(self):
+        for argv in (
+            "'rev-parse', '--verify', 'HEAD'", "'branch', '--show-current'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--cached', '--name-only'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--numstat', '--no-textconv'",
+            "'-c', 'core.fsmonitor=false', 'show', 'HEAD:x'",
+            "'-c', 'core.fsmonitor=false', 'status', '--porcelain'",
+            "'-c', 'core.fsmonitor=false', 'ls-files', '--stage'",
+        ):
+            with self.subTest(argv=argv):
+                self.assertFalse(self.denied("python3 -I - <<'PY'\nimport subprocess\n"
+                                             f"subprocess.run(['git', {argv}], text=True)\nPY\n"))
+
+    def test_literal_git_read_requires_isolation_and_literal_lead(self):
+        body = "import subprocess\nsubprocess.run(['git', 'rev-parse', 'HEAD'])\n"
+        for header in ('python3 -', 'echo x && python3 -I -', 'PYTHONHASHSEED=0 python3 -I -',
+                       'GIT_CONFIG_COUNT=0 python3 -I -'):
+            with self.subTest(header=header):
+                self.assertTrue(self.denied(header + " <<'PY'\n" + body + 'PY\n'))
+                self.assertIn('unsupported interpreter header', self.reason)
+
+    def test_python_heredoc_header_suffixes_are_denied(self):
+        for suffix in ('; true', ' | sh', ' > /w/out.json'):
+            with self.subTest(suffix=suffix):
+                command = "python3 - <<'PY'" + suffix + "\nprint('git push origin HEAD')\nPY\n"
+                self.assertTrue(self.denied(command))
+                self.assertIn('unsupported interpreter header', self.reason)
+
+    def test_literal_git_read_refuses_unsafe_argv(self):
+        for argv in (
+            "'pu' + 'sh'", "'push', 'origin', 'HEAD'",
+            "'-c', 'core.fsmonitor=true', 'status'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--cached', '--name-only', '--output=x'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--cached', '--name-only', '--ext-diff'",
+            "'-c', 'core.fsmonitor=false', 'show', 'HEAD'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--cached'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--', '--name-only'",
+            "'-c', 'core.fsmonitor=false', 'branch', '-D', 'x'",
+            "'-C', '-bad', 'rev-parse', 'HEAD'",
+            "'-c', 'alias.x=push', 'rev-parse', 'HEAD'",
+            "'diff', '--cached', '--name-only'",
+        ):
+            with self.subTest(argv=argv):
+                for helper in (False, True):
+                    body = ("import subprocess\ndef git(*args):\n"
+                            "    return subprocess.check_output(['git', *args])\n"
+                            f"git({argv})\n" if helper else
+                            f"import subprocess\nsubprocess.run(['git', {argv}])\n")
+                    self.assertTrue(self.denied("python3 - <<'PY'\n" + body + 'PY\n'))
+
+    def test_literal_git_read_rejects_writes_and_rebinding(self):
+        body = "import subprocess\nsubprocess.run(['git', '-c', 'core.fsmonitor=false', 'status'])\n"
+        for write in ("open('x', 'w').write('x')", "Path('x').write_text('x')", "Path('x').unlink()",
+                      "Path('x').replace('y')", "Path('x').chmod(0o755)", "Path('x').mkdir()"):
+            with self.subTest(write=write):
+                self.assertTrue(self.denied("python3 - <<'PY'\nfrom pathlib import Path\n" + body + write + '\nPY\n'))
+        for extra in ("root = '/other'\n", "def f(root):\n    return root\n"):
+            command = self.W14.replace("root, *args", "root, '-c', 'core.fsmonitor=false', *args")
+            self.assertTrue(self.denied(command.replace("p = 'backend", extra + "p = 'backend")))
+
+    def test_literal_git_read_requires_exact_process_and_helper_forms(self):
+        bodies = (
+            "import subprocess as sp\nsp.run(['git', 'rev-parse', 'HEAD'])",
+            "from subprocess import run\nrun(['git', 'rev-parse', 'HEAD'])",
+            "import subprocess\nf = subprocess.run\nf(['git', 'rev-parse', 'HEAD'])",
+            "import subprocess\nsubprocess.run(['git', 'rev-parse', 'HEAD'], shell=True)",
+            "import subprocess\nsubprocess.run(['git', 'rev-parse', 'HEAD'], text=1)",
+            "import subprocess\nsubprocess.run(['git', '--no-pager', 'rev-parse', 'HEAD'])",
+            "import subprocess\ns = 'rev-parse'\nsubprocess.run(['git', s, 'HEAD'])",
+            "import subprocess\ndef git(*args):\n    return subprocess.run(['git', *args])\ngit(args='status')",
+            "import subprocess\ndef git(*args):\n    return subprocess.run(['git', *args])\nf = git\nf('rev-parse')",
+            "import subprocess\ndef git(x, *args):\n    return subprocess.run(['git', *args])\ngit('rev-parse')",
+            "import subprocess\ndef git(*args):\n    return subprocess.run(['git', *args])\ngit = print\ngit('rev-parse')",
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                self.assertTrue(self.denied("python3 - <<'PY'\n" + body + '\nPY\n'))
+        for header in ('''python -c 'import os; os.system("git "+"pu"+"sh")' ''',
+                       "python3 -c 'print(1)'", 'python3 -m module', 'python3 -O -'):
+            with self.subTest(header=header):
+                self.assertTrue(self.denied(header + " <<'PY'\nimport subprocess\n"
+                                           "subprocess.run(['git', 'rev-parse', 'HEAD'])\nPY\n"))
+
+    def test_process_capable_heredocs_on_every_line(self):
+        body = "import subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\n"
+        for lead in ('', 'echo ready\n'):
+            for python in ('python', 'python3', 'python3.14'):
+                with self.subTest(lead=lead, python=python):
+                    self.assertTrue(self.denied(lead + python + " - <<'PY'\n" + body + 'PY\n'))
+                    self.assertIn('process-capable heredoc rule', self.reason)
+        self.assertTrue(self.denied("python3 - <<'PY'\nimport subprocess\n"
+                                    "subprocess.run(['sh', 'x.sh'])\nPY\ngit status\n"))
+
+    def test_named_writer_denial_rules(self):
+        cases = (
+            ("python3 - <<'PY'\nimport subprocess\nsubprocess.run(['sh', 'x.sh'])\nPY\n",
+             'process-capable heredoc rule'),
+            ('git push origin HEAD', 'git remote writer rule (push)'),
+            ("python3 - <<'PY'\nopen('x.sh', 'w').write('x')\nPY\nsh x.sh\n", 'heredoc-then-run rule'),
+            ('npm publish', "WRITER_BASH 'npm publish'"),
+        )
+        for command, reason in cases:
+            with self.subTest(reason=reason):
+                self.assertTrue(self.denied(command))
+                self.assertIn(reason, self.reason)
+        self.assertTrue(self.denied("python3 - <<'PY'\nimport subprocess\n"
+                                    "subprocess.run(['git', '-c', 'core.fsmonitor=false', 'diff', '--name-only', '--output=x'])\nPY\n"))
+        self.assertIn('literal git read options: --output=x', self.reason)
 
     def test_inert_python_file_edit_is_file_text(self):
         body = ("p = '.github/scripts/merge-queue-gate-status.test.mjs'\n"
@@ -591,6 +733,7 @@ PY
 
         with patch.object(ultraship, 'python_heredoc_shell', side_effect=ValueError('classifier failed')):
             self.assertTrue(self.denied('echo hi'))
+            self.assertIn('classifier exception', self.reason)
 
     def test_read_only_loop_paths_are_file_text(self):
         command = ("python3 - <<'EOF'\nfrom pathlib import Path\n"

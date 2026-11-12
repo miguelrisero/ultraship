@@ -49,11 +49,12 @@ class WriterFalsePublishTests(unittest.TestCase):
                 self.assertEqual(self.decision(command).get('permissionDecision'), 'deny')
 
     def test_png_identity_check_during_a_staged_merge_is_admitted(self):
-        self.assertAdmitted(
+        self.assertDenied(
             "cd /w/lane && python3 -I - <<'PY'\nimport subprocess\npath = 'docs/screens/onboarding.png'\n"
             "staged = subprocess.check_output(['git', 'rev-parse', f':{path}'], text=True)\n"
             "incoming = subprocess.check_output(['git', 'rev-parse', f'MERGE_HEAD:{path}'], text=True)\n"
-            "print({'same': staged == incoming})\nPY",
+            "print({'same': staged == incoming})\nPY")
+        self.assertAdmitted(
             'git -C "$WT" diff --cached MERGE_HEAD -- docs/screens/onboarding.png',
             'WT=/w/lane; git -C $WT ls-tree MERGE_HEAD -- docs/screens/onboarding.png',
             'WT=/w/lane; git -C $WT cat-file -p MERGE_HEAD:docs/screens/onboarding.png | wc -c')
@@ -118,7 +119,7 @@ class WriterFalsePublishTests(unittest.TestCase):
             'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0=push git st',
             "export GIT_CONFIG_PARAMETERS=\"'alias.st=push'\"; git st",
             'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0=send-pack git st')
-        self.assertAdmitted('cd /w && PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 ' + body)
+        self.assertDenied('cd /w && PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 ' + body)
 
     def test_wrapper_runs_its_first_argument_as_the_command_word(self):
         self.assertDenied(*(f'{wrapper} /usr/lib/git-core/git-pu* origin HEAD' for wrapper in (
@@ -185,7 +186,7 @@ class WriterFalsePublishTests(unittest.TestCase):
 
     def test_dated_proof_preparation_in_scratch_is_admitted(self):
         # The refused Teams-lane shape: a timestamp, then a Python patch of a scratch script, then a syntax check.
-        self.assertAdmitted(
+        self.assertDenied(
             "date -u +%FT%TZ && python3 -I - <<'PY'\n"
             "from pathlib import Path\nimport ast, hashlib\n"
             "base = Path('/w/.scratch/battery')\np = base / 'battery-1110.sh'\ns = p.read_text()\n"
@@ -195,7 +196,8 @@ class WriterFalsePublishTests(unittest.TestCase):
             "body = s.split(\"<<'PY'\\n\", 1)[1].rsplit('\\nPY\\n', 1)[0]\nast.parse(body)\n"
             "dst = base / 'battery-final-1110.sh'\nwith dst.open('x') as fh:\n    fh.write(s)\n"
             "dst.chmod(0o444)\nprint(hashlib.sha256(dst.read_bytes()).hexdigest())\nPY\n"
-            "bash -n /w/.scratch/battery/battery-final-1110.sh",
+            "bash -n /w/.scratch/battery/battery-final-1110.sh")
+        self.assertAdmitted(
             "date -u +%FT%TZ && cd /w/lane && python3 - <<'PY'\np = 'tests/startup.test.js'\ns = open(p).read()\n"
             "open(p, 'w').write(s + \"order.push('listen')\\n\")\nPY")
 
@@ -272,7 +274,7 @@ class WriterFalsePublishTests(unittest.TestCase):
         write = "python3 - <<'X'\nopen('run.sh', 'w').write('git pu' + 'sh origin HEAD')\nX\n"
         self.assertDenied('date --file=x && ' + write + 'bash run.sh', 'uv run ' + write + 'sh run.sh',
                           'sleep 2 && bash run.sh & ' + write)
-        self.assertAdmitted("cd /w && uv run python3 - <<'X'\nimport subprocess\nsubprocess.run(['git', 'status'])\nX")
+        self.assertDenied("cd /w && uv run python3 - <<'X'\nimport subprocess\nsubprocess.run(['git', 'status'])\nX")
 
     def test_publication_behind_a_date_prefix_stays_denied(self):
         self.assertDenied(

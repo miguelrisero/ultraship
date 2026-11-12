@@ -291,6 +291,15 @@ print('ultraship hooks: ok')
 
 
 class PythonHeredocGuardTests(unittest.TestCase):
+    def test_writer_named_process_heredoc_rule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, 'XDG_STATE_HOME': tmp, 'HOME': tmp}
+            command = "echo ready\npython3 - <<'PY'\nimport subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\nPY\n"
+            result = hook('pre', {'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
+                                  'tool_input': {'command': command}}, env)
+            self.assertTrue(denied(result))
+            self.assertIn('process-capable heredoc rule', result['hookSpecificOutput']['permissionDecisionReason'])
+
     def test_python_heredoc_executable_remainder_is_refused(self):
         cases = (
             ('import subprocess', 'wt switch --create lane', True),
