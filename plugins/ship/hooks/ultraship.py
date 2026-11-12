@@ -204,23 +204,24 @@ def git_read_argv(argv):
     }
     if subcommand not in options:
         return 'literal git read subcommand'
-    if subcommand in {'diff', 'show', 'status', 'ls-files'} and not fsmonitor:
+    if subcommand in {'rev-parse', 'diff', 'show', 'status', 'ls-files'} and not fsmonitor:
         return 'git read requires -c core.fsmonitor=false (fsmonitor rule)'
     separator = arguments.index('--') if '--' in arguments else len(arguments)
     option_words = arguments[:separator]
     positional = [word for word in option_words if not word.startswith('-')] + arguments[separator + 1:]
     if (any(word.startswith('-') and word not in options[subcommand] for word in option_words)
             or any(word.startswith('-') for word in positional)):
-        return 'literal git read options: ' + next(
+        return 'literal git read options: ' + next((
             word for word in arguments if word.startswith('-') and word != '--'
-            and (word not in options[subcommand] or word in positional))
+            and (word not in options[subcommand] or word in positional)), '--')
     if subcommand == 'branch' and arguments != ['--show-current']:
         return 'literal git read branch options'
     if subcommand == 'diff' and not (
             {'--name-only', '--name-status'} & set(option_words)
             or {'--numstat', '--stat'} & set(option_words) and '--no-textconv' in option_words):
         return 'literal git read diff output'
-    if subcommand == 'show' and (not positional or any(':' not in word for word in positional)):
+    if subcommand == 'show' and ('--' in arguments or not positional
+                                 or any(':' not in word or word.startswith(':/') for word in positional)):
         return 'literal git read show object'
     return ''
 
@@ -296,7 +297,7 @@ def literal_git_read_python(body, reasons=None):
         else:
             helper = None
         starred = [node for node in elements if isinstance(node, ast.Starred)]
-        if starred and not (helper and len(starred) == 1 and elements[-1] is starred[0]
+        if (helper or starred) and not (helper and len(starred) == 1 and elements[-1] is starred[0]
                             and isinstance(starred[0].value, ast.Name)
                             and starred[0].value.id == helper.args.vararg.arg):
             return False
@@ -720,6 +721,7 @@ def read_only_shell(command):
 
 # Literal `cd` and `date` steps run no file, so they may lead a Python heredoc; the scan still reads them.
 PYTHON_LEAD = r'(?:(?:cd +[\w./-]+|date(?: +[-+\w%:]+)*) +&& +)*'
+# A writer may already run `git add` alone, so this lead adds no capability.
 GIT_READ_LEAD = r'[ \t]*(?:(?:cd +[\w./-]+|date(?: +[-+\w%:]+)*|git +add +--(?: +[\w./-]+)+) +&& +)*'
 
 
@@ -901,30 +903,48 @@ def cat_heredoc_data(command):
 
 
 def process_heredoc_denial(command):
-    """Check each Python stdin body, including bodies after a prior shell command."""
+    """Check Python stdin bodies and keep quoted commit messages as data."""
     lines = cat_heredoc_data(command).splitlines(keepends=True)
     index = 0
     while index < len(lines):
-        match = re.fullmatch(r"(?P<lead>.*?)(?:python|python3(?:\.\d+)?)(?:[ \t]+[^\n<>]+)?[ \t]+<<(?P<tabs>-?)[ \t]*"
-                             r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)[^\n]*\n", lines[index])
-        if not match:
+        operators = list(re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
+                                    r"(?P<delimiter>'[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", lines[index]))
+        if not operators:
             index += 1
             continue
-        header = re.fullmatch(re.escape(match['lead']) + PYTHON_STDIN, lines[index])
-        if not header:
-            return 'process-capable heredoc rule (unsupported interpreter header)'
+        match = operators[0]
+        prefix = lines[index][:match.start()]
+        commit_lead = r'[ \t]*(?:cd +[\w./-]+ +&& +)?git +commit(?: +(?:-[a-zA-Z]|--[\w-]+))* +'
+        message_data = (len(operators) == 1 and match['delimiter'][0] in '\'"'
+                        and re.fullmatch(commit_lead + r'(?:-m +"\$\(cat[ \t]*|-F +- +)', prefix)
+                        and not lines[index][match.end():].strip())
+        interpreter = re.search(r'(?<![\w.-])(?:[\w./-]*/)?python(?:3(?:\.\d+)?)?(?=[ \t<]|$)', lines[index])
+        if message_data:
+            pass
+        elif interpreter or '$' in prefix or '`' in prefix:
+            lead = lines[index][:interpreter.start()] if interpreter else prefix
+            header = re.fullmatch(re.escape(lead) + PYTHON_STDIN, lines[index])
+            if len(operators) != 1 or not header:
+                return 'process-capable heredoc rule (unsupported interpreter header)'
+        else:
+            index += 1
+            continue
         delimiter = shlex.split(match['delimiter'])[0]
         end = index + 1
         while end < len(lines) and (lines[end].lstrip('\t') if match['tabs'] else lines[end]).removesuffix('\n') != delimiter:
             end += 1
         if end == len(lines):
             return 'process-capable heredoc rule (unterminated body)'
+        if message_data:
+            index = end + 1
+            continue
         body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[index + 1:end])
         reasons = []
         literal_read = literal_git_read_python(body, reasons)
-        if literal_read and not ('I' in header['flags'] and re.fullmatch(GIT_READ_LEAD, match['lead'])
+        if literal_read and not ('I' in header['flags'] and re.fullmatch(GIT_READ_LEAD, lead)
                                  and match['delimiter'][0] in '\'"\\'):
-            return 'process-capable heredoc rule (unsupported interpreter header)'
+            return ('process-capable heredoc rule (literal git read needs -I, '
+                    'a cd/date/git add lead and a quoted delimiter)')
         if not (inert_python(body) or literal_read or 'I' in header['flags'] and inert_python(body, isolated=True)):
             return 'process-capable heredoc rule' + (': ' + reasons[0] if reasons else '')
         index = end + 1
@@ -1348,11 +1368,14 @@ def pre(data):
                                   'commit grants permit local base-branch merges into their own lane branch. '
                                   'Return this step to your driver; the driver may run it.')
             try:
-                # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
                 command = tin.get('command', '')
+                if any(char in command for char in ('\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85',
+                                                     chr(0x2028), chr(0x2029))):
+                    deny(publication_reason + ' Rule: line separator rule.')
                 reason = process_heredoc_denial(command)
                 if reason:
                     deny(publication_reason + ' Rule: ' + reason + '.')
+                # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
                 file_text_removed = python_heredoc_shell(cat_heredoc_data(command), inert_only=True)
                 reason = git_push(command)
                 if reason:
