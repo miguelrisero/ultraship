@@ -45,6 +45,143 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(header=header):
                 self.assertFalse(self.denied(f'{header}\nimport re, json\n{body}EOF\n'))
 
+    CLEANUP_SCRIPT = r"""cd /w/ws && python3 -I - <<'PY'
+from pathlib import Path
+s=Path('/w/ws/.scratch/ship-video/ui-gate')
+r=s.parents[2]
+t=(r/'.scratch/ship-video/battery-template-s1.sh').read_text().splitlines()
+h='\n'.join(t[:24]).replace('ROOT='+str(r/'wt-video'),'ROOT='+str(r))
+b=h+'''
+for project in video-ui-before video-ui-after; do
+ test -z "$(docker ps -aq --filter label=com.docker.compose.project=$project)"
+done
+git -C "$ROOT/wt-ui-before" status --porcelain
+git -C /w/repo worktree remove "$ROOT/wt-ui-before"
+echo 'capture worktrees=0'
+'''
+p=s/'battery-ui-cleanup.sh';p.write_text(b);p.chmod(0o755)
+PY
+"""
+    TOML_APPEND = r"""cd /w/wt && python3 -I - <<'PY'
+from pathlib import Path
+import subprocess
+import tomllib
+root = Path('/w/wt')
+subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True)
+subprocess.check_output(['git', '-C', str(root), 'branch', '--show-current'], text=True)
+subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain'], text=True)
+text = '\n[[retired]]\nid = "XX01"\nreason = "synthetic"\n'
+tomllib.loads(text)
+with open(root / 'backend/api/tests/mutation/benchmark-ads.toml', 'ab') as f:
+    f.write(text.encode())
+PY
+
+"""
+    TOML_DIFF = 'git -C /w/wt diff --numstat -- backend/api/tests/mutation/benchmark-ads.toml'
+
+    def test_isolated_cleanup_script_is_file_text(self):
+        self.assertFalse(self.denied(self.CLEANUP_SCRIPT))
+        start = self.CLEANUP_SCRIPT.index("b=h+'''")
+        end = self.CLEANUP_SCRIPT.index("'''\np=s/")
+        publication_text = ('gh release create v1\nnpm publish\nvercel deploy --prod\n'
+                            'git push origin HEAD\n')
+        command = self.CLEANUP_SCRIPT[:start] + "b='''\n" + publication_text + self.CLEANUP_SCRIPT[end:]
+        self.assertFalse(self.denied(command))
+
+    def test_cleanup_script_requires_isolation_and_empty_remainder(self):
+        start = self.CLEANUP_SCRIPT.index("b=h+'''")
+        end = self.CLEANUP_SCRIPT.index("'''\np=s/")
+        command = self.CLEANUP_SCRIPT[:start] + "b='''git push origin HEAD\n" + self.CLEANUP_SCRIPT[end:]
+        self.assertTrue(self.denied(command.replace('python3 -I -', 'python3 -')))
+        for remainder in ('sh x.sh', 'git status', 'git diff --stat', 'wc -l x', 'cat x'):
+            with self.subTest(remainder=remainder):
+                self.assertTrue(self.denied(command + remainder))
+
+    def test_isolated_computed_paths_keep_reflection_denied(self):
+        for expression in ("getattr(p, 'write_text')('git push origin HEAD')",
+                           "p.__class__  # git push origin HEAD"):
+            with self.subTest(expression=expression):
+                command = ("python3 -I - <<'PY'\nfrom pathlib import Path\n"
+                           "p = Path('/w') / 'x.sh'\np.chmod(0o755)\n" + expression + '\nPY\n')
+                self.assertTrue(self.denied(command))
+
+    def test_isolated_toml_append_and_separate_git_check_are_admitted(self):
+        command = r"""cd /w/wt && python3 -I - <<'PY'
+import tomllib
+text = '\n[[retired]]\nid = "XX01"\nreason = "The PR removed the push retry, so no publish or release path remains."\n'
+tomllib.loads(text)
+with open('/w/wt/backend/api/tests/mutation/benchmark-ads.toml', 'a') as f:
+    f.write(text)
+PY
+"""
+        self.assertFalse(self.denied(command))
+        self.assertFalse(self.denied(self.TOML_DIFF))
+        self.assertTrue(self.denied(command + self.TOML_DIFF))
+
+    def test_subprocess_toml_append_with_git_check_stays_denied(self):
+        self.assertTrue(self.denied(self.TOML_APPEND + self.TOML_DIFF))
+
+    def test_isolated_computed_git_config_with_status_stays_denied(self):
+        command = ("python3 -I - <<'PY'\nfrom pathlib import Path\n"
+                   "p = Path('/w/wt/.gi' + 't/config')\n"
+                   "p.write_text('[core]\\n    fsmonitor = sh x.sh\\n')\nPY\n"
+                   'git status --porcelain\n')
+        self.assertTrue(self.denied(command))
+
+    def test_writer_publication_commands_stay_denied(self):
+        for command in ('git push origin HEAD:refs/heads/x', 'gh pr merge 1 --squash',
+                        "gh pr comment 1 --body '/merge fix: x'", 'npm publish',
+                        'vercel deploy --prod', 'gh release create v1.0.0'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
+    def test_isolated_writes_to_loadable_git_or_unresolved_paths_stay_denied(self):
+        # Process calls are synthetic classifier input; this test never executes the bodies.
+        bodies = (
+            "open('lib/python3.13/encodings/rot_13.py', 'w').write('import os; os.system(\"git push origin HEAD\")')\n"
+            "b'x'.decode('rot_13')\n",
+            "from pathlib import Path\np = Path('.gi' + 't/hooks/pre-commit')\n"
+            "p.write_text('git push origin HEAD')\np.chmod(0o755)\n",
+            "from pathlib import Path\nd = Path('/w/site-packages')\n"
+            "(d / 'zz.pth').write_text('import os; os.system(\"git push origin HEAD\")')\n",
+            "from pathlib import Path\np = Path('/w/x.txt')\n"
+            "p.write_text('git push origin HEAD')\np.replace('/w/traceback.py')\n",
+            "from pathlib import Path\nw = Path('/w/x.sh').write_text\nw('git push origin HEAD')\n",
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                self.assertTrue(self.denied("cd /usr/local && python3 -I - <<'PY'\n" + body + 'PY\n'))
+
+    def test_isolated_attribute_stores_stay_denied(self):
+        # Process calls are synthetic classifier input; this test never executes the bodies.
+        bodies = (
+            "Path.parent = Path('lib/python3.13/encodings/rot_13.py')\n"
+            "Path('/w/x.txt').parent.write_text('import os; os.system(\"git push origin HEAD\")')\n"
+            "b'x'.decode('rot_13')\n",
+            "Path.parents = [Path('lib/python3.13/encodings/rot_13.py')]\n"
+            "Path('/w/x.txt').parents[0].write_text('import os; os.system(\"git push origin HEAD\")')\n"
+            "b'x'.decode('rot_13')\n",
+            "p = Path('/w/x.txt')\np.parent = 1\np.write_text('git push origin HEAD')\n",
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                command = "cd /usr/local && python3 -I - <<'PY'\nfrom pathlib import Path\n" + body + 'PY\n'
+                self.assertTrue(self.denied(command))
+
+    def test_isolated_normalized_path_string_joins_stay_denied(self):
+        for body in (
+            "open(str(Path('/w/repo/.gi/')) + 't/config', 'a').write('git push origin HEAD')",
+            "open(str(Path('/w/traceback.p/')) + 'y', 'w').write('git push origin HEAD')",
+        ):
+            with self.subTest(body=body):
+                command = "cd /usr/local && python3 -I - <<'PY'\nfrom pathlib import Path\n" + body + '\nPY\n'
+                self.assertTrue(self.denied(command))
+
+    def test_isolated_path_command_write_with_read_only_consumer_stays_denied(self):
+        command = ("python3 -I - <<'PY'\nfrom pathlib import Path\np = Path('/w/bin') / 'wc'\n"
+                   "p.write_text('git push origin HEAD')\np.chmod(0o755)\nPY\nwc -l x\n")
+        self.assertTrue(self.denied(command))
+
     def test_bytecode_flags_keep_inert_publication_words_as_file_text(self):
         for flags in self.BYTECODE_FLAGS:
             with self.subTest(flags=flags):
