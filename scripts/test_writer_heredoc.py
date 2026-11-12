@@ -378,7 +378,7 @@ PY
                 command = self.LOOP_EDIT.replace('for name, pairs in edits.items():', f'for name in {iterator}:')
                 self.assertTrue(self.denied(command))
         command = self.LOOP_EDIT.replace("'a.md': [('old push', 'new push')], 'b.md': [('a', 'push')]", '')
-        command = command.replace("    edits['plugins/ship/agents/' + name] = [('old', 'push')]", '    pass')
+        command = command.replace("    edits['plugins/ship/agents/' + name] = [('old', 'push')]", '    pass  # git push')
         self.assertTrue(self.denied(command))
 
     def test_loop_key_concatenation_checks_every_combination(self):
