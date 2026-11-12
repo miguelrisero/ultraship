@@ -52,8 +52,9 @@ For each slice, in order:
 
 1. Dispatch `writer--sol` with the slice, worktree, base SHA, tests, and commit authority.
 2. Confirm the tests pass on the writer's head. When the brief bans local test execution, the writer runs no tests and CI or the coordinator's gated run proves them instead.
-3. Dispatch `reviewer--sol` on the slice diff at that SHA.
-4. Send real P0 and P1 findings back to the same writer. Commit the fixed slice.
+3. At the lane's first commit, push it with the [resolved destination preflight](#9-push-and-pr) and open a draft PR at once, so CI and review run while the lane builds.
+4. Dispatch `reviewer--sol` on the slice diff at that SHA.
+5. Send real P0 and P1 findings back to the same writer. Commit the fixed slice.
 
 Append one `slices` row when the last slice is committed. Note the slice count and SHAs.
 
@@ -120,7 +121,7 @@ Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into 
      Repeat the complete preflight after any change; evidence applies only to this push attempt.
      To execute, remove only `--dry-run --porcelain`: use `git push origin HEAD:refs/heads/<feature-branch>`.
      Never use an abbreviated or default push. Never target a default branch.
-4. Open one PR at the first push, or update the open PR. Open it before any proof work: mutation batteries and live checks run after the PR exists. Put scope, behavior, verification steps, and risks in the body.
+4. Update the draft PR from step 3, or open it now if none exists. Put scope, behavior, verification steps, and risks in the body. Mark it ready after the last code commit and any row update.
 
 ## 10. Babysit
 

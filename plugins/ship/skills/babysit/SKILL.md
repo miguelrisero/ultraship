@@ -22,7 +22,7 @@ Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) durin
 2. **Wait for CI.** The same background `watchers.py wait` route owns recurring reads. At CI entry and after the wait exits, the sole reader checks required contexts on the current head with `bash "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/watch-checks.sh" <PR> 0 0`, subject to the same cadence. This invocation takes one snapshot and never runs beside the background wait. The checker requires every context from classic protection and branch rules to report and pass. An absent context counts as pending. Pending contexts return custody to the background wait; a rollup transition alone proves neither required-context success nor Better Review coverage. Exit 4 means the checker cannot determine the required contexts; its reason blocks progress until access or protection configuration permits verification. `WATCH_CHECKS_IGNORE` defaults to empty and accepts exact context names, one per line. For checks that report only after `/merge`, the snapshot command is `WATCH_CHECKS_IGNORE="Merge Queue Gate" bash "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/watch-checks.sh" <PR> 0 0`. Ignore only the repository's post-merge-command checks.
 3. **Collect.** Read one failed log once per failure with `gh run view <run-id> --log-failed`. List threads with `bash "${CLAUDE_SKILL_DIR}/scripts/threads.sh" <PR>`.
 4. **Triage.** Give the failures and threads to `ship:triage--sol`. It returns `real`, `false-positive`, `duplicate`, or `already-fixed` for each item, with evidence.
-5. **Fix.** Collect every failing check and every unresolved thread before the fix. Send all `real` items to `ship:writer--sol` as one batch. Rerun the affected tests, unless the brief bans local test execution; then CI reruns them. Push once for the round. Never push a partial batch.
+5. **Fix.** Collect every failing check and every unresolved thread before the fix. Send all `real` items to `ship:writer--sol` as one batch within 1 hour of the review; checks still pending then join the next round. Rerun the affected tests, unless the brief bans local test execution; then CI reruns them. Push once for the round. Never push a partial batch.
 6. **Answer every thread.** Reply with the fix commit or the refuting evidence, then resolve the thread:
 
    ```bash
@@ -44,7 +44,7 @@ When `gh pr view --json mergeStateStatus` reports `BEHIND` or `DIRTY`, merge cur
 
 ## Breaker
 
-- Target 6 pushes or fewer per PR.
+- Target 6 pushes or fewer per PR after it is marked ready.
 - When the same failure signature repeats twice, dispatch `ship:reviewer--sol` on the failures, the threads, and the fix history. Follow its root-cause plan in the next round.
   Require flaky-risk findings with file, line, and mechanism, or explicit none with inspected scope, in this review brief and every fallback.
 - At round 5, stop for a chief review. Send the chief, or the user when no chief runs, the open failures and threads, each with its link, the fix history, and the next action. Resume only with the chief's plan.

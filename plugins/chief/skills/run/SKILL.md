@@ -76,6 +76,7 @@ D6575, 2026-10-29: CoC coordination direction, separate from actual owner receip
 Each lane gets a branch and a linked worktree based on current remote main, inside the permitted workspace. Serialize overlapping file ownership.
 
 Dispatch `ship:driver` for each lane. Drivers run `claude-opus-5-5`. Dispatch `ship:driver--sol` only when the Claude quota is low, and record the current quota reading on the board first.
+Replace a PR driver that sends no report for 15 minutes: stop it by its recorded identity, then dispatch `ship:driver` on the same lane in that turn. Keep a harness-supported wake within 15 minutes while a PR driver runs.
 
 Each driver brief has:
 
@@ -151,7 +152,7 @@ Require the ship completion gate before a lane reaches ready-for-review. Recheck
 
 Apply the ship skill's proof-after-merge rule: green required CI, an independent review, and every thread dispositioned gate the merge, and the merge goes out within 2 hours of green CI. The mutation proof runs at the merge commit after the merge.
 
-Every owner or High-priority ticket gets a named driver within 4 hours. The driver opens the PR before any proof work.
+Every owner or High-priority ticket gets a named driver within 4 hours.
 
 When a lane's babysit stops at round 5, review its failures, threads, and fix history. Send the driver one root-cause plan for the next round.
 
