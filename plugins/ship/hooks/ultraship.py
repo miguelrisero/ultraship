@@ -125,7 +125,7 @@ def inert_python(body):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             # A dunder attribute path (`0.__globals__`, `[__x`) or a bare dunder name can reach reflection through
             # format fields; other text that mentions a dunder, such as `import __main__`, is file text.
-            if re.search(r'^__|[.\[]__', node.value) or '.git/' in node.value or '.git\\' in node.value or node.value.endswith('.git'):
+            if protected_text(node.value):
                 return False
         if isinstance(node, ast.Match):
             return False
@@ -180,6 +180,10 @@ def writable(path):
     return isinstance(path, str) and not LOADABLE.search(path)
 
 
+def protected_text(text):
+    return bool(re.search(r'^__|[.\[]__', text) or '.git/' in text or '.git\\' in text or text.endswith('.git'))
+
+
 def inert_paths(tree, literals, bound):
     """Whether every `Path` is built from one literal and used only as the receiver of `PATH_METHODS`.
 
@@ -231,7 +235,7 @@ def inert_paths(tree, literals, bound):
             return None
         targets = [child for statement in ast.walk(tree) if isinstance(statement, ast.For)
                    for child in ast.walk(statement.target) if isinstance(child, ast.Name) and child.id == node.id]
-        if bound.count(node.id) != len(targets):
+        if bound.count(node.id) != len(targets) or any(isinstance(child.ctx, ast.Load) for child in targets):
             return None
         for child in ast.walk(loop):
             if (isinstance(child, ast.Name) and child.id == node.id and child is not target
@@ -255,14 +259,23 @@ def inert_paths(tree, literals, bound):
             return None
         return dict_keys(iterator.id)
 
-    def key_values(node):
+    def key_values(node, depth=0):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return {node.value}
         if isinstance(node, ast.Name):
-            return loop_values(node, literal_only=True)
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            left, right = key_values(node.left), key_values(node.right)
-            return {a + b for a in left for b in right} if left and right else None
+            values = loop_values(node, literal_only=True)
+            return values if values and len(values) <= 256 else None
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and depth < 8:
+            left, right = key_values(node.left, depth + 1), key_values(node.right, depth + 1)
+            if left and right:
+                values = set()
+                for a in left:
+                    for b in right:
+                        value = a + b
+                        if value not in values and len(values) == 256:
+                            return None
+                        values.add(value)
+                return values
         return None
 
     def dict_keys(name):
@@ -308,9 +321,7 @@ def inert_paths(tree, literals, bound):
         # Loop paths need statically known writable values because Python can load a file the script writes.
         values = loop_values(argument) if isinstance(argument, ast.Name) else None
         return list(values) if values and all(
-            writable(value) and not re.search(r'^__|[.\[]__', value)
-            and '.git/' not in value and '.git\\' not in value and not value.endswith('.git')
-            for value in values) else [None]
+            writable(value) and not protected_text(value) for value in values) else [None]
 
     imported = sum(alias.name == 'Path' for node in ast.walk(tree)
                    if isinstance(node, ast.ImportFrom) and node.module == 'pathlib' for alias in node.names)
@@ -321,7 +332,7 @@ def inert_paths(tree, literals, bound):
             if statement not in tree.body and not (
                     len(statement.value.args) == 1 and isinstance(statement.value.args[0], ast.Name)
                     and loop_values(statement.value.args[0])
-                    and all(writable(path) for path in constructed(statement.value))
+                    and constructed(statement.value) != [None]
                     and bound.count(statement.targets[0].id) == 1):
                 continue
             holders.setdefault(statement.targets[0].id, []).append(statement)
@@ -333,9 +344,6 @@ def inert_paths(tree, literals, bound):
         if not (isinstance(call, ast.Call) and call.func is node) or bound.count('Path') != imported:
             return False
         if call.keywords or len(call.args) != 1:
-            return False
-        if (isinstance(call.args[0], ast.Name) and literals.get(call.args[0].id) is None
-                and constructed(call) == [None]):
             return False
         owner = parents.get(call)
         if isinstance(owner, ast.Attribute):
@@ -419,10 +427,6 @@ def read_only_shell(command):
     if current:
         parts.append(current)
     for words in parts:
-        if (words[:2] == ['git', 'diff'] and words[2:3] in (['--check'], ['--stat'])
-                and (len(words) == 3 or words[3:4] == ['--'] and len(words) > 4
-                     and all(re.fullmatch(r'(?!-)[\w./-]+', path) for path in words[4:]))):
-            continue
         if words[0] not in READ_ONLY_COMMANDS:
             return False
         if words[0] == 'sed' and not (
@@ -1017,17 +1021,20 @@ def pre(data):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
                     'mcp__bettercoding__set_input_status'):
             deny('Writers return owner decision needs to the driver. Only the driver maintains Inputs.')
-        # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
-        file_text_removed = python_heredoc_shell(cat_heredoc_data(tin.get('command', '')), inert_only=True)
-        if tool == 'Bash' and (git_push(tin.get('command', ''))
-                               or WRITER_BASH.search(file_text_removed)):
-            deny('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
-                 'commit grants permit local base-branch merges into their own lane branch. '
-                 'Return this step to your driver; the driver may run it.')
         if tool == 'Bash':
-            reason = writer_gh_denial(file_text_removed)
-            if reason:
-                deny(reason)
+            publication_reason = ('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
+                                  'commit grants permit local base-branch merges into their own lane branch. '
+                                  'Return this step to your driver; the driver may run it.')
+            try:
+                # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
+                file_text_removed = python_heredoc_shell(cat_heredoc_data(tin.get('command', '')), inert_only=True)
+                if git_push(tin.get('command', '')) or WRITER_BASH.search(file_text_removed):
+                    deny(publication_reason)
+                reason = writer_gh_denial(file_text_removed)
+                if reason:
+                    deny(reason)
+            except Exception:
+                deny(publication_reason)
         target = tin.get('file_path') or tin.get('notebook_path') or ''
         if tool in ('Edit', 'Write', 'NotebookEdit') and (
                 HARNESS_PATH.search(target) or target.startswith(str(Path.home() / '.claude') + '/')):

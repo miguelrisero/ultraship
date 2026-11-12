@@ -282,13 +282,13 @@ class WriterHeredocTests(unittest.TestCase):
                  "    for old, new in pairs:\n"
                  "        assert text.count(old) == 1, (name, old)\n"
                  "        text = text.replace(old, new)\n"
-                 "    path.write_text(text)\nPY\n git diff --check && git diff --stat\n")
+                 "    path.write_text(text)\nPY\n")
 
     def test_loop_built_file_edits_are_file_text(self):
         self.assertFalse(self.denied(self.LOOP_EDIT))
 
-    def test_exact_denied_loop_edit_is_file_text(self):
-        command = r"""cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/b8fe-chief-coc-27-oct/.scratch/plugin-pr-speed/ultraship && python3 - <<'PY'
+    def test_saved_combined_command_stays_denied(self):
+        command = r"""cd /w/lane-1 && python3 - <<'PY'
 from pathlib import Path
 edits = {
 'plugins/ship/skills/ship/references/pipeline.md': [
@@ -329,7 +329,8 @@ for name, pairs in edits.items():
 PY
  git diff --check && git diff --stat
 """
-        self.assertFalse(self.denied(command))
+        self.assertTrue(self.denied(command))
+        self.assertFalse(self.denied(command.removesuffix(' git diff --check && git diff --stat\n')))
 
     def test_loop_paths_accept_only_known_writable_values(self):
         for iterator in ("('a.md', 'b.md')", "['a.md', 'b.md']", "{'a.md', 'b.md'}",
@@ -355,7 +356,7 @@ PY
 
     def test_loop_dict_uses_keep_unknown_keys_denied(self):
         for statement in ("edits = {'c.md': []}", 'print(edits)', "del edits['a.md']",
-                          'edits.clear()', 'alias = edits.items', "edits['a.md'] += []",
+                          "edits.pop('a.md')", 'alias = edits.items', "edits['a.md'] += []",
                           "edits[unknown] = []", "edits[('a.md',)] = []"):
             with self.subTest(statement=statement):
                 self.assertTrue(self.denied(self.LOOP_EDIT.replace('for name, pairs', statement + '\nfor name, pairs')))
@@ -367,6 +368,11 @@ PY
             self.LOOP_EDIT.replace('    text = path.read_text()', '    alias = path\n    text = path.read_text()'),
             self.LOOP_EDIT.replace('for name, pairs in edits.items():', 'for (name,), pairs in edits.items():'),
             self.LOOP_EDIT.replace('path.write_text(text)', 'path.write_text(text, **options)'),
+            self.LOOP_EDIT.replace('for name, pairs in edits.items():',
+                                   "def f():\n    global name\n    name = 'traceback.py'\n"
+                                   'for name, pairs in edits.items():')
+            .replace('    path = Path(name)', '    f()\n    path = Path(name)')
+            .replace('PY\n', 'for d[name] in ():\n    pass\nfor d[name] in ():\n    pass\nPY\n'),
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
@@ -391,18 +397,48 @@ PY
         command = self.LOOP_EDIT.replace("'plugins/ship/agents/' + name", "'.gi' + 't/config'")
         self.assertTrue(self.denied(command))
 
-    def test_loop_edits_allow_only_scoped_diff_remainders(self):
-        body = self.LOOP_EDIT.split('PY\n git diff')[0] + 'PY\n'
+    def test_loop_edits_keep_git_diff_remainders_denied(self):
+        body = self.LOOP_EDIT
         for remainder in ('git diff --check', 'git diff --stat', 'git diff --check -- a.md',
                           'git diff --stat -- plugins/ship/agents/a.md'):
             with self.subTest(remainder=remainder):
-                self.assertFalse(self.denied(body + remainder))
+                self.assertTrue(self.denied(body + remainder))
         for remainder in ('git diff', 'git diff --ext-diff', 'git status', 'git log',
                           'git diff --stat > out.txt', 'git -c core.pager=cat diff --stat',
                           'git diff --stat --ext-diff', 'git diff --stat HEAD..main',
                           'git diff --check HEAD'):
             with self.subTest(remainder=remainder):
                 self.assertTrue(self.denied(body + remainder))
+
+    def test_git_configuration_edits_keep_diff_remainders_denied(self):
+        commands = (
+            "python3 - <<'EOF'\nopen('/home/u/.gitconfig', 'a').write("
+            "'[core]\\n    fsmonitor = git push origin HEAD\\n')\nEOF\ngit diff --stat\n",
+            "python3 - <<'EOF'\nopen('.gitattributes', 'w').write('* filter=x\\n')\n"
+            "open('/home/u/.gitconfig', 'a').write('[filter \\\"x\\\"]\\n    clean = git push origin HEAD\\n')\n"
+            'EOF\ngit diff --check\n',
+            "cat <<'EOF' >> /home/u/.gitconfig\n[core]\n    fsmonitor = git push origin HEAD\n"
+            'EOF\ngit diff --stat\n',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
+    def test_loop_key_work_limits_keep_publication_denied(self):
+        for count, names in ((40, "('a', 'b')"), (1200, "('a',)")):
+            with self.subTest(count=count):
+                key = ' + '.join(['n'] * count)
+                command = ("python3 - <<'EOF'\nfrom pathlib import Path\nedits = {'a.md': []}\n"
+                           f'for n in {names}:\n    edits[{key}] = []\n'
+                           'for name, pairs in edits.items():\n    path = Path(name)\n'
+                           "    path.write_text('git push')\nEOF\n && git push origin HEAD")
+                self.assertTrue(self.denied(command))
+
+    def test_read_only_loop_paths_are_file_text(self):
+        command = ("python3 - <<'EOF'\nfrom pathlib import Path\n"
+                   "for name in ('plugins/ship/hooks/ultraship.py', 'scripts/test_writer_heredoc.py'):\n"
+                   "    print(Path(name).read_text().count('git push'))\nEOF\n")
+        self.assertFalse(self.denied(command))
 
     def test_python_writes_that_python_can_import_keep_the_scan(self):
         for path in ('traceback.py', 'traceback/__init__.py', 'Traceback/__init__.py', 'json/decoder.py',
