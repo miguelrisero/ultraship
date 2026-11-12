@@ -163,6 +163,8 @@ The tested merge must contain the recorded base and author head; changed evidenc
 Dry-run proof and CI at the new head require separate admission; this adaptation authorizes no mutation command execution.
 Only the exact approved paired `old` and `new` fields may change under category 5.
 The removed-behavior retirement route is the sole exception to the paired-field limit: it appends one `[[retired]]` table per approved row and changes no existing line.
+On that route, the CoC decision it names is the loaded edit authority.
+On that route, the independent review that the guarded behavior is gone replaces the CI-named subject, same-operation, same-claim, and identical-mutant requirements.
 Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.
 Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.
 Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.
@@ -279,20 +281,23 @@ Limit scope to CoC-named exact row-file paths and unique row IDs from the PR's o
 Require the recorded base/head diff to show that the PR removes each named row and the source behavior that the row guarded.
 Require the PR body to give the reason for each removed row.
 Append exactly one `[[retired]]` table per named row at the end of its named file.
-Set its `id` to the row ID and its `reason` to the PR-body reason, copied verbatim as one TOML basic string with `\` and `"` escaped.
+Set its `id` to the row ID and copy its `reason` verbatim from the PR body as one TOML basic string, escaping `\`, `"`, and every control character such as a line break.
 Start the appended text with an empty line, so it never joins the last existing line.
 Change nothing else in the named file: no existing line, row, field, pin, or table.
-Read, search, or parse no existing content of the named file; check the edit only with content-free line counts that show added lines and zero deleted lines.
-Refuse a row whose guarded behavior still exists, moved, or has a replacement row.
+Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.
+Read, search, or parse no existing content of the named file.
+Permit the applying writer to parse only the appended text, never the named file, to check that it is valid TOML.
+Check the retirement commit only with content-free line counts for each named file: added lines only, zero deleted lines.
+Refuse a row whose guarded behavior still exists in any form, including a changed form at the same site, or that moved or has a replacement row.
 Before the push, require an independent reviewer to run its Removed-behavior retirement review and confirm for every named row that the guarded behavior is gone and not moved, and that the file change is only the appended tables.
 Require that reviewer to differ from the PR author and the applying writer.
 Bind the review receipt to reviewer identity, approving verdict, CoC decision identity, commit SHA, row-file paths, row IDs, and CI evidence.
 Require CoC approval of that review receipt before the push; changed source or evidence invalidates the receipt and approval.
 Keep messages, briefs, and PR bodies free of pair bytes and row TOML text; identify each edit only by path, row ID, and the appended `[[retired]]` table.
-This route grants zero TOML search or parse authority, protected reads, or anchor extraction.
+Beyond that check of the appended text, this route grants zero TOML search or parse authority, protected reads, or anchor extraction.
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
-Drivers prepare retirement evidence; writers append only the named `[[retired]]` tables.
+Drivers prepare retirement evidence and the reviewer's line counts; writers append only the named `[[retired]]` tables.
 
 ### Same-strength adaptations
 

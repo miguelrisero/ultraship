@@ -65,6 +65,7 @@ EXPECTED_LANE_REVIEW = [
 EXPECTED_RETIREMENT_REVIEW = [
     '## Row retirement with replacement review',
     'Use this read-only route only when the brief names the retirement route and carries the CoC ruling that admits the retirement.',
+    'A brief that names the removed-behavior retirement route uses Removed-behavior retirement review above instead.',
     'The CoC rules under the owner\'s testing delegation in the owner global CLAUDE.md, "CoC decisions".',
     'Admit the retirement of a protected row only when all four conditions hold:',
     "  1. The same PR adds a replacement row in the PR's own rows file.",
@@ -101,17 +102,20 @@ EXPECTED_REMOVED_RETIREMENT_ROUTE = [
     'Require the recorded base/head diff to show that the PR removes each named row and the source behavior that the row guarded.',
     'Require the PR body to give the reason for each removed row.',
     'Append exactly one `[[retired]]` table per named row at the end of its named file.',
-    'Set its `id` to the row ID and its `reason` to the PR-body reason, copied verbatim as one TOML basic string with `\\` and `"` escaped.',
+    'Set its `id` to the row ID and copy its `reason` verbatim from the PR body as one TOML basic string, escaping `\\`, `"`, and every control character such as a line break.',
     'Start the appended text with an empty line, so it never joins the last existing line.',
     'Change nothing else in the named file: no existing line, row, field, pin, or table.',
-    'Read, search, or parse no existing content of the named file; check the edit only with content-free line counts that show added lines and zero deleted lines.',
-    'Refuse a row whose guarded behavior still exists, moved, or has a replacement row.',
+    'Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.',
+    'Read, search, or parse no existing content of the named file.',
+    'Permit the applying writer to parse only the appended text, never the named file, to check that it is valid TOML.',
+    'Check the retirement commit only with content-free line counts for each named file: added lines only, zero deleted lines.',
+    'Refuse a row whose guarded behavior still exists in any form, including a changed form at the same site, or that moved or has a replacement row.',
     'Before the push, require an independent reviewer to run its Removed-behavior retirement review and confirm for every named row that the guarded behavior is gone and not moved, and that the file change is only the appended tables.',
     'Require that reviewer to differ from the PR author and the applying writer.',
     'Bind the review receipt to reviewer identity, approving verdict, CoC decision identity, commit SHA, row-file paths, row IDs, and CI evidence.',
     'Require CoC approval of that review receipt before the push; changed source or evidence invalidates the receipt and approval.',
     'Keep messages, briefs, and PR bodies free of pair bytes and row TOML text; identify each edit only by path, row ID, and the appended `[[retired]]` table.',
-    'This route grants zero TOML search or parse authority, protected reads, or anchor extraction.',
+    'Beyond that check of the appended text, this route grants zero TOML search or parse authority, protected reads, or anchor extraction.',
     'Require separate admission for every mutation or checker execution; keep mutation proof after merge.',
     "Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.",
 ]
@@ -124,23 +128,25 @@ EXPECTED_REMOVED_RETIREMENT_REVIEW = [
     'Admit the retirement of a protected row only when all four conditions hold:',
     "  1. The PR's own failing anchor CI evidence reports the row `in the base file, missing at HEAD`.",
     '  2. The recorded diff between the base SHA and the author head SHA removes the source behavior that the row guarded.',
-    '  3. The guarded behavior is gone from the tree at the frozen SHA after the edit: not moved, renamed, or reimplemented elsewhere.',
-    '  4. The edit appends exactly one `[[retired]]` table per named row, with that row ID and the PR-body reason, and changes nothing else in the file.',
+    '  3. The guarded behavior is gone from the tree at the frozen SHA after the edit: not changed in place, moved, renamed, or reimplemented elsewhere.',
+    '  4. The retirement commit appends exactly one `[[retired]]` table per named row, with that row ID and the PR-body reason, and changes nothing else in the file.',
     'Refuse on any doubt about any condition.',
     'Refuse a retirement when the guarded behavior still exists anywhere in the tree at the frozen SHA after the edit.',
+    "Refuse when an identical mutant of the row's operation, with the same claim, still applies at the frozen SHA after the edit; that row uses the lane-derived route.",
     'Review a retirement with a replacement row under Row retirement with replacement review below, and every other row change under Lane-derived row review below.',
     'Require the CoC-approved exact allowlist: the row-file path and unique row ID of each retired row.',
     'Require the brief to quote the PR-body reason for each retired row.',
     'Require the recorded base SHA, author head SHA, and frozen SHA after the edit, and read-only trees at the base SHA and the frozen SHA after the edit.',
+    'Require the brief to give the retirement commit SHA and content-free line counts for each named file between that commit and its parent.',
     'Require every supplied diff to leave out the row-file hunks.',
     'Permit locating each named row and each appended `[[retired]]` table by its row ID inside its named file.',
     "Read only each retired row's lines at the base SHA and each appended `[[retired]]` table at the frozen SHA after the edit.",
-    "Confirm from content-free line counts that each named file gains exactly the appended tables' lines and loses none.",
-    'Search only non-row source and test files for the guarded behavior; never search a rows file.',
+    "Confirm from those line counts that each named file gains exactly the appended tables' lines and loses none.",
+    'Search only non-row source and test files for the guarded behavior.',
     'Bind each retired row to the subject file that its base row names.',
     'Bind CI evidence to the repository, PR, base SHA, author head SHA, tested merge SHA/tree, run ID, attempt, and job ID/name.',
     'Require the tested merge to contain the recorded base SHA and author head SHA.',
-    'Require the frozen SHA after the edit to contain the author head SHA.',
+    'Require the frozen SHA after the edit to contain the author head SHA and the retirement commit.',
     'Require the reviewer to differ from the PR author and the writer who made the row edits.',
     'Bind the verdict and receipt to reviewer identity, approving verdict, CoC decision identity, frozen SHA after the edit, row-file paths, row IDs, and CI evidence.',
     'Require CoC approval of the review receipt before the push; changed source or evidence invalidates the receipt and approval.',
@@ -274,6 +280,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Dry-run proof and CI at the new head require separate admission; this adaptation authorizes no mutation command execution.',
                 'Only the exact approved paired `old` and `new` fields may change under category 5.',
                 'The removed-behavior retirement route is the sole exception to the paired-field limit: it appends one `[[retired]]` table per approved row and changes no existing line.',
+                'On that route, the CoC decision it names is the loaded edit authority.',
+                'On that route, the independent review that the guarded behavior is gone replaces the CI-named subject, same-operation, same-claim, and identical-mutant requirements.',
                 'Row identity, claims, subjects, designated tests, pins, operators, assertions, bounds, and unrelated fields remain unchanged under category 5.',
                 'Missing, ambiguous, stale, mismatched, or unlawfully obtained evidence blocks the edit.',
                 'Owner provenance, effective refusals, protected holds, and zero writer publication authority remain binding.',
@@ -399,6 +407,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 with self.subTest(path=name, category=5):
                     self.assertIn('  5. ' + category, text.splitlines())
             elif Path(name).name.startswith('driver'):
+                self.assertIn('and refresh paired anchor strings or retire a removed row within the fifth category below.', text)
                 phrase = 'Do not treat driver evidence preparation as authority to apply the writer edit.'
                 with self.subTest(path=name, shared_role=phrase):
                     self.assertIn(phrase, shared)
@@ -418,6 +427,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             else:
                 with self.subTest(path=name, skill_contract='category_count'):
                     self.assertIn('five standing test adaptations', text)
+                    self.assertIn("and the exact paired-anchor category below, which also retires a row the PR's own diff removed.", text)
                 phrase = 'Drivers prepare category 5 evidence; writers verify it and apply only separately permitted exact edits.'
                 with self.subTest(path=name, skill_contract='category_roles'):
                     self.assertIn(phrase, shared)
@@ -457,18 +467,20 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after,
                              maxsplit=1, flags=re.MULTILINE)[0]
             if Path(name).name.startswith('writer--'):
-                role = 'Send the driver the CoC decision, named rows, quoted CI log lines, and PR-body reasons before you append the tables.'
+                role = ['Send the driver the CoC decision, named rows, quoted CI log lines, and PR-body reasons before you append the tables; afterwards report the retirement commit SHA and its content-free line counts.']
             elif Path(name).name.startswith('driver'):
-                role = 'Prepare the retirement writer brief with the CoC decision, named row-file paths and row IDs, quoted CI log lines, recorded base/head diff, and each PR-body reason.'
+                role = ['Prepare the retirement writer brief with the CoC decision, named row-file paths and row IDs, quoted CI log lines, recorded base/head diff, and each PR-body reason.',
+                        'Put the retirement commit SHA and its content-free line counts for each named file in the reviewer brief.']
             else:
-                role = 'Drivers prepare retirement evidence; writers append only the named `[[retired]]` tables.'
+                role = ["Drivers prepare retirement evidence and the reviewer's line counts; writers append only the named `[[retired]]` tables."]
             with self.subTest(path=name):
                 self.assertTrue(heading)
                 self.assertLess(text.index('Category 5 uses exactly one route below, named in the brief.'),
                                 text.index(heading))
                 self.assertLess(text.index('#### Lane-derived route\n'), text.index(heading))
+                self.assertLess(text.index(heading), text.index('### Same-strength adaptations\n'))
                 self.assertEqual([line for line in route.splitlines() if line],
-                                 EXPECTED_REMOVED_RETIREMENT_ROUTE + [role])
+                                 EXPECTED_REMOVED_RETIREMENT_ROUTE + role)
                 self.assertNotIn('Replace only the paired `old` and `new` fields', route)
 
     def test_removed_behavior_retirement_review_requires_all_four_conditions(self):
