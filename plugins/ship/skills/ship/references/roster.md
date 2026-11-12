@@ -7,11 +7,13 @@ Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable
 | `ship:planner--sol` | `gpt-6.1-sol` | high | Plans, premises | `planner--opus`, `planner--sonnet` |
 | `ship:writer--sol` | `gpt-6.1-sol` | high | All code | `writer--sonnet` |
 | `ship:writer--sonnet` | `claude-sonnet-5-5` | high | Code, last fallback | none |
+| `ship:writer--fable52` | `claude-fable-5-2` | high | Code, only when the brief or the owner names Fable 5.2 | `writer--sol` |
 | `ship:driver` | `claude-opus-5-5` | xhigh | Lane ship tail | `driver--sol` at low Claude quota only |
 | `ship:driver--sol` | `gpt-6.1-sol` | high | Lane ship tail at low Claude quota, with a recorded quota reading | none |
 | `ship:reviewer--sol` | `gpt-6.1-sol` | high | Light panel, slice review, selection, fix read, high and final panels, closing pass, babysit breaker | `reviewer--opus`, `reviewer--sonnet` |
 | `ship:reviewer--opus` | `claude-opus-5-5` | xhigh | Deep review, simplify | `reviewer--sonnet` |
 | `ship:reviewer--fable` | `claude-opus-5-5` | xhigh | Design and final panels (required seat) | `reviewer--astra` |
+| `ship:reviewer--fable52` | `claude-fable-5-2` | xhigh | Review or panel seat, only when the brief or the owner names Fable 5.2 | `reviewer--fable` |
 | `ship:reviewer--astra` | `gpt-6-astra` | xhigh | Design and light panels | `reviewer--sol`, `reviewer--sonnet` |
 | `ship:reviewer--kimi` | `kimi-k3` | high | Final panel (trial until 2026-10-09) | none |
 | `ship:reviewer--luna` | `gpt-6-luna` | medium | Light panel | `reviewer--sonnet` |

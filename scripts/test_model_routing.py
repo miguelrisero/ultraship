@@ -36,6 +36,8 @@ class ModelRoutingTests(unittest.TestCase):
         self.assertIn('`reviewer--fable`, `reviewer--kimi`', panels)
         self.assertIn('`reviewer--astra` takes the seat', panels)
         for path in (ROOT / 'plugins/ship/agents').glob('*.md'):
+            if path.stem.endswith('--fable52'):
+                continue
             self.assertNotIn('claude-fable-', checks.frontmatter(path.read_text()).get('model', ''))
         sol = checks.frontmatter((ROOT / 'plugins/ship/agents/reviewer--sol.md').read_text())
         self.assertEqual((sol['model'], sol['effort']), ('gpt-6.1-sol', 'high'))
@@ -47,3 +49,18 @@ class ModelRoutingTests(unittest.TestCase):
         for path in (ROOT / 'plugins/ship/agents').glob('*.md'):
             self.assertNotEqual(checks.frontmatter(path.read_text()).get('model', 'inherit'), 'inherit', path.name)
         self.assertEqual(checks.check('HEAD'), [])
+
+    def test_fable52_seats_pin_fable_and_copy_their_base_seat_body(self):
+        for seat, base, effort in (('writer--fable52', 'writer--sol', 'high'),
+                                   ('reviewer--fable52', 'reviewer--fable', 'xhigh')):
+            with self.subTest(seat=seat):
+                path = ROOT / 'plugins/ship/agents' / (seat + '.md')
+                text = path.read_text()
+                fields = checks.frontmatter(text)
+                self.assertEqual((fields['name'], fields['model'], fields['effort']), (seat, 'claude-fable-5-2', effort))
+                self.assertEqual(checks.inspect_text(text, path), [])
+                base_text = (ROOT / 'plugins/ship/agents' / (base + '.md')).read_text()
+                self.assertEqual(text.split('\n---\n', 1)[1], base_text.split('\n---\n', 1)[1])
+        reviewer = checks.frontmatter((ROOT / 'plugins/ship/agents/reviewer--fable52.md').read_text())
+        self.assertNotIn('Bash', reviewer['tools'])
+        self.assertNotIn('Edit', reviewer['tools'])
