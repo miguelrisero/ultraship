@@ -915,9 +915,11 @@ def process_heredoc_denial(command):
         match = operators[0]
         prefix = lines[index][:match.start()]
         commit_lead = r'[ \t]*(?:cd +[\w./-]+ +&& +)?git +commit(?: +(?:-[a-zA-Z]|--[\w-]+))* +'
-        message_data = (index == 0 and len(operators) == 1 and match['delimiter'][0] in '\'"'
+        message_data = (index == 0 and len(operators) == 1
                         and re.fullmatch(commit_lead + r'(?:-m +"\$\(cat[ \t]*|-F +- +)', prefix)
                         and not lines[index][match.end():].strip())
+        if message_data and not re.fullmatch(r"'[A-Za-z0-9_]+'|\"[A-Za-z0-9_]+\"", match['delimiter']):
+            return 'process-capable heredoc rule (unsupported commit message delimiter)'
         interpreter = re.search(r'(?<![\w.-])(?:[\w./-]*/)?python(?:3(?:\.\d+)?)?(?=[ \t<]|$)', lines[index])
         if message_data:
             pass

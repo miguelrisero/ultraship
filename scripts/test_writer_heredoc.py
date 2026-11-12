@@ -130,6 +130,37 @@ if [ "$?" -eq 0 ]; then git commit -m "test(census): re-pin the task offer forec
                 self.assertFalse(self.denied(lead + "git commit --verbose -F - <<'EOF'\nfix: x\n\n"
                                              "- Admit `python3 -I - <<'PY'` bodies.\nEOF\n"))
 
+    def test_commit_stdin_escaped_delimiter_is_denied(self):
+        command = r'''git commit -F - <<"\$X"
+fix: x
+$X
+python3 -I - <<'PY'
+import subprocess
+subprocess.run(['git', 'pu' + 'sh'])
+PY
+: <<'TAIL'
+\$X
+TAIL
+'''
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (unsupported commit message delimiter)', self.reason)
+
+    def test_commit_cat_escaped_delimiter_is_denied(self):
+        command = r'''git commit -m "$(cat <<"\$X"
+fix: x
+$X
+)"
+python3 -I - <<'PY'
+import subprocess
+subprocess.run(['git', 'pu' + 'sh'])
+PY
+: <<'TAIL'
+\$X
+TAIL
+'''
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (unsupported commit message delimiter)', self.reason)
+
     def test_commit_message_after_unclosed_heredoc_is_denied(self):
         command = ("bash <<'SH'\ngit commit -m \"$(cat <<'X'\nSH\npython3 -I - <<'PY'\n"
                    "import subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\nPY\nX\n")
