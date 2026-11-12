@@ -88,12 +88,14 @@ PY
         command = self.CLEANUP_SCRIPT[:start] + "b='''\n" + publication_text + self.CLEANUP_SCRIPT[end:]
         self.assertFalse(self.denied(command))
 
-    def test_cleanup_script_requires_isolation_and_read_only_remainder(self):
-        self.assertTrue(self.denied(self.CLEANUP_SCRIPT.replace('python3 -I -', 'python3 -')))
-        for remainder in ('sh /w/ws/.scratch/ship-video/ui-gate/battery-ui-cleanup.sh',
-                          'git status', 'git diff --stat'):
+    def test_cleanup_script_requires_isolation_and_empty_remainder(self):
+        start = self.CLEANUP_SCRIPT.index("b=h+'''")
+        end = self.CLEANUP_SCRIPT.index("'''\np=s/")
+        command = self.CLEANUP_SCRIPT[:start] + "b='''git push origin HEAD\n" + self.CLEANUP_SCRIPT[end:]
+        self.assertTrue(self.denied(command.replace('python3 -I -', 'python3 -')))
+        for remainder in ('sh x.sh', 'git status', 'git diff --stat', 'wc -l x', 'cat x'):
             with self.subTest(remainder=remainder):
-                self.assertTrue(self.denied(self.CLEANUP_SCRIPT + remainder))
+                self.assertTrue(self.denied(command + remainder))
 
     def test_isolated_computed_paths_keep_reflection_denied(self):
         for expression in ("getattr(p, 'write_text')('git push origin HEAD')",
@@ -133,15 +135,27 @@ PY
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
 
-    def test_subprocess_git_check_preserves_body_and_lead_scan(self):
-        for command in (
-            self.TOML_APPEND.replace("tomllib.loads(text)", "subprocess.run(['git', 'push', 'origin', 'HEAD'])")
-            + self.TOML_DIFF,
-            self.TOML_APPEND.replace('cd /w/wt &&', 'sh x.sh &') + self.TOML_DIFF,
-            self.TOML_APPEND.replace('tomllib.loads(text)', 'invalid syntax !') + self.TOML_DIFF,
-        ):
-            with self.subTest(command=command):
-                self.assertTrue(self.denied(command))
+    def test_isolated_writes_to_loadable_git_or_unresolved_paths_stay_denied(self):
+        # Process calls are synthetic classifier input; this test never executes the bodies.
+        bodies = (
+            "open('lib/python3.13/encodings/rot_13.py', 'w').write('import os; os.system(\"git push origin HEAD\")')\n"
+            "b'x'.decode('rot_13')\n",
+            "from pathlib import Path\np = Path('.gi' + 't/hooks/pre-commit')\n"
+            "p.write_text('git push origin HEAD')\np.chmod(0o755)\n",
+            "from pathlib import Path\nd = Path('/w/site-packages')\n"
+            "(d / 'zz.pth').write_text('import os; os.system(\"git push origin HEAD\")')\n",
+            "from pathlib import Path\np = Path('/w/x.txt')\n"
+            "p.write_text('git push origin HEAD')\np.replace('/w/traceback.py')\n",
+            "from pathlib import Path\nw = Path('/w/x.sh').write_text\nw('git push origin HEAD')\n",
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                self.assertTrue(self.denied("cd /usr/local && python3 -I - <<'PY'\n" + body + 'PY\n'))
+
+    def test_isolated_path_command_write_with_read_only_consumer_stays_denied(self):
+        command = ("python3 -I - <<'PY'\nfrom pathlib import Path\np = Path('/w/bin') / 'wc'\n"
+                   "p.write_text('git push origin HEAD')\np.chmod(0o755)\nPY\nwc -l x\n")
+        self.assertTrue(self.denied(command))
 
     def test_bytecode_flags_keep_inert_publication_words_as_file_text(self):
         for flags in self.BYTECODE_FLAGS:

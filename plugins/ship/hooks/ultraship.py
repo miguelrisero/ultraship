@@ -12,7 +12,7 @@ import shlex
 import sys
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
 RESEARCH_BUDGET = 40
@@ -76,15 +76,15 @@ INERT_ATTRIBUTES = {
     'items', 'keys', 'values', 'group', 'groups', 'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape',
     'loads', 'dumps', 'load', 'dump', 'dedent', 'sha256', 'hexdigest', 'unlink',
 }
-PROCESS_FREE_ATTRIBUTES = INERT_ATTRIBUTES | {'parents', 'chmod', 'mkdir'}
+ISOLATED_ATTRIBUTES = INERT_ATTRIBUTES | {'parents', 'chmod', 'mkdir'}
 READ_ONLY_COMMANDS = {'sed', 'grep', 'head', 'tail', 'cat', 'wc', 'diff', 'echo', 'ls', 'true', 'date'}
 READ_ONLY_STARTS = {'cat', 'grep', 'head', 'tail', 'ls', 'wc', 'diff', 'cd', 'git'}
 REFLECTION = {'eval', 'exec', 'compile', 'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars', 'breakpoint',
               'help', 'input'}
 
 
-def inert_python(body, paths=True):
-    """Whether a Python script can only compute and read or write files, so its words are file text, not commands."""
+def inert_python(body, isolated=False):
+    """Whether Python only computes and edits files: literal paths normally, resolved paths in isolated mode."""
     try:
         tree = ast.parse(body)
     except (SyntaxError, ValueError):
@@ -119,7 +119,7 @@ def inert_python(body, paths=True):
         if isinstance(node, ast.Name) and (node.id in REFLECTION or node.id.startswith('__')):
             return False
         if isinstance(node, ast.Attribute):
-            if node.attr not in (INERT_ATTRIBUTES if paths else PROCESS_FREE_ATTRIBUTES):
+            if node.attr not in (ISOLATED_ATTRIBUTES if isolated else INERT_ATTRIBUTES):
                 return False
             if (isinstance(node.value, ast.Name) and node.value.id in modules
                     and node.attr not in INERT_MEMBERS[modules[node.value.id]]):
@@ -131,8 +131,6 @@ def inert_python(body, paths=True):
                 return False
         if isinstance(node, ast.Match):
             return False
-    if not paths:
-        return True
     # The interpreter imports modules from the current folder (Python 3.13 imports `traceback` on any uncaught
     # error), so a write must name a literal path that Python cannot load.
     # A name keeps its literal only when nothing else in the script binds it.
@@ -143,6 +141,8 @@ def inert_python(body, paths=True):
         node, (ast.ExceptHandler, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name]
     bound += [(alias.asname or alias.name).split('.')[0] for node in ast.walk(tree)
               if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names]
+    if isolated:
+        return isolated_writes(tree, bound)
     literals, assigned = {}, {}
     for statement in tree.body:
         if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
@@ -174,6 +174,80 @@ def inert_python(body, paths=True):
             if not paths or not all(writable(path) for path in paths):
                 return False
     return inert_paths(tree, literals, bound)
+
+
+def resolved_path(node, assigned, depth=0):
+    if depth >= 16:
+        return None
+    resolve = lambda value: resolved_path(value, assigned, depth + 1)
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in assigned:
+        return resolve(assigned[node.id])
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {'Path', 'str'}
+            and len(node.args) == 1 and not node.keywords):
+        return resolve(node.args[0])
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
+        left, right = resolve(node.left), resolve(node.right)
+        if left is not None and right is not None:
+            return str(PurePosixPath(left) / right) if isinstance(node.op, ast.Div) else left + right
+    if isinstance(node, ast.Attribute) and node.attr == 'parent':
+        path = resolve(node.value)
+        if path is not None:
+            return str(PurePosixPath(path).parent)
+    if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+            and node.value.attr == 'parents' and isinstance(node.slice, ast.Constant)
+            and type(node.slice.value) is int):
+        path = resolve(node.value.value)
+        if path is not None:
+            try:
+                return str(PurePosixPath(path).parents[node.slice.value])
+            except IndexError:
+                return None
+    return None
+
+
+def isolated_writes(tree, bound):
+    path_imports = sum(alias.name == 'Path' and alias.asname in (None, 'Path')
+                       for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == 'pathlib'
+                       for alias in node.names)
+    if bound.count('Path') != path_imports or 'str' in bound or 'open' in bound:
+        return False
+    assigned = {node.targets[0].id: node.value for node in tree.body
+                if isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and bound.count(node.targets[0].id) == 1}
+    calls = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
+    targets = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == 'open' and id(node) not in calls:
+            return False
+        if isinstance(node, ast.Attribute) and node.attr in {
+                'write_text', 'chmod', 'mkdir', 'unlink', 'open', 'replace'} and id(node) not in calls:
+            return False
+        if not isinstance(node, ast.Call):
+            continue
+        builtin_open = isinstance(node.func, ast.Name) and node.func.id == 'open'
+        method = node.func.attr if isinstance(node.func, ast.Attribute) else None
+        if builtin_open or method == 'open':
+            if (any(isinstance(argument, ast.Starred) for argument in node.args)
+                    or any(keyword.arg not in {'mode', 'encoding', 'newline', 'errors'} for keyword in node.keywords)):
+                return False
+            offset = 1 if builtin_open else 0
+            modes = [*node.args[offset:offset + 1],
+                     *(keyword.value for keyword in node.keywords if keyword.arg == 'mode')]
+            if all(isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
+                   for mode in modes):
+                continue
+            target = (node.args[0] if node.args else None) if builtin_open else node.func.value
+            targets.append(target)
+        elif method in {'write_text', 'chmod', 'mkdir', 'unlink'}:
+            targets.append(node.func.value)
+        elif method == 'replace':
+            if node.keywords or any(isinstance(argument, ast.Starred) for argument in node.args):
+                return False
+            if len(node.args) == 1:
+                targets.extend((node.func.value, node.args[0]))
+    return all(writable(path := resolved_path(target, assigned)) and not protected_text(path) for target in targets)
 
 
 def writable(path):
@@ -506,10 +580,10 @@ def python_heredoc_shell(command, inert_only=False):
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
             # Only a `cd` or `date` may lead it and only a read-only remainder may follow it, because another command
             # could run the file it writes.
-            # Isolated mode excludes current-folder imports; process-free bodies write file text through computed paths.
-            if (re.fullmatch(rf'[ \t]*{PYTHON_LEAD}', match['lead']) and read_only_shell(remainder)
-                    and match['delimiter'][0] in '\'"\\'
-                    and (inert_python(body) or 'I' in match['flags'] and inert_python(body, paths=False))):
+            # Resolved writes in isolated mode require an empty remainder, which cannot run a planted command.
+            if (re.fullmatch(rf'[ \t]*{PYTHON_LEAD}', match['lead']) and match['delimiter'][0] in '\'"\\'
+                    and (read_only_shell(remainder) and inert_python(body)
+                         or not remainder.strip() and 'I' in match['flags'] and inert_python(body, isolated=True))):
                 return lines[0] + remainder
             if inert_only:
                 return command
