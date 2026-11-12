@@ -103,6 +103,19 @@ PY
                            "p = Path('/w') / 'x.sh'\np.chmod(0o755)\n" + expression + '\nPY\n')
                 self.assertTrue(self.denied(command))
 
+    def test_isolated_toml_append_and_separate_git_check_are_admitted(self):
+        command = r"""cd /w/wt && python3 -I - <<'PY'
+import tomllib
+text = '\n[[retired]]\nid = "XX01"\nreason = "The PR removed the push retry, so no publish or release path remains."\n'
+tomllib.loads(text)
+with open('/w/wt/backend/api/tests/mutation/benchmark-ads.toml', 'a') as f:
+    f.write(text)
+PY
+"""
+        self.assertFalse(self.denied(command))
+        self.assertFalse(self.denied(self.TOML_DIFF))
+        self.assertTrue(self.denied(command + self.TOML_DIFF))
+
     def test_subprocess_toml_append_with_git_check_stays_denied(self):
         self.assertTrue(self.denied(self.TOML_APPEND + self.TOML_DIFF))
 

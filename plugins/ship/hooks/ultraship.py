@@ -56,6 +56,7 @@ LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
 INERT_MEMBERS = {
     're': {'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape'},
     'json': {'loads', 'dumps', 'load', 'dump'},
+    'tomllib': {'loads'},
     'textwrap': {'dedent'},
     'difflib': {'unified_diff', 'SequenceMatcher'},
     'hashlib': {'sha256'},
