@@ -393,13 +393,14 @@ PY
 
     def test_loop_edits_allow_only_scoped_diff_remainders(self):
         body = self.LOOP_EDIT.split('PY\n git diff')[0] + 'PY\n'
-        for remainder in ('git diff --check', 'git diff --stat', 'git diff --check a.md',
-                          'git diff --stat plugins/ship/agents/a.md'):
+        for remainder in ('git diff --check', 'git diff --stat', 'git diff --check -- a.md',
+                          'git diff --stat -- plugins/ship/agents/a.md'):
             with self.subTest(remainder=remainder):
                 self.assertFalse(self.denied(body + remainder))
         for remainder in ('git diff', 'git diff --ext-diff', 'git status', 'git log',
                           'git diff --stat > out.txt', 'git -c core.pager=cat diff --stat',
-                          'git diff --stat --ext-diff'):
+                          'git diff --stat --ext-diff', 'git diff --stat HEAD..main',
+                          'git diff --check HEAD'):
             with self.subTest(remainder=remainder):
                 self.assertTrue(self.denied(body + remainder))
 

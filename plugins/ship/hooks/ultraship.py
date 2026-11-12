@@ -420,7 +420,8 @@ def read_only_shell(command):
         parts.append(current)
     for words in parts:
         if (words[:2] == ['git', 'diff'] and words[2:3] in (['--check'], ['--stat'])
-                and all(re.fullmatch(r'(?!-)[\w./-]+', path) for path in words[3:])):
+                and (len(words) == 3 or words[3:4] == ['--'] and len(words) > 4
+                     and all(re.fullmatch(r'(?!-)[\w./-]+', path) for path in words[4:]))):
             continue
         if words[0] not in READ_ONLY_COMMANDS:
             return False
