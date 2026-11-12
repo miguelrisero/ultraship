@@ -130,6 +130,26 @@ if [ "$?" -eq 0 ]; then git commit -m "test(census): re-pin the task offer forec
                 self.assertFalse(self.denied(lead + "git commit --verbose -F - <<'EOF'\nfix: x\n\n"
                                              "- Admit `python3 -I - <<'PY'` bodies.\nEOF\n"))
 
+    def test_commit_message_after_unclosed_heredoc_is_denied(self):
+        command = ("bash <<'SH'\ngit commit -m \"$(cat <<'X'\nSH\npython3 -I - <<'PY'\n"
+                   "import subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\nPY\nX\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (unsupported interpreter header)', self.reason)
+
+    def test_commit_message_after_open_quote_is_denied(self):
+        command = ('echo "\ngit commit -m "$(cat <<\'X\'\n"\npython3 -I - <<\'PY\'\n'
+                   "import subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\nPY\nX\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (unsupported interpreter header)', self.reason)
+
+    def test_commit_message_inside_multiline_quote_is_denied(self):
+        for header in ("git commit -F - <<'X'", "git commit -m \"$(cat <<'X'"):
+            with self.subTest(header=header):
+                command = (": '\n" + header + "\n'\npython3 -I - <<'PY'\nimport subprocess\n"
+                           "subprocess.run(['git', 'pu' + 'sh'])\nPY\n: '\nX\n'\n")
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable heredoc rule', self.reason)
+
     def test_interpreter_cat_substitution_is_denied(self):
         for consumer in ('python3 -c', 'P=python3; $P -c', 'sh -c'):
             with self.subTest(consumer=consumer):
