@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol'}}, env))
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'Explore', 'model': 'haiku'}}, env))
 
-    for agent in ['ship:writer--sol', 'ship:writer--sonnet']:
+    for agent in ['ship:writer--sol', 'ship:writer--sonnet', 'ship:writer--fable52']:
         destination_cases = ('setup.py', 'pkg/sitecustomize.py', 'pkg/usercustomize/__init__.py',
                              'lib/python3.13/x.py', 'x.pth', 'x.toml', 'lib/x.py', 'python3.13/x.py')
         destination_decisions = [
@@ -205,7 +205,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     for action in ['create_input', 'update_input', 'set_input_status']:
         tool = f'mcp__bettercoding__{action}'
         assert re.fullmatch(matcher, tool), tool
-        for agent in ['ship:writer--sol', 'ship:writer--sonnet']:
+        for agent in ['ship:writer--sol', 'ship:writer--sonnet', 'ship:writer--fable52']:
             assert denied(hook('pre', {'agent_type': agent, 'tool_name': tool}, env)), (agent, tool)
         assert not denied(hook('pre', {'agent_type': 'ship:driver', 'tool_name': tool}, env)), tool
     for action in ['get_input', 'list_inputs', 'get_input_events']:
