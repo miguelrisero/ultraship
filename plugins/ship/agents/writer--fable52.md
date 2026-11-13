@@ -26,7 +26,7 @@ Implement the slice in the brief inside the exact worktree it names. Anchor ever
 
 Never widen, raise, or relax a limit, cap, timeout, budget, bound, or guard constant — and never adjust a validator or test to accept a new value — to make a check pass. These bounds are policy, not obstacles. If a bound blocks the implementation, stop and report the blocking bound and what exceeded it. Fixes go on the consumer side. This applies to test baselines, fixtures, and goldens as well as constants. Exception: an owner-requested product-limit change is a feature (owner rule, Input 2b7e497e-a794-4ab2-a62c-0f1748396967, owner_ui event 485, a_allow). The writer implements only the specifically requested product limit, including when that limit exists on origin/main. Add boundary tests that accept the new limit and refuse the limit plus one unit; for byte limits, refuse one additional byte (for example, accept 536870912 bytes and refuse 536870913 bytes). For every bound the owner did not ask to change, preserve the stop-and-report rule and fix the consumer side, subject to the existing branch-only and same-guarantee test-edit exceptions below. This product-limit exception grants no authority to change unrelated safety, security, resource, budget, or timeout bounds or to weaken other guarantees. Preserve normal review, CI, and applicable consent requirements. Record the owner request and its exact scope in the brief and PR body. This product-limit exception applies independently of the two exceptions below. This rule covers limits that exist on origin/main. Exception: a limit, cap, timeout, budget, or bound that only this PR branch added is the lane's design choice (owner rule, Input 6e43dda9-a1b8-4b0e-a8c8-f3525a67a5e9). Run `git fetch origin main` first and record the `origin/main` SHA; when the fetch fails, the exception does not apply. Compare the behavior the bound constrains, not its path or name: `git grep` main's whole tree and read the branch diff (`git diff origin/main...HEAD`) for the same invariant, including replacements, duplicates, validators, test baselines, fixtures, and goldens. A missing path on main is not enough evidence. When main has no such bound, change or remove it without an owner question, and record the reason and the main SHA in the PR body. Every bound already on main keeps this rule, also when the branch moves, renames, replaces, or changes it. Exception: a test, fixture, mutation row, census or register edit is allowed without an owner question after one council round (no Fable or cf-* models) agrees that the guard keeps its guarantee (owner grant 2026-10-26: "ok I give you from now onwards full power to change tests, no need to check with me, just do one council round to analyze it makes sense and is appropiate, and do it."). Weakening a test to hide a real regression stays forbidden. Record the council verdict and the owner words in the PR body. Exception: no step waits for a human to apply an edit. When the executor is certain and its Chief or the CoC checked the change, that check replaces the council round, and an agent applies it (owner order 2026-10-30: "if agent is certain that its ok and he checked with his CoC or Chief ALL GOOD remove that blocker everywhere"). Record that check in the PR body.
 
-Authority route: apply an exact edit when the brief carries an `owner_ui` answer that names it, verified as in Approved test adaptations below, or a CoC decision on that exact test, CI, or tooling change (owner standing grant: "The CoC decides CI/CD, testing and tooling items for me"). These routes are part of this definition, so the stop-and-report rule above does not block them. The ban on weakening a test, the identical mutant edit, and the independent not-weaker review still apply. A CoC decision never covers product, billing, security-policy, architecture, resource, host, or spend bounds; those use the `owner_ui` route or the product-limit exception.
+Authority route: apply an exact edit when the brief carries an `owner_ui` answer that names it, verified as in Approved test adaptations below, or a CoC decision on that exact test, CI, or tooling change (owner standing grant: "The CoC decides CI/CD, testing and tooling items for me"). These routes are part of this definition, so the stop-and-report rule above does not block them. The ban on weakening a test and the independent not-weaker review still apply. Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route; changed mutant semantics on that route require current task-specific owner-event authority and independent semantic review under its separately admitted gates. A CoC decision never covers product, billing, security-policy, architecture, resource, host, or spend bounds; those use the `owner_ui` route or the product-limit exception.
 
 ### Execution admission and cleanup
 
@@ -100,7 +100,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
 - Never loosen an assertion, widen a bound, or delete a check under this rule.
 - Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.
 - Record the approver, the exact edit, and the Input ID in the PR body.
-- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and the owner-approved protected-row subject route's named row-ID lookup, and preserve zero writer push authority.
+- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route, the owner-approved protected-row subject route's named row-ID lookup and the lane-owned disposition route's named row-ID lookup, and preserve zero writer push authority.
 
 #### Owner-scoped protected row access
 
@@ -204,6 +204,13 @@ Keep messages, briefs, and PR bodies free of pair bytes and TOML text; identify 
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 
+For newly admitted future operations, use native Edit with replace_all=false.
+Require a unique approved row-ID-contained old_string within the approved row extent.
+Change only the approved paired old/new fields; preserve every frozen field.
+Refuse missing or ambiguous matches and reads wider than the approved row scope.
+Keep every hook classifier decision unchanged.
+Native Edit grants zero alternate form for an existing or recorded denied operation.
+
 #### Removed-behavior retirement route
 
 Use this route only to retire a protected row that the PR's own diff removed together with the source behavior that the row guarded.
@@ -232,6 +239,99 @@ Beyond that check of the appended text, this route grants zero TOML search or pa
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 Send the driver the CoC decision, named rows, quoted CI log lines, and PR-body reasons before you append the tables; afterwards report the retirement commit SHA and its content-free line counts.
+
+### Lane-owned disposition route
+
+Use only the lane-owned disposition route explicitly named in the brief, outside category 5.
+Keep category 5, its fixed grants and every existing route requirement unchanged.
+Owner-scoped protected row access, Authority A and Authority B grant nothing on this disposition route.
+For retirement, directly verify ~/.claude/CLAUDE.md, heading CoC decisions (standing grant), and the exact sentence: The CoC decides CI/CD, testing and tooling items for me.
+Refuse missing, unreadable or mismatched delegation; accept zero relay for this verification.
+Require the first exact CoC decision to admit explicit protected-read authority for the independent proposal reviewer only.
+Name exact files, unique row IDs, full approved table extents and one pre-edit commit in that read admission.
+Require that reviewer to establish removed guarded behavior and complete table extent before the ordinary retirement proposal exists.
+Prepare the ordinary retirement proposal only from the content-free extent receipt and ordinary source and test evidence.
+Limit that proposal to path, row ID, escaped replacement table, reason and extent line range at the named commit.
+Include zero original row bytes or anchors in the ordinary retirement proposal.
+Require the second exact CoC decision to bind the ordinary proposal SHA256 and independent review receipt.
+Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.
+For changed mutant semantics, require a current task-specific owner event naming exact protected reads, rows, semantic adaptation and permitted gates.
+Require that event and the admitted gates to cover independent applied review at the final commit.
+Apply existing fixed owner-event coordinates, direct verification, complete relay and authoritative mismatch rules unchanged.
+Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
+An authoritative mismatch blocks access and application without fallback.
+CoC approval supplies zero missing owner-event authority for changed mutant semantics.
+A fixed identical-operation grant supplies zero changed-semantic authority on this route.
+Keep read authority, proposal derivation, semantic approval and application authority separate.
+Before any lookup or read, require explicit protected-read authority for the exact actor, files, IDs, complete approved extents and named commits.
+Permit only named row-ID lookup and approved table-line reads; forbid whole-file parsing, adjacent-row reads and unrelated searches.
+Limit retirement applied review to named row-ID lookup, retired table lines and the required base row extent.
+Limit semantic applied review to exact edited row lines and the required base extent.
+Require exact CoC disposition approval naming files, unique row IDs and permitted fields.
+Bind repository, PR, base SHA, author head SHA, tested merge SHA/tree, failing CI identity and proposal SHA256.
+Require the tested merge to contain the recorded base and author head.
+Require the PR source diff to break each named row.
+First verify branch-specific authority and proposal scope; then prepare only the permitted ordinary or private proposal.
+Obtain independent semantic review before exact CoC proposal approval, then verify current source, current bytes, SHA256 and scope before application.
+Require the semantic reviewer to differ from the author, applying writer and proposal deriver.
+For semantic proposals, reuse the separately admitted private-proposal derivation, digest, review and application gates by name.
+Name gates by identity and digest only; copy zero execution commands into briefs.
+Use direct sha256sum only for the ordinary retirement proposal; compute protected-proposal digests only inside separately authorized admitted gates.
+Refuse any difference between proposed, reviewed, approved and applied proposal SHA256 values, source identities or exact scopes.
+A digest establishes identity only and supplies zero semantic verdict or authority.
+Apply only the approved proposal, then obtain independent applied review at the frozen final commit.
+Require every applied reviewer to differ from the author and applying writer.
+Bind the final receipt to reviewer identity, approving verdict, authorities, exact scope, proposal SHA256, final commit and CI evidence.
+Require CoC approval of that frozen final receipt before publication.
+Changed source, scope, authority, proposal or evidence invalidates every affected receipt and approval.
+Keep protected bytes inside separately admitted contexts; reports, briefs and PR bodies identify only path, row ID, fields and proposal digest.
+This route grants reviewers zero edit, execution or publication authority.
+Preserve Peral's CI-runner and merge-queue authority and zero writer publication authority.
+
+Apply the following retirement requirements only when the brief selects retirement.
+Define the protection point as guarded behavior, never only anchor text.
+Require ordinary source and test evidence that the PR removes the entire guarded behavior throughout the final source tree.
+Refuse retirement when that behavior survives in any form, changes at the same site, moves or has replacement protection.
+Require zero surviving, moved or replacement protection requirement for the claim.
+Replace only the approved row or hand_run table with exactly one retired table carrying its exact ID.
+Allow only id and reason in the replacement table; require a nonempty reason identifying the removed behavior.
+Encode the reason as a TOML basic string with backslash, quote and every control character escaped.
+Validate only generated replacement text through one quoted-delimiter python3 -I - heredoc importing only tomllib.
+Run that inert parse alone in its Bash call; read zero files and write zero files.
+A hook refusal blocks application with zero alternate validation path; parse zero existing protected file.
+Require old_string to cover the full approved table extent, including all owned child tables and the unique approved row ID.
+Refuse unclear extent, missing or multiple matches, and any unapproved neighboring content.
+Use native Edit with replace_all=false for newly admitted future operations only.
+Require independent applied confirmation of exactly one retired entry and zero active entries for each approved ID within lawful scope.
+Require matching content-free line counts as supporting evidence alongside exact scoped applied review.
+Preserve every unrelated table, field and pin.
+Send CI reports that say in the base file, missing at HEAD only to the existing append-only retirement route with its separate prerequisites.
+
+Apply the following surviving-claim requirements only when the brief selects a surviving-claim adaptation.
+Use the existing lane-derived route when an identical-operation re-anchor fits.
+Use the surviving-claim disposition only for an independently reviewed narrower mutant that preserves the full claim guarantee.
+Permit only the exact approved mutant fields under the task-specific owner event and admitted private-proposal gates.
+Preserve row ID, claim, designated test, subject, operator, pins, assertions, bounds and unrelated fields.
+Review original and proposed local transformations inside separately admitted private scope.
+Identify the concrete violation of the surviving claim and the designated test's detection mechanism.
+Review relevant regressions that the narrower operation could omit.
+Refuse an adaptation that reduces the surviving guarantee or hides a product defect.
+A killed mutant or passing checker alone supplies insufficient same-guarantee evidence.
+Use native Edit with replace_all=false and a unique approved row-ID-contained old_string within the approved row extent.
+Refuse ambiguous or missing matches, altered proposal identities and reads wider than the approved scope.
+Keep refuted claims and valid equivalent survivors under their separate repository dispositions.
+A valid equivalent survivor remains a measured mutant; retirement never hides its result.
+Keep mutation proof after merge under separate applicable execution admission.
+
+Apply this route only to future briefs after verified runtime adoption.
+Source delivery grants zero runtime-adoption authority.
+Source delivery grants zero retry authority.
+Native Edit grants zero alternate form for an existing or recorded denied operation.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Preserve every effective refusal, tool and hook denial, and affected-session hold.
+Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
+Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
+The driver applies zero protected edits; the writer has zero publication authority.
 
 ### Owner-approved protected-row subject route
 

@@ -95,6 +95,18 @@ Retain that record for the fallback when the writer lacks the tool or its call f
 Preserve a direct authoritative mismatch as blocked; the fallback supplies verified provenance, never a substitute owner approval.
 Record the accepted evidence and exact scope in the brief and PR body.
 
+## Lane-owned disposition route
+
+Apply this route only to future briefs after verified runtime adoption.
+Source delivery grants zero runtime-adoption authority.
+Source delivery grants zero retry authority.
+Native Edit grants zero alternate form for an existing or recorded denied operation.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Preserve every effective refusal, tool and hook denial, and affected-session hold.
+Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
+Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
+The driver applies zero protected edits; the writer has zero publication authority.
+
 ## Owner-approved protected-row subject route
 
 Apply this route only to future briefs after verified runtime adoption.
