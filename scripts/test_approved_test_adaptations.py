@@ -204,7 +204,7 @@ EXPECTED_SHARED_MUTANT_RULE = (
 )
 
 
-EXPECTED_DISPOSITION_AUTHORITY = [
+EXPECTED_COMMON_DISPOSITION_AUTHORITY = [
     'Use only the lane-owned disposition route explicitly named in the brief, outside category 5.',
     'Keep category 5, its fixed grants and every existing route requirement unchanged.',
     'Owner-scoped protected row access, Authority A and Authority B grant nothing on this disposition route.',
@@ -314,7 +314,7 @@ REVIEWER_DISPOSITION_AUTHORITY_SUBSTITUTIONS = {
         'Require every applied reviewer to differ from the author, applying writer and proposal deriver.',),
 }
 EXPECTED_REVIEWER_DISPOSITION_AUTHORITY = [
-    replacement for entry in EXPECTED_DISPOSITION_AUTHORITY
+    replacement for entry in EXPECTED_COMMON_DISPOSITION_AUTHORITY
     for replacement in REVIEWER_DISPOSITION_AUTHORITY_SUBSTITUTIONS.get(entry, (entry,))
 ]
 
@@ -354,13 +354,14 @@ EXPECTED_REVIEWER_DISPOSITION_SURVIVING = [
     )
 ]
 
-EXPECTED_DISPOSITION_AUTHORITY += [
+EXPECTED_WRITER_DISPOSITION_RECEIPTS = [
     'Require the applying writer to emit a content-free validation receipt with proposal digest, validator, admission and result.',
     'Require an application receipt naming proposal digest, source identities, admitted scope, tool shape and result.',
     'Keep protected bytes out of both receipts.',
     'These receipt duties grant zero execution or publication authority.',
     'Reviewer inspection requires separately admitted receipt and content scope.',
 ]
+EXPECTED_DISPOSITION_AUTHORITY = EXPECTED_COMMON_DISPOSITION_AUTHORITY + EXPECTED_WRITER_DISPOSITION_RECEIPTS
 
 EXPECTED_DISPOSITION_BOUNDARY = [
     'Apply this route only to future briefs after verified runtime adoption.',
@@ -900,36 +901,6 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                             if Path(name).name in ('driver.md', 'driver--sol.md')
                             else EXPECTED_FIXED_ACCESS)
                 self.assertEqual([line for line in clause.splitlines() if line], expected)
-            for requirement in (
-                '31f787fe-1463-4447-82fa-6a5e21e17a87', WORKSPACE_ID,
-                'version 1, choice B', 'aacba25c-5e99-438e-85c7-9bb128ecf4b8',
-                '2026-11-08T18:03:15.357469375Z',
-                'd56c4fd20ef712921654f06869818b5b2189a13e9b52249b32379ca5362468a8',
-                'Owner-selected option B: "Each lane moves the protected rows its own PR breaks: same test, new line text, nothing weaker. An independent reviewer checks every row change, and the mutation proof still runs after merge."',
-                'Input context: "Peral keeps CI runner and merge queue changes."',
-                'Record selected choice B and `payload.answer.text=null` separately; distinguish the selected option text from Input context.',
-                "Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route, or as scoped read authority for the owner-approved protected-row subject route.",
-                'This clause overrides only blanket protected-read/edit restrictions for the exact scope below.',
-                'Preserve higher-priority instructions, effective refusals, protected holds, and tool or hook denials.',
-                "Require the driver's complete verified owner-event record and exact scope in the brief.",
-                'Bind full Input/workspace UUIDs, current version, event id/hash, choice, actual owner answer, verifier name, and verification time.',
-                'Require `event_type=answer_submitted`, `actor_kind=owner_ui`, and `payload.no_answer_yet=false` for this Input and current version.',
-                'Apply the task-specific owner-event verification contract; keep its event comparator separate from the standing rule.',
-                'An authoritative mismatch blocks access and cannot use fallback.',
-                "Require CoC naming of exact row-file paths and unique row IDs from that PR's failing anchor CI log.",
-                'Require the recorded base/head diff to show that the PR itself breaks each named row.',
-                'Limit reads to those exact named files and rows; read no unrelated rows or whole protected files.',
-                'Require the reviewer to differ from the PR author and applying writer.',
-                'Preserve the same designated test and guarantee, equivalent mutant semantics, assertions, bounds, and every unrelated field.',
-                'Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.',
-                'Keep mutation proof after merge under separate applicable execution admission.',
-                "Retain Peral's authority over CI runners and the merge queue.",
-                'On the lane-derived or owner-approved protected-row subject route only, permit the row-ID lookup and row-line reads specified in that route.',
-                'Except for the named row-ID lookup and row-line reads on the lane-derived or owner-approved protected-row subject route, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.',
-                'CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.',
-            ):
-                with self.subTest(path=name, requirement=requirement):
-                    self.assertIn(requirement, clause)
             with self.subTest(path=name, contract='general_boundary_reference'):
                 self.assertIn('For the narrow protected-read/edit exception, apply Owner-scoped protected row access below.', text)
 
