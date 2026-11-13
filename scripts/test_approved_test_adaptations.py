@@ -208,6 +208,7 @@ EXPECTED_COMMON_DISPOSITION_AUTHORITY = [
     'Use only the lane-owned disposition route explicitly named in the brief, outside category 5.',
     'Keep category 5, its fixed grants and every existing route requirement unchanged.',
     'Owner-scoped protected row access, Authority A and Authority B grant nothing on this disposition route.',
+    'Apply the following delegation and two-decision requirements only when the brief selects retirement.',
     'For retirement, directly verify ~/.claude/CLAUDE.md, heading CoC decisions (standing grant), and the exact sentence: The CoC decides CI/CD, testing and tooling items for me.',
     'Refuse missing, unreadable or mismatched delegation; accept zero relay for this verification.',
     'Require the first exact CoC decision to admit explicit protected-read authority for the independent proposal reviewer only.',
@@ -218,6 +219,7 @@ EXPECTED_COMMON_DISPOSITION_AUTHORITY = [
     'Include zero original row bytes or anchors in the ordinary retirement proposal.',
     'Require the second exact CoC decision to bind the ordinary proposal SHA256 and independent review receipt.',
     'Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.',
+    'End the retirement-only authority block; apply every subsequent shared requirement to both branches unless explicitly scoped.',
     'For changed mutant semantics, require a current task-specific owner event naming exact protected reads, rows, semantic adaptation and permitted gates.',
     'Require that event and the admitted gates to cover independent applied review at the final commit.',
     'For changed mutant semantics, apply the task-specific owner-event verification contract to the current event and exact semantic scope.',
@@ -304,7 +306,7 @@ REVIEWER_DISPOSITION_AUTHORITY_SUBSTITUTIONS = {
         'Require separate admission for each named private-proposal derivation, digest, review and application context.',
         'Inspect semantic evidence only inside the review scope that the applicable authority admits.'),
     'Use direct sha256sum only for the ordinary retirement proposal; compute protected-proposal digests only inside separately authorized admitted gates.': (
-        "Inspect the ordinary retirement proposal's digest receipt from a separately admitted writer or gate.",
+        "For retirement only, inspect the ordinary retirement proposal's digest receipt from a separately admitted writer or gate.",
         'Require protected-proposal digest receipts from separately authorized admitted gates.',
         'Execute zero digest commands.'),
     'Apply only the approved proposal, then obtain independent applied review at the frozen final commit.': (
@@ -355,7 +357,7 @@ EXPECTED_REVIEWER_DISPOSITION_SURVIVING = [
 ]
 
 EXPECTED_WRITER_DISPOSITION_RECEIPTS = [
-    'Require the applying writer to emit a content-free validation receipt with proposal digest, validator, admission and result.',
+    'For retirement only, require the applying writer to emit a content-free validation receipt with proposal digest, validator, admission and result.',
     'Require an application receipt naming proposal digest, source identities, admitted scope, tool shape and result.',
     'Keep protected bytes out of both receipts.',
     'These receipt duties grant zero execution or publication authority.',
