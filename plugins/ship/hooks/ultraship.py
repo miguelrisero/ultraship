@@ -957,7 +957,7 @@ def process_heredoc_denial(command, readers=False):
             if len(operators) != 1 or not header:
                 return 'process-capable heredoc rule (unsupported interpreter header)'
         else:
-            if readers or data_reader_header(lines[index]):
+            if readers:
                 if (len(operators) != 1 or not data_reader_header(lines[index])
                         or not data_reader_header(lines[index].replace('\\\n', ''))):
                     return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
@@ -967,7 +967,8 @@ def process_heredoc_denial(command, readers=False):
                     body_line = lines[end].lstrip('\t') if match['tabs'] else lines[end]
                     if body_line.removesuffix('\n') == delimiter:
                         break
-                    if match['delimiter'][0] not in '\'"\\' and ('$' in body_line or '`' in body_line):
+                    if match['delimiter'][0] not in '\'"\\' and (
+                            '$' in body_line or '`' in body_line or body_line.removesuffix('\n').endswith('\\')):
                         return 'process-capable heredoc rule (expandable data body)'
                     end += 1
                 if end == len(lines):
@@ -1023,7 +1024,9 @@ def shell_raw_words(text):
             continue
         while index < len(text):
             char = text[index]
-            if char == '\\' and (quote != "'" or text[start:start + 2] == "$'"):
+            if not quote and text[index:index + 2] == "$'":
+                raise ValueError('ANSI-C shell quote')
+            if char == '\\' and quote != "'":
                 index += 2
                 if index > len(text):
                     raise ValueError('unfinished shell escape')
@@ -1079,23 +1082,6 @@ def nested_shell_strings(tokens):
             if argument[0] in {';', '&', '|', '(', ')', '`', '\n'}:
                 break
             arguments.append(argument)
-        if name == 'watch':
-            cursor = 0
-            while cursor < len(arguments) and arguments[cursor][1].startswith('-'):
-                option = arguments[cursor][1]
-                if option in {'-n', '--interval'}:
-                    cursor += 2
-                elif option in {'-d', '--differences', '-t', '--no-title', '-e', '--errexit', '-g', '--chgexit',
-                                '-p', '--precise', '-b', '--beep', '-x', '--exec'}:
-                    cursor += 1
-                elif re.fullmatch(r'--interval=.+|-n.+|--differences=.*', option):
-                    cursor += 1
-                else:
-                    raise ValueError('ambiguous watch option')
-            if cursor >= len(arguments):
-                raise ValueError('missing watch program')
-            yield ('', ' '.join(word[1] for word in arguments[cursor:]), arguments[cursor][2], arguments[-1][3])
-            continue
         if name in {'script', 'flock', 'su'}:
             value_options = {'script': {'-O', '-I', '-B', '-T', '-m', '--log-out', '--log-in', '--log-io',
                                          '--log-timing', '--logging-format'},
@@ -1122,7 +1108,7 @@ def nested_shell_strings(tokens):
                 else:
                     raise ValueError('ambiguous command wrapper option')
             continue
-        if name == 'eval':
+        if name in {'eval', 'watch'}:
             yield from arguments
             if arguments:
                 yield ('', ' '.join(word[1] for word in arguments), arguments[0][2], arguments[-1][3])
@@ -1148,11 +1134,32 @@ def nested_shell_strings(tokens):
                 yield (argument[0], value, argument[2], arguments[-1][3])
 
 
+def shell_line_continuations(text):
+    """Join shell continuations while preserving literal single-quoted code."""
+    kept, quote, index = [], '', 0
+    while index < len(text):
+        char = text[index]
+        if char == '\\' and quote != "'":
+            if text[index:index + 2] == '\\\n':
+                index += 2
+                continue
+            kept.append(text[index:index + 2])
+            index += 2
+            continue
+        if char == quote:
+            quote = ''
+        elif not quote and char in "'\"":
+            quote = char
+        kept.append(char)
+        index += 1
+    return ''.join(kept)
+
+
 def unresolved_shell_word(raw):
     """Treat expansion markers conservatively; single quotes protect only glob characters."""
     spans = single_quoted_spans(raw)
     return '$' in raw or '`' in raw or spans is None or any(
-        re.search(r'[*?\[{]', span) for span, single in spans if not single)
+        re.search(r'[*?\[{]|^=', span) for span, single in spans if not single)
 
 
 def nested_work_exceeded(tokens, seen):
@@ -1162,11 +1169,11 @@ def nested_work_exceeded(tokens, seen):
 
 def python_inline_denial(command):
     """Check every Python -c word, including wrapper arguments and nested shell strings."""
-    shell = shell_without_heredoc_bodies(command)
+    shell = shell_line_continuations(shell_without_heredoc_bodies(command))
     pending = [shell]
     seen = set()
     while pending:
-        text = pending.pop()
+        text = shell_line_continuations(pending.pop())
         if text in seen:
             continue
         seen.add(text)
@@ -1271,7 +1278,10 @@ def code_option(value):
 
 def stdin_program_path(value):
     path = os.path.normpath(re.sub(r'/+', '/', value))
-    return value == '-' or path in {'/dev', '/proc'} or path.startswith(('/dev/', '/proc/'))
+    resolved = os.path.normpath(os.path.join(os.getcwd(), path))
+    return (value == '-' or '..' in value.split('/') or path in {'dev', 'proc'}
+            or path.startswith(('dev/', 'proc/')) or resolved in {'/dev', '/proc'}
+            or resolved.startswith(('/dev/', '/proc/')))
 
 
 def inline_interpreter_denial(command):
@@ -1282,7 +1292,7 @@ def inline_interpreter_denial(command):
     pending = [shell]
     seen = set()
     while pending:
-        text = pending.pop()
+        text = shell_line_continuations(pending.pop())
         if text in seen:
             continue
         seen.add(text)
@@ -1293,6 +1303,14 @@ def inline_interpreter_denial(command):
         if nested_work_exceeded(tokens, seen):
             return 'inline interpreter code rule (nesting limit)'
         nested = list(nested_shell_strings(tokens))
+        input_tokens = shell_raw_words(shell_line_continuations(shell))
+        redirected = any(token[0] == '<' for token in input_tokens)
+        piped_input = redirected or any(
+            token[0] == '|'
+            and not (index and input_tokens[index - 1][0] == '|' and input_tokens[index - 1][3] == token[2])
+            and not (index + 1 < len(input_tokens) and input_tokens[index + 1][0] == '|'
+                     and input_tokens[index + 1][2] == token[3])
+            for index, token in enumerate(input_tokens))
         if re.search(r'(?:\$\([^\n]*\)|`[^`\n]*`)[ \t]+(?:-[ceEpr]\b|--(?:eval|print)\b|-[a-zA-Z]*[ce]\b)', text):
             return 'inline interpreter code rule (unresolved command word)'
         segments, words, piped = [], [], False
@@ -1326,6 +1344,10 @@ def inline_interpreter_denial(command):
                     continue
                 break
         for words, piped in segments:
+            first = next((word for word in words if not re.match(r'[A-Za-z_]\w*=', word[1])), None)
+            if (piped_input and first and first[0] != '[' and first[1] != '$?'
+                    and unresolved_shell_word(first[0])):
+                return 'inline interpreter code rule (unresolved command word)'
             for index, (raw, value, start, end) in enumerate(words):
                 arguments = [word[1] for word in words[index + 1:]]
                 unresolved = raw != '[' and value != '$?' and start not in shell_programs and unresolved_shell_word(raw)
@@ -1339,9 +1361,12 @@ def inline_interpreter_denial(command):
                 if not name:
                     continue
                 segment_text = text[words[0][2]:words[-1][3]]
-                if any(word[0] == '<' for word in words) or re.search(r'[<>][ \t]*\(|=\(', text[end:]):
+                if redirected or any(word[0] == '<' for word in words) or re.search(r'[<>][ \t]*\(|=\(', text[end:]):
                     return 'inline interpreter code rule (program from a pipe)'
                 if not arguments and not piped:
+                    if any(token[0] in {'<', '|', '('} or token[0] == '{'
+                           for token in shell_raw_words(shell)):
+                        return 'inline interpreter code rule (program from a pipe)'
                     continue
                 if name != 'python':
                     short, long, subcommands = INLINE_INTERPRETERS[name]
@@ -1360,9 +1385,27 @@ def inline_interpreter_denial(command):
                 elif not arguments or any(stdin_program_path(argument) for argument in arguments):
                     return 'inline interpreter code rule (program from a pipe)'
                 elif piped:
-                    flags = [argument for argument in arguments if re.fullmatch(r'-[a-zA-Z]+', argument)]
-                    program = any(argument in {'-c', '-m'} or re.match(r'-[a-zA-Z]*[cm]', argument)
-                                  for argument in arguments) or any(not argument.startswith('-') for argument in arguments)
+                    flags, program, cursor = [], False, 0
+                    while cursor < len(arguments):
+                        option = arguments[cursor]
+                        if option in {'-W', '-X', '--check-hash-based-pycs'}:
+                            cursor += 2
+                            continue
+                        if option.startswith(('-W', '-X', '--check-hash-based-pycs=')):
+                            cursor += 1
+                            continue
+                        if option == '--':
+                            program = cursor + 1 < len(arguments)
+                            break
+                        if not option.startswith('-'):
+                            program = True
+                            break
+                        if re.fullmatch(r'-[a-zA-Z]+', option):
+                            flags.append(option)
+                        if re.match(r'-[bBdEhiIOPqRsSuvVx]*[cm]', option):
+                            program = cursor + 1 < len(arguments) or len(option) > 2
+                            break
+                        cursor += 1
                     if (not program or any('i' in flag[1:] for flag in flags)
                             or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
@@ -1872,8 +1915,7 @@ def pre(data):
                                   'Return this step to your driver; the driver may run it.')
             try:
                 command = tin.get('command', '')
-                if any(char in command for char in ('\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85', '\xa0',
-                                                     chr(0x2028), chr(0x2029))):
+                if any(char.isspace() and char not in ' \t\n' for char in command):
                     deny(publication_reason + ' Rule: line separator rule.')
                 reason = process_heredoc_denial(command)
                 if reason:

@@ -212,7 +212,7 @@ class WriterHeredocTests(unittest.TestCase):
 
     def test_ansi_quoted_node_option_is_denied(self):
         self.assertTrue(self.denied("node $'-e' 'require(\"child_process\").execSync(\"git \" + \"pu\" + \"sh\")'"))
-        self.assertIn('inline interpreter code rule', self.reason)
+        self.assertIn('process-capable python -c rule', self.reason)
 
     def test_python_pipe_stdin_operand_keeps_trailing_arguments_denied(self):
         command = ('printf \'%s\' \'import subprocess; subprocess.run(["git", "pu" + "sh"])\' '
@@ -244,6 +244,71 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('inline interpreter code rule' if command.startswith('flock')
                               else 'process-capable python -c rule', self.reason)
+
+    def test_github_run_watch_is_a_read_only_command(self):
+        self.assertFalse(self.denied('gh run watch 123 --exit-status'))
+
+    def test_unquoted_heredoc_backslash_cannot_move_end_line(self):
+        self.assertTrue(self.denied('cat > a <<EOF\nx\\\nEOF\necho ok\nEOF'))
+        self.assertIn('process-capable heredoc rule (expandable data body)', self.reason)
+
+    def test_bare_interpreter_groups_cannot_read_stdin(self):
+        for command in ("printf '%s' 'x' | (node)", "printf '%s' 'x' | { node; }", '(node) < x.js'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (unresolved command word)' if '{' in command
+                              else 'inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_ansi_quote_at_any_word_position_is_denied(self):
+        for command in (r'''echo x$'\''; bun --eval 'require("child_process")' #' ''', "echo $'text'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_relative_stdin_paths_cannot_supply_program(self):
+        for command in ("printf '%s' 'x' | node ../../../../../../dev/stdin",
+                        "cd / && printf '%s' 'x' | node dev/stdin"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_shell_continuations_cannot_hide_interpreter_or_code_option(self):
+        code = "'import os; os.system(chr(103))'"
+        for command in ('pyth\\\non3 -c ' + code, '"pyth\\\non3" -c ' + code, 'python3 -\\\nc ' + code):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+        self.assertFalse(self.denied("python3 -c 'print(\\\n1)'"))
+
+    def test_all_non_shell_whitespace_is_denied(self):
+        for separator in (chr(0x3000), chr(0x1f)):
+            command = "python3 -c '#'" + separator + "'\nimport subprocess; subprocess.run((\"git\", \"pu\" + \"sh\"))'"
+            self.assertTrue(self.denied(command))
+            self.assertIn('line separator rule', self.reason)
+
+    def test_unresolved_pipeline_command_cannot_supply_program(self):
+        for command in ("N=node; printf '%s' 'x' | $N", "printf '%s' 'x' | =node"):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+        self.assertFalse(self.denied("git diff | grep -n 'foo'"))
+
+    def test_leading_input_redirect_keeps_later_python_stdin_denied(self):
+        self.assertTrue(self.denied("< <(printf '%s' 'x') python3 -I"))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_legacy_data_body_scan_preserves_base_denial_reasons(self):
+        command = ('cat > f.sh <<\'EOF\'\npython3 - <<\'PY\'\nimport subprocess\n'
+                   'subprocess.run(("git", "pu" + "sh"))\nPY\nEOF\nbash f.sh')
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (interpreter heredoc must start the command)', self.reason)
+        self.assertTrue(self.denied('cat <<EOF\n$(git push)\nEOF'))
+        self.assertIn('git writer expansion or glob rule', self.reason)
+
+    def test_python_option_values_cannot_supply_pipe_program(self):
+        for flags in ('-W ignore', '-Wignore', '-X dev', '--check-hash-based-pycs always'):
+            command = "printf '%s\\n' 'import subprocess' | python3 " + flags
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
@@ -280,7 +345,8 @@ class WriterHeredocTests(unittest.TestCase):
         for command in ("printf '%s' 'import subprocess' | python3 -I", "printf '%s\\n' 'x' | python3 -i -c 'print(1)'",
                         "printf '%s' 'x' | node /dev/./stdin", "python3 =(printf '%s' 'x')"):
             self.assertTrue(self.denied(command))
-            self.assertIn('interpreter', self.reason)
+            self.assertIn('process-capable python -c rule' if command.startswith('python3 =')
+                          else 'inline interpreter code rule (program from a pipe)', self.reason)
 
     def test_shell_cluster_scans_every_following_program_word(self):
         # Shell and process calls below are classifier fixtures only; the test never executes them.
