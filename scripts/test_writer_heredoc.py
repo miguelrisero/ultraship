@@ -527,6 +527,18 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertFalse(self.denied('git --no-pager grep -n python src'))
         self.assertFalse(self.denied('git grep -n script -c'))
 
+    def test_chdir_scan_stops_at_program_word(self):
+        for command in ('env NODE_ENV=production node scripts/build.js --check',
+                        'sudo -n node ./x.js --chunk', 'env FOO=1 node scripts/x.js -C 3'):
+            self.assertFalse(self.denied(command))
+        for command in ("env -S '-C /dev/fd node 0'", 'env -C /dev/fd node 0'):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_git_attached_global_options_preserve_grep_data(self):
+        self.assertFalse(self.denied('git -C. grep -n node -- src'))
+        self.assertFalse(self.denied('git -ccolor.ui=never grep -n node src'))
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))

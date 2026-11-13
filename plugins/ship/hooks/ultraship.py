@@ -1112,6 +1112,8 @@ def grep_data_token(tokens, index):
         option = tokens[cursor][1]
         if option in values:
             cursor += 2
+        elif len(option) > 2 and option.startswith(('-C', '-c')):
+            cursor += 1
         elif option.partition('=')[0] in values and '=' in option:
             cursor += 1
         elif option in {'--no-pager', '--paginate', '-p'}:
@@ -1430,11 +1432,6 @@ def chdir_wrapper_present(command):
                         return True
                 if name not in {'env', 'sudo'}:
                     continue
-                for following in tokens[index + 1:]:
-                    if following[1] == '--':
-                        break
-                    if following[1].startswith('--ch') or re.match(r'^-[A-Za-z]*[CD]', following[1]):
-                        return True
                 flags = {'env': {'-i', '--ignore-environment', '-0', '--null', '-v', '--debug'},
                          'sudo': {'-n', '--non-interactive', '-E', '--preserve-env', '-H', '--set-home',
                                   '-k', '-K', '-S', '-b', '--background'}}[name]
@@ -1453,10 +1450,17 @@ def chdir_wrapper_present(command):
                     if option in flags:
                         cursor += 1
                     elif option in values:
+                        if name == 'env' and option in {'-S', '--split-string'}:
+                            if cursor + 1 >= len(tokens):
+                                return True
+                            pending.append('env ' + tokens[cursor + 1][1])
                         cursor += 2
                     elif '=' in option and option.partition('=')[0] in values:
+                        if name == 'env' and option.startswith('--split-string='):
+                            pending.append('env ' + option.partition('=')[2])
                         cursor += 1
                     elif name == 'env' and option.startswith('-S') and len(option) > 2:
+                        pending.append('env ' + option[2:])
                         cursor += 1
                     else:
                         return True
