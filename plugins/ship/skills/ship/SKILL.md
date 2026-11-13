@@ -308,6 +308,45 @@ Require separate admission for every mutation or checker execution; keep mutatio
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 Drivers prepare retirement evidence and the reviewer's line counts; writers append only the named `[[retired]]` tables.
 
+### New lane-owned row review route
+
+Use this route only when the brief explicitly selects the new lane-owned row review route.
+Verify ~/.claude/CLAUDE.md directly under heading CoC decisions (standing grant).
+Require the exact sentence: The CoC decides CI/CD, testing and tooling items for me.
+Refuse missing, unreadable or mismatched delegation before protected access; accept zero relay for this direct verification.
+Require exact CoC read admission naming the independent reviewer, repository, PR, base SHA, author head SHA and frozen final commit.
+Require explicit protected-read authority for exact files, unique new row IDs, complete approved extents and named commits before any lookup or read.
+Require lawful content-free evidence of lane ownership and absence of each new ID at the base.
+Reject existing IDs, unrelated rows, ambiguous extents and stale evidence.
+A named new file alone establishes zero authority over every row inside it.
+Keep existing-row re-anchoring, disposition and retirement routes separate and their authority requirements unchanged.
+Keep fixed existing-row grants, event coordinates and permitted lookup route lists unchanged.
+Preserve fixed-event provenance whenever the brief invokes a separately applicable owner-event route.
+Read authority grants zero derivation, writer creation, execution or publication authority.
+Permit only named row-ID lookups and approved row-line reads at the frozen final commit.
+Read zero adjacent rows or whole protected files; parse zero whole protected files.
+Require the reviewer to differ from the author, applying writer and proposal deriver.
+Review each claim, designated test, subject binding, operator, mutant validity and the test's detection mechanism.
+Require independent evidence that the designated test detects the claimed violation.
+Preserve assertions, bounds, policy guarantees and every unrelated entry.
+Require scoped creation authority for the author and applying writer as separate recorded evidence.
+Bind the receipt to reviewer identity, verdict, exact authorities, repository, PR, base SHA, author head SHA, frozen final commit, files, IDs, extents and ordinary evidence identities.
+Require CoC approval of the frozen receipt before publication.
+Changed source, authority, scope or evidence invalidates every affected receipt and approval.
+Keep proof execution after merge under separate applicable admission.
+Grant zero reviewer edit, execution, retry or publication authority.
+Report only paths, IDs, fields, digests and content-free findings.
+
+Apply this route only to future briefs after verified runtime adoption.
+Source delivery grants zero runtime-adoption authority.
+Source delivery grants zero retry authority.
+Source delivery grants zero installation authority.
+Source delivery grants zero publication authority.
+Preserve every existing refusal, tool and hook denial, and affected-session hold.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
+Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
+
 ### Lane-owned disposition route
 
 Use only the lane-owned disposition route explicitly named in the brief, outside category 5.
@@ -325,7 +364,8 @@ Require the second exact CoC decision to bind the ordinary proposal SHA256 and i
 Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.
 For changed mutant semantics, require a current task-specific owner event naming exact protected reads, rows, semantic adaptation and permitted gates.
 Require that event and the admitted gates to cover independent applied review at the final commit.
-Apply existing fixed owner-event coordinates, direct verification, complete relay and authoritative mismatch rules unchanged.
+For changed mutant semantics, apply the task-specific owner-event verification contract to the current event and exact semantic scope.
+Preserve every historical fixed-event comparator unchanged within its existing standing branch only.
 Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
 An authoritative mismatch blocks access and application without fallback.
 CoC approval supplies zero missing owner-event authority for changed mutant semantics.
@@ -355,6 +395,11 @@ Changed source, scope, authority, proposal or evidence invalidates every affecte
 Keep protected bytes inside separately admitted contexts; reports, briefs and PR bodies identify only path, row ID, fields and proposal digest.
 This route grants reviewers zero edit, execution or publication authority.
 Preserve Peral's CI-runner and merge-queue authority and zero writer publication authority.
+Require the applying writer to emit a content-free validation receipt with proposal digest, validator, admission and result.
+Require an application receipt naming proposal digest, source identities, admitted scope, tool shape and result.
+Keep protected bytes out of both receipts.
+These receipt duties grant zero execution or publication authority.
+Reviewer inspection requires separately admitted receipt and content scope.
 
 Apply the following retirement requirements only when the brief selects retirement.
 Define the protection point as guarded behavior, never only anchor text.

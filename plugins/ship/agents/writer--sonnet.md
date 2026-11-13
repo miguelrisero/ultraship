@@ -257,7 +257,8 @@ Require the second exact CoC decision to bind the ordinary proposal SHA256 and i
 Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.
 For changed mutant semantics, require a current task-specific owner event naming exact protected reads, rows, semantic adaptation and permitted gates.
 Require that event and the admitted gates to cover independent applied review at the final commit.
-Apply existing fixed owner-event coordinates, direct verification, complete relay and authoritative mismatch rules unchanged.
+For changed mutant semantics, apply the task-specific owner-event verification contract to the current event and exact semantic scope.
+Preserve every historical fixed-event comparator unchanged within its existing standing branch only.
 Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
 An authoritative mismatch blocks access and application without fallback.
 CoC approval supplies zero missing owner-event authority for changed mutant semantics.
@@ -287,6 +288,11 @@ Changed source, scope, authority, proposal or evidence invalidates every affecte
 Keep protected bytes inside separately admitted contexts; reports, briefs and PR bodies identify only path, row ID, fields and proposal digest.
 This route grants reviewers zero edit, execution or publication authority.
 Preserve Peral's CI-runner and merge-queue authority and zero writer publication authority.
+Require the applying writer to emit a content-free validation receipt with proposal digest, validator, admission and result.
+Require an application receipt naming proposal digest, source identities, admitted scope, tool shape and result.
+Keep protected bytes out of both receipts.
+These receipt duties grant zero execution or publication authority.
+Reviewer inspection requires separately admitted receipt and content scope.
 
 Apply the following retirement requirements only when the brief selects retirement.
 Define the protection point as guarded behavior, never only anchor text.
