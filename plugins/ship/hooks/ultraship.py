@@ -1064,14 +1064,31 @@ def shell_without_heredoc_bodies(command):
 
 
 def nested_shell_strings(tokens):
+    """Keep the identity of each argument that a shell or string wrapper can execute."""
     for index, token in enumerate(tokens):
-        if os.path.basename(token[1]) in {'sh', 'bash', 'zsh', 'dash', 'ksh'}:
-            for cursor in range(index + 1, len(tokens)):
-                if tokens[cursor][0] in {';', '&', '|', '(', ')', '`', '\n'}:
-                    break
-                if re.fullmatch(r'-[a-zA-Z]*c', tokens[cursor][1]) and cursor + 1 < len(tokens):
-                    yield tokens[cursor + 1][1]
-                    break
+        name = os.path.basename(token[1])
+        if name not in {'sh', 'bash', 'zsh', 'dash', 'ksh', 'env', 'eval'}:
+            continue
+        arguments = []
+        for argument in tokens[index + 1:]:
+            if argument[0] in {';', '&', '|', '(', ')', '`', '\n'}:
+                break
+            arguments.append(argument)
+        if name == 'eval':
+            yield from arguments
+            if arguments:
+                yield ('', ' '.join(word[1] for word in arguments), arguments[0][2], arguments[-1][3])
+            continue
+        for cursor, argument in enumerate(arguments):
+            option = argument[1]
+            code = (option in {'-S', '--split-string'} if name == 'env'
+                    else bool(re.fullmatch(r'-[a-zA-Z]*c[a-zA-Z]*', option)))
+            if code and cursor + 1 < len(arguments):
+                yield arguments[cursor + 1]
+            elif name == 'env' and option.startswith(('-S', '--split-string=')):
+                value = option[2:] if option.startswith('-S') else option.split('=', 1)[1]
+                if value:
+                    yield (argument[0], value, argument[2], argument[3])
 
 
 def python_inline_denial(command):
@@ -1145,7 +1162,7 @@ def python_inline_denial(command):
                     if python_writes(code) and (not check_only_shell(rest) or text != shell_without_heredoc_bodies(command)):
                         return 'python -c then run rule'
                     break
-        pending.extend(nested_shell_strings(tokens))
+        pending.extend(token[1] for token in nested_shell_strings(tokens))
     return None
 
 
@@ -1184,7 +1201,7 @@ def stdin_program_path(value):
 
 
 def inline_interpreter_denial(command):
-    shell = shell_without_heredoc_bodies(command)
+    shell = literal_variables(shell_without_heredoc_bodies(command))
     lines = command.splitlines(keepends=True)
     if lines and ANY_PYTHON_HEREDOC.fullmatch(lines[0]) and not process_heredoc_denial(command):
         shell = shell[len(lines[0]):]
@@ -1213,20 +1230,16 @@ def inline_interpreter_denial(command):
             else:
                 words.append(token)
         segments.append((words, piped))
-        shell_programs = set(nested_shell_strings(tokens))
+        shell_programs = {token[2] for token in nested_shell_strings(tokens)}
         for words, piped in segments:
             for index, (raw, value, start, end) in enumerate(words):
-                if value in shell_programs:
+                if start in shell_programs:
                     continue
                 arguments = [word[1] for word in words[index + 1:]]
                 unresolved = raw != value or bool(re.search(r'[$`*?\[\]{}]', raw))
-                command_position = index == 0 or all(
-                    re.match(r'[A-Za-z_]\w*=', word[1]) or word[1] in WRAPPERS or word[1].startswith('-')
-                    for word in words[:index])
                 joined_code = bool(re.search(r'[$`*?\[\]{}]', raw)) and bool(
                     re.search(r'python|node|perl|ruby|pypy|(?:^|[^\w])-[ceEpr](?:$|[^\w])', raw))
-                if joined_code or unresolved and (command_position or interpreter_name(value)) and any(
-                        code_option(argument) for argument in arguments):
+                if joined_code or unresolved and any(code_option(argument) for argument in arguments):
                     return 'inline interpreter code rule (unresolved command word)'
                 name = interpreter_name(value)
                 if not name:
@@ -1250,7 +1263,7 @@ def inline_interpreter_denial(command):
                                 else f'inline interpreter code rule ({name})')
                 elif not arguments or any(stdin_program_path(argument) for argument in arguments):
                     return 'inline interpreter code rule (program from a pipe)'
-        pending.extend(nested_shell_strings(tokens))
+        pending.extend(token[1] for token in nested_shell_strings(tokens))
     return None
 
 

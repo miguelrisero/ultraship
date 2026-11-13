@@ -191,6 +191,34 @@ class WriterHeredocTests(unittest.TestCase):
     def test_plain_quoted_arguments_do_not_reparse_as_programs(self):
         self.assertFalse(self.denied('echo "it\'s fine"'))
 
+    def test_shell_options_and_string_wrappers_keep_nested_code_checked(self):
+        script = "python3 -c 'import sys; print(sys.argv)'"
+        for wrapper in ('bash -o pipefail -c', 'sh -ec', 'bash --norc -c', 'env -S', 'eval'):
+            with self.subTest(wrapper=wrapper):
+                self.assertTrue(self.denied(f'{wrapper} "{script}"'))
+                self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_wrapper_option_values_cannot_hide_unresolved_interpreters(self):
+        for wrapper in ('timeout --signal=TERM 5', 'env -u A'):
+            with self.subTest(wrapper=wrapper):
+                self.assertTrue(self.denied(f"{wrapper} $P -c 'x'"))
+                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_shell_program_skip_uses_token_offset(self):
+        command = "bash -c '$P'; timeout --signal=TERM 5 '$P' -c 'x'"
+        self.assertTrue(self.denied(command))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_ansi_quoted_node_option_is_denied(self):
+        self.assertTrue(self.denied("node $'-e' 'require(\"child_process\").execSync(\"git \" + \"pu\" + \"sh\")'"))
+        self.assertIn('inline interpreter code rule', self.reason)
+
+    def test_python_pipe_stdin_operand_keeps_trailing_arguments_denied(self):
+        command = ('printf \'%s\' \'import subprocess; subprocess.run(["git", "pu" + "sh"])\' '
+                   '| python3 - ignored')
+        self.assertTrue(self.denied(command))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
     def test_python_helper_without_import_is_denied(self):
         body = "def git(*args):\n    return subprocess.check_output(['git', *args])\n"
         for operator, delimiter, indent in (('<<', 'EOF', ''), ('<<', "'EOF'", ''),
