@@ -363,6 +363,21 @@ class WriterHeredocTests(unittest.TestCase):
     def test_wrapper_words_without_command_options_remain_data(self):
         self.assertFalse(self.denied('grep -n script -r src'))
 
+    def test_comment_after_substitution_cannot_hide_pipeline(self):
+        for command in ("echo $(true)#; printf '%s' 'x' | node",
+                        "echo `true #`; printf '%s' 'x' | node"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule' if '`' in command
+                              else 'inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_wrapper_code_bundles_and_command_prefixes_are_checked(self):
+        for command in ('script -qec \'python3 -c "import os"\' /dev/null', "flock f --comm 'node -e x'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule' if command.startswith('flock')
+                              else 'process-capable python -c rule', self.reason)
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))

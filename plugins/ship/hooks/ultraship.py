@@ -1010,25 +1010,30 @@ def process_heredoc_denial(command, readers=False):
 
 def shell_raw_words(text):
     """Keep raw shell words and offsets; quotes and escapes never lose their identity."""
-    words, index, parentheses = [], 0, []
+    words, index, parentheses, backtick = [], 0, [], False
     while index < len(text):
         if text[index].isspace():
             if text[index] == '\n':
                 words.append(('\n', '\n', index, index + 1))
             index += 1
             continue
-        if text[index] == '#':
+        if (text[index] == '#' and (not index or text[index - 1].isspace()
+                                     or text[index - 1] in ';&|(<>' or backtick)):
+            if backtick or any(kind == '$' for kind in parentheses):
+                raise ValueError('comment inside command substitution')
             end = text.find('\n', index)
             index = len(text) if end < 0 else end
             continue
         start, quote = index, ''
         if text[index] in ';&|()<>`':
+            if text[index] == '`':
+                backtick = not backtick
             if text[index] == '(':
                 before = text[index - 1] if index else ''
                 array = before == '=' and bool(re.search(r'(?:^|[\s;&|()<>])[A-Za-z_]\w*=$', text[:index]))
                 if before and not before.isspace() and before not in ';&|()<>$' and not array:
                     raise ValueError('word-internal shell group')
-                parentheses.append(before in '$<>=' and bool(before))
+                parentheses.append(before if before in '$<>=' and before else '')
             elif text[index] == ')' and parentheses:
                 substitution = parentheses.pop()
                 after = text[index + 1:index + 2]
@@ -1098,8 +1103,12 @@ def nested_shell_strings(tokens):
                 break
             arguments.append(argument)
         if name in {'script', 'flock', 'su'}:
-            if not any(word[1] in {'-c', '--command'} or word[1].startswith('--command=')
-                       or name == 'script' and re.fullmatch(r'-[qfea]*c', word[1]) for word in arguments):
+            def command_candidate(option):
+                prefix = option.partition('=')[0]
+                return bool(re.fullmatch(r'-[A-Za-z]*c[A-Za-z]*', option)) or (
+                    prefix.startswith('--') and len(prefix) > 2 and (
+                        '--command'.startswith(prefix) or name == 'su' and '--session-command'.startswith(prefix)))
+            if not any(command_candidate(word[1]) for word in arguments):
                 continue
             value_options = {'script': {'-O', '-I', '-B', '-T', '-m', '--log-out', '--log-in', '--log-io',
                                          '--log-timing', '--logging-format'},
@@ -1111,13 +1120,15 @@ def nested_shell_strings(tokens):
             cursor = 0
             while cursor < len(arguments):
                 option = arguments[cursor][1]
-                if option in {'-c', '--command'} or name == 'script' and re.fullmatch(r'-[qfea]*c', option):
+                command_option, separator, attached = option.partition('=')
+                code_option = command_candidate(option)
+                if code_option and not separator:
                     if cursor + 1 >= len(arguments):
                         raise ValueError('missing wrapper program')
                     yield arguments[cursor + 1]
                     break
-                if option.startswith('--command='):
-                    yield (arguments[cursor][0], option.split('=', 1)[1], arguments[cursor][2], arguments[cursor][3])
+                if code_option and separator:
+                    yield (arguments[cursor][0], attached, arguments[cursor][2], arguments[cursor][3])
                     break
                 if option in value_options[name]:
                     cursor += 2
