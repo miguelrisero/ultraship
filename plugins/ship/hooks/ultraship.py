@@ -1129,104 +1129,121 @@ def nested_shell_strings(tokens):
         name = os.path.basename(token[1])
         if name not in STRING_WRAPPERS:
             continue
-        if grep_data_token(tokens, index):
+        grep_data = grep_data_token(tokens, index)
+        if grep_data:
             start, end = index, index + 1
             separators = {';', '&', '|', '(', ')', '`', '\n'}
             while start and tokens[start - 1][0] not in separators:
                 start -= 1
             while end < len(tokens) and tokens[end][0] not in separators:
                 end += 1
-            if all('$' not in word[0] and '`' not in word[0] for word in tokens[start:end]):
+            command = start
+            while command < index and re.match(r'[A-Za-z_]\w*=', tokens[command][1]):
+                command += 1
+            resolved = True
+            for position in range(start, end):
+                raw = tokens[position][0]
+                if position <= command or position == index:
+                    resolved = resolved and not unresolved_shell_word(raw)
+                else:
+                    spans = single_quoted_spans(raw)
+                    resolved = resolved and '$' not in raw and '`' not in raw and spans is not None and not any(
+                        span.startswith('=') for span, single in (spans or []) if not single)
+            if resolved:
                 continue
-        arguments = []
-        for argument in tokens[index + 1:]:
-            if argument[0] in {';', '&', '|', '(', ')', '`', '\n'}:
-                break
-            arguments.append(argument)
-        if name in {'script', 'flock', 'su'}:
-            def command_candidate(option):
-                prefix = option.partition('=')[0]
-                return (option.startswith('-') and not option.startswith('--') and 'c' in option) or (
-                    prefix.startswith('--') and len(prefix) > 2 and (
-                        '--command'.startswith(prefix) or name == 'su' and '--session-command'.startswith(prefix)))
-            if not any(command_candidate(word[1]) for word in arguments):
-                continue
-            value_options = {'script': {'-O', '-I', '-B', '-T', '-m', '--log-out', '--log-in', '--log-io',
-                                         '--log-timing', '--logging-format'},
-                             'flock': {'-w', '-E', '--wait', '--timeout', '--conflict-exit-code'},
-                             'su': {'-s', '-g', '-G', '-w', '--shell', '--group', '--supp-group', '--whitelist-environment'}}
-            flags = {'script': {'-q', '-f', '-e', '-a', '--quiet', '--flush', '--return', '--append'},
-                     'flock': {'-s', '-x', '-u', '-n', '-o', '-F', '--shared', '--exclusive', '--unlock', '--nonblock', '--close', '--no-fork'},
-                     'su': {'-', '-l', '-m', '-p', '--login', '--preserve-environment'}}
-            cursor = 0
-            while cursor < len(arguments):
-                option = arguments[cursor][1]
-                if option.startswith('-') and not option.startswith('--') and option != '-':
-                    flag_letters = {'script': 'qfea', 'flock': 'sxunoF', 'su': 'lmp'}[name]
-                    value_letters = {'script': 'OIBTm', 'flock': 'wE', 'su': 'sgGw'}[name]
-                    offset = 1
-                    while offset < len(option):
-                        letter = option[offset]
-                        if letter == 'c' or letter in value_letters:
-                            if offset + 1 < len(option):
-                                if letter == 'c':
-                                    word = arguments[cursor]
-                                    yield (word[0][offset + 1:], option[offset + 1:], word[2] + offset + 1, word[3])
-                            else:
-                                cursor += 1
-                                if cursor >= len(arguments):
-                                    raise ValueError('missing wrapper option value')
-                                if letter == 'c':
-                                    yield arguments[cursor]
-                            break
-                        if letter not in flag_letters:
-                            raise ValueError('ambiguous command wrapper option')
-                        offset += 1
-                    cursor += 1
+        try:
+            arguments = []
+            for argument in tokens[index + 1:]:
+                if argument[0] in {';', '&', '|', '(', ')', '`', '\n'}:
+                    break
+                arguments.append(argument)
+            if name in {'script', 'flock', 'su'}:
+                def command_candidate(option):
+                    prefix = option.partition('=')[0]
+                    return (option.startswith('-') and not option.startswith('--') and 'c' in option) or (
+                        prefix.startswith('--') and len(prefix) > 2 and (
+                            '--command'.startswith(prefix) or name == 'su' and '--session-command'.startswith(prefix)))
+                if not any(command_candidate(word[1]) for word in arguments):
                     continue
-                command_option, separator, attached = option.partition('=')
-                code_option = command_candidate(option)
-                if code_option and not separator:
+                value_options = {'script': {'-O', '-I', '-B', '-T', '-m', '--log-out', '--log-in', '--log-io',
+                                             '--log-timing', '--logging-format'},
+                                 'flock': {'-w', '-E', '--wait', '--timeout', '--conflict-exit-code'},
+                                 'su': {'-s', '-g', '-G', '-w', '--shell', '--group', '--supp-group', '--whitelist-environment'}}
+                flags = {'script': {'-q', '-f', '-e', '-a', '--quiet', '--flush', '--return', '--append'},
+                         'flock': {'-s', '-x', '-u', '-n', '-o', '-F', '--shared', '--exclusive', '--unlock', '--nonblock', '--close', '--no-fork'},
+                         'su': {'-', '-l', '-m', '-p', '--login', '--preserve-environment'}}
+                cursor = 0
+                while cursor < len(arguments):
+                    option = arguments[cursor][1]
+                    if option.startswith('-') and not option.startswith('--') and option != '-':
+                        flag_letters = {'script': 'qfea', 'flock': 'sxunoF', 'su': 'lmp'}[name]
+                        value_letters = {'script': 'OIBTm', 'flock': 'wE', 'su': 'sgGw'}[name]
+                        offset = 1
+                        while offset < len(option):
+                            letter = option[offset]
+                            if letter == 'c' or letter in value_letters:
+                                if offset + 1 < len(option):
+                                    if letter == 'c':
+                                        word = arguments[cursor]
+                                        yield (word[0][offset + 1:], option[offset + 1:], word[2] + offset + 1, word[3])
+                                else:
+                                    cursor += 1
+                                    if cursor >= len(arguments):
+                                        raise ValueError('missing wrapper option value')
+                                    if letter == 'c':
+                                        yield arguments[cursor]
+                                break
+                            if letter not in flag_letters:
+                                raise ValueError('ambiguous command wrapper option')
+                            offset += 1
+                        cursor += 1
+                        continue
+                    command_option, separator, attached = option.partition('=')
+                    code_option = command_candidate(option)
+                    if code_option and not separator:
+                        if cursor + 1 >= len(arguments):
+                            raise ValueError('missing wrapper program')
+                        yield arguments[cursor + 1]
+                        cursor += 2
+                        continue
+                    if code_option and separator:
+                        yield (arguments[cursor][0], attached, arguments[cursor][2], arguments[cursor][3])
+                        cursor += 1
+                        continue
+                    if option in value_options[name]:
+                        cursor += 2
+                    elif option in flags[name] or not option.startswith('-'):
+                        cursor += 1
+                    else:
+                        raise ValueError('ambiguous command wrapper option')
+                continue
+            if name in {'eval', 'watch'}:
+                yield from arguments
+                if arguments:
+                    yield ('', ' '.join(word[1] for word in arguments), arguments[0][2], arguments[-1][3])
+                continue
+            for cursor, argument in enumerate(arguments):
+                option = argument[1]
+                code = (option in {'-S', '--split-string'} if name == 'env'
+                        else bool(re.fullmatch(r'-[a-zA-Z]*c[a-zA-Z]*', option)))
+                if code:
                     if cursor + 1 >= len(arguments):
                         raise ValueError('missing wrapper program')
-                    yield arguments[cursor + 1]
-                    cursor += 2
-                    continue
-                if code_option and separator:
-                    yield (arguments[cursor][0], attached, arguments[cursor][2], arguments[cursor][3])
-                    cursor += 1
-                    continue
-                if option in value_options[name]:
-                    cursor += 2
-                elif option in flags[name] or not option.startswith('-'):
-                    cursor += 1
-                else:
-                    raise ValueError('ambiguous command wrapper option')
-            continue
-        if name in {'eval', 'watch'}:
-            yield from arguments
-            if arguments:
-                yield ('', ' '.join(word[1] for word in arguments), arguments[0][2], arguments[-1][3])
-            continue
-        for cursor, argument in enumerate(arguments):
-            option = argument[1]
-            code = (option in {'-S', '--split-string'} if name == 'env'
-                    else bool(re.fullmatch(r'-[a-zA-Z]*c[a-zA-Z]*', option)))
-            if code:
-                if cursor + 1 >= len(arguments):
-                    raise ValueError('missing wrapper program')
-                operand = arguments[cursor + 1]
-                if name == 'env':
-                    value = operand[1] + ' ' + shlex.join(word[1] for word in arguments[cursor + 2:])
-                    yield (operand[0], value, operand[2], arguments[-1][3])
-                else:
-                    yield from arguments[cursor + 1:]
-            elif name == 'env' and option.startswith(('-S', '--split-string=')):
-                value = option[2:] if option.startswith('-S') else option.split('=', 1)[1]
-                if not value:
-                    raise ValueError('missing env split string')
-                value += ' ' + shlex.join(word[1] for word in arguments[cursor + 1:])
-                yield (argument[0], value, argument[2], arguments[-1][3])
+                    operand = arguments[cursor + 1]
+                    if name == 'env':
+                        value = operand[1] + ' ' + shlex.join(word[1] for word in arguments[cursor + 2:])
+                        yield (operand[0], value, operand[2], arguments[-1][3])
+                    else:
+                        yield from arguments[cursor + 1:]
+                elif name == 'env' and option.startswith(('-S', '--split-string=')):
+                    value = option[2:] if option.startswith('-S') else option.split('=', 1)[1]
+                    if not value:
+                        raise ValueError('missing env split string')
+                    value += ' ' + shlex.join(word[1] for word in arguments[cursor + 1:])
+                    yield (argument[0], value, argument[2], arguments[-1][3])
+        except ValueError:
+            if not grep_data:
+                raise
 
 
 def shell_line_continuations(text):

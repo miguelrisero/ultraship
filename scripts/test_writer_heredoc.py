@@ -562,6 +562,9 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertFalse(self.denied('grep -rn eval "$DIR"'))
         self.assertFalse(self.denied('grep -rn eval src/*.py | head'))
         self.assertFalse(self.denied('grep -rn eval *.py | wc -l'))
+        self.assertTrue(self.denied("gre? -rn x eval 'node -e 1'"))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+        self.assertFalse(self.denied('grep -n script -rc "$DIR"'))
 
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
