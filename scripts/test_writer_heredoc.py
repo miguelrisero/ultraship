@@ -546,6 +546,15 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
+    def test_env_split_string_escapes_fail_closed(self):
+        for command in (r"env -S'-C\_/dev/fd node 0'", r"env -S '-C\_/dev/fd node 0'",
+                        r"env --split-string='-C\_/dev/fd node 0'", r"env --split-string '-C\_/dev/fd node 0'",
+                        "env -S '${X} node ./x.js'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule', self.reason)
+        self.assertFalse(self.denied("env -S'FOO=1 node ./x.js'"))
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))

@@ -1453,14 +1453,23 @@ def chdir_wrapper_present(command):
                         if name == 'env' and option in {'-S', '--split-string'}:
                             if cursor + 1 >= len(tokens):
                                 return True
-                            pending.append('env ' + tokens[cursor + 1][1])
+                            payload = tokens[cursor + 1][1]
+                            if '\\' in payload or '$' in payload:
+                                return True
+                            pending.append('env ' + payload)
                         cursor += 2
                     elif '=' in option and option.partition('=')[0] in values:
                         if name == 'env' and option.startswith('--split-string='):
-                            pending.append('env ' + option.partition('=')[2])
+                            payload = option.partition('=')[2]
+                            if '\\' in payload or '$' in payload:
+                                return True
+                            pending.append('env ' + payload)
                         cursor += 1
                     elif name == 'env' and option.startswith('-S') and len(option) > 2:
-                        pending.append('env ' + option[2:])
+                        payload = option[2:]
+                        if '\\' in payload or '$' in payload:
+                            return True
+                        pending.append('env ' + payload)
                         cursor += 1
                     else:
                         return True
