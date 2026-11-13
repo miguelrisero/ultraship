@@ -169,6 +169,63 @@ class ReviewerSearchTests(unittest.TestCase):
                 with self.subTest(tool=tool, arguments=arguments):
                     self.assert_denied(tool, arguments, cwd='/fixture/repo')
 
+    def test_event_cwd_resolves_relative_protected_paths(self):
+        for tool, arguments in (
+            ('Read', {'file_path': '../mutation/x.txt'}),
+            ('LSP', {'filePath': '../mutation/x.txt'}),
+            ('Grep', {'path': '../mutation', 'pattern': 'identifier'}),
+            ('Grep', {'glob': '../mutation/*.py', 'pattern': 'identifier'}),
+            ('Glob', {'pattern': '../mutation/*.py'}),
+            ('mcp__fff__grep', {'query': '../mutation/ identifier'}),
+            ('mcp__fff__multi_grep', {'patterns': ['identifier'], 'constraints': '../mutation/'}),
+            ('mcp__fff__find_files', {'query': '../mutation/ identifier'}),
+        ):
+            with self.subTest(tool=tool, arguments=arguments):
+                self.assert_denied(tool, arguments, cwd='/fixture/repo/tests/src')
+
+    def test_ancestors_of_home_or_cwd_do_not_scope_searches(self):
+        with patch.object(ultraship.Path, 'home', return_value=Path('/home/fixture')):
+            for directory in ('..', '../..', '/home', '/fixture', '/fixture/repo'):
+                for tool, arguments in (
+                    ('Grep', {'path': directory, 'pattern': 'identifier'}),
+                    ('Glob', {'pattern': directory + '/**/*.py'}),
+                    ('mcp__fff__grep', {'query': directory + '/ identifier'}),
+                    ('mcp__fff__multi_grep', {'patterns': ['identifier'], 'constraints': directory + '/**/*.py'}),
+                    ('mcp__fff__find_files', {'query': directory + '/**/*.py identifier'}),
+                ):
+                    with self.subTest(tool=tool, arguments=arguments):
+                        self.assert_denied(tool, arguments, cwd='/fixture/repo/src')
+
+    def test_joined_search_globs_cannot_enter_protected_directory(self):
+        for glob in ('tests/m*tion/**', 'tests/mut?tion/**', 'tests/[m]utation/**',
+                     'tests/**/x.py', 'tests/{mutation,unit}/**'):
+            for tool, arguments in (
+                ('Grep', {'path': '/fixture/repo', 'glob': glob, 'pattern': 'identifier'}),
+                ('Glob', {'path': '/fixture/repo', 'pattern': glob}),
+                ('mcp__fff__grep', {'query': glob + ' identifier'}),
+                ('mcp__fff__multi_grep', {'patterns': ['identifier'], 'constraints': glob}),
+                ('mcp__fff__find_files', {'query': glob + ' identifier'}),
+            ):
+                with self.subTest(tool=tool, arguments=arguments):
+                    self.assert_denied(tool, arguments, cwd='/fixture/repo/src')
+        for tool, arguments in (
+            ('Grep', {'path': 'backend/api/tests', 'glob': '**/*.py', 'pattern': 'identifier'}),
+            ('Grep', {'path': 'backend/api/tests', 'pattern': 'identifier'}),
+            ('Glob', {'path': 'backend/api/tests', 'pattern': '**/*.py'}),
+        ):
+            with self.subTest(tool=tool, arguments=arguments):
+                self.assert_denied(tool, arguments, cwd='/fixture/repo')
+        for glob in ('tests/test_search.py', 'tests/unit/**/*.py'):
+            for tool, arguments in (
+                ('Grep', {'path': '/fixture/repo', 'glob': glob, 'pattern': 'identifier'}),
+                ('Glob', {'path': '/fixture/repo', 'pattern': glob}),
+                ('mcp__fff__grep', {'query': glob + ' identifier'}),
+                ('mcp__fff__multi_grep', {'patterns': ['identifier'], 'constraints': glob}),
+                ('mcp__fff__find_files', {'query': glob + ' identifier'}),
+            ):
+                with self.subTest(tool=tool, arguments=arguments):
+                    self.assertEqual(self.decision(tool, arguments, cwd='/fixture/repo/src'), {})
+
     def test_every_reviewer_suffix_uses_the_shared_role_boundary(self):
         suffixes = [path.stem for path in (ROOT / 'plugins/ship/agents').glob('reviewer--*.md')]
         self.assertTrue(suffixes)

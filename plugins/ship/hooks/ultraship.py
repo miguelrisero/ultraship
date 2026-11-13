@@ -2247,21 +2247,25 @@ def pre(data):
             def normalize(value):
                 return posixpath.normpath(value.replace('\\', '/')).replace('//', '/')
 
-            if any(re.search(r'(?<![\w.-])tests/mutation(/|$)', normalize(token.lstrip('!')))
+            home = normalize(str(Path.home()))
+            cwd = normalize(data.get('cwd') or str(Path.cwd()))
+
+            def absolute(value, base=cwd):
+                value = value.replace('\\', '/')
+                if value == '~' or value.startswith('~/'):
+                    value = home + value[1:]
+                return normalize(posixpath.join(base, value))
+
+            if any(re.search(r'(?<![\w.-])tests/mutation(/|$)', absolute(token.lstrip('!')))
                    for value in values for token in [value, *value.split()]):
                 deny('Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.')
             if tool in ('Grep', 'Glob', 'mcp__fff__grep', 'mcp__fff__multi_grep', 'mcp__fff__find_files'):
-                home = normalize(str(Path.home()))
-                cwd = normalize(data.get('cwd') or str(Path.cwd()))
-
                 def bounded(directory):
                     if not directory.strip() or directory.startswith('!'):
                         return False
-                    directory = directory.replace('\\', '/')
-                    if directory == '~' or directory.startswith('~/'):
-                        directory = home + directory[1:]
-                    absolute = normalize(posixpath.join(cwd, directory))
-                    return absolute not in ('/', home, cwd)
+                    resolved = absolute(directory)
+                    return not any(posixpath.commonpath((resolved, target)) == resolved
+                                   for target in ('/', home, cwd))
 
                 def directory_constraint(token):
                     if token.startswith('!'):
@@ -2273,9 +2277,26 @@ def pre(data):
                         directory = '/'
                     return bounded(directory)
 
+                def reaches_protected(pattern, base=cwd):
+                    parts = absolute(pattern, base).split('/')
+                    # shortcut: only a named tests segment is checked; broader globs require brief exclusions.
+                    for index, part in enumerate(parts):
+                        if part != 'tests':
+                            continue
+                        following = parts[index + 1:]
+                        if not following or following[0] == '**':
+                            return True
+                        choices = re.split(r'[{},]', following[0])
+                        if any(fnmatch.fnmatchcase('mutation', choice) for choice in choices):
+                            return True
+                    return False
+
                 scoped = bounded(tin.get('path', ''))
                 if tool in ('Grep', 'Glob'):
-                    scoped |= directory_constraint(tin.get('glob' if tool == 'Grep' else 'pattern', ''))
+                    pattern = tin.get('glob' if tool == 'Grep' else 'pattern', '')
+                    if reaches_protected(pattern, absolute(tin.get('path', ''))):
+                        deny('Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.')
+                    scoped |= directory_constraint(pattern)
                 else:
                     constraints = tin.get('constraints', '').split()
                     query = tin.get('query', '').split()
@@ -2286,6 +2307,8 @@ def pre(data):
                             constraints.append(token)
                     elif tool == 'mcp__fff__find_files':
                         constraints.extend(query)
+                    if any(not token.startswith('!') and reaches_protected(token) for token in constraints):
+                        deny('Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.')
                     scoped |= any(directory_constraint(token) for token in constraints)
                 if not scoped:
                     deny('Reviewers must scope searches to an explicit path or positive directory constraint. '
