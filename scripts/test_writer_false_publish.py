@@ -63,7 +63,8 @@ class WriterFalsePublishTests(unittest.TestCase):
         commands += ['find . > x', 'grep x README.md > x', 'find $(echo .)', 'ls `echo x`',
                      'find . | cat', 'find .; ls x', 'find . -name *x*', 'grep *x* README.md',
                      'g?t status', 'find . && git status', 'find . && python3 x.py',
-                     "find . -name x'*push*'", 'find .&& ls /w/*push*']
+                     "find . -name x'*push*'", 'find .&& ls /w/*push*',
+                     "grep '--filter=md:git push origin HEAD' x README.md && ls /w/*push*"]
         for command in commands:
             with self.subTest(command=command):
                 self.assertFalse(ultraship.literal_search_shell(command))

@@ -1236,7 +1236,7 @@ def inline_interpreter_denial(command):
                 if start in shell_programs:
                     continue
                 arguments = [word[1] for word in words[index + 1:]]
-                unresolved = raw != value or bool(re.search(r'[$`*?\[\]{}]', raw))
+                unresolved = value != '$?' and (raw != value or bool(re.search(r'[$`*?\[\]{}]', raw)))
                 joined_code = bool(re.search(r'[$`*?\[\]{}]', raw)) and bool(
                     re.search(r'python|node|perl|ruby|pypy|(?:^|[^\w])-[ceEpr](?:$|[^\w])', raw))
                 if joined_code or unresolved and any(code_option(argument) for argument in arguments):
@@ -1469,6 +1469,7 @@ def literal_search_shell(command):
                     return False
                 cursor += 1
             if (cursor + 1 >= len(arguments) or not value(arguments[cursor])
+                    or arguments[cursor].startswith("'-")
                     or not all(path(word) for word in arguments[cursor + 1:])):
                 return False
         elif command == 'ls':
