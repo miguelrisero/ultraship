@@ -18,6 +18,49 @@ For every finding give:
 
 Report no finding without a mechanism and a consequence. An empty result is valid when you covered the whole scope; state the coverage. End with a verdict: `pass`, `findings`, or `blocked` with the reason. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.
 
+## Owner-approved protected-row subject review
+
+Use this read-only route only when the brief names the owner-approved protected-row subject route.
+Apply [the shared prospective boundary](../skills/ship/references/owner-decisions.md#owner-approved-protected-row-subject-route); preserve every existing refusal and affected-session hold.
+Require both complete matching authority records: Owner-scoped protected row access and a separate task-specific owner event approving the exact subject replacement.
+Bind subject access explicitly to fixed Authority B in Lane-derived row review below, including its fixed Input, workspace, version, event and hash.
+Apply Authority B's direct verification and relay checks to that access record; its authoritative mismatch blocks access without fallback.
+Authority A grants nothing on this subject route.
+Apply the supported writer's subject-route provenance and exact batch-scope requirements before any protected read.
+Require the brief's row-file paths and unique IDs to equal the CoC allowlist and every subject current/replacement value to have exact owner approval.
+Bind both verified records and brief scope to the same repository, PR, base SHA, author head SHA, source identities and failing CI evidence.
+Verify full Input/workspace UUIDs, current version, event id/hash, choice, actual answer, verifier and verification time for both records.
+Require `event_type=answer_submitted`, `actor_kind=owner_ui` and `payload.no_answer_yet=false` for both Inputs and current versions.
+Use `get_input` directly when available; an authoritative mismatch blocks access without fallback.
+Under this definition's tool-absence relay rules, accept complete current driver or CoC verified records only after tool absence or an auth/tool error.
+Check internal consistency and exact scope; refuse missing, stale, superseded, cancelled, ambiguous, inconsistent, invented or unrelated provenance.
+A product-limit or cost approval alone grants zero protected read or subject-edit authority.
+Require read-only trees at the original base, subject commit and final frozen commit as applicable.
+Require the subject commit to contain the author head, the final commit to contain the subject commit, and the tested merge to contain the original base and author head.
+Omit protected row-file hunks from supplied diffs.
+Limit protected row reads only to named row files and approved row lines at those named commits.
+Permit named row-ID lookup there; forbid whole-file parsing, unnamed-row reads, adjacent-row reads and broader protected searches.
+Permit ordinary source reads only of the named original subject at the original base and the named approved subject at the subject and final commits.
+Require the reviewer to differ from the PR author and applying writer.
+Require the subject review to check only the subject field change at the subject commit against the original base.
+Confirm that only approved fields change and that the PR moves the guarded behavior into the exact owner-approved subject.
+For a subject-only adaptation, confirm that the old anchor applies exactly once at the new subject.
+Confirm identical mutant operation, the same claim, test, operator, pins, assertions, bounds and every unrelated field.
+Require paired-field changes to have separate authority, a separate commit and a separate receipt.
+For a combined adaptation, require the subject-only commit first and the paired-only final commit second.
+Require the paired review to compare the subject commit with the final commit and keep the subject and every other frozen field unchanged.
+Keep the original base and author head for CI binding.
+For a combined adaptation, defer the exactly-once anchor check to final combined review.
+Require final combined review to compare the original base with the final commit, verify the final anchor exactly once at the new subject, and confirm identical mutant operation and unchanged guarantees.
+Bind the final review receipt to both earlier receipts, all applicable authorities and the original base, author head, subject and final commit identities.
+Keep every other review route's subject freezes unchanged outside this exact scope.
+Line counts supply supporting metadata only; they cannot prove which field changes.
+Bind the receipt to both authority identities, reviewer identity, approving verdict, final frozen commit, exact scope, source identities and CI evidence.
+Require CoC approval of that receipt before publication; changed authority, source, scope or evidence invalidates approval.
+Identify findings and receipts only by path, row ID and field; include zero protected bytes in reports, briefs or PR bodies.
+Grant zero edit, checker, mutation, other execution, session, configuration, permission or publication authority.
+Keep mutation proof after merge under separate applicable admission.
+
 ## Removed-behavior retirement review
 
 Use this read-only route only when the brief names the removed-behavior retirement route and carries the CoC decision that admits the retirement.
@@ -85,6 +128,9 @@ Preserve higher-priority instructions, effective refusals, tool and hook denials
 
 ## Lane-derived row review
 
+For an owner-approved protected-row subject route adaptation, paired review compares the subject commit with the final commit while preserving the subject and every field freeze; keep the original base and author head for CI binding.
+On that combined route only, use the subject commit as this section's row comparison base and the final commit as its frozen SHA after the edit.
+Keep the original base for the PR-breaking source diff, tested-merge containment and CI evidence requirements below; the subject commit supplies only the paired row comparison base.
 Use this read-only route only when the brief names the lane-derived route and one of the two owner authorities below.
 Authority A: the owner standing grant in the owner global CLAUDE.md (`~/.claude/CLAUDE.md`), section "CoC decisions".
 Under authority A, read that file yourself and confirm that the section grants a lane re-anchoring the protected mutation rows its own diff breaks, with an identical mutant edit and an independent not-weaker review.

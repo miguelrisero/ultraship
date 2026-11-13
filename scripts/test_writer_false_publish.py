@@ -27,11 +27,11 @@ FRONTEND_EDIT = ("cd /w/lane/frontend/app/src && python3 - <<'EOF'\n"
 
 
 class WriterFalsePublishTests(unittest.TestCase):
-    def decision(self, command):
+    def decision(self, command, agent_type='ship:writer--sol'):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             try:
-                ultraship.pre({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
+                ultraship.pre({'agent_type': agent_type, 'tool_name': 'Bash',
                                'tool_input': {'command': command}})
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
@@ -47,6 +47,20 @@ class WriterFalsePublishTests(unittest.TestCase):
         for command in commands:
             with self.subTest(command=command):
                 self.assertEqual(self.decision(command).get('permissionDecision'), 'deny')
+
+    def test_future_literal_ordinary_file_identity_forms_preserve_publication_denials(self):
+        commands = (
+            'git -c core.fsmonitor=false -C /w/synthetic-identity rev-parse --verify HEAD',
+            'git -c core.fsmonitor=false -C /w/synthetic-identity status --porcelain=v1 --untracked-files=all',
+            'git -c core.fsmonitor=false -C /w/synthetic-identity diff --no-ext-diff --no-textconv --binary HEAD -- README.md scripts/ordinary.txt',
+            'sha256sum /w/synthetic-identity/README.md /w/synthetic-identity/scripts/ordinary.txt',
+        )
+        for agent_type in ('ship:writer--sol', 'ship:writer--sonnet'):
+            for command in commands:
+                with self.subTest(agent_type=agent_type, command=command):
+                    self.assertEqual(self.decision(command, agent_type), {})
+                    for suffix in (' && git push origin HEAD', '; npm publish'):
+                        self.assertEqual(self.decision(command + suffix, agent_type).get('permissionDecision'), 'deny')
 
     def test_literal_read_only_search_chain_is_admitted(self):
         command = ("cd /w/ultraship-hookfix && find . -name CLAUDE.md && "
