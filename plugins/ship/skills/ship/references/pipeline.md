@@ -7,6 +7,13 @@ At any owner-dependent step, apply [owner decisions](owner-decisions.md). Record
 Require flaky-risk findings or explicit none with inspected scope in all direct, fallback, closing, babysit, delegated, and replacement review briefs.
 Code findings identify file, line, and mechanism; plan findings identify relevant evidence locations.
 
+Every initial, verification, and replacement brief lists permitted paths and exclusions.
+Apply this rule to every review dispatch, including slice, selection, fix-read, closing, and delegated review seats.
+Scope every search call to the permitted paths.
+Exclude `tests/mutation/`, generated and vendored content, and any other brief exclusions.
+Report a failed or empty scoped search to the coordinator; never widen the search scope.
+An explicit repository-root path does not authorize broader discovery.
+
 | # | Step | Ledger step | Agents |
 |---|---|---|---|
 | 1 | Guard the branch, open the run | `run-start` | driver |

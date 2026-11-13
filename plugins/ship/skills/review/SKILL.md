@@ -38,6 +38,12 @@ HEAD alone cannot identify uncommitted work.
 
 ## Dispatch
 
+Every initial, verification, and replacement brief lists permitted paths and exclusions.
+Scope every search call to the permitted paths.
+Exclude `tests/mutation/`, generated and vendored content, and any other brief exclusions.
+Report a failed or empty scoped search to the coordinator; never widen the search scope.
+An explicit repository-root path does not authorize broader discovery.
+
 - For broad discovery, use `ship:researcher--luna`.
 - Split the diff into bounded slices. Give each slice to a `ship:reviewer--opus` seat with the scope, SHA, evidence, reference path, and read-only boundary. Cover every applicable lens; combine related lenses.
 - Leave the Agent `model` field unset. On an unavailable seat, use the fallback chain in `${CLAUDE_PLUGIN_ROOT}/skills/ship/references/roster.md`.

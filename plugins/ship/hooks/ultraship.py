@@ -2222,6 +2222,37 @@ def pre(data):
             deny(f'Research budget of {RESEARCH_BUDGET} discovery calls is spent. Return your answer '
                  'with the evidence you have and list what stays unconfirmed.')
         counter.write_text(str(used + 1))
+    if role(data, 'reviewer') and (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')):
+        fields = ('file_path', 'filePath', 'path', 'glob')
+        if tool == 'Glob':
+            fields += ('pattern',)
+        if tool.startswith('mcp__fff__'):
+            fields += ('query', 'constraints', 'patterns')
+        values = []
+        for field in fields:
+            value = tin.get(field)
+            values.extend(value if isinstance(value, list) else [value])
+        if any(isinstance(value, str) and re.search(r'(?<![\w.-])tests/mutation(/|$)', value)
+               for value in values):
+            deny('Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.')
+        if tool in ('Grep', 'Glob', 'mcp__fff__grep', 'mcp__fff__multi_grep', 'mcp__fff__find_files'):
+            scoped = isinstance(tin.get('path'), str) and bool(tin['path'].strip())
+            if tool in ('Grep', 'Glob'):
+                pattern = tin.get('glob' if tool == 'Grep' else 'pattern') or ''
+                directory, separator, _ = pattern.partition('/')
+                scoped |= bool(separator and directory and not any(char in directory for char in '*?[{!'))
+            else:
+                constraints = (tin.get('constraints') or '').split()
+                for token in (tin.get('query') or '').split():
+                    if '/' not in token and '.' not in token and not token.startswith(('!', '*')):
+                        break
+                    constraints.append(token)
+                scoped |= any(token.endswith('/') and not token.startswith('!')
+                              and token.strip('/') and not any(char in token for char in '*?[{')
+                              for token in constraints)
+            if not scoped:
+                deny('Reviewers must scope searches to an explicit path or positive directory constraint. '
+                     'Report failed or empty searches; never widen the scope.')
 
 
 def owed_file(data):

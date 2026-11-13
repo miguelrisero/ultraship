@@ -1,12 +1,144 @@
 """Agent-facing execution contracts; these checks never execute a test workload or signal a process."""
+from contextlib import redirect_stdout
+import importlib.util
+import io
+import json
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
+
+
+HOOK = Path(__file__).resolve().parents[1] / 'plugins/ship/hooks/ultraship.py'
+spec = importlib.util.spec_from_file_location('execution_policy_hook', HOOK)
+ultraship = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ultraship)
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def read(name):
     return (ROOT / name).read_text()
+
+
+class ReviewerSearchTests(unittest.TestCase):
+    def decision(self, tool, arguments, agent='ship:reviewer--sol', **event):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            try:
+                ultraship.pre({'agent_type': agent, 'tool_name': tool,
+                               'tool_input': arguments, **event})
+            except SystemExit as exc:
+                self.assertEqual(exc.code, 0)
+        return json.loads(output.getvalue())['hookSpecificOutput'] if output.getvalue() else {}
+
+    def assert_denied(self, tool, arguments, agent='ship:reviewer--sol', **event):
+        decision = self.decision(tool, arguments, agent, **event)
+        self.assertEqual(decision.get('permissionDecision'), 'deny', (tool, arguments, agent))
+        self.assertIn('reviewer', decision['permissionDecisionReason'].lower())
+
+    def test_explicit_protected_paths_in_each_tool_argument(self):
+        for protected in ('/fixture/repo/tests/mutation/x.txt',
+                          '/fixture/repo/pkg/tests/mutation/x.txt', '**/tests/mutation/**',
+                          'tests/mutation/', '!tests/mutation/**'):
+            cases = [
+                ('Read', {'file_path': protected}),
+                ('LSP', {'filePath': protected}),
+                ('Grep', {'path': protected, 'pattern': 'identifier'}),
+                ('Grep', {'path': '/fixture/repo/src', 'glob': protected, 'pattern': 'identifier'}),
+                ('Glob', {'path': protected, 'pattern': '*.py'}),
+                ('Glob', {'path': '/fixture/repo/src', 'pattern': protected}),
+                ('mcp__fff__grep', {'query': protected + ' identifier'}),
+                ('mcp__fff__find_files', {'query': protected}),
+                ('mcp__fff__multi_grep', {'patterns': ['identifier'], 'constraints': protected}),
+            ]
+            for index in range(3):
+                patterns = ['identifier', 'other', 'third']
+                patterns[index] = protected
+                cases.append(('mcp__fff__multi_grep', {'patterns': patterns, 'constraints': 'src/'}))
+            for agent in ('ship:reviewer--sol', 'reviewer--sol'):
+                for tool, arguments in cases:
+                    with self.subTest(path=protected, agent=agent, tool=tool, arguments=arguments):
+                        self.assert_denied(tool, arguments, agent)
+
+    def test_searches_require_directory_scope_even_after_empty_or_failed_results(self):
+        cases = [('Grep', {'pattern': 'identifier'}),
+                 ('Grep', {'pattern': 'identifier', 'glob': '*.py'}),
+                 ('Glob', {'pattern': '**/*.py'})]
+        for tool in ('mcp__fff__grep', 'mcp__fff__multi_grep', 'mcp__fff__find_files'):
+            base = {'patterns': ['identifier']} if tool.endswith('multi_grep') else {'query': 'identifier'}
+            for constraints in ('', '*.py', 'ultraship.py', '!src/', '!src/ *.py'):
+                cases.append((tool, {**base, 'constraints': constraints}))
+            cases.append((tool, {**base, 'cursor': 'synthetic-cursor'}))
+            if tool.endswith('grep') and not tool.endswith('multi_grep'):
+                for prefix in ('*.py', 'ultraship.py', '!src/'):
+                    cases.append((tool, {'query': prefix + ' identifier'}))
+        for agent in ('ship:reviewer--sol', 'reviewer--sol'):
+            for tool, arguments in cases:
+                for result in (None, {'content': []}, {'is_error': True, 'content': 'synthetic error'}):
+                    with self.subTest(agent=agent, tool=tool, arguments=arguments, result=result):
+                        self.assert_denied(tool, arguments, agent, tool_response=result)
+
+    def test_scoped_searches_and_near_matches_remain_available(self):
+        for directory in ('/fixture/repo/src', '/fixture/repo/tests/mutation_helpers'):
+            cases = [('Read', {'file_path': directory + '/x.txt'}),
+                     ('LSP', {'filePath': directory + '/x.txt'}),
+                     ('Grep', {'path': directory, 'pattern': 'identifier'}),
+                     ('Glob', {'path': directory, 'pattern': '**/*.py'})]
+            for agent in ('ship:reviewer--sol', 'reviewer--sol'):
+                for tool, arguments in cases:
+                    with self.subTest(agent=agent, tool=tool, arguments=arguments):
+                        self.assertEqual(self.decision(tool, arguments, agent), {})
+        for tool, arguments in (
+            ('Grep', {'glob': 'src/**/*.py', 'pattern': 'identifier'}),
+            ('Glob', {'pattern': 'src/**/*.py'}),
+            ('mcp__fff__grep', {'query': 'src/ identifier'}),
+            ('mcp__fff__grep', {'query': 'identifier', 'constraints': 'src/ *.py !generated/'}),
+            ('mcp__fff__multi_grep', {'patterns': ['identifier'], 'constraints': 'src/'}),
+            ('mcp__fff__find_files', {'query': 'src/ identifier'}),
+        ):
+            with self.subTest(tool=tool, arguments=arguments):
+                self.assertEqual(self.decision(tool, arguments), {})
+
+    def test_every_reviewer_suffix_uses_the_shared_role_boundary(self):
+        suffixes = [path.stem for path in (ROOT / 'plugins/ship/agents').glob('reviewer--*.md')]
+        self.assertTrue(suffixes)
+        for suffix in suffixes:
+            for prefix in ('', 'ship:'):
+                with self.subTest(agent=prefix + suffix):
+                    self.assert_denied('Grep', {'pattern': 'identifier'}, prefix + suffix)
+
+    def test_other_roles_and_existing_denials_keep_their_decisions(self):
+        for agent in ('ship:writer--sol', 'ship:researcher--luna', 'Explore'):
+            with tempfile.TemporaryDirectory(dir=ROOT.parent) as state, patch.object(ultraship, 'STATE', Path(state)):
+                self.assertEqual(self.decision('Grep', {'pattern': 'identifier'}, agent), {})
+        decision = self.decision('Bash', {'command': 'git push origin HEAD'}, 'ship:writer--sol')
+        self.assertEqual(decision['permissionDecision'], 'deny')
+        self.assertIn('Writers never push', decision['permissionDecisionReason'])
+        decision = self.decision('Agent', {'subagent_type': 'ship:reviewer--sol', 'model': 'opus'})
+        self.assertEqual(decision['permissionDecision'], 'deny')
+        self.assertIn('ship agents pin their own model.', decision['permissionDecisionReason'])
+        with tempfile.TemporaryDirectory(dir=ROOT.parent) as state, patch.object(ultraship, 'STATE', Path(state)):
+            for _ in range(40):
+                self.assertEqual(self.decision('Grep', {'pattern': 'identifier'}, 'ship:researcher--luna'), {})
+            decision = self.decision('Grep', {'pattern': 'identifier'}, 'ship:researcher--luna')
+            self.assertEqual(decision['permissionDecision'], 'deny')
+            self.assertIn('Research budget of 40 discovery calls is spent.', decision['permissionDecisionReason'])
+
+    def test_dispatch_contract_covers_replacements_and_failed_searches(self):
+        for path in ('plugins/ship/skills/review/SKILL.md',
+                     'plugins/ship/skills/panel/SKILL.md',
+                     'plugins/ship/skills/ship/references/pipeline.md'):
+            text = read(path)
+            with self.subTest(path=path):
+                for requirement in (
+                    'Every initial, verification, and replacement brief lists permitted paths and exclusions.',
+                    'Scope every search call to the permitted paths.',
+                    'Exclude `tests/mutation/`, generated and vendored content, and any other brief exclusions.',
+                    'Report a failed or empty scoped search to the coordinator; never widen the search scope.',
+                    'An explicit repository-root path does not authorize broader discovery.',
+                ):
+                    self.assertIn(requirement, text)
 
 
 class ExecutionPolicyTests(unittest.TestCase):
