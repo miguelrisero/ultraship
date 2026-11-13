@@ -936,8 +936,8 @@ def data_reader_header(line):
 
 
 def literal_quotes_removed(line):
-    """Drop quoted text the shell never expands; an unterminated quote or ANSI-C $'' keeps the whole line."""
-    if "$'" in line:
+    """Drop single-quoted text; keep the whole line when bash could read its quotes differently."""
+    if "$'" in line or '#' in line or '`' in line:
         return line
     kept, index = [], 0
     while index < len(line):
@@ -951,7 +951,7 @@ def literal_quotes_removed(line):
                 end += 2 if char == '"' and line[end] == '\\' else 1
             if end >= len(line):
                 return line
-            if char == '"' and ('$' in line[index:end] or '`' in line[index:end]):
+            if char == '"':
                 kept.append(line[index:end + 1])
             index = end + 1
         else:

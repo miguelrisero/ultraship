@@ -111,7 +111,7 @@ class WriterHeredocTests(unittest.TestCase):
 
     def test_quoted_conflict_marker_search_is_data(self):
         loop = 'git diff --name-only | while IFS= read -r f; do grep -n {} "$f" && exit 1; done'
-        for marker in ("'^<<<<<<<'", '"^<<<<<<<"', "'<<<<<<< HEAD'"):
+        for marker in ("'^<<<<<<<'", "'<<<<<<< HEAD'"):
             with self.subTest(marker=marker):
                 self.assertFalse(self.denied(loop.format(marker)), self.reason)
         for command in (
