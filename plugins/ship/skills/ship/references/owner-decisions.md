@@ -95,6 +95,33 @@ Retain that record for the fallback when the writer lacks the tool or its call f
 Preserve a direct authoritative mismatch as blocked; the fallback supplies verified provenance, never a substitute owner approval.
 Record the accepted evidence and exact scope in the brief and PR body.
 
+## Owner-approved protected-row subject route
+
+Apply this route only to future briefs after verified runtime adoption.
+A matching existing denial blocks the action, recipient and scope under every route.
+Preserve every effective tool, hook, owner and loaded-instruction refusal and every affected-session hold.
+Native Edit grants zero alternate form for a denied operation.
+Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
+The driver applies zero protected edits; the writer publishes nothing.
+A product-limit or cost approval alone grants zero protected read, subject, paired-field, retirement or pin-edit authority.
+Apply the exact access and edit provenance requirements in the supported writer's loaded subject route.
+Keep all other routes' subject and field freezes binding outside that exact approved route scope.
+
+### Future ordinary-file identity checkpoints
+
+Use direct Git and file-hash tools only for independently authorized future ordinary-file identity checkpoints.
+Require literal worktree paths and an exact permitted file allowlist; exclude protected files.
+Disable fsmonitor with `-c core.fsmonitor=false` on direct Git reads.
+Disable external diff helpers and text conversion with `--no-ext-diff --no-textconv` where applicable.
+Use literal revision and status reads and direct `sha256sum` over only the permitted ordinary files.
+Bind the revision, status, diff and hash results to one unchanged checkpoint.
+Invalidate an inconsistent checkpoint collection or any collection whose source changes during capture.
+Preserve process ownership, cleanup, execution admission and the brief's restrictions.
+Keep computed process-capable Python denied regardless of its claimed read-only purpose.
+This documentation grants zero alternative execution for a recorded denied identity operation.
+
 ## Structural migration parent example
 
 When a main merge changes migration files or the brief names migration scope, prepare merged-tree graph and target-parent evidence.

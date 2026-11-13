@@ -951,6 +951,44 @@ TAIL
         self.assertTrue(self.denied("python3 - <<'PY'\nimport subprocess\n"
                                     "subprocess.run(['sh', 'x.sh'])\nPY\ngit status\n"))
 
+    def test_nonpublication_classifier_refusals_grant_zero_replay_or_driver_handoff(self):
+        from unittest.mock import patch
+
+        cases = (
+            ("python3 - <<'PY'\nimport subprocess\nsubprocess.run(['sh', 'synthetic.sh'])\nPY\n",
+             'process-capable heredoc rule', False),
+            ("python3 -I - <<'PY' | sh\nprint('synthetic')\nPY\n",
+             'process-capable heredoc rule', False),
+            ("python3 - <<'PY'\nopen('synthetic.sh', 'w').write('synthetic')\nPY\nsh synthetic.sh\n",
+             'heredoc-then-run rule', False),
+            ("node <<'SYNTHETIC'\nsynthetic\nSYNTHETIC\n",
+             'process-capable heredoc rule (heredoc reader not on the allowlist)', False),
+            ("python3 -c 'import sys; print(sys.argv)'", 'process-capable python -c rule', False),
+            ('node -e synthetic', 'inline interpreter code rule', False),
+            ('echo synthetic\r', 'line separator rule', False),
+            ('echo synthetic', 'classifier exception', True),
+        )
+        for command, rule, broken_classifier in cases:
+            with self.subTest(rule=rule, command=command):
+                context = (patch.object(ultraship, 'python_heredoc_shell', side_effect=ValueError('synthetic'))
+                           if broken_classifier else contextlib.nullcontext())
+                with context:
+                    self.assertTrue(self.denied(command))
+                self.assertIn('Rule: ' + rule, self.reason)
+                self.assertRegex(self.reason, r'(?i)(?:operation|scope).*denied')
+                self.assertRegex(self.reason, r'(?i)zero.*(?:alternate|alternative).*(?:form|actor)')
+                self.assertRegex(self.reason, r'(?i)cause.*resolution.*fresh.*disposition')
+                self.assertNotIn('Return this step to your driver', self.reason)
+                self.assertNotIn('the driver may run it', self.reason)
+
+    def test_publication_refusal_retains_publication_specific_driver_handoff(self):
+        for command in ('git push origin HEAD', 'npm publish'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release;',
+                              self.reason)
+                self.assertIn('Return this step to your driver; the driver may run it.', self.reason)
+
     def test_named_writer_denial_rules(self):
         cases = (
             ("python3 - <<'PY'\nimport subprocess\nsubprocess.run(['sh', 'x.sh'])\nPY\n",

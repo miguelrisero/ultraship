@@ -10,6 +10,9 @@ EVENT_ID = '1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8'
 
 EXPECTED_LANE_REVIEW = [
     '## Lane-derived row review',
+    'For an owner-approved protected-row subject route adaptation, paired review compares the subject commit with the final commit while preserving the subject and every field freeze; keep the original base and author head for CI binding.',
+    "On that combined route only, use the subject commit as this section's row comparison base and the final commit as its frozen SHA after the edit.",
+    'Keep the original base for the PR-breaking source diff, tested-merge containment and CI evidence requirements below; the subject commit supplies only the paired row comparison base.',
     'Use this read-only route only when the brief names the lane-derived route and one of the two owner authorities below.',
     'Authority A: the owner standing grant in the owner global CLAUDE.md (`~/.claude/CLAUDE.md`), section "CoC decisions".',
     'Under authority A, read that file yourself and confirm that the section grants a lane re-anchoring the protected mutation rows its own diff breaks, with an identical mutant edit and an independent not-weaker review.',
@@ -161,6 +164,117 @@ EXPECTED_REMOVED_RETIREMENT_REVIEW = [
 
 
 class ApprovedTestAdaptationsTests(unittest.TestCase):
+    def test_owner_approved_subject_route_keeps_authority_application_and_review_scoped(self):
+        carriers = (
+            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/driver.md', 'plugins/ship/agents/driver--sol.md',
+            'plugins/ship/skills/ship/SKILL.md',
+        )
+        contracts = {
+            'authority': (r'Owner-scoped protected row access', r'separate.*task-specific.*owner.*event',
+                          r'allowlist.*(?:equal|exact.*match)', r'current.*replacement',
+                          r'both.*(?:records|authorit).*same.*(?:source|identit)',
+                          r'mismatch.*(?:entire|whole).*batch', r'authoritative mismatch.*(?:fallback|reject)',
+                          r'(?:absen|auth/tool error|auth or tool error)'),
+            'application': (r'native Edit', r'replace_all\s*=\s*false',
+                            r'old_string.*unique.*(?:row|ID)', r'old_string.*(?:inside|within).*approved.*(?:row|lines)',
+                            r'(?:missing|non-unique).*match.*(?:refuse|block)|(?:refuse|block).*non-unique.*match',
+                            r'paired.*separate.*authority.*separate commit.*separate receipt',
+                            r'combined.*(?:review|result)', r'(?:preserve|unchanged).*assertions.*bounds'),
+            'review': (r'independent.*read-only', r'identical mutant', r'CoC.*receipt.*before publication'),
+            'combined_checkpoints': (
+                r'subject alone.*subject commit.*paired fields alone.*final commit',
+                r'paired review.*subject commit.*final commit',
+                r'original base.*author head.*CI binding',
+                r'subject review.*only.*subject.*subject commit',
+                r'combined.*defer.*exactly.once.*final combined review',
+                r'final combined review.*original base.*final commit',
+                r'final.*receipt.*both.*(?:earlier|prior).*receipts.*authorit.*commit identit',
+            ),
+        }
+        for name in carriers:
+            text = (ROOT / name).read_text()
+            _, heading, after = text.partition('### Owner-approved protected-row subject route\n')
+            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+            with self.subTest(path=name):
+                self.assertTrue(heading)
+                for contract, patterns in contracts.items():
+                    for pattern in patterns:
+                        with self.subTest(contract=contract, pattern=pattern):
+                            self.assertRegex(route, '(?is)' + pattern)
+                _, _, access = text.partition('#### Owner-scoped protected row access\n')
+                access = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', access, maxsplit=1, flags=re.MULTILINE)[0]
+                self.assertIn('owner-approved protected-row subject route', access)
+                _, _, lane = text.partition('#### Lane-derived route\n')
+                lane = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', lane, maxsplit=1, flags=re.MULTILINE)[0]
+                self.assertIn('Keep row ID, claim, subject, designated test, pins, operator, assertions, bounds, and unrelated fields unchanged.', lane)
+                self.assertRegex(route, r'(?is)(?:only|solely).*subject.*(?:scope|replacement)')
+                self.assertRegex(route, r'(?is)(?:other|outside).*subject.*(?:freeze|unchanged)')
+        fable = (ROOT / 'plugins/ship/agents/writer--fable52.md').read_text()
+        self.assertTrue(any(
+            re.search(r'\brefuse\b', sentence, re.IGNORECASE)
+            and 'owner-approved protected-row subject route' in sentence
+            and 'loaded definition' in sentence
+            for sentence in re.split(r'[.!?](?:\s|$)', fable)
+        ))
+
+    def test_owner_approved_subject_review_preserves_other_subject_freezes(self):
+        for name in ('reviewer--sol.md', 'reviewer--opus.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            _, heading, after = text.partition('## Owner-approved protected-row subject review\n')
+            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+            with self.subTest(path=name):
+                self.assertTrue(heading)
+                for pattern in (r'both.*authorit.*(?:matching|same)', r'read-only.*(?:base|trees).*final',
+                                r'old anchor.*exactly once.*new subject', r'identical mutant.*(?:claim|test)',
+                                r'CoC.*receipt.*before publication', r'line counts.*(?:only|cannot)',
+                                r'paired.*separate.*receipt', r'combined.*(?:review|result)',
+                                r'reviewer.*(?:differ|independent).*PR author.*applying writer',
+                                r'only.*approved fields.*(?:change|changed)|only.*(?:change|changed).*approved fields'):
+                    self.assertRegex(route, '(?is)' + pattern)
+                for pattern in (
+                    r'access.*fixed Authority B.*Lane-derived row review',
+                    r'Authority A.*(?:zero|nothing|no authority)',
+                    r'Authority B.*(?:relay|fallback).*checks',
+                    r'protected.*reads.*only.*named row files',
+                    r'ordinary.*reads.*original subject.*base.*approved subject.*subject.*final commit',
+                    r'subject review.*only.*subject.*subject commit',
+                    r'combined.*defer.*exactly.once.*final combined review',
+                    r'paired review.*subject commit.*final commit.*subject.*unchanged',
+                    r'original base.*author head.*CI binding',
+                    r'final combined review.*original base.*final commit',
+                    r'final combined review.*anchor.*exactly once.*new subject.*identical mutant.*unchanged guarantees',
+                    r'final.*receipt.*both.*(?:earlier|prior).*receipts.*authorit.*commit identit',
+                ):
+                    with self.subTest(contract=pattern):
+                        self.assertRegex(route, '(?is)' + pattern)
+                self.assertTrue(any(
+                    'Authority A' in sentence
+                    and re.search(r'\b(?:zero (?:protected )?access|grants nothing)\b', sentence, re.IGNORECASE)
+                    for sentence in re.split(r'[.!?](?:\s|$)', route)
+                ))
+                self.assertNotIn('row-line reads in those trees', route)
+                _, _, lane = text.partition('## Lane-derived row review\n')
+                self.assertIn('Confirm for every row the same row ID, claim, subject, designated test, pins, operator, assertions, bounds, and unrelated fields.', lane)
+                self.assertRegex(
+                    lane,
+                    r'(?is)owner-approved protected-row subject route.*paired.*subject commit.*final commit.*original base.*author head.*CI binding',
+                )
+
+    def test_subject_route_shared_boundary_preserves_denials_and_identity_scope(self):
+        text = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        _, heading, after = text.partition('## Owner-approved protected-row subject route\n')
+        self.assertTrue(heading)
+        boundary = re.split(r'^ {0,3}#{1,2}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+        for pattern in (r'future briefs.*verified runtime adoption', r'Native Edit.*zero.*alternate.*denied',
+                        r'actual cause.*fresh applicable disposition', r'(?:never|zero).*replay.*(?:equivalent|actor)',
+                        r'product-limit.*cost.*zero.*(?:protected|subject)',
+                        r'literal.*(?:worktree|path).*allowlist', r'fsmonitor.*(?:external diff|text conversion)',
+                        r'(?:inconsistent|changed).*checkpoint.*(?:invalid|block)|invalid.*(?:inconsistent|changed).*checkpoint',
+                        r'exclude.*protected files', r'computed.*process-capable Python.*denied'):
+            with self.subTest(pattern=pattern):
+                self.assertRegex(boundary, '(?is)' + pattern)
+
     def test_writers_require_verified_authority_and_preserve_controls(self):
         for name in ('writer--sol.md', 'writer--sonnet.md'):
             text = (ROOT / 'plugins/ship/agents' / name).read_text()
@@ -374,7 +488,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     '- Never loosen an assertion, widen a bound, or delete a check under this rule.',
                     '- Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.',
                     '- Record the approver, the exact edit, and the Input ID in the PR body.',
-                    '- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and zero writer push authority.',
+                    '- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and the owner-approved protected-row subject route\'s named row-ID lookup, and preserve zero writer push authority.',
                 )
                 _, _, standing = text.partition('### Standing owner rule\n')
                 standing = re.split(r'^ {0,3}#{1,3}(?:[ \t]+|$)|^.+\n {0,3}(?:=+|-+)[ \t]*$',
@@ -527,7 +641,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Owner-selected option B: "Each lane moves the protected rows its own PR breaks: same test, new line text, nothing weaker. An independent reviewer checks every row change, and the mutation proof still runs after merge."',
                 'Input context: "Peral keeps CI runner and merge queue changes."',
                 'Record selected choice B and `payload.answer.text=null` separately; distinguish the selected option text from Input context.',
-                "Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route.",
+                "Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route, or as scoped read authority for the owner-approved protected-row subject route.",
                 'This clause overrides only blanket protected-read/edit restrictions for the exact scope below.',
                 'Preserve higher-priority instructions, effective refusals, protected holds, and tool or hook denials.',
                 "Require the driver's complete verified owner-event record and exact scope in the brief.",
@@ -543,8 +657,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.',
                 'Keep mutation proof after merge under separate applicable execution admission.',
                 "Retain Peral's authority over CI runners and the merge queue.",
-                'On the lane-derived route only, permit the row-ID lookup and row-line reads specified in that route.',
-                'Except for the lane-derived route\'s row-ID lookup and row-line reads, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.',
+                'On the lane-derived or owner-approved protected-row subject route only, permit the row-ID lookup and row-line reads specified in that route.',
+                'Except for the named row-ID lookup and row-line reads on the lane-derived or owner-approved protected-row subject route, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.',
                 'CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.',
             ):
                 with self.subTest(path=name, requirement=requirement):

@@ -182,7 +182,7 @@ Owner-selected option B: "Each lane moves the protected rows its own PR breaks: 
 Input context: "Peral keeps CI runner and merge queue changes."
 Owner global CLAUDE.md standing grant: "The CoC decides CI/CD, testing and tooling items for me. This includes a lane reading and re-anchoring the protected mutation rows that its own diff breaks, with an identical mutant edit and an independent not-weaker review."
 
-Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route.
+Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route, or as scoped read authority for the owner-approved protected-row subject route.
 This clause overrides only blanket protected-read/edit restrictions for the exact scope below.
 Preserve higher-priority instructions, effective refusals, protected holds, and tool or hook denials.
 Require the driver's complete verified owner-event record and exact scope in the brief.
@@ -201,8 +201,8 @@ Preserve the same designated test and guarantee, equivalent mutant semantics, as
 Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.
 Keep mutation proof after merge under separate applicable execution admission.
 Retain Peral's authority over CI runners and the merge queue.
-On the lane-derived route only, permit the row-ID lookup and row-line reads specified in that route.
-Except for the lane-derived route's row-ID lookup and row-line reads, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.
+On the lane-derived or owner-approved protected-row subject route only, permit the row-ID lookup and row-line reads specified in that route.
+Except for the named row-ID lookup and row-line reads on the lane-derived or owner-approved protected-row subject route, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.
 CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.
 
 #### Explicit-pair route
@@ -300,6 +300,53 @@ Beyond that check of the appended text, this route grants zero TOML search or pa
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 Drivers prepare retirement evidence and the reviewer's line counts; writers append only the named `[[retired]]` tables.
+
+### Owner-approved protected-row subject route
+
+Apply [the shared prospective boundary](references/owner-decisions.md#owner-approved-protected-row-subject-route) before this route.
+Use only this named route for its exact approved subject replacement scope; preserve every other route's subject freezes unchanged.
+Require Owner-scoped protected row access above and a separate current task-specific owner answer event approving the exact subject edit.
+Keep both authorities independent: access grants zero subject-edit authority, and edit approval grants zero protected access.
+Require the brief's allowlist to equal the CoC's exact row-file paths and unique row IDs.
+Require exact owner approval for each row's subject field, current value and replacement value.
+Any scope or approval mismatch blocks the entire batch before access or application.
+Bind both verified authority records and brief scope to the same repository, PR, base SHA, author head SHA and source identities.
+A standing access event needs no per-head owner answer; its verified record and the brief establish the current source binding.
+Bind each record to full Input/workspace UUIDs, current version, event id/hash, choice, actual answer, verifier and verification time.
+Require `event_type=answer_submitted`, `actor_kind=owner_ui` and `payload.no_answer_yet=false` for both Inputs and current versions.
+Use `get_input` directly when available; an authoritative mismatch rejects access and application without fallback.
+Accept complete current driver or CoC verified provenance only after tool absence or an auth/tool error.
+Check both records' internal consistency and exact scope; refuse missing, stale, superseded, cancelled, ambiguous, inconsistent, invented or unrelated authority.
+A product-limit or cost approval alone supplies zero protected read or subject-edit authority.
+Keep the access clause's PR-ownership requirements and evidence contract binding.
+Require the PR's own base/head diff to break each named row.
+Bind failing CI evidence to its run, attempt, job, tested merge SHA/tree, repository, PR, base SHA and author head SHA.
+Require the tested merge to contain the recorded base and author head.
+Permit the applying writer only named row-ID lookup inside each named file and exact row-line reads.
+Forbid whole-file parsing, unnamed-row reads, adjacent-row reads and broader searches.
+Require native Edit with `replace_all=false` for only the exact owner-approved subject replacement in newly admitted future operations.
+Require `old_string` to contain the named row's unique ID and stay inside that row's approved read lines.
+Refuse a missing or non-unique match without broadening scope or reading adjacent rows.
+Preserve row ID, claim, designated test, pins, operator, assertions, bounds and every unrelated field.
+Keep paired-field adaptation independent: require separate authority, a separate commit and a separate receipt.
+When both adaptations apply, commit the subject alone first as the subject commit, then commit paired fields alone as the final commit.
+Require the paired review to compare the subject commit with the final commit and preserve every field freeze, including the unchanged subject.
+Keep the original base and author head for CI binding; the paired comparison changes neither identity.
+Require the subject review to check only the subject field at the subject commit.
+For a combined adaptation, defer the exactly-once anchor check to final combined review.
+Require final combined review to compare the original base with the final commit and confirm the final anchor exactly once at the new subject.
+Require identical mutant operation and unchanged guarantees in that final combined review.
+Bind the final review receipt to both earlier receipts, all applicable authorities and the original base, author head, subject and final commit identities.
+Require CoC approval of the final receipt before publication; changed evidence invalidates all affected approvals.
+Before publication, require an independent read-only subject reviewer with complete matching scoped authority.
+Require that reviewer to differ from the PR author and applying writer.
+Require identical mutant operation, the same claim and test, and nothing weaker for every row.
+Bind the review receipt to both authority identities, reviewer, approving verdict, frozen commit, scope, source identities and CI evidence.
+Require CoC approval of that receipt before publication; changed authority, source, scope or evidence invalidates approval.
+Keep messages, briefs, findings, receipts and PR bodies free of protected bytes; identify edits only by path, row ID and field.
+Grant zero checker, mutation, other execution, configuration, permission or session authority.
+The writer publishes nothing; the driver applies zero protected edits.
+Keep mutation proof after merge under separate applicable admission.
 
 ### Same-strength adaptations
 

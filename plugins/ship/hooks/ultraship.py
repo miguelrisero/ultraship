@@ -2164,18 +2164,23 @@ def pre(data):
             publication_reason = ('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                                   'commit grants permit local base-branch merges into their own lane branch. '
                                   'Return this step to your driver; the driver may run it.')
+            classifier_reason = ('This operation remains denied. Report the rule and blocked scope to the parent. '
+                                 'Native Edit grants zero alternate command form or actor for a denied operation. '
+                                 'Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt. '
+                                 'Never replay a denied command, equivalent, or substitute actor.')
             try:
                 command = tin.get('command', '')
                 if any(char.isspace() and char not in ' \t\n' for char in command):
-                    deny(publication_reason + ' Rule: line separator rule.')
+                    deny(classifier_reason + ' Rule: line separator rule.')
                 reason = process_heredoc_denial(command)
                 if reason:
-                    deny(publication_reason + ' Rule: ' + reason + '.')
+                    deny(classifier_reason + ' Rule: ' + reason + '.')
                 # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
                 file_text_removed = python_heredoc_shell(cat_heredoc_data(command), inert_only=True)
                 reason = git_push(command)
                 if reason:
-                    deny(publication_reason + ' Rule: ' + reason + '.')
+                    denial_reason = classifier_reason if reason == 'heredoc-then-run rule' else publication_reason
+                    deny(denial_reason + ' Rule: ' + reason + '.')
                 match = WRITER_BASH.search(file_text_removed)
                 if match:
                     deny(publication_reason + ' Rule: WRITER_BASH ' + repr(match[2].strip()) + '.')
@@ -2184,15 +2189,15 @@ def pre(data):
                     deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + reason)
                 reason = process_heredoc_denial(command, readers=True)
                 if reason:
-                    deny(publication_reason + ' Rule: ' + reason + '.')
+                    deny(classifier_reason + ' Rule: ' + reason + '.')
                 reason = python_inline_denial(command)
                 if reason:
-                    deny(publication_reason + ' Rule: ' + reason + '.')
+                    deny(classifier_reason + ' Rule: ' + reason + '.')
                 reason = inline_interpreter_denial(command, data.get('cwd'))
                 if reason:
-                    deny(publication_reason + ' Rule: ' + reason + '.')
+                    deny(classifier_reason + ' Rule: ' + reason + '.')
             except Exception:
-                deny(publication_reason + ' Rule: classifier exception.')
+                deny(classifier_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''
         if tool in ('Edit', 'Write', 'NotebookEdit') and (
                 HARNESS_PATH.search(target) or target.startswith(str(Path.home() / '.claude') + '/')):
