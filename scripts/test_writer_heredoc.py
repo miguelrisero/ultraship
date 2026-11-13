@@ -555,6 +555,12 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertIn('inline interpreter code rule', self.reason)
         self.assertFalse(self.denied("env -S'FOO=1 node ./x.js'"))
 
+    def test_unresolved_grep_segment_keeps_nested_shell_scan(self):
+        self.assertTrue(self.denied('grep -rn "$PAT" src eval \'node -e 1\''))
+        self.assertIn('inline interpreter code rule (node)', self.reason)
+        self.assertFalse(self.denied("grep -rn x eval 'node -e 1'"))
+        self.assertFalse(self.denied('grep -rn eval "$DIR"'))
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))

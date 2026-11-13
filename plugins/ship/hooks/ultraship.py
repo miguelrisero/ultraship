@@ -1127,8 +1127,17 @@ def nested_shell_strings(tokens):
     """Keep the identity of each argument that a shell or string wrapper can execute."""
     for index, token in enumerate(tokens):
         name = os.path.basename(token[1])
-        if name not in STRING_WRAPPERS or grep_data_token(tokens, index):
+        if name not in STRING_WRAPPERS:
             continue
+        if grep_data_token(tokens, index):
+            start, end = index, index + 1
+            separators = {';', '&', '|', '(', ')', '`', '\n'}
+            while start and tokens[start - 1][0] not in separators:
+                start -= 1
+            while end < len(tokens) and tokens[end][0] not in separators:
+                end += 1
+            if all(not unresolved_shell_word(word[0]) for word in tokens[start:end]):
+                continue
         arguments = []
         for argument in tokens[index + 1:]:
             if argument[0] in {';', '&', '|', '(', ')', '`', '\n'}:
