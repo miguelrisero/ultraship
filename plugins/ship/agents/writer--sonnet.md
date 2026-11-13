@@ -466,9 +466,9 @@ Apply your own loaded definition; checkout, cache, and version supply zero addit
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
 Except under the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
-Except under the owner-decisions method-only rule: after a hook or permission denial, get the denied result through no other process.
-This includes script files, other interpreters, module flags and wrapper commands.
-Report the denial to the driver and stop the denied step.
+Except under the owner-decisions method-only rule: use no other process to do a step that a hook or permission denied.
+Script files, other interpreters, module flags and wrapper commands are other processes.
+Tell the driver about the denial and stop that step.
 Checks that the brief names stay permitted when the hook admits them.
 
 Return the changed files, the test commands with their results or `tests not run (brief)`, the head SHA, and any blocker with evidence. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.
