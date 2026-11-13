@@ -418,6 +418,11 @@ def isolated_writes(tree, bound):
             return False
         if isinstance(node, ast.Name) and node.id == 'open' and id(node) not in calls:
             return False
+        # A method read off the class (`Path.open('t', 'w')`, `c.replace(src, dst)`) takes the path as its first
+        # argument, so the class is usable only as the callee that builds a path.
+        if ((isinstance(node, ast.Name) and node.id == 'Path' or isinstance(node, ast.Attribute) and node.attr == 'Path')
+                and id(node) not in calls or isinstance(node, ast.Name) and node.id == 'type'):
+            return False
         if isinstance(node, ast.Attribute) and node.attr in {
                 'write_text', 'chmod', 'mkdir', 'unlink', 'open', 'replace'} and id(node) not in calls:
             return False
@@ -428,6 +433,9 @@ def isolated_writes(tree, bound):
         if builtin_open or method == 'open':
             if (any(isinstance(argument, ast.Starred) for argument in node.args)
                     or any(keyword.arg not in {'mode', 'encoding', 'newline', 'errors'} for keyword in node.keywords)):
+                return False
+            # Called on the class (`Path.open`, an alias, `type(...)`), the first argument is the path, not the mode.
+            if not builtin_open and len(node.args) > 1:
                 return False
             offset = 1 if builtin_open else 0
             modes = [*node.args[offset:offset + 1],
@@ -764,10 +772,12 @@ def runs_heredoc_output(command):
             # The written files exist only after the script, so only a later or a background command can run them.
             if check_only_shell(''.join(lines[end + 1:])) and not re.search(r'(?<!&)&(?![&>])', match['lead']):
                 return False
-            if not inert_python(body):
+            literal = inert_python(body)
+            # `-I` keeps the working folder off `sys.path`, so computed paths are inert there.
+            if not literal and not ('I' in match['flags'] and inert_python(body, isolated=True)):
                 return True
             # An inert script writes only through `open` with a write mode or a `Path` write method.
-            return python_writes(body, isolated='I' in match['flags'] and not inert_python(body))
+            return python_writes(body, isolated='I' in match['flags'] and not literal)
     return False
 
 

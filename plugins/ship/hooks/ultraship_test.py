@@ -311,6 +311,31 @@ class PythonHeredocGuardTests(unittest.TestCase):
                 command = f"set -e && python3 -I - <<'PY'\n{body}\nPY\n{remainder}\n"
                 self.assertEqual(ultraship.runs_heredoc_output(command), expected)
 
+    def test_isolated_computed_path_reads_are_inert(self):
+        reads = ("import hashlib\nfrom pathlib import Path\nroot = Path('/repo')\nfor name in ['a', 'b']:\n"
+                 "    print(hashlib.sha256((root / name).read_bytes()).hexdigest())")
+        writes = "from pathlib import Path\nroot = Path('/repo')\n(root / 'x.sh').write_text('x')"
+        # Columns: interpreter, body, remainder, heredoc-then-run verdict, isolated inert verdict (None: not pinned).
+        cases = (
+            ('python3 -I -', reads, 'git add a b && git commit -m fix', False, True),
+            ('python3 -', reads, 'git add a b && git commit -m fix', True, None),
+            ('python3 -I -', writes, 'sh /repo/x.sh', True, None),
+            ('python3 -I -', "from pathlib import Path\nroot = Path('/repo')\n(root / 'x.sh').chmod(0o755)",
+             'sh /repo/x.sh', True, None),
+            ('python3 -I -', "from pathlib import Path\nPath.open('t', 'w').write('x')", 'sh t', True, False),
+            ('python3 -I -', "from pathlib import Path\nk = Path\nk.open('t', 'w').write('x')", 'sh t', True, False),
+            ('python3 -I -', "import pathlib\npathlib.Path.open('t', 'w').write('x')", 'sh t', True, False),
+            ('python3 -I -', "from pathlib import Path\ntype(Path('/repo')).open('t', 'w').write('x')", 'sh t', True, False),
+            ('python3 -I -', "from pathlib import Path\nk = Path\nk.replace(Path('/w/x.txt'), '/w/traceback.py')",
+             'sh t', True, False),
+        )
+        for interpreter, body, remainder, expected, isolated_inert in cases:
+            with self.subTest(interpreter=interpreter, body=body, remainder=remainder):
+                command = f"cd /repo && {interpreter} <<'PY'\n{body}\nPY\n{remainder}\n"
+                self.assertEqual(ultraship.runs_heredoc_output(command), expected)
+                if isolated_inert is not None:
+                    self.assertEqual(ultraship.inert_python(body, isolated=True), isolated_inert)
+
 
 class WriterGitHubGuardTests(unittest.TestCase):
     def setUp(self):
