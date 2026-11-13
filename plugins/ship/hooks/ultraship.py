@@ -941,7 +941,9 @@ def process_heredoc_denial(command):
         if message_data:
             remainder = ''.join(lines[end + 1:])
             complete = remainder in (')"', ')"\n') if '-m' in prefix.split() else not remainder
-            if end == len(lines) or not complete:
+            if end == len(lines) or not complete or any(
+                    (line.lstrip('\t') if match['tabs'] else line).startswith(delimiter)
+                    for line in lines[index + 1:end]):
                 return 'process-capable heredoc rule (commit message heredoc must be the whole command)'
             return None
         if end == len(lines):

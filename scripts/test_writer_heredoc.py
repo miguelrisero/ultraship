@@ -1049,6 +1049,20 @@ PY
         self.assertTrue(self.denied(command))
         self.assertIn('process-capable heredoc rule (Python heredoc needs a quoted delimiter)', self.reason)
 
+    def test_commit_cat_delimiter_prefix_early_end_is_denied(self):
+        command = ('git commit -m "$(cat <<\'EOF\'\nfix: x\nEOF)"\n'
+                   "python3 -I - <<'PY'\nimport subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\n"
+                   'PY\n: "\nEOF\n)"\n')
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (commit message heredoc must be the whole command)',
+                      self.reason)
+
+    def test_commit_stdin_delimiter_prefix_message_is_denied(self):
+        command = "git commit -F - <<'EOF'\nfix: x\nEOF)\nEOF\n"
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (commit message heredoc must be the whole command)',
+                      self.reason)
+
 
 if __name__ == '__main__':
     unittest.main()
