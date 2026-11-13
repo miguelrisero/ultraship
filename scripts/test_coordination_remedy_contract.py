@@ -91,3 +91,96 @@ class CoordinationRemedyContractTests(unittest.TestCase):
 
     def test_contract_keeps_the_refusal_rule_line_budget(self):
         self.assertLessEqual(len([line for line in self.refusals.splitlines() if line.strip()]), 8)
+
+    def test_contract_binds_formatting_resends_to_authenticated_original_calls(self):
+        for requirement in (
+            'For `Agent` and `SendMessage`, allow one formatting-only resend only after '
+            'an authenticated lint refusal with an exact formatting remedy.',
+            'Require trusted native tool evidence attributing the complete refusal to the '
+            'formatting producer and identifying the original refused tool call.',
+            'For `SendMessage`, require authenticated `plugins/ship/hooks/text_lint.py` '
+            'producer attribution.',
+            'The `Output contract:` prefix alone supplies zero producer authentication.',
+            'An authenticated formatting-only refusal qualifies despite that prefix; '
+            'generic or unclassified denials remain blocked.',
+            'Require every returned finding to be formatting-only and the applicable loaded contract.',
+            "The formatting exception covers only the identified formatting producer's refusal "
+            "of that handoff's text; other binding tool denials remain final.",
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.refusals)
+        for name in ('driver.md', 'driver--sol.md'):
+            with self.subTest(driver=name):
+                driver = (ROOT / 'plugins/ship/agents' / name).read_text()
+                self.assertIn('Apply its once-only authenticated formatting-only resend contract '
+                              'to `Agent` and `SendMessage`.', driver)
+
+    def test_contract_limits_formatting_remedies_to_supported_prose(self):
+        for requirement in (
+            'Apply only the exact formatting remedy; preserve the action, recipient, scope, '
+            'authority, non-prose fields, owner provenance, and choice identifiers.',
+            'A missing `Facts` heading organizes supported existing facts only; '
+            'invent zero facts, evidence, approval, or authority.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.refusals)
+        self.assertIn('preserve existing published choice IDs during retries.', self.owner)
+
+    def test_contract_keeps_formatting_route_fail_closed(self):
+        block = self.refusals.partition('For formatting-only resends, block ')[2].partition('.')[0]
+        for case in (
+            'generic prefixes without exact provenance',
+            'unknown producers',
+            'incomplete refusal evidence',
+            'missing or ambiguous formatting remedies',
+            'unknown or mixed reasons',
+            'safety refusals',
+            'affected-operation denials',
+            'uncertain delivery',
+            'changed action, recipient, scope, authority, non-prose fields, owner provenance, '
+            'or choice identifiers',
+        ):
+            with self.subTest(case=case):
+                self.assertIn(case, block)
+
+    def test_contract_requires_canonical_exclusive_durable_consumption(self):
+        for requirement in (
+            'Use one canonical durable record binding the original refused call and unchanged '
+            'action, recipient, and scope.',
+            'Require one verified sender with proven exclusive custody before consuming the attempt.',
+            'Verify absence of overlapping senders; require explicit custody transfer during replacement.',
+            'An existing atomic claim qualifies only when its guarantees cover this same canonical record.',
+            'A read followed by an append alone supplies zero exclusivity proof.',
+            'Durably consume the single attempt and confirm persistence before sending.',
+            'Recovery, replacement, and new sessions use the same record and retain its consumed state.',
+            'A failed corrected send stays consumed.',
+            'Never use alternate delivery or substitute execution for a still-effective refusal.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.refusals)
+        block = self.refusals.partition('For resend consumption, block ')[2].partition('.')[0]
+        for case in (
+            'unknown custody',
+            'overlapping senders',
+            'replacement without explicit custody transfer',
+            'uncertain persistence',
+            'absent or uncertain records',
+            'consumed attempts',
+        ):
+            with self.subTest(case=case):
+                self.assertIn(case, block)
+
+    def test_contract_keeps_formatting_source_delivery_prospective(self):
+        self.assertIn('Prospective source delivery supplies zero runtime-adoption '
+                      'or affected-retry authority.', self.refusals)
+        self.assertIn('Preserve existing loaded-session restrictions and affected-session holds.',
+                      self.refusals)
+        self.assertIn('Recheck current version, status, and answer provenance before the resend.',
+                      self.refusals)
+        self.assertIn('Preserve actual owner Input event delivery and all answer-verification '
+                      'steps below.', self.owner)
+        self.assertIn('Only the CoC publishes canonical owner decisions and results '
+                      'in CoC workspace Inputs.', self.owner)
+        self.assertIn('Never use BetterCoding `send_workspace_message`, `run_session_prompt`, '
+                      'or simulated user input for peer coordination, including fallback delivery.',
+                      self.owner)
