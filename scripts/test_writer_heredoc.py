@@ -118,6 +118,79 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command))
 
+    def test_commit_prefix_keeps_later_inline_code_checked(self):
+        command = ('git commit -m x\n: <<\'Z\'\nZ\n'
+                   'python3 -c \'import subprocess; subprocess.run(["git", "pu" + "sh"])\'')
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule', self.reason)
+        self.assertIn('process-capable python -c rule', ultraship.python_inline_denial(command))
+
+    def test_expansions_cannot_assemble_inline_interpreter(self):
+        for command in ('$P -c x', 'py${X}thon3 -c x', 'python3${IFS}-c x'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_python_value_options_keep_inline_code_checked(self):
+        code = 'import subprocess; subprocess.run(["git", "pu" + "sh"])'
+        for flags in ('-W ignore', '-X dev', '-Wignore', '-Xdev', '-m module', '-- script.py'):
+            with self.subTest(flags=flags):
+                self.assertTrue(self.denied(f"python3 {flags} -c '{code}'"))
+                self.assertIn('process-capable python -c rule', self.reason)
+        self.assertFalse(self.denied("python3 -W ignore -c 'print(1)'"))
+
+    def test_inline_newline_operators_terminate_recursion(self):
+        self.assertFalse(self.denied("python3 -c 'print(1)'\ncat x\n"))
+        self.assertTrue(self.denied("cat x\npython3 -c 'import sys; print(sys.argv)'\n"))
+        self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_named_interpreters_refuse_unlisted_code_options(self):
+        for command in ('php -B x', 'node --import x', 'deno run x', 'bun --preload x'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (', self.reason)
+
+    def test_stdin_paths_cannot_supply_interpreter_programs(self):
+        for reader in ('python3', 'node', 'perl'):
+            for path in ('-', '/dev/stdin', '/dev/fd/0', '/proc/self/fd/0'):
+                with self.subTest(reader=reader, path=path):
+                    self.assertTrue(self.denied(f'cat f | {reader} {path}'))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_redirects_and_process_substitution_cannot_supply_programs(self):
+        for command in ('node <(echo x)', 'perl < x', 'python3 < x', 'python3 /dev/stdin'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_unquoted_data_heredoc_expansions_are_denied(self):
+        for body in ('$(python3 -c x)', '`node -e x`', '${PROGRAM}'):
+            with self.subTest(body=body):
+                self.assertTrue(self.denied('cat <<EOF\n' + body + '\nEOF\n'))
+                self.assertIn('process-capable heredoc rule', self.reason)
+
+    def test_warning_operand_cannot_hide_real_python_code(self):
+        code = 'import subprocess; subprocess.run(["git", "pu" + "sh"])'
+        for flags in ('-W ignore', "-Wc'print(1)'", '-X I'):
+            with self.subTest(flags=flags):
+                self.assertTrue(self.denied(f"python3 {flags} -c '{code}'"))
+                self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_nested_python_write_checks_outer_consumer(self):
+        command = 'bash -c "python3 -c \'open(\\"r.sh\\", \\"w\\").write(\\"echo x\\")\'" && bash r.sh'
+        self.assertTrue(self.denied(command))
+        self.assertIn('python -c then run rule', self.reason)
+
+    def test_path_open_write_keeps_consumers_denied(self):
+        code = 'from pathlib import Path; Path("r.sh").open("w").write("echo x")'
+        self.assertTrue(self.denied(f"python3 -I -c '{code}' && bash r.sh"))
+        self.assertIn('python -c then run rule', self.reason)
+        self.assertTrue(self.denied("python3 -I - <<'EOF'\n" + code + '\nEOF\nbash r.sh'))
+        self.assertIn('heredoc-then-run rule', self.reason)
+
+    def test_plain_quoted_arguments_do_not_reparse_as_programs(self):
+        self.assertFalse(self.denied('echo "it\'s fine"'))
+
     def test_python_helper_without_import_is_denied(self):
         body = "def git(*args):\n    return subprocess.check_output(['git', *args])\n"
         for operator, delimiter, indent in (('<<', 'EOF', ''), ('<<', "'EOF'", ''),
