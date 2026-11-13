@@ -310,6 +310,24 @@ class WriterHeredocTests(unittest.TestCase):
             self.assertTrue(self.denied(command))
             self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
+    def test_command_pipeline_input_reaches_grouped_python(self):
+        for command in ("printf '%s' 'x' | (python3 -I)", "printf '%s' 'x' |& python3 -I",
+                        "printf '%s' 'x' | { python3 -I; }"):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule', self.reason)
+
+    def test_python_clusters_consume_warning_and_runtime_option_values(self):
+        for flags in ('-bW ignore', '-IX dev', '-IWignore'):
+            self.assertTrue(self.denied("printf '%s' 'x' | python3 " + flags))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_program_after_directory_change_is_denied(self):
+        for command in ("cd /dev && printf '%s' 'x' | node stdin",
+                        "cd /dev/fd && printf '%s' 'x' | python3 0", 'cd /dev && node stdin'):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        self.assertFalse(self.denied('node scripts/build.js'))
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))

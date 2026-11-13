@@ -1167,6 +1167,41 @@ def nested_work_exceeded(tokens, seen):
         os.path.basename(token[1]) in STRING_WRAPPERS for token in tokens) > 50000
 
 
+def python_program(arguments):
+    """Return the program kind, flags, word index, and attached operand offset."""
+    flags, cursor = '', 0
+    while cursor < len(arguments):
+        option = arguments[cursor]
+        if option == '--':
+            return ('script' if cursor + 1 < len(arguments) else 'stdin', flags, cursor + 1, 0)
+        if option == '-' or not option.startswith('-'):
+            return ('stdin' if option == '-' else 'script', flags, cursor, 0)
+        if option == '--check-hash-based-pycs':
+            cursor += 2
+            continue
+        if option.startswith('--check-hash-based-pycs='):
+            cursor += 1
+            continue
+        if option.startswith('--'):
+            return 'unknown', flags, cursor, 0
+        offset = 1
+        while offset < len(option):
+            flag = option[offset]
+            if flag in 'cm':
+                attached = offset + 1 < len(option)
+                return flag, flags, cursor if attached else cursor + 1, offset + 1 if attached else 0
+            if flag in 'WX':
+                if offset + 1 == len(option):
+                    cursor += 1
+                break
+            if flag not in 'bBdEhiIOPqRsSuvVx':
+                return 'unknown', flags, cursor, 0
+            flags += flag
+            offset += 1
+        cursor += 1
+    return 'stdin', flags, cursor, 0
+
+
 def python_inline_denial(command):
     """Check every Python -c word, including wrapper arguments and nested shell strings."""
     shell = shell_line_continuations(shell_without_heredoc_bodies(command))
@@ -1195,39 +1230,18 @@ def python_inline_denial(command):
             for index, (raw, value, start, end) in enumerate(words):
                 if not re.fullmatch(r'python(?:3(?:\.\d+)?)?', os.path.basename(value)):
                     continue
-                flags, skip, stopped = '', False, False
-                for cursor in range(index + 1, len(words)):
-                    option = words[cursor][1]
-                    if not stopped and unresolved_shell_word(words[cursor][0]):
+                arguments = words[index + 1:]
+                kind, flags, operand, offset = python_program([word[1] for word in arguments])
+                if any(unresolved_shell_word(word[0]) for word in arguments[:operand + (kind != 'c')]):
+                    return 'process-capable python -c rule'
+                if kind != 'c':
+                    if any(re.match(r'^-[bBdEhiIOPqRsSuvVx]*c', word[1]) for word in arguments):
                         return 'process-capable python -c rule'
-                    match = re.match(r'^-([bBdEhiIOPqRsSuvVx]*c)', option)
-                    if option.startswith(('-W', '-X')) and option not in {'-W', '-X'}:
-                        continue
-                    if skip:
-                        skip = False
-                        if match:
-                            return 'process-capable python -c rule'
-                        continue
-                    if stopped:
-                        if match:
-                            return 'process-capable python -c rule'
-                        continue
-                    if not match:
-                        if option in {'-W', '-X'}:
-                            skip = True
-                        elif option == '-m' or option == '--' or not option.startswith('-'):
-                            stopped = True
-                        elif option.startswith(('-W', '-X')):
-                            pass
-                        elif re.fullmatch(r'-[bBdEhiIOPqRsSuvVx]+', option):
-                            flags += option[1:]
-                        else:
-                            stopped = True
-                        continue
-                    flags += match[1]
-                    attached = words[cursor][0][len(match[0]):]
-                    code_word = words[cursor] if attached else words[cursor + 1] if cursor + 1 < len(words) else None
-                    code_raw = attached if attached else code_word[0] if code_word else ''
+                    continue
+                if operand >= len(arguments):
+                    return 'process-capable python -c rule'
+                for code_word in [arguments[operand]]:
+                    code_raw = code_word[0][offset:]
                     code = code_raw[1:-1]
                     literal = (len(code_raw) >= 2 and (
                         code_raw[0] == code_raw[-1] == "'" and "'" not in code
@@ -1311,6 +1325,7 @@ def inline_interpreter_denial(command):
             and not (index + 1 < len(input_tokens) and input_tokens[index + 1][0] == '|'
                      and input_tokens[index + 1][2] == token[3])
             for index, token in enumerate(input_tokens))
+        relative_program_denied = piped_input or any(token[1] in {'cd', 'pushd'} for token in input_tokens)
         if re.search(r'(?:\$\([^\n]*\)|`[^`\n]*`)[ \t]+(?:-[ceEpr]\b|--(?:eval|print)\b|-[a-zA-Z]*[ce]\b)', text):
             return 'inline interpreter code rule (unresolved command word)'
         segments, words, piped = [], [], False
@@ -1379,35 +1394,20 @@ def inline_interpreter_denial(command):
                         continue
                     script = arguments[0] if arguments else ''
                     if (not script or script.startswith('-') or stdin_program_path(script)
+                            or relative_program_denied and not os.path.isabs(script)
                             or not re.fullmatch(r'[\w./:@%+,-]+', words[index + 1][0])):
-                        return ('inline interpreter code rule (program from a pipe)' if piped or stdin_program_path(script)
+                        return ('inline interpreter code rule (program from a pipe)' if piped_input or stdin_program_path(script)
+                                or relative_program_denied and script and not os.path.isabs(script)
                                 else f'inline interpreter code rule ({name})')
                 elif not arguments or any(stdin_program_path(argument) for argument in arguments):
                     return 'inline interpreter code rule (program from a pipe)'
-                elif piped:
-                    flags, program, cursor = [], False, 0
-                    while cursor < len(arguments):
-                        option = arguments[cursor]
-                        if option in {'-W', '-X', '--check-hash-based-pycs'}:
-                            cursor += 2
-                            continue
-                        if option.startswith(('-W', '-X', '--check-hash-based-pycs=')):
-                            cursor += 1
-                            continue
-                        if option == '--':
-                            program = cursor + 1 < len(arguments)
-                            break
-                        if not option.startswith('-'):
-                            program = True
-                            break
-                        if re.fullmatch(r'-[a-zA-Z]+', option):
-                            flags.append(option)
-                        if re.match(r'-[bBdEhiIOPqRsSuvVx]*[cm]', option):
-                            program = cursor + 1 < len(arguments) or len(option) > 2
-                            break
-                        cursor += 1
-                    if (not program or any('i' in flag[1:] for flag in flags)
-                            or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
+                else:
+                    kind, flags, operand, offset = python_program(arguments)
+                    if (kind == 'script' and operand < len(arguments) and relative_program_denied
+                            and not os.path.isabs(arguments[operand])):
+                        return 'inline interpreter code rule (program from a pipe)'
+                    if piped_input and (kind not in {'c', 'm', 'script'} or operand >= len(arguments)
+                                        or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
         pending.extend(token[1] for token in nested)
     return None
