@@ -734,9 +734,10 @@ def check_only_shell(command):
         read_only_shell(segment) or re.fullmatch(r'(?:ba|z)?sh +-n +[\w./][\w./-]*', segment) for segment in segments)
 
 
-def python_writes(body):
-    """Use the same conservative write test for inline code and stdin bodies."""
-    return any(isinstance(node, ast.Attribute) and node.attr in {'write_text', 'unlink', 'chmod', 'mkdir', 'replace'}
+def python_writes(body, isolated=False):
+    """Count write methods only in the modes that admit them."""
+    methods = {'write_text', 'unlink'} | ({'chmod', 'mkdir', 'replace'} if isolated else set())
+    return any(isinstance(node, ast.Attribute) and node.attr in methods
                or isinstance(node, ast.Call) and (
                    getattr(node.func, 'id', None) == 'open' or getattr(node.func, 'attr', None) == 'open') and not all(
                    isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
@@ -766,7 +767,7 @@ def runs_heredoc_output(command):
             if not inert_python(body):
                 return True
             # An inert script writes only through `open` with a write mode or a `Path` write method.
-            return python_writes(body)
+            return python_writes(body, isolated='I' in match['flags'] and not inert_python(body))
     return False
 
 
@@ -919,7 +920,7 @@ def data_reader_header(line):
     path = r'[\w./:@%+,-]+'
     argument = rf'(?:{word}|>>?[ \t]*{path})'
     delimiter = r"(?:'[A-Za-z0-9_]+'|\"[A-Za-z0-9_]+\"|\\?[A-Za-z0-9_]+)"
-    operator = rf"(?:<<<[ \t]*(?:'[^'\n]*'|{word})|<<-?[ \t]*{delimiter})"
+    operator = rf"(?:<<<[ \t]*(?:'[^'\n<]*'|{word})|<<-?[ \t]*{delimiter})"
     return re.fullmatch(rf'[ \t]*(?:cd +{path} +&& +)*(?:' + '|'.join(sorted(HEREDOC_READERS))
                         + rf')(?:[ \t]+{argument})*[ \t]*{operator}(?:[ \t]+{argument})*[ \t]*\n?', line) is not None
 
@@ -927,11 +928,6 @@ def data_reader_header(line):
 def process_heredoc_denial(command, readers=False):
     """Check Python stdin bodies and keep quoted commit messages as data."""
     lines = (command if readers else cat_heredoc_data(command)).splitlines(keepends=True)
-    if readers:
-        for text in (command, command.replace('\\\n', '')):
-            for line in text.splitlines(keepends=True):
-                if '<<<' in line and not data_reader_header(line):
-                    return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
     index = 0
     while index < len(lines):
         operators = list(re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
@@ -961,17 +957,24 @@ def process_heredoc_denial(command, readers=False):
             if len(operators) != 1 or not header:
                 return 'process-capable heredoc rule (unsupported interpreter header)'
         else:
-            if readers and match['delimiter'][0] not in '\'"\\':
+            if readers or data_reader_header(lines[index]):
+                if (len(operators) != 1 or not data_reader_header(lines[index])
+                        or not data_reader_header(lines[index].replace('\\\n', ''))):
+                    return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
                 delimiter = shlex.split(match['delimiter'])[0]
-                for body_line in lines[index + 1:]:
+                end = index + 1
+                while end < len(lines):
+                    body_line = lines[end].lstrip('\t') if match['tabs'] else lines[end]
                     if body_line.removesuffix('\n') == delimiter:
                         break
-                    if '$' in body_line or '`' in body_line:
+                    if match['delimiter'][0] not in '\'"\\' and ('$' in body_line or '`' in body_line):
                         return 'process-capable heredoc rule (expandable data body)'
-            if readers and (len(operators) != 1 or not data_reader_header(lines[index])
-                            or not data_reader_header(lines[index].replace('\\\n', ''))):
-                return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
-            index += 1
+                    end += 1
+                if end == len(lines):
+                    return 'process-capable heredoc rule (unterminated body)'
+                index = end + 1
+            else:
+                index += 1
             continue
         delimiter = shlex.split(match['delimiter'])[0]
         end = index + 1
@@ -1020,7 +1023,7 @@ def shell_raw_words(text):
             continue
         while index < len(text):
             char = text[index]
-            if char == '\\' and quote != "'":
+            if char == '\\' and (quote != "'" or text[start:start + 2] == "$'"):
                 index += 2
                 if index > len(text):
                     raise ValueError('unfinished shell escape')
@@ -1054,8 +1057,6 @@ def shell_without_heredoc_bodies(command):
             delimiter, tabs, quoted = pending[0]
             if (line.lstrip('\t') if tabs else line).removesuffix('\n') == delimiter:
                 pending.pop(0)
-            elif not quoted:
-                kept.append(line)
             continue
         kept.append(line)
         for match in re.finditer(r"(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", line):
@@ -1063,17 +1064,64 @@ def shell_without_heredoc_bodies(command):
     return ''.join(kept)
 
 
+SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'mksh', 'yash', 'rbash', 'ash'}
+STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su'}
+
+
 def nested_shell_strings(tokens):
     """Keep the identity of each argument that a shell or string wrapper can execute."""
     for index, token in enumerate(tokens):
         name = os.path.basename(token[1])
-        if name not in {'sh', 'bash', 'zsh', 'dash', 'ksh', 'env', 'eval'}:
+        if name not in STRING_WRAPPERS:
             continue
         arguments = []
         for argument in tokens[index + 1:]:
             if argument[0] in {';', '&', '|', '(', ')', '`', '\n'}:
                 break
             arguments.append(argument)
+        if name == 'watch':
+            cursor = 0
+            while cursor < len(arguments) and arguments[cursor][1].startswith('-'):
+                option = arguments[cursor][1]
+                if option in {'-n', '--interval'}:
+                    cursor += 2
+                elif option in {'-d', '--differences', '-t', '--no-title', '-e', '--errexit', '-g', '--chgexit',
+                                '-p', '--precise', '-b', '--beep', '-x', '--exec'}:
+                    cursor += 1
+                elif re.fullmatch(r'--interval=.+|-n.+|--differences=.*', option):
+                    cursor += 1
+                else:
+                    raise ValueError('ambiguous watch option')
+            if cursor >= len(arguments):
+                raise ValueError('missing watch program')
+            yield ('', ' '.join(word[1] for word in arguments[cursor:]), arguments[cursor][2], arguments[-1][3])
+            continue
+        if name in {'script', 'flock', 'su'}:
+            value_options = {'script': {'-O', '-I', '-B', '-T', '-m', '--log-out', '--log-in', '--log-io',
+                                         '--log-timing', '--logging-format'},
+                             'flock': {'-w', '-E', '--wait', '--timeout', '--conflict-exit-code'},
+                             'su': {'-s', '-g', '-G', '-w', '--shell', '--group', '--supp-group', '--whitelist-environment'}}
+            flags = {'script': {'-q', '-f', '-e', '-a', '--quiet', '--flush', '--return', '--append'},
+                     'flock': {'-s', '-x', '-u', '-n', '-o', '-F', '--shared', '--exclusive', '--unlock', '--nonblock', '--close', '--no-fork'},
+                     'su': {'-', '-l', '-m', '-p', '--login', '--preserve-environment'}}
+            cursor = 0
+            while cursor < len(arguments):
+                option = arguments[cursor][1]
+                if option in {'-c', '--command'} or name == 'script' and re.fullmatch(r'-[qfea]*c', option):
+                    if cursor + 1 >= len(arguments):
+                        raise ValueError('missing wrapper program')
+                    yield arguments[cursor + 1]
+                    break
+                if option.startswith('--command='):
+                    yield (arguments[cursor][0], option.split('=', 1)[1], arguments[cursor][2], arguments[cursor][3])
+                    break
+                if option in value_options[name]:
+                    cursor += 2
+                elif option in flags[name] or not option.startswith('-'):
+                    cursor += 1
+                else:
+                    raise ValueError('ambiguous command wrapper option')
+            continue
         if name == 'eval':
             yield from arguments
             if arguments:
@@ -1091,7 +1139,7 @@ def nested_shell_strings(tokens):
                     value = operand[1] + ' ' + shlex.join(word[1] for word in arguments[cursor + 2:])
                     yield (operand[0], value, operand[2], arguments[-1][3])
                 else:
-                    yield operand
+                    yield from arguments[cursor + 1:]
             elif name == 'env' and option.startswith(('-S', '--split-string=')):
                 value = option[2:] if option.startswith('-S') else option.split('=', 1)[1]
                 if not value:
@@ -1100,9 +1148,22 @@ def nested_shell_strings(tokens):
                 yield (argument[0], value, argument[2], arguments[-1][3])
 
 
+def unresolved_shell_word(raw):
+    """Treat expansion markers conservatively; single quotes protect only glob characters."""
+    spans = single_quoted_spans(raw)
+    return '$' in raw or '`' in raw or spans is None or any(
+        re.search(r'[*?\[{]', span) for span, single in spans if not single)
+
+
+def nested_work_exceeded(tokens, seen):
+    return len(seen) > 64 or len(tokens) * sum(
+        os.path.basename(token[1]) in STRING_WRAPPERS for token in tokens) > 50000
+
+
 def python_inline_denial(command):
     """Check every Python -c word, including wrapper arguments and nested shell strings."""
-    pending = [shell_without_heredoc_bodies(command)]
+    shell = shell_without_heredoc_bodies(command)
+    pending = [shell]
     seen = set()
     while pending:
         text = pending.pop()
@@ -1113,6 +1174,8 @@ def python_inline_denial(command):
             tokens = shell_raw_words(text)
         except ValueError:
             return 'process-capable python -c rule'
+        if nested_work_exceeded(tokens, seen):
+            return 'process-capable python -c rule (nesting limit)'
         segments, current = [], []
         for token in tokens:
             if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
@@ -1121,7 +1184,6 @@ def python_inline_denial(command):
             else:
                 current.append(token)
         segments.append(current)
-        code_words = set()
         for words in segments:
             for index, (raw, value, start, end) in enumerate(words):
                 if not re.fullmatch(r'python(?:3(?:\.\d+)?)?', os.path.basename(value)):
@@ -1129,6 +1191,8 @@ def python_inline_denial(command):
                 flags, skip, stopped = '', False, False
                 for cursor in range(index + 1, len(words)):
                     option = words[cursor][1]
+                    if not stopped and unresolved_shell_word(words[cursor][0]):
+                        return 'process-capable python -c rule'
                     match = re.match(r'^-([bBdEhiIOPqRsSuvVx]*c)', option)
                     if option.startswith(('-W', '-X')) and option not in {'-W', '-X'}:
                         continue
@@ -1166,9 +1230,9 @@ def python_inline_denial(command):
                         inert_python(code, isolated=True) or literal_git_read_python(code, reasons)))
                     if raw != value or re.search(r'[$`*?\[\]{}]', raw) or not admitted:
                         return 'process-capable python -c rule' + (': ' + reasons[0] if reasons else '')
-                    code_words.add(code_word[2])
                     rest = text[:start] + text[code_word[3]:]
-                    if python_writes(code) and (not check_only_shell(rest) or text != shell_without_heredoc_bodies(command)):
+                    isolated = 'I' in flags and not inert_python(code)
+                    if python_writes(code, isolated=isolated) and (not check_only_shell(rest) or text != shell):
                         return 'python -c then run rule'
                     break
         pending.extend(token[1] for token in nested_shell_strings(tokens))
@@ -1202,11 +1266,12 @@ def interpreter_name(value):
 
 
 def code_option(value):
-    return bool(re.match(r'^--(?:eval|print)(?:=|$)|^-[ceEpr](?:.*)$|^-[a-zA-Z]*[ce]$', value))
+    return bool(re.match(r'--(?:eval|print)(?:=|$)|-[ceEpr]|-[a-zA-Z]*[ceE]', value))
 
 
 def stdin_program_path(value):
-    return value in {'-', '/dev/stdin'} or bool(re.fullmatch(r'/dev/fd/\d+|/proc/[^/]+/fd/\d+', value))
+    path = os.path.normpath(re.sub(r'/+', '/', value))
+    return value == '-' or path in {'/dev', '/proc'} or path.startswith(('/dev/', '/proc/'))
 
 
 def inline_interpreter_denial(command):
@@ -1225,6 +1290,9 @@ def inline_interpreter_denial(command):
             tokens = shell_raw_words(text)
         except ValueError:
             return 'inline interpreter code rule (unresolved command word)'
+        if nested_work_exceeded(tokens, seen):
+            return 'inline interpreter code rule (nesting limit)'
+        nested = list(nested_shell_strings(tokens))
         if re.search(r'(?:\$\([^\n]*\)|`[^`\n]*`)[ \t]+(?:-[ceEpr]\b|--(?:eval|print)\b|-[a-zA-Z]*[ce]\b)', text):
             return 'inline interpreter code rule (unresolved command word)'
         segments, words, piped = [], [], False
@@ -1241,7 +1309,7 @@ def inline_interpreter_denial(command):
         segments.append((words, piped))
         shell_programs = set()
         for index, token in enumerate(tokens):
-            if os.path.basename(token[1]) not in {'sh', 'bash', 'zsh', 'dash', 'ksh'}:
+            if os.path.basename(token[1]) not in SHELL_INTERPRETERS:
                 continue
             cursor = index + 1
             while cursor < len(tokens):
@@ -1260,18 +1328,21 @@ def inline_interpreter_denial(command):
         for words, piped in segments:
             for index, (raw, value, start, end) in enumerate(words):
                 arguments = [word[1] for word in words[index + 1:]]
-                unresolved = (raw != '[' and value != '$?' and start not in shell_programs
-                              and (raw != value or bool(re.search(r'[$`*?\[\]{}]', raw))))
-                joined_code = bool(re.search(r'[$`*?\[\]{}]', raw)) and bool(
-                    re.search(r'python|node|perl|ruby|pypy|(?:^|[^\w])-[ceEpr](?:$|[^\w])', raw))
-                if joined_code or unresolved and any(code_option(argument) for argument in arguments):
+                unresolved = raw != '[' and value != '$?' and start not in shell_programs and unresolved_shell_word(raw)
+                names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
+                joined_code = unresolved_shell_word(raw) and bool(re.search(
+                    rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw))
+                if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
+                                                   or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'}):
                     return 'inline interpreter code rule (unresolved command word)'
                 name = interpreter_name(value)
                 if not name:
                     continue
                 segment_text = text[words[0][2]:words[-1][3]]
-                if '<' in segment_text or re.search(r'[<>][ \t]*\(', text[end:]):
+                if any(word[0] == '<' for word in words) or re.search(r'[<>][ \t]*\(|=\(', text[end:]):
                     return 'inline interpreter code rule (program from a pipe)'
+                if not arguments and not piped:
+                    continue
                 if name != 'python':
                     short, long, subcommands = INLINE_INTERPRETERS[name]
                     if (name == 'deno' and arguments[:1] and arguments[0] in {'eval', 'repl', 'run'}
@@ -1288,7 +1359,14 @@ def inline_interpreter_denial(command):
                                 else f'inline interpreter code rule ({name})')
                 elif not arguments or any(stdin_program_path(argument) for argument in arguments):
                     return 'inline interpreter code rule (program from a pipe)'
-        pending.extend(token[1] for token in nested_shell_strings(tokens))
+                elif piped:
+                    flags = [argument for argument in arguments if re.fullmatch(r'-[a-zA-Z]+', argument)]
+                    program = any(argument in {'-c', '-m'} or re.match(r'-[a-zA-Z]*[cm]', argument)
+                                  for argument in arguments) or any(not argument.startswith('-') for argument in arguments)
+                    if (not program or any('i' in flag[1:] for flag in flags)
+                            or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
+                        return 'inline interpreter code rule (program from a pipe)'
+        pending.extend(token[1] for token in nested)
     return None
 
 
@@ -1518,8 +1596,12 @@ def shell_git_push(command):
               '--config-env', '--super-prefix', '--attr-source', '--shallow-file'}
     folders = {'-C', '--git-dir', '--work-tree'}
     pending = [command]
+    seen = set()
     while pending:
         text = pending.pop().replace('\\' + '\n', '')
+        if text in seen:
+            continue
+        seen.add(text)
         try:
             lexer = shlex.shlex(text, posix=True, punctuation_chars='();<>|&`')
             lexer.whitespace_split = True
@@ -1790,7 +1872,7 @@ def pre(data):
                                   'Return this step to your driver; the driver may run it.')
             try:
                 command = tin.get('command', '')
-                if any(char in command for char in ('\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85',
+                if any(char in command for char in ('\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85', '\xa0',
                                                      chr(0x2028), chr(0x2029))):
                     deny(publication_reason + ' Rule: line separator rule.')
                 reason = process_heredoc_denial(command)
