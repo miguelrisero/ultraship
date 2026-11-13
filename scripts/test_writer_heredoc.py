@@ -118,6 +118,7 @@ class WriterHeredocTests(unittest.TestCase):
             "grep -n '^<<<<<<<' a.py; python3 <<< 'import os'",
             "grep \\' x && python3 <<< 'import os'",
             "grep -n '^<<<<<<< a.py",
+            "echo 'a\n\" '; python3 <<< 'import os' # \"",
             "grep -n $'\\'' a.py; python3 <<< x # '",
             'grep -n "$(python3 <<< \'import os\')" a.py',
         ):

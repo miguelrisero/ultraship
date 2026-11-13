@@ -968,7 +968,9 @@ def process_heredoc_denial(command, readers=False):
         operators = list(re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
                                     r"(?P<delimiter>'[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", lines[index]))
         if not operators:
-            if readers and '<<' in literal_quotes_removed(lines[index]) and not data_reader_header(lines[index]):
+            # A quote opened on an earlier line changes how bash reads this one, so only a one-line command drops quotes.
+            text = literal_quotes_removed(lines[index]) if len(lines) == 1 else lines[index]
+            if readers and '<<' in text and not data_reader_header(lines[index]):
                 return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
             index += 1
             continue
