@@ -98,8 +98,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'an authenticated lint refusal with an exact formatting remedy.',
             'Require trusted native tool evidence attributing the complete refusal to the '
             'formatting producer and identifying the original refused tool call.',
-            'For `SendMessage`, require authenticated `plugins/ship/hooks/text_lint.py` '
-            'producer attribution.',
+            'For `SendMessage`, require authenticated `plugins/ship/hooks/text_lint.py` or '
+            'chief-of-chiefs `skills/run/scripts/text_lint.py` producer attribution.',
             'The `Output contract:` prefix alone supplies zero producer authentication.',
             'An authenticated formatting-only refusal qualifies despite that prefix; '
             'generic or unclassified denials remain blocked.',
@@ -114,6 +114,17 @@ class CoordinationRemedyContractTests(unittest.TestCase):
                 driver = (ROOT / 'plugins/ship/agents' / name).read_text()
                 self.assertIn('Apply its once-only authenticated formatting-only resend contract '
                               'to `Agent` and `SendMessage`.', driver)
+
+    def test_contract_requires_known_formatting_findings_and_blocks_unknown_evidence(self):
+        self.assertIn(
+            'Require every returned finding to match a known `text_lint.py` formatting message.',
+            self.refusals,
+            'Every returned finding must match a known text_lint formatting message',
+        )
+        block = self.refusals.partition('For formatting-only resends, block ')[2].partition('.')[0]
+        for case in ('unknown producers', 'unmatched findings'):
+            with self.subTest(case=case):
+                self.assertIn(case, block, f'The formatting exception must block {case}')
 
     def test_contract_limits_formatting_remedies_to_supported_prose(self):
         for requirement in (

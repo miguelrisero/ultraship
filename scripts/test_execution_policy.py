@@ -75,3 +75,66 @@ class ExecutionPolicyTests(unittest.TestCase):
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, policy)
+
+    def test_each_writer_carries_the_same_scoped_native_file_recipe(self):
+        import re
+
+        requirements = (
+            ('Native Read requires ordinary-content authority before any effective refusal', (
+                'native read', 'authorized ordinary content', 'before any effective refusal',
+            )),
+            ('Native Edit requires an absolute path and one unique exact replacement', (
+                'native edit', 'absolute path', 'replace_all=false', 'one unique exact match',
+            )),
+            ('Uncertain authority, scope or match requires stopping and reporting to the driver', (
+                'if authority, scope or match is uncertain, stop the operation and report it to the driver',
+            )),
+            ('Protected content retains its grants and review without added access', (
+                'protected content', 'exact existing grants', 'independent review', 'zero protected access',
+            )),
+            ('An effective refusal blocks equivalent operations and substitute actors', (
+                'effective refusal', 'blocks equivalent native reads', 'native edits',
+                'alternate execution', 'substitute actors',
+            )),
+            ('The recipe requires verification of the exact brief scope', (
+                "verify the brief's exact file scope",
+            )),
+            ('The recipe requires applicable operation authority', (
+                'applicable operation authority',
+            )),
+            ('The ordinary recipe applies before effective holds', (
+                'before any effective refusal or hold',
+            )),
+            ('Source delivery grants zero session adoption authority', (
+                'zero session adoption authority',
+            )),
+            ('Source delivery grants zero affected-retry authority', (
+                'zero affected-retry authority',
+            )),
+        )
+        sections = []
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+            with self.subTest(path=name):
+                text = read('plugins/ship/agents/' + name)
+                heading = '\n### Native file edits\n'
+                section = re.split(r'\n#{1,3} ', text.partition(heading)[2], maxsplit=1)[0]
+                sections.append(section)
+                self.assertIn(heading, text, f'{name}: requires the Native file edits section')
+                normalized = ' '.join(section.lower().replace('`', '').split())
+                for message, phrases in requirements:
+                    for phrase in phrases:
+                        with self.subTest(requirement=message, phrase=phrase):
+                            self.assertIn(phrase, normalized, f'{name}: {message}; missing {phrase!r}')
+                first_step = re.search(r'(?m)^[ \t]*\d+[.)][ \t]+', section)
+                self.assertIsNotNone(first_step, f'{name}: requires numbered native-file steps')
+                warning = ' '.join(section[:first_step.start()].lower().replace('`', '').split())
+                for phrase in requirements[4][1]:
+                    with self.subTest(warning_phrase=phrase):
+                        self.assertIn(
+                            phrase, warning,
+                            f'{name}: the complete refusal warning must precede the first numbered step',
+                        )
+        self.assertEqual(
+            len(set(sections)), 1,
+            'All three writers must carry identical Native file edits sections',
+        )

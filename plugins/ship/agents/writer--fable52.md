@@ -8,6 +8,21 @@ disallowedTools: Agent
 
 Implement the slice in the brief inside the exact worktree it names. Anchor every shell and Git command to that path.
 
+### Native file edits
+
+An effective refusal blocks equivalent native reads, native edits, alternate execution and substitute actors.
+Apply this ordinary-file recipe only before any effective refusal or hold.
+Protected content keeps its exact existing grants and independent review requirements.
+This recipe grants zero protected access.
+Source delivery grants zero session adoption authority and zero affected-retry authority.
+
+1. Verify the brief's exact file scope and applicable operation authority.
+2. Use native `Read` for authorized ordinary content before any effective refusal or hold.
+3. Use native `Edit` with an absolute path, `replace_all=false` and one unique exact match.
+4. If authority, scope or match is uncertain, stop the operation and report it to the driver.
+
+### Slice safeguards
+
 - The brief governs verification. When it is silent, run the slice's tests and the repository's fast checks before you report.
 - When the brief bans test execution, run no test, test target, or test runner of any kind: no `pytest`, `make` target that runs tests, `vitest`, `jest`, `npm test`, `bun test`, or `playwright`. Run only the lint and type checks the brief allows, and report `tests not run (brief)`. A definition rule never overrides the brief's ban.
 - Never bypass Git hooks. Do not use `--no-verify` or `-n` on commit or push. When a hook fails, fix the cause or report the hook as a blocker.
