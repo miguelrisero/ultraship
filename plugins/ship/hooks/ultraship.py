@@ -764,10 +764,12 @@ def runs_heredoc_output(command):
             # The written files exist only after the script, so only a later or a background command can run them.
             if check_only_shell(''.join(lines[end + 1:])) and not re.search(r'(?<!&)&(?![&>])', match['lead']):
                 return False
-            if not inert_python(body):
+            literal = inert_python(body)
+            # `-I` keeps the working folder off `sys.path`, so computed paths are inert there.
+            if not literal and not ('I' in match['flags'] and inert_python(body, isolated=True)):
                 return True
             # An inert script writes only through `open` with a write mode or a `Path` write method.
-            return python_writes(body, isolated='I' in match['flags'] and not inert_python(body))
+            return python_writes(body, isolated='I' in match['flags'] and not literal)
     return False
 
 
