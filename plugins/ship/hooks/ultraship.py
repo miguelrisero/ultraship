@@ -915,16 +915,19 @@ def process_heredoc_denial(command):
         match = operators[0]
         prefix = lines[index][:match.start()]
         commit_lead = r'[ \t]*(?:cd +[\w./-]+ +&& +)?git +commit(?: +(?:-[a-zA-Z]|--[\w-]+))* +'
-        message_data = (index == 0 and len(operators) == 1
-                        and re.fullmatch(commit_lead + r'(?:-m +"\$\(cat[ \t]*|-F +- +)', prefix)
-                        and not lines[index][match.end():].strip())
-        if message_data and not re.fullmatch(r"'[A-Za-z0-9_]+'|\"[A-Za-z0-9_]+\"", match['delimiter']):
-            return 'process-capable heredoc rule (unsupported commit message delimiter)'
+        message_data = index == 0 and re.match(commit_lead, prefix)
+        if message_data and (len(operators) != 1
+                             or not re.fullmatch(commit_lead + r'(?:-m +"\$\(cat[ \t]*|-F +- +)', prefix)
+                             or lines[index][match.end():].strip()
+                             or not re.fullmatch(r"'[A-Za-z0-9_]+'|\"[A-Za-z0-9_]+\"", match['delimiter'])):
+            return 'process-capable heredoc rule (commit message heredoc must be the whole command)'
         interpreter = re.search(r'(?<![\w.-])(?:[\w./-]*/)?python(?:3(?:\.\d+)?)?(?=[ \t<]|$)', lines[index])
         if message_data:
             pass
         elif interpreter or '$' in prefix or '`' in prefix:
             lead = lines[index][:interpreter.start()] if interpreter else prefix
+            if index != 0 or not re.fullmatch(GIT_READ_LEAD, lead):
+                return 'process-capable heredoc rule (interpreter heredoc must start the command)'
             header = re.fullmatch(re.escape(lead) + PYTHON_STDIN, lines[index])
             if len(operators) != 1 or not header:
                 return 'process-capable heredoc rule (unsupported interpreter header)'
@@ -935,11 +938,14 @@ def process_heredoc_denial(command):
         end = index + 1
         while end < len(lines) and (lines[end].lstrip('\t') if match['tabs'] else lines[end]).removesuffix('\n') != delimiter:
             end += 1
+        if message_data:
+            remainder = ''.join(lines[end + 1:])
+            complete = remainder in (')"', ')"\n') if '-m' in prefix.split() else not remainder
+            if end == len(lines) or not complete:
+                return 'process-capable heredoc rule (commit message heredoc must be the whole command)'
+            return None
         if end == len(lines):
             return 'process-capable heredoc rule (unterminated body)'
-        if message_data:
-            index = end + 1
-            continue
         body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[index + 1:end])
         reasons = []
         literal_read = literal_git_read_python(body, reasons)
