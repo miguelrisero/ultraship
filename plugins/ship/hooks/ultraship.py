@@ -1083,12 +1083,21 @@ def nested_shell_strings(tokens):
             option = argument[1]
             code = (option in {'-S', '--split-string'} if name == 'env'
                     else bool(re.fullmatch(r'-[a-zA-Z]*c[a-zA-Z]*', option)))
-            if code and cursor + 1 < len(arguments):
-                yield arguments[cursor + 1]
+            if code:
+                if cursor + 1 >= len(arguments):
+                    raise ValueError('missing wrapper program')
+                operand = arguments[cursor + 1]
+                if name == 'env':
+                    value = operand[1] + ' ' + shlex.join(word[1] for word in arguments[cursor + 2:])
+                    yield (operand[0], value, operand[2], arguments[-1][3])
+                else:
+                    yield operand
             elif name == 'env' and option.startswith(('-S', '--split-string=')):
                 value = option[2:] if option.startswith('-S') else option.split('=', 1)[1]
-                if value:
-                    yield (argument[0], value, argument[2], argument[3])
+                if not value:
+                    raise ValueError('missing env split string')
+                value += ' ' + shlex.join(word[1] for word in arguments[cursor + 1:])
+                yield (argument[0], value, argument[2], arguments[-1][3])
 
 
 def python_inline_denial(command):
@@ -1230,13 +1239,29 @@ def inline_interpreter_denial(command):
             else:
                 words.append(token)
         segments.append((words, piped))
-        shell_programs = {token[2] for token in nested_shell_strings(tokens)}
+        shell_programs = set()
+        for index, token in enumerate(tokens):
+            if os.path.basename(token[1]) not in {'sh', 'bash', 'zsh', 'dash', 'ksh'}:
+                continue
+            cursor = index + 1
+            while cursor < len(tokens):
+                option = tokens[cursor][1]
+                if option in {'-o', '+o', '-O', '+O'}:
+                    cursor += 2
+                    continue
+                if re.fullmatch(r'-[a-zA-Z]*c[a-zA-Z]*', option):
+                    if cursor + 1 < len(tokens):
+                        shell_programs.add(tokens[cursor + 1][2])
+                    break
+                if option.startswith('-') and option != '--':
+                    cursor += 1
+                    continue
+                break
         for words, piped in segments:
             for index, (raw, value, start, end) in enumerate(words):
-                if start in shell_programs:
-                    continue
                 arguments = [word[1] for word in words[index + 1:]]
-                unresolved = value != '$?' and (raw != value or bool(re.search(r'[$`*?\[\]{}]', raw)))
+                unresolved = (raw != '[' and value != '$?' and start not in shell_programs
+                              and (raw != value or bool(re.search(r'[$`*?\[\]{}]', raw))))
                 joined_code = bool(re.search(r'[$`*?\[\]{}]', raw)) and bool(
                     re.search(r'python|node|perl|ruby|pypy|(?:^|[^\w])-[ceEpr](?:$|[^\w])', raw))
                 if joined_code or unresolved and any(code_option(argument) for argument in arguments):

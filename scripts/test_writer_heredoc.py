@@ -219,6 +219,16 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied(command))
         self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
+    def test_env_split_string_keeps_later_code_arguments_checked(self):
+        code = 'require("child_process").execSync("git " + "pu" + "sh")'
+        self.assertTrue(self.denied(f"env -S 'node' -e '{code}'"))
+        self.assertIn('inline interpreter code rule', self.reason)
+
+    def test_wrapper_program_attribution_keeps_direct_tokens_checked(self):
+        command = "bash -o -c $P -c 'x'"
+        self.assertTrue(self.denied(command))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
     def test_python_helper_without_import_is_denied(self):
         body = "def git(*args):\n    return subprocess.check_output(['git', *args])\n"
         for operator, delimiter, indent in (('<<', 'EOF', ''), ('<<', "'EOF'", ''),
