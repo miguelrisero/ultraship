@@ -103,7 +103,7 @@ Source delivery grants zero retry authority.
 Source delivery grants zero installation authority.
 Source delivery grants zero publication authority.
 Preserve every existing refusal, tool and hook denial, and affected-session hold.
-Except under the method-only rule in Loaded instructions and refusals: Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 
@@ -112,8 +112,8 @@ Source delivery, installation, version, cache, restart, executor and tool change
 Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
-Except under the method-only rule in Loaded instructions and refusals: Native Edit grants zero alternate form for an existing or recorded denied operation.
-Except under the method-only rule in Loaded instructions and refusals: Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Native Edit grants zero alternate form for an existing or recorded denied operation.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
@@ -122,11 +122,11 @@ The driver applies zero protected edits; the writer has zero publication authori
 ## Owner-approved protected-row subject route
 
 Apply this route only to future briefs after verified runtime adoption.
-Except under the method-only rule in Loaded instructions and refusals: A matching existing denial blocks the action, recipient and scope under every route.
+A matching existing denial blocks the action, recipient and scope under every route.
 Preserve every effective tool, hook, owner and loaded-instruction refusal and every affected-session hold.
-Except under the method-only rule in Loaded instructions and refusals: Native Edit grants zero alternate form for a denied operation.
+Native Edit grants zero alternate form for a denied operation.
 Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt.
-Except under the method-only rule in Loaded instructions and refusals: Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 The driver applies zero protected edits; the writer publishes nothing.
 A product-limit or cost approval alone grants zero protected read, subject, paired-field, retirement or pin-edit authority.

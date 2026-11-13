@@ -225,7 +225,7 @@ Require a unique approved row-ID-contained old_string within the approved row ex
 Change only the approved paired old/new fields; preserve every frozen field.
 Refuse missing or ambiguous matches and reads wider than the approved row scope.
 Keep every hook classifier decision unchanged.
-Except under the owner-decisions method-only rule: Native Edit grants zero alternate form for an existing or recorded denied operation.
+Native Edit grants zero alternate form for an existing or recorded denied operation.
 
 #### Removed-behavior retirement route
 
@@ -350,8 +350,8 @@ Keep mutation proof after merge under separate applicable execution admission.
 Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
-Except under the owner-decisions method-only rule: Native Edit grants zero alternate form for an existing or recorded denied operation.
-Except under the owner-decisions method-only rule: Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Native Edit grants zero alternate form for an existing or recorded denied operation.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
