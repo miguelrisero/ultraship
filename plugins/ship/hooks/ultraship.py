@@ -1448,7 +1448,7 @@ def inline_interpreter_denial(command, cwd=None):
                     segments.append((words, piped))
                     words = []
                 if raw != '\n':
-                    piped = raw == '|'
+                    piped = raw == '|' or raw == '(' and token[2] > 0 and text[token[2] - 1] == '>'
             else:
                 words.append(token)
         segments.append((words, piped))

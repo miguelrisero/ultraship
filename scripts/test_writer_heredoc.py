@@ -447,6 +447,14 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
+    def test_output_process_substitution_is_piped_input(self):
+        for command in ('printf \'%s\' \'import subprocess; subprocess.run(("git", "pu" + "sh"))\' > >(python3 -I)',
+                        'echo x > >(python3 -B)'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        self.assertFalse(self.denied('echo x > >(python3 -m json.tool)'))
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))
