@@ -93,6 +93,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
         for requirement in (
             'Method-only denial (owner Input e6ba1705-42f2-491c-ac0b-43ae191596b6, choice B): '
             'a refusal naming only the method, never the content, permits one native Edit retry.',
+            'The method-only rule applies only to ordinary files and never to a protected-row operation.',
             'A fresh writer applies the already-approved edit text exactly once with native Edit; '
             'the commit stays a separate step.',
             'The method ban and every content, scope, protected-access and publication denial stay final.',
