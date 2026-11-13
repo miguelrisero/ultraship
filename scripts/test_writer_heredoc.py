@@ -67,6 +67,57 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied(f"python3 -I -c '{bad}'"))
         self.assertIn('process-capable python -c rule: git read requires', self.reason)
 
+    def test_other_interpreter_inline_code_is_denied(self):
+        for interpreter, option in (
+            ('node', '-e'), ('node', '-p'), ('node', '--eval=x'), ('nodejs', '-e'),
+            ('perl', '-e'), ('perl', '-ne'), ('perl', '-MPOSIX -e'), ('perl', '-E'),
+            ('perl5.36', '-lne'), ('pypy3', '-c'), ('pypy3.10', '-m'), ('ruby', '-e'),
+            ('php', '-r'), ('deno', 'eval'), ('bun', '-e'), ('osascript', '-e'),
+            ('Rscript', '-e'), ('lua', '-e'), ('luajit', '-e'),
+        ):
+            with self.subTest(interpreter=interpreter, option=option):
+                self.assertTrue(self.denied(f'{interpreter} {option} x'))
+                self.assertIn('inline interpreter code rule (', self.reason)
+
+    def test_unresolved_inline_command_words_are_denied(self):
+        for command in ('"python3" -c x', "pyth''on3 -c x", r'p\ython3 -c x',
+                        '$P -c x', '$(which node) -e x'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+        self.assertTrue(self.denied('$P -c x'))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_heredoc_reader_allowlist_denies_interpreters_and_wrappers(self):
+        for reader in ('node -', 'node', 'perl', 'pypy3 -', 'ruby', '"python3" -',
+                       "pyth''on3 -", 'env node', 'X=1 node'):
+            with self.subTest(reader=reader):
+                self.assertTrue(self.denied(reader + " <<'EOF'\nx\nEOF\n"))
+                self.assertIn('process-capable heredoc rule (heredoc reader not on the allowlist)', self.reason)
+        for command in ("cat <<'EOF' | node\nx\nEOF\n", "cat <<'EOF' |\nx\nEOF\nnode\n",
+                        "env cat <<'EOF'\nx\nEOF\n", "cat <<'EOF'; node\nx\nEOF\n"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('heredoc reader not on the allowlist', self.reason)
+
+    def test_here_strings_require_data_reader(self):
+        for reader in ('python3', 'node', 'perl'):
+            with self.subTest(reader=reader):
+                self.assertTrue(self.denied(reader + " <<< 'abc'"))
+                self.assertIn('heredoc reader not on the allowlist', self.reason)
+
+    def test_program_from_pipe_is_denied(self):
+        for command in ("printf '%s' x | python3", 'echo x | node', 'cat f | perl'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_data_readers_and_script_operands_are_admitted(self):
+        for command in ('node --version', 'node script.js', 'perl script.pl',
+                        "cat > notes.md <<'EOF'\ntext\nEOF\n", "tee x.txt <<'EOF'\ntext\nEOF\n",
+                        "grep x <<< 'abc'"):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command))
+
     def test_python_helper_without_import_is_denied(self):
         body = "def git(*args):\n    return subprocess.check_output(['git', *args])\n"
         for operator, delimiter, indent in (('<<', 'EOF', ''), ('<<', "'EOF'", ''),

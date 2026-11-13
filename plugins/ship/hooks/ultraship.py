@@ -907,14 +907,35 @@ def cat_heredoc_data(command):
     return command
 
 
-def process_heredoc_denial(command):
+HEREDOC_READERS = {'cat', 'tee', 'grep', 'head', 'tail', 'wc'}
+
+
+def data_reader_header(line):
+    """Admit only literal data readers, their words, and literal output paths."""
+    word = r'[\w./:@%+,=-]+'
+    path = r'[\w./:@%+,-]+'
+    argument = rf'(?:{word}|>>?[ \t]*{path})'
+    delimiter = r"(?:'[A-Za-z0-9_]+'|\"[A-Za-z0-9_]+\"|\\?[A-Za-z0-9_]+)"
+    operator = rf"(?:<<<[ \t]*(?:'[^'\n]*'|{word})|<<-?[ \t]*{delimiter})"
+    return re.fullmatch(rf'[ \t]*(?:cd +{path} +&& +)*(?:' + '|'.join(sorted(HEREDOC_READERS))
+                        + rf')(?:[ \t]+{argument})*[ \t]*{operator}(?:[ \t]+{argument})*[ \t]*\n?', line) is not None
+
+
+def process_heredoc_denial(command, readers=False):
     """Check Python stdin bodies and keep quoted commit messages as data."""
-    lines = cat_heredoc_data(command).splitlines(keepends=True)
+    lines = (command if readers else cat_heredoc_data(command)).splitlines(keepends=True)
+    if readers:
+        for text in (command, command.replace('\\\n', '')):
+            for line in text.splitlines(keepends=True):
+                if '<<<' in line and not data_reader_header(line):
+                    return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
     index = 0
     while index < len(lines):
         operators = list(re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
                                     r"(?P<delimiter>'[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", lines[index]))
         if not operators:
+            if readers and '<<' in lines[index] and not data_reader_header(lines[index]):
+                return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
             index += 1
             continue
         match = operators[0]
@@ -937,6 +958,9 @@ def process_heredoc_denial(command):
             if len(operators) != 1 or not header:
                 return 'process-capable heredoc rule (unsupported interpreter header)'
         else:
+            if readers and (len(operators) != 1 or not data_reader_header(lines[index])
+                            or not data_reader_header(lines[index].replace('\\\n', ''))):
+                return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
             index += 1
             continue
         delimiter = shlex.split(match['delimiter'])[0]
@@ -965,6 +989,8 @@ def process_heredoc_denial(command):
         if match['delimiter'][0] not in '\'"\\':
             return 'process-capable heredoc rule (Python heredoc needs a quoted delimiter)'
         index = end + 1
+    if readers and '\\\n' in command:
+        return process_heredoc_denial(command.replace('\\\n', ''), readers=True)
     return None
 
 
@@ -1074,6 +1100,81 @@ def python_inline_denial(command):
                     break
         for raw, value, start, end in tokens:
             if start not in code_words and any(char.isspace() for char in value):
+                pending.append(value)
+    return None
+
+
+# Each interpreter lists short inline-code/module flags, long flags, and code subcommands.
+INLINE_INTERPRETERS = {
+    'node': ('ep', {'--eval', '--print'}, set()),
+    'nodejs': ('ep', {'--eval', '--print'}, set()),
+    'perl': ('eEpMm', set(), set()),
+    'ruby': ('e', set(), set()),
+    'php': ('r', set(), set()),
+    'pypy': ('cm', set(), set()),
+    'pypy3': ('cm', set(), set()),
+    'lua': ('e', set(), set()),
+    'luajit': ('e', set(), set()),
+    'deno': ('', set(), {'eval'}),
+    'bun': ('ep', {'--eval', '--print'}, set()),
+    'Rscript': ('e', set(), set()),
+    'osascript': ('e', set(), set()),
+}
+
+
+def interpreter_name(value):
+    base = os.path.basename(value)
+    for name in INLINE_INTERPRETERS:
+        if re.fullmatch(re.escape(name) + r'(?:\d+(?:\.\d+)*|(?:\.\d+)+)?', base):
+            return name
+    return 'python' if re.fullmatch(r'python(?:3(?:\.\d+)?)?', base) else None
+
+
+def code_option(value):
+    return bool(re.match(r'^--(?:eval|print)(?:=|$)|^-[ceEpr](?:.*)$|^-[a-zA-Z]*[ce]$', value))
+
+
+def inline_interpreter_denial(command):
+    pending = [shell_without_heredoc_bodies(command)]
+    while pending:
+        text = pending.pop()
+        try:
+            tokens = shell_raw_words(text)
+        except ValueError:
+            return 'inline interpreter code rule (unresolved command word)'
+        if re.search(r'(?:\$\([^\n]*\)|`[^`\n]*`)[ \t]+(?:-[ceEpr]\b|--(?:eval|print)\b|-[a-zA-Z]*[ce]\b)', text):
+            return 'inline interpreter code rule (unresolved command word)'
+        segments, words, piped = [], [], False
+        for token in tokens:
+            raw = token[0]
+            if raw in {';', '&', '|', '(', ')', '`', '\n'}:
+                if words:
+                    segments.append((words, piped))
+                    words = []
+                if raw != '\n':
+                    piped = raw == '|'
+            else:
+                words.append(token)
+        segments.append((words, piped))
+        for words, piped in segments:
+            for index, (raw, value, start, end) in enumerate(words):
+                arguments = [word[1] for word in words[index + 1:]]
+                unresolved = raw != value or bool(re.search(r'[$`*?\[\]{}]', raw))
+                if unresolved and any(code_option(argument) for argument in arguments):
+                    return 'inline interpreter code rule (unresolved command word)'
+                name = interpreter_name(value)
+                if not name:
+                    continue
+                if name != 'python':
+                    short, long, subcommands = INLINE_INTERPRETERS[name]
+                    if any(argument in subcommands or argument.split('=', 1)[0] in long
+                           or argument.startswith('-') and not argument.startswith('--')
+                           and bool(set(argument[1:]) & set(short)) for argument in arguments):
+                        return f'inline interpreter code rule ({name})'
+                if piped and not any(argument != '-' and not argument.startswith('-') for argument in arguments):
+                    return 'inline interpreter code rule (program from a pipe)'
+        for raw, value, start, end in tokens:
+            if raw != '\n' and any(char.isspace() for char in value):
                 pending.append(value)
     return None
 
@@ -1513,6 +1614,9 @@ def pre(data):
                 reason = writer_gh_denial(file_text_removed)
                 if reason:
                     deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + reason)
+                reason = process_heredoc_denial(command, readers=True) or inline_interpreter_denial(command)
+                if reason:
+                    deny(publication_reason + ' Rule: ' + reason + '.')
                 reason = python_inline_denial(command)
                 if reason:
                     deny(publication_reason + ' Rule: ' + reason + '.')
