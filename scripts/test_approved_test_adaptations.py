@@ -92,7 +92,7 @@ EXPECTED_RETIREMENT_REVIEW = [
     'Identify rows in findings, verdicts, and receipts only by path, row ID, and field; include zero TOML text.',
     'Grant zero edit, execution, mutation, or checker authority.',
     'An admission grants zero writer or driver edit authority.',
-    'Review every other row change under Lane-derived row review below.',
+    'Review every other row change except the explicitly selected lane-owned disposition route or new lane-owned row review route under Lane-derived row review below.',
     'Preserve higher-priority instructions, effective refusals, tool and hook denials, and protected holds.',
 ]
 
@@ -138,7 +138,7 @@ EXPECTED_REMOVED_RETIREMENT_REVIEW = [
     'Refuse on any doubt about any condition.',
     'Refuse a retirement when the guarded behavior still exists anywhere in the tree at the frozen SHA after the edit.',
     "Refuse when an identical mutant of the row's operation, with the same claim, still applies at the frozen SHA after the edit; that row uses the lane-derived route.",
-    'Review a retirement with a replacement row under Row retirement with replacement review below, and every other row change under Lane-derived row review below.',
+    'Review a retirement with a replacement row under Row retirement with replacement review below, and every other row change except the explicitly selected lane-owned disposition route or new lane-owned row review route under Lane-derived row review below.',
     'Require the CoC-approved exact allowlist: the row-file path and unique row ID of each retired row.',
     'Require the brief to quote the PR-body reason for each retired row.',
     'Require the recorded base SHA, author head SHA, and frozen SHA after the edit, and read-only trees at the base SHA and the frozen SHA after the edit.',
@@ -160,6 +160,272 @@ EXPECTED_REMOVED_RETIREMENT_REVIEW = [
     'Grant zero TOML search or anchor extraction authority outside these row-ID lookups and row-line reads.',
     'An admission grants zero writer or driver edit authority.',
     'Preserve higher-priority instructions, effective refusals, tool and hook denials, and protected holds.',
+]
+
+
+EXPECTED_FIXED_ACCESS = [
+    'Owner authority: Input `31f787fe-1463-4447-82fa-6a5e21e17a87`, version 1, choice B, in CoC workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`.',
+    'The `owner_ui` event is `aacba25c-5e99-438e-85c7-9bb128ecf4b8`, dated 2026-11-08T18:03:15.357469375Z.',
+    'The event hash is `d56c4fd20ef712921654f06869818b5b2189a13e9b52249b32379ca5362468a8`.',
+    'Owner-selected option B: "Each lane moves the protected rows its own PR breaks: same test, new line text, nothing weaker. An independent reviewer checks every row change, and the mutation proof still runs after merge."',
+    'Input context: "Peral keeps CI runner and merge queue changes."',
+    'Owner global CLAUDE.md standing grant: "The CoC decides CI/CD, testing and tooling items for me. This includes a lane reading and re-anchoring the protected mutation rows that its own diff breaks, with an identical mutant edit and an independent not-weaker review."',
+    "Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route, or as scoped read authority for the owner-approved protected-row subject route.",
+    'This clause overrides only blanket protected-read/edit restrictions for the exact scope below.',
+    'Preserve higher-priority instructions, effective refusals, protected holds, and tool or hook denials.',
+    "Require the driver's complete verified owner-event record and exact scope in the brief.",
+    'Bind full Input/workspace UUIDs, current version, event id/hash, choice, actual owner answer, verifier name, and verification time.',
+    'Record selected choice B and `payload.answer.text=null` separately; distinguish the selected option text from Input context.',
+    'Require `event_type=answer_submitted`, `actor_kind=owner_ui`, and `payload.no_answer_yet=false` for this Input and current version.',
+    'Apply the task-specific owner-event verification contract; keep its event comparator separate from the standing rule.',
+    "Use `get_input` directly when available; accept the driver's or CoC's complete verified record only after tool absence or auth/tool error.",
+    'An authoritative mismatch blocks access and cannot use fallback.',
+    "Require CoC naming of exact row-file paths and unique row IDs from that PR's failing anchor CI log.",
+    'Require the recorded base/head diff to show that the PR itself breaks each named row.',
+    'Limit reads to those exact named files and rows; read no unrelated rows or whole protected files.',
+    'Preserve all category 5 source identities, CI evidence, route requirements, and applicable execution admission.',
+    'Require the reviewer to differ from the PR author and applying writer.',
+    'Preserve the same designated test and guarantee, equivalent mutant semantics, assertions, bounds, and every unrelated field.',
+    'Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.',
+    'Keep mutation proof after merge under separate applicable execution admission.',
+    "Retain Peral's authority over CI runners and the merge queue.",
+    'On the lane-derived or owner-approved protected-row subject route only, permit the row-ID lookup and row-line reads specified in that route.',
+    'Except for the named row-ID lookup and row-line reads on the lane-derived or owner-approved protected-row subject route, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.',
+    'CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.',
+]
+
+EXPECTED_FIXED_DRIVER_ACCESS = EXPECTED_FIXED_ACCESS[:19] + EXPECTED_FIXED_ACCESS[20:]
+
+EXPECTED_SHARED_MUTANT_RULE = (
+    'The ban on weakening a test and the independent not-weaker review still apply. '
+    'Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route; '
+    'changed mutant semantics on that route require current task-specific owner-event authority and independent semantic review '
+    'under its separately admitted gates.'
+)
+
+
+EXPECTED_COMMON_DISPOSITION_AUTHORITY = [
+    'Use only the lane-owned disposition route explicitly named in the brief, outside category 5.',
+    'Keep category 5, its fixed grants and every existing route requirement unchanged.',
+    'Owner-scoped protected row access, Authority A and Authority B grant nothing on this disposition route.',
+    'Apply the following delegation and two-decision requirements only when the brief selects retirement.',
+    'For retirement, directly verify ~/.claude/CLAUDE.md, heading CoC decisions (standing grant), and the exact sentence: The CoC decides CI/CD, testing and tooling items for me.',
+    'Refuse missing, unreadable or mismatched delegation; accept zero relay for this verification.',
+    'Require the first exact CoC decision to admit explicit protected-read authority for the independent proposal reviewer only.',
+    'Name exact files, unique row IDs, full approved table extents and one pre-edit commit in that read admission.',
+    'Require that reviewer to establish removed guarded behavior and complete table extent before the ordinary retirement proposal exists.',
+    'Prepare the ordinary retirement proposal only from the content-free extent receipt and ordinary source and test evidence.',
+    'Limit that proposal to path, row ID, escaped replacement table, reason and extent line range at the named commit.',
+    'Include zero original row bytes or anchors in the ordinary retirement proposal.',
+    'Require the second exact CoC decision to bind the ordinary proposal SHA256 and independent review receipt.',
+    'Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.',
+    'End the retirement-only authority block; apply every subsequent shared requirement to both branches unless explicitly scoped.',
+    'For changed mutant semantics, require a current task-specific owner event naming exact protected reads, rows, semantic adaptation and permitted gates.',
+    'Require that event and the admitted gates to cover independent applied review at the final commit.',
+    'For changed mutant semantics, apply the task-specific owner-event verification contract to the current event and exact semantic scope.',
+    'Preserve every historical fixed-event comparator unchanged within its existing standing branch only.',
+    'Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.',
+    'An authoritative mismatch blocks access and application without fallback.',
+    'CoC approval supplies zero missing owner-event authority for changed mutant semantics.',
+    'A fixed identical-operation grant supplies zero changed-semantic authority on this route.',
+    'Keep read authority, proposal derivation, semantic approval and application authority separate.',
+    'Before any lookup or read, require explicit protected-read authority for the exact actor, files, IDs, complete approved extents and named commits.',
+    'Permit only named row-ID lookup and approved table-line reads; forbid whole-file parsing, adjacent-row reads and unrelated searches.',
+    'Limit retirement applied review to named row-ID lookup, retired table lines and the required base row extent.',
+    'Limit semantic applied review to exact edited row lines and the required base extent.',
+    'Require exact CoC disposition approval naming files, unique row IDs and permitted fields.',
+    'Bind repository, PR, base SHA, author head SHA, tested merge SHA/tree, failing CI identity and proposal SHA256.',
+    'Require the tested merge to contain the recorded base and author head.',
+    'Require the PR source diff to break each named row.',
+    'First verify branch-specific authority and proposal scope; then prepare only the permitted ordinary or private proposal.',
+    'Obtain independent semantic review before exact CoC proposal approval, then verify current source, current bytes, SHA256 and scope before application.',
+    'Require the semantic reviewer to differ from the author, applying writer and proposal deriver.',
+    'For semantic proposals, reuse the separately admitted private-proposal derivation, digest, review and application gates by name.',
+    'Name gates by identity and digest only; copy zero execution commands into briefs.',
+    'Use direct sha256sum only for the ordinary retirement proposal; compute protected-proposal digests only inside separately authorized admitted gates.',
+    'Refuse any difference between proposed, reviewed, approved and applied proposal SHA256 values, source identities or exact scopes.',
+    'A digest establishes identity only and supplies zero semantic verdict or authority.',
+    'Apply only the approved proposal, then obtain independent applied review at the frozen final commit.',
+    'Require every applied reviewer to differ from the author and applying writer.',
+    'Bind the final receipt to reviewer identity, approving verdict, authorities, exact scope, proposal SHA256, final commit and CI evidence.',
+    'Require CoC approval of that frozen final receipt before publication.',
+    'Changed source, scope, authority, proposal or evidence invalidates every affected receipt and approval.',
+    'Keep protected bytes inside separately admitted contexts; reports, briefs and PR bodies identify only path, row ID, fields and proposal digest.',
+    'This route grants reviewers zero edit, execution or publication authority.',
+    'Preserve Peral\'s CI-runner and merge-queue authority and zero writer publication authority.',
+]
+
+EXPECTED_DISPOSITION_RETIREMENT = [
+    'Apply the following retirement requirements only when the brief selects retirement.',
+    'Define the protection point as guarded behavior, never only anchor text.',
+    'Require ordinary source and test evidence that the PR removes the entire guarded behavior throughout the final source tree.',
+    'Refuse retirement when that behavior survives in any form, changes at the same site, moves or has replacement protection.',
+    'Require zero surviving, moved or replacement protection requirement for the claim.',
+    'Replace only the approved row or hand_run table with exactly one retired table carrying its exact ID.',
+    'Allow only id and reason in the replacement table; require a nonempty reason identifying the removed behavior.',
+    'Encode the reason as a TOML basic string with backslash, quote and every control character escaped.',
+    'Validate only generated replacement text through one quoted-delimiter python3 -I - heredoc importing only tomllib.',
+    'Run that inert parse alone in its Bash call; read zero files and write zero files.',
+    'A hook refusal blocks application with zero alternate validation path; parse zero existing protected file.',
+    'Require old_string to cover the full approved table extent, including all owned child tables and the unique approved row ID.',
+    'Refuse unclear extent, missing or multiple matches, and any unapproved neighboring content.',
+    'Use native Edit with replace_all=false for newly admitted future operations only.',
+    'Require independent applied confirmation of exactly one retired entry and zero active entries for each approved ID within lawful scope.',
+    'Require matching content-free line counts as supporting evidence alongside exact scoped applied review.',
+    'Preserve every unrelated table, field and pin.',
+    'Send CI reports that say in the base file, missing at HEAD only to the existing append-only retirement route with its separate prerequisites.',
+]
+
+EXPECTED_DISPOSITION_SURVIVING = [
+    'Apply the following surviving-claim requirements only when the brief selects a surviving-claim adaptation.',
+    'Use the existing lane-derived route when an identical-operation re-anchor fits.',
+    'Use the surviving-claim disposition only for an independently reviewed narrower mutant that preserves the full claim guarantee.',
+    'Permit only the exact approved mutant fields under the task-specific owner event and admitted private-proposal gates.',
+    'Preserve row ID, claim, designated test, subject, operator, pins, assertions, bounds and unrelated fields.',
+    'Review original and proposed local transformations inside separately admitted private scope.',
+    'Identify the concrete violation of the surviving claim and the designated test\'s detection mechanism.',
+    'Review relevant regressions that the narrower operation could omit.',
+    'Refuse an adaptation that reduces the surviving guarantee or hides a product defect.',
+    'A killed mutant or passing checker alone supplies insufficient same-guarantee evidence.',
+    'Use native Edit with replace_all=false and a unique approved row-ID-contained old_string within the approved row extent.',
+    'Refuse ambiguous or missing matches, altered proposal identities and reads wider than the approved scope.',
+    'Keep refuted claims and valid equivalent survivors under their separate repository dispositions.',
+    'A valid equivalent survivor remains a measured mutant; retirement never hides its result.',
+    'Keep mutation proof after merge under separate applicable execution admission.',
+]
+
+REVIEWER_DISPOSITION_AUTHORITY_SUBSTITUTIONS = {
+    'Prepare the ordinary retirement proposal only from the content-free extent receipt and ordinary source and test evidence.': (
+        'Require a separately admitted writer or gate to prepare the retirement proposal from the extent receipt and ordinary source and test evidence.',),
+    'First verify branch-specific authority and proposal scope; then prepare only the permitted ordinary or private proposal.': (
+        'Verify branch-specific authority and proposal scope before inspecting the separately prepared ordinary or private proposal.',),
+    'Obtain independent semantic review before exact CoC proposal approval, then verify current source, current bytes, SHA256 and scope before application.': (
+        'Complete independent semantic review before exact CoC proposal approval.',
+        'Require the applying writer or gate to verify current source, current bytes, SHA256 and exact scope before application.'),
+    'For semantic proposals, reuse the separately admitted private-proposal derivation, digest, review and application gates by name.': (
+        'Require separate admission for each named private-proposal derivation, digest, review and application context.',
+        'Inspect semantic evidence only inside the review scope that the applicable authority admits.'),
+    'Use direct sha256sum only for the ordinary retirement proposal; compute protected-proposal digests only inside separately authorized admitted gates.': (
+        "For retirement only, inspect the ordinary retirement proposal's digest receipt from a separately admitted writer or gate.",
+        'Require protected-proposal digest receipts from separately authorized admitted gates.',
+        'Execute zero digest commands.'),
+    'Apply only the approved proposal, then obtain independent applied review at the frozen final commit.': (
+        'Require a separately admitted writer or gate to apply only the approved proposal.',
+        'Inspect the applied result at the frozen final commit within the exact admitted read scope.'),
+    'Require every applied reviewer to differ from the author and applying writer.': (
+        'Require every applied reviewer to differ from the author, applying writer and proposal deriver.',),
+}
+EXPECTED_REVIEWER_DISPOSITION_AUTHORITY = [
+    replacement for entry in EXPECTED_COMMON_DISPOSITION_AUTHORITY
+    for replacement in REVIEWER_DISPOSITION_AUTHORITY_SUBSTITUTIONS.get(entry, (entry,))
+]
+
+REVIEWER_DISPOSITION_RETIREMENT_SUBSTITUTIONS = {
+    'Replace only the approved row or hand_run table with exactly one retired table carrying its exact ID.': (
+        'Confirm that the applied edit replaces only the approved row or hand_run table with one retired table carrying the exact ID.',),
+    'Encode the reason as a TOML basic string with backslash, quote and every control character escaped.': (
+        "Inspect the generated reason's evidence for TOML basic-string encoding, including escapes for backslashes, quotes and every control character.",),
+    'Validate only generated replacement text through one quoted-delimiter python3 -I - heredoc importing only tomllib.': (
+        'Require a validation receipt from a separately admitted writer or gate for the generated replacement text only.',
+        'Require the receipt to identify the proposal SHA256, validator, admission and successful result.',
+        'Confirm from the receipt and scoped evidence that validation used one quoted-delimiter python3 -I - heredoc on generated text only, imported only tomllib, ran alone and read or wrote zero files.'),
+    'Run that inert parse alone in its Bash call; read zero files and write zero files.': (
+        'Execute zero parsers or commands.',),
+    'A hook refusal blocks application with zero alternate validation path; parse zero existing protected file.': (
+        'Refuse missing or mismatched validation receipts and every effective validation or application denial.',
+        'Permit zero alternate validation path and zero parsing of an existing protected file.'),
+    'Require old_string to cover the full approved table extent, including all owned child tables and the unique approved row ID.': (
+        'Inspect scoped evidence that the approved match covers the complete table extent, all owned child tables and the unique approved row ID.',),
+    'Use native Edit with replace_all=false for newly admitted future operations only.': (
+        'Confirm from the application receipt that the separately admitted writer used native Edit with replace_all=false for a newly admitted future operation.',),
+    'Require independent applied confirmation of exactly one retired entry and zero active entries for each approved ID within lawful scope.': (
+        'Confirm exactly one retired entry and zero active entries for each approved ID within lawful scope.',),
+}
+EXPECTED_REVIEWER_DISPOSITION_RETIREMENT = [
+    replacement for entry in EXPECTED_DISPOSITION_RETIREMENT
+    for replacement in REVIEWER_DISPOSITION_RETIREMENT_SUBSTITUTIONS.get(entry, (entry,))
+]
+
+EXPECTED_REVIEWER_DISPOSITION_SURVIVING = [
+    replacement for entry in EXPECTED_DISPOSITION_SURVIVING
+    for replacement in (
+        ('Confirm from the application receipt that the writer used native Edit with replace_all=false and a unique row-ID-contained match within the approved extent.',
+         'Require separately admitted writers or gates to derive and apply proposals; reviewers inspect scoped evidence and receipts only.')
+        if entry == 'Use native Edit with replace_all=false and a unique approved row-ID-contained old_string within the approved row extent.'
+        else (entry,)
+    )
+]
+
+EXPECTED_WRITER_DISPOSITION_RECEIPTS = [
+    'For retirement only, require the applying writer to emit a content-free validation receipt with proposal digest, validator, admission and result.',
+    'Require an application receipt naming proposal digest, source identities, admitted scope, tool shape and result.',
+    'Keep protected bytes out of both receipts.',
+    'These receipt duties grant zero execution or publication authority.',
+    'Reviewer inspection requires separately admitted receipt and content scope.',
+]
+EXPECTED_DISPOSITION_AUTHORITY = EXPECTED_COMMON_DISPOSITION_AUTHORITY + EXPECTED_WRITER_DISPOSITION_RECEIPTS
+
+EXPECTED_DISPOSITION_BOUNDARY = [
+    'Apply this route only to future briefs after verified runtime adoption.',
+    'Source delivery grants zero runtime-adoption authority.',
+    'Source delivery grants zero retry authority.',
+    'Native Edit grants zero alternate form for an existing or recorded denied operation.',
+    'Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.',
+    'Preserve every effective refusal, tool and hook denial, and affected-session hold.',
+    'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.',
+    'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.',
+    'The driver applies zero protected edits; the writer has zero publication authority.',
+]
+
+EXPECTED_LANE_NATIVE_EDIT = [
+    'For newly admitted future operations, use native Edit with replace_all=false.',
+    'Require a unique approved row-ID-contained old_string within the approved row extent.',
+    'Change only the approved paired old/new fields; preserve every frozen field.',
+    'Refuse missing or ambiguous matches and reads wider than the approved row scope.',
+    'Keep every hook classifier decision unchanged.',
+    'Native Edit grants zero alternate form for an existing or recorded denied operation.',
+]
+
+
+EXPECTED_NEW_ROW_REVIEW = [
+    'Use this route only when the brief explicitly selects the new lane-owned row review route.',
+    'Verify ~/.claude/CLAUDE.md directly under heading CoC decisions (standing grant).',
+    'Require the exact sentence: The CoC decides CI/CD, testing and tooling items for me.',
+    'Refuse missing, unreadable or mismatched delegation before protected access; accept zero relay for this direct verification.',
+    'Require exact CoC read admission naming the independent reviewer, repository, PR, base SHA, author head SHA and frozen final commit.',
+    'Require explicit protected-read authority for exact files, unique new row IDs, complete approved extents and named commits before any lookup or read.',
+    'Require lawful content-free evidence of lane ownership and absence of each new ID at the base.',
+    'Reject existing IDs, unrelated rows, ambiguous extents and stale evidence.',
+    'A named new file alone establishes zero authority over every row inside it.',
+    'Keep existing-row re-anchoring, disposition and retirement routes separate and their authority requirements unchanged.',
+    'Keep fixed existing-row grants, event coordinates and permitted lookup route lists unchanged.',
+    'Preserve fixed-event provenance whenever the brief invokes a separately applicable owner-event route.',
+    'Read authority grants zero derivation, writer creation, execution or publication authority.',
+    'Permit only named row-ID lookups and approved row-line reads at the frozen final commit.',
+    'Read zero adjacent rows or whole protected files; parse zero whole protected files.',
+    'Require the reviewer to differ from the author, applying writer and proposal deriver.',
+    "Review each claim, designated test, subject binding, operator, mutant validity and the test's detection mechanism.",
+    'Require independent evidence that the designated test detects the claimed violation.',
+    'Preserve assertions, bounds, policy guarantees and every unrelated entry.',
+    'Require scoped creation authority for the author and applying writer as separate recorded evidence.',
+    'Bind the receipt to reviewer identity, verdict, exact authorities, repository, PR, base SHA, author head SHA, frozen final commit, files, IDs, extents and ordinary evidence identities.',
+    'Require CoC approval of the frozen receipt before publication.',
+    'Changed source, authority, scope or evidence invalidates every affected receipt and approval.',
+    'Keep proof execution after merge under separate applicable admission.',
+    'Grant zero reviewer edit, execution, retry or publication authority.',
+    'Report only paths, IDs, fields, digests and content-free findings.',
+]
+
+EXPECTED_NEW_ROW_BOUNDARY = [
+    'Apply this route only to future briefs after verified runtime adoption.',
+    'Source delivery grants zero runtime-adoption authority.',
+    'Source delivery grants zero retry authority.',
+    'Source delivery grants zero installation authority.',
+    'Source delivery grants zero publication authority.',
+    'Preserve every existing refusal, tool and hook denial, and affected-session hold.',
+    'Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.',
+    'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.',
+    'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.',
 ]
 
 
@@ -488,7 +754,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     '- Never loosen an assertion, widen a bound, or delete a check under this rule.',
                     '- Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.',
                     '- Record the approver, the exact edit, and the Input ID in the PR body.',
-                    '- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and the owner-approved protected-row subject route\'s named row-ID lookup, and preserve zero writer push authority.',
+                    '- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route, the owner-approved protected-row subject route\'s named row-ID lookup and the lane-owned disposition route\'s named row-ID lookup, and preserve zero writer push authority.',
                 )
                 _, _, standing = text.partition('### Standing owner rule\n')
                 standing = re.split(r'^ {0,3}#{1,3}(?:[ \t]+|$)|^.+\n {0,3}(?:=+|-+)[ \t]*$',
@@ -633,36 +899,10 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                               maxsplit=1, flags=re.MULTILINE)[0]
             with self.subTest(path=name, contract='loaded_clause'):
                 self.assertTrue(heading)
-            for requirement in (
-                '31f787fe-1463-4447-82fa-6a5e21e17a87', WORKSPACE_ID,
-                'version 1, choice B', 'aacba25c-5e99-438e-85c7-9bb128ecf4b8',
-                '2026-11-08T18:03:15.357469375Z',
-                'd56c4fd20ef712921654f06869818b5b2189a13e9b52249b32379ca5362468a8',
-                'Owner-selected option B: "Each lane moves the protected rows its own PR breaks: same test, new line text, nothing weaker. An independent reviewer checks every row change, and the mutation proof still runs after merge."',
-                'Input context: "Peral keeps CI runner and merge queue changes."',
-                'Record selected choice B and `payload.answer.text=null` separately; distinguish the selected option text from Input context.',
-                "Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route, or as scoped read authority for the owner-approved protected-row subject route.",
-                'This clause overrides only blanket protected-read/edit restrictions for the exact scope below.',
-                'Preserve higher-priority instructions, effective refusals, protected holds, and tool or hook denials.',
-                "Require the driver's complete verified owner-event record and exact scope in the brief.",
-                'Bind full Input/workspace UUIDs, current version, event id/hash, choice, actual owner answer, verifier name, and verification time.',
-                'Require `event_type=answer_submitted`, `actor_kind=owner_ui`, and `payload.no_answer_yet=false` for this Input and current version.',
-                'Apply the task-specific owner-event verification contract; keep its event comparator separate from the standing rule.',
-                'An authoritative mismatch blocks access and cannot use fallback.',
-                "Require CoC naming of exact row-file paths and unique row IDs from that PR's failing anchor CI log.",
-                'Require the recorded base/head diff to show that the PR itself breaks each named row.',
-                'Limit reads to those exact named files and rows; read no unrelated rows or whole protected files.',
-                'Require the reviewer to differ from the PR author and applying writer.',
-                'Preserve the same designated test and guarantee, equivalent mutant semantics, assertions, bounds, and every unrelated field.',
-                'Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.',
-                'Keep mutation proof after merge under separate applicable execution admission.',
-                "Retain Peral's authority over CI runners and the merge queue.",
-                'On the lane-derived or owner-approved protected-row subject route only, permit the row-ID lookup and row-line reads specified in that route.',
-                'Except for the named row-ID lookup and row-line reads on the lane-derived or owner-approved protected-row subject route, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.',
-                'CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.',
-            ):
-                with self.subTest(path=name, requirement=requirement):
-                    self.assertIn(requirement, clause)
+                expected = (EXPECTED_FIXED_DRIVER_ACCESS
+                            if Path(name).name in ('driver.md', 'driver--sol.md')
+                            else EXPECTED_FIXED_ACCESS)
+                self.assertEqual([line for line in clause.splitlines() if line], expected)
             with self.subTest(path=name, contract='general_boundary_reference'):
                 self.assertIn('For the narrow protected-read/edit exception, apply Owner-scoped protected row access below.', text)
 
@@ -782,6 +1022,194 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 phrase = 'Drivers prepare same-strength evidence; writers verify it before any separately permitted exact edit.'
             with self.subTest(path=name, phrase=phrase):
                 self.assertIn(phrase, text)
+
+    def lane_owned_disposition_routes(self):
+        carriers = (
+            ('plugins/ship/agents/writer--sol.md', '### Lane-owned disposition route'),
+            ('plugins/ship/agents/writer--sonnet.md', '### Lane-owned disposition route'),
+            ('plugins/ship/agents/writer--fable52.md', '### Lane-owned disposition route'),
+            ('plugins/ship/agents/driver.md', '### Lane-owned disposition route'),
+            ('plugins/ship/agents/driver--sol.md', '### Lane-owned disposition route'),
+            ('plugins/ship/skills/ship/SKILL.md', '### Lane-owned disposition route'),
+            ('plugins/ship/agents/reviewer--sol.md', '## Lane-owned disposition review'),
+            ('plugins/ship/agents/reviewer--opus.md', '## Lane-owned disposition review'),
+        )
+        for name, heading in carriers:
+            text = (ROOT / name).read_text()
+            with self.subTest(path=name, contract='selected_disposition_section'):
+                self.assertEqual(text.splitlines().count(heading), 1)
+            _, _, after = text.partition(heading + '\n')
+            route = re.split(r'^ {0,3}#{1,3}(?:[ \t]+|$)', after,
+                             maxsplit=1, flags=re.MULTILINE)[0]
+            yield name, text, [line for line in route.splitlines() if line]
+
+    def disposition_inventories(self, name):
+        if name in ('plugins/ship/agents/reviewer--sol.md', 'plugins/ship/agents/reviewer--opus.md'):
+            return (EXPECTED_REVIEWER_DISPOSITION_AUTHORITY, EXPECTED_REVIEWER_DISPOSITION_RETIREMENT,
+                    EXPECTED_REVIEWER_DISPOSITION_SURVIVING)
+        return (EXPECTED_DISPOSITION_AUTHORITY, EXPECTED_DISPOSITION_RETIREMENT,
+                EXPECTED_DISPOSITION_SURVIVING)
+
+    def test_lane_owned_disposition_requires_separate_authorities_and_frozen_review(self):
+        for name, text, lines in self.lane_owned_disposition_routes():
+            authority, retirement, surviving = self.disposition_inventories(name)
+            expected_size = sum(map(len, (authority, retirement, surviving, EXPECTED_DISPOSITION_BOUNDARY)))
+            with self.subTest(path=name, contract='exact_authority_and_boundary_inventory'):
+                self.assertEqual(len(lines), expected_size)
+                self.assertEqual(lines[:len(authority)], authority)
+                self.assertEqual(lines[-len(EXPECTED_DISPOSITION_BOUNDARY):], EXPECTED_DISPOSITION_BOUNDARY)
+            if Path(name).name.startswith('reviewer--'):
+                self.assertLess(text.index('## Lane-owned disposition review\n'),
+                                text.index('## Removed-behavior retirement review\n'))
+            elif Path(name).name.startswith(('writer--', 'driver')):
+                self.assertLess(text.index('### Lane-owned disposition route\n'),
+                                text.index('### Owner-approved protected-row subject route\n'))
+            else:
+                self.assertLess(text.index('#### Removed-behavior retirement route\n'),
+                                text.index('### Lane-owned disposition route\n'))
+        text = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        heading = '## Lane-owned disposition route'
+        self.assertEqual(text.splitlines().count(heading), 1)
+        _, _, after = text.partition(heading + '\n')
+        boundary = re.split(r'^ {0,3}#{1,2}(?:[ \t]+|$)', after,
+                            maxsplit=1, flags=re.MULTILINE)[0]
+        self.assertEqual([line for line in boundary.splitlines() if line],
+                         EXPECTED_DISPOSITION_BOUNDARY)
+
+    def test_lane_owned_retirement_requires_same_id_and_zero_surviving_requirement(self):
+        for name, _, lines in self.lane_owned_disposition_routes():
+            with self.subTest(path=name, contract='retirement_inventory'):
+                authority, retirement, _ = self.disposition_inventories(name)
+                start = len(authority)
+                self.assertEqual(lines[start:start + len(retirement)], retirement)
+
+    def test_lane_owned_surviving_claim_requires_full_guarantee_for_narrower_mutant(self):
+        for name, _, lines in self.lane_owned_disposition_routes():
+            with self.subTest(path=name, contract='surviving_claim_inventory'):
+                authority, retirement, surviving = self.disposition_inventories(name)
+                start = len(authority) + len(retirement)
+                self.assertEqual(lines[start:start + len(surviving)], surviving)
+
+    def test_disposition_reviewers_keep_read_only_tools_and_exact_role_substitutions(self):
+        self.assertTrue(set(REVIEWER_DISPOSITION_AUTHORITY_SUBSTITUTIONS) <= set(EXPECTED_DISPOSITION_AUTHORITY))
+        self.assertTrue(set(REVIEWER_DISPOSITION_RETIREMENT_SUBSTITUTIONS) <= set(EXPECTED_DISPOSITION_RETIREMENT))
+        for name in ('reviewer--sol.md', 'reviewer--opus.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            frontmatter = text.split('\n---\n', 1)[0]
+            tools = [line for line in frontmatter.splitlines() if line.startswith('tools:')]
+            with self.subTest(path=name):
+                self.assertEqual(tools, [
+                    'tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch',
+                ])
+
+    def test_lane_derived_future_native_edit_preserves_existing_scope(self):
+        for name, text, _ in self.lane_owned_disposition_routes():
+            if Path(name).name.startswith('reviewer--'):
+                continue
+            _, heading, after = text.partition('#### Lane-derived route\n')
+            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after,
+                             maxsplit=1, flags=re.MULTILINE)[0]
+            lines = [line for line in route.splitlines() if line]
+            with self.subTest(path=name):
+                self.assertTrue(heading)
+                self.assertEqual(lines[-len(EXPECTED_LANE_NATIVE_EDIT):], EXPECTED_LANE_NATIVE_EDIT)
+
+    def test_standing_search_exception_names_only_the_approved_disposition_lookup(self):
+        start = 'Preserve the mutation TOML search prohibition '
+        expected = (start + 'outside the owner-scoped lane-derived route, '
+                    "the owner-approved protected-row subject route's named row-ID lookup and "
+                    "the lane-owned disposition route's named row-ID lookup, and preserve zero writer push authority.")
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md',
+                     'driver.md', 'driver--sol.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            with self.subTest(path=name):
+                self.assertEqual(text.count(start), 1)
+                _, _, after = text.partition(start)
+                self.assertEqual(start + after.split('.', 1)[0] + '.', expected)
+
+    def test_shared_identical_mutant_rule_limits_exception_to_admitted_disposition(self):
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            lines = [line for line in text.splitlines() if line.startswith('Authority route:')]
+            with self.subTest(path=name):
+                self.assertEqual(len(lines), 1)
+                prefix = ('Authority route: apply an exact edit when the brief carries an `owner_ui` answer that names it, '
+                          'verified as in Approved test adaptations below, or a CoC decision on that exact test, CI, or tooling change '
+                          '(owner standing grant: "The CoC decides CI/CD, testing and tooling items for me"). '
+                          'These routes are part of this definition, so the stop-and-report rule above does not block them. ')
+                suffix = (' A CoC decision never covers product, billing, security-policy, architecture, resource, host, '
+                          'or spend bounds; those use the `owner_ui` route or the product-limit exception.')
+                self.assertEqual(lines, [prefix + EXPECTED_SHARED_MUTANT_RULE + suffix])
+
+    def test_lane_owned_disposition_keeps_writer_and_reviewer_parity(self):
+        writers = []
+        supported_writers = []
+        reviewers = []
+        for name, text, _ in self.lane_owned_disposition_routes():
+            if Path(name).name.startswith('writer--'):
+                body = text.split('\n---\n', 1)[1]
+                if Path(name).name in ('writer--sol.md', 'writer--sonnet.md'):
+                    supported_writers.append(body)
+                prefix, heading, after = body.partition('\n### Owner-approved protected-row subject route\n')
+                subject, following, suffix = after.partition('\n### Same-strength adaptations\n')
+                self.assertTrue(heading and following)
+                writers.append((name, prefix, suffix))
+                if Path(name).name == 'writer--fable52.md':
+                    self.assertEqual(subject,
+                                     '\nRefuse every step of the owner-approved protected-row subject route because this loaded definition implements none of it.\n'
+                                     'This refusal includes row-ID lookup, row reads and edits.\n'
+                                     'Preserve every existing refusal and affected-session hold.\n')
+            elif Path(name).name.startswith('reviewer--'):
+                reviewers.append(text.split('\n---\n', 1)[1])
+        self.assertEqual(len(supported_writers), 2)
+        self.assertEqual(supported_writers[0], supported_writers[1])
+        for name, prefix, suffix in writers[1:]:
+            with self.subTest(path=name):
+                self.assertEqual(prefix, writers[0][1])
+                self.assertEqual(suffix, writers[0][2])
+        self.assertEqual(reviewers[0], reviewers[1])
+
+    def test_new_lane_owned_row_review_requires_exact_authority_and_receipt_contract(self):
+        for name in ('reviewer--sol.md', 'reviewer--opus.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            heading = '## New lane-owned row review'
+            with self.subTest(path=name):
+                self.assertEqual(text.splitlines().count(heading), 1)
+                _, _, after = text.partition(heading + '\n')
+                route = re.split(r'^ {0,3}#{1,2}(?:[ \t]+|$)', after,
+                                 maxsplit=1, flags=re.MULTILINE)[0]
+                self.assertEqual([line for line in route.splitlines() if line],
+                                 EXPECTED_NEW_ROW_REVIEW + EXPECTED_NEW_ROW_BOUNDARY)
+                self.assertLess(text.index(heading + '\n'),
+                                text.index('## Lane-owned disposition review\n'))
+
+    def test_new_lane_owned_row_dispatch_preserves_creation_authority_separation(self):
+        for name in ('plugins/ship/agents/driver.md', 'plugins/ship/agents/driver--sol.md',
+                     'plugins/ship/skills/ship/SKILL.md'):
+            text = (ROOT / name).read_text()
+            heading = '### New lane-owned row review route'
+            with self.subTest(path=name):
+                self.assertEqual(text.splitlines().count(heading), 1)
+                _, _, after = text.partition(heading + '\n')
+                route = re.split(r'^ {0,3}#{1,3}(?:[ \t]+|$)', after,
+                                 maxsplit=1, flags=re.MULTILINE)[0]
+                self.assertEqual([line for line in route.splitlines() if line],
+                                 EXPECTED_NEW_ROW_REVIEW + EXPECTED_NEW_ROW_BOUNDARY)
+                _, _, standing = text.partition('#### Removed-behavior retirement route\n')
+                category_end = re.search(r'^### ', standing, flags=re.MULTILINE)
+                self.assertIsNotNone(category_end)
+                self.assertNotIn(heading, standing[:category_end.start()])
+                self.assertLess(text.index(heading + '\n'),
+                                text.index('### Lane-owned disposition route\n'))
+
+    def test_new_lane_owned_row_shared_boundary_grants_zero_adoption_or_retry(self):
+        text = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        heading = '## New lane-owned row review route'
+        self.assertEqual(text.splitlines().count(heading), 1)
+        _, _, after = text.partition(heading + '\n')
+        boundary = re.split(r'^ {0,3}#{1,2}(?:[ \t]+|$)', after,
+                            maxsplit=1, flags=re.MULTILINE)[0]
+        self.assertEqual([line for line in boundary.splitlines() if line], EXPECTED_NEW_ROW_BOUNDARY)
 
     def test_skill_cites_owner_rule(self):
         text = (ROOT / 'plugins/ship/skills/ship/SKILL.md').read_text()
