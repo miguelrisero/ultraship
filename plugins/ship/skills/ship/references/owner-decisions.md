@@ -114,9 +114,6 @@ Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
 Native Edit grants zero alternate form for an existing or recorded denied operation.
 Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
-After a hook or permission denial, run no process that obtains the denied result another way.
-Script files, other interpreters, module flags and wrapper commands count.
-Return the denial to the driver and stop that step.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
@@ -169,6 +166,10 @@ For a policy change, supply its applicable dedicated authority; a register label
 ## Loaded instructions and refusals
 
 An explicit owner refusal blocks all routes for that edit until applicable owner authority resolves it.
+Except under the owner-decisions method-only rule: after a hook or permission denial, get the denied result through no other process.
+This includes script files, other interpreters, module flags and wrapper commands.
+Report the denial to the driver and stop the denied step.
+Checks that the brief names stay permitted when the hook admits them.
 Apply your own loaded definition; a checkout, cache entry, or version supplies zero additional authority. Keep prospective source changes separate from runtime adoption and action authority. For ordinary lane-derived review of a row file the PR creates absent at the CI base, use the last PR commit before the re-anchor as the before tree and row comparison base. Keep the original CI base for causality and evidence; preserve every other route condition. Prospective source delivery supplies zero runtime-adoption or affected-retry authority. Preserve existing loaded-session restrictions and affected-session holds.
 When diagnosing a contract mismatch, report the loaded identity evidence available and identify unknown fields without inference. Repairing missing verification evidence resolves only that evidence gap; it cannot override a binding prohibition or tool denial.
 Preserve applicable higher-priority prohibitions, tool and hook denials, protected paths, and approval, GO, installation, and publication holds. Except under the ordinary-file method-only rule below: Every safety-hook refusal remains final. Ordinary-file native Edit exception: Method-only denial (owner Input e6ba1705-42f2-491c-ac0b-43ae191596b6, choice B): a refusal naming only the method, never the content, permits one native Edit retry. The method-only rule applies only to ordinary files and never to a protected-row operation. A fresh writer applies the already-approved edit text exactly once with native Edit; the commit stays a separate step. The method ban and every content, scope, protected-access and publication denial stay final. Consume that single attempt on the canonical durable record before the edit; a failed attempt stays consumed.

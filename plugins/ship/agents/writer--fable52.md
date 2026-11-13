@@ -352,9 +352,6 @@ Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
 Native Edit grants zero alternate form for an existing or recorded denied operation.
 Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
-After a hook or permission denial, run no process that obtains the denied result another way.
-Script files, other interpreters, module flags and wrapper commands count.
-Return the denial to the driver and stop that step.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
@@ -428,5 +425,9 @@ Apply your own loaded definition; checkout, cache, and version supply zero addit
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
 Except under the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
+Except under the owner-decisions method-only rule: after a hook or permission denial, get the denied result through no other process.
+This includes script files, other interpreters, module flags and wrapper commands.
+Report the denial to the driver and stop the denied step.
+Checks that the brief names stay permitted when the hook admits them.
 
 Return the changed files, the test commands with their results or `tests not run (brief)`, the head SHA, and any blocker with evidence. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.
