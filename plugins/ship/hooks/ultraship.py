@@ -1010,7 +1010,7 @@ def process_heredoc_denial(command, readers=False):
 
 def shell_raw_words(text):
     """Keep raw shell words and offsets; quotes and escapes never lose their identity."""
-    words, index = [], 0
+    words, index, parentheses = [], 0, []
     while index < len(text):
         if text[index].isspace():
             if text[index] == '\n':
@@ -1019,6 +1019,17 @@ def shell_raw_words(text):
             continue
         start, quote = index, ''
         if text[index] in ';&|()<>`':
+            if text[index] == '(':
+                before = text[index - 1] if index else ''
+                array = before == '=' and bool(re.search(r'(?:^|[\s;&|()<>])[A-Za-z_]\w*=$', text[:index]))
+                if before and not before.isspace() and before not in ';&|()<>$' and not array:
+                    raise ValueError('word-internal shell group')
+                parentheses.append(before in '$<>=' and bool(before))
+            elif text[index] == ')' and parentheses:
+                substitution = parentheses.pop()
+                after = text[index + 1:index + 2]
+                if not substitution and after and not after.isspace() and after not in ';&|()<>':
+                    raise ValueError('word suffix after shell group')
             index += 1
             words.append((text[start:index], text[start:index], start, index))
             continue
@@ -1318,14 +1329,15 @@ def inline_interpreter_denial(command):
             return 'inline interpreter code rule (nesting limit)'
         nested = list(nested_shell_strings(tokens))
         input_tokens = shell_raw_words(shell_line_continuations(shell))
-        redirected = any(token[0] == '<' for token in input_tokens)
+        redirected = any(token[0] == '<' for source in (input_tokens, tokens) for token in source)
         piped_input = redirected or any(
             token[0] == '|'
-            and not (index and input_tokens[index - 1][0] == '|' and input_tokens[index - 1][3] == token[2])
-            and not (index + 1 < len(input_tokens) and input_tokens[index + 1][0] == '|'
-                     and input_tokens[index + 1][2] == token[3])
-            for index, token in enumerate(input_tokens))
-        relative_program_denied = piped_input or any(token[1] in {'cd', 'pushd'} for token in input_tokens)
+            and not (index and source[index - 1][0] == '|' and source[index - 1][3] == token[2])
+            and not (index + 1 < len(source) and source[index + 1][0] == '|'
+                     and source[index + 1][2] == token[3])
+            for source in (input_tokens, tokens) for index, token in enumerate(source))
+        relative_program_denied = piped_input or any(
+            token[1] in {'cd', 'pushd'} for source in (input_tokens, tokens) for token in source)
         if re.search(r'(?:\$\([^\n]*\)|`[^`\n]*`)[ \t]+(?:-[ceEpr]\b|--(?:eval|print)\b|-[a-zA-Z]*[ce]\b)', text):
             return 'inline interpreter code rule (unresolved command word)'
         segments, words, piped = [], [], False
@@ -1379,8 +1391,8 @@ def inline_interpreter_denial(command):
                 if redirected or any(word[0] == '<' for word in words) or re.search(r'[<>][ \t]*\(|=\(', text[end:]):
                     return 'inline interpreter code rule (program from a pipe)'
                 if not arguments and not piped:
-                    if any(token[0] in {'<', '|', '('} or token[0] == '{'
-                           for token in shell_raw_words(shell)):
+                    if piped_input or any(token[0] in {'<', '|', '('} or token[0] == '{'
+                                          for token in input_tokens + tokens):
                         return 'inline interpreter code rule (program from a pipe)'
                     continue
                 if name != 'python':
@@ -1394,19 +1406,19 @@ def inline_interpreter_denial(command):
                         continue
                     script = arguments[0] if arguments else ''
                     if (not script or script.startswith('-') or stdin_program_path(script)
-                            or relative_program_denied and not os.path.isabs(script)
+                            or (relative_program_denied or piped) and not os.path.isabs(script)
                             or not re.fullmatch(r'[\w./:@%+,-]+', words[index + 1][0])):
                         return ('inline interpreter code rule (program from a pipe)' if piped_input or stdin_program_path(script)
-                                or relative_program_denied and script and not os.path.isabs(script)
+                                or (relative_program_denied or piped) and script and not os.path.isabs(script)
                                 else f'inline interpreter code rule ({name})')
                 elif not arguments or any(stdin_program_path(argument) for argument in arguments):
                     return 'inline interpreter code rule (program from a pipe)'
                 else:
                     kind, flags, operand, offset = python_program(arguments)
-                    if (kind == 'script' and operand < len(arguments) and relative_program_denied
+                    if (kind == 'script' and operand < len(arguments) and (relative_program_denied or piped)
                             and not os.path.isabs(arguments[operand])):
                         return 'inline interpreter code rule (program from a pipe)'
-                    if piped_input and (kind not in {'c', 'm', 'script'} or operand >= len(arguments)
+                    if (piped_input or piped) and (kind not in {'c', 'm', 'script'} or operand >= len(arguments)
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
         pending.extend(token[1] for token in nested)

@@ -328,6 +328,25 @@ class WriterHeredocTests(unittest.TestCase):
             self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
         self.assertFalse(self.denied('node scripts/build.js'))
 
+    def test_nested_text_contributes_pipeline_and_directory_state(self):
+        for command in ('sh -c "printf \'%s\' \'x\' | python3 -I"',
+                        'eval "printf \'%s\' \'x\' | python3 -I"',
+                        'sh -c "cd /dev && printf \'%s\' \'x\' | node stdin"'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_word_internal_glob_groups_cannot_hide_interpreters(self):
+        # These process calls remain classifier input only.
+        for command in ("/usr/bin/pyth(o)n3 -c 'import os; os.system(chr(103))'",
+                        "cd /usr/bin && env (p)ython3 -c 'import os; os.system(chr(103))'",
+                        "/usr/bin/pyth@(o)n3 -c 'import os; os.system(chr(103))'", "/usr/bin/no(d)e -e 'x'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+        self.assertFalse(self.denied('a=(1 2); echo ok'))
+        self.assertFalse(self.denied('head=$(git -C /w rev-parse HEAD)trailing'))
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))
@@ -343,7 +362,8 @@ class WriterHeredocTests(unittest.TestCase):
         for command in ("DENO=deno; $DENO eval 'console.log(1)'", 'DENO=deno; $DENO run https://example.invalid/mod.ts',
                         'DENO=deno; $DENO repl', 'D=deno; "$D" eval x'):
             self.assertTrue(self.denied(command))
-            self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+            self.assertIn('process-capable python -c rule' if 'console.log' in command
+                          else 'inline interpreter code rule (unresolved command word)', self.reason)
 
     def test_here_string_cannot_hide_later_python_program(self):
         command = 'grep x <<< \'<<"Z"\'\npython3 -c \'import subprocess; subprocess.run(("git", "pu" + "sh"))\''
