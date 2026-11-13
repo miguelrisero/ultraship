@@ -734,6 +734,15 @@ def check_only_shell(command):
         read_only_shell(segment) or re.fullmatch(r'(?:ba|z)?sh +-n +[\w./][\w./-]*', segment) for segment in segments)
 
 
+def python_writes(body):
+    """Use the same conservative write test for inline code and stdin bodies."""
+    return any(isinstance(node, ast.Attribute) and node.attr in {'write_text', 'unlink'}
+               or isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'open' and not all(
+                   isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
+                   for mode in [*node.args[1:2], *(k.value for k in node.keywords if k.arg == 'mode')])
+               for node in ast.walk(ast.parse(body)))
+
+
 def runs_heredoc_output(command):
     """Whether a Python heredoc that can write files is followed by a command that can run one.
 
@@ -754,11 +763,7 @@ def runs_heredoc_output(command):
             if not inert_python(body):
                 return True
             # An inert script writes only through `open` with a write mode or a `Path` write method.
-            return any(isinstance(node, ast.Attribute) and node.attr in {'write_text', 'unlink'}
-                       or isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'open' and not all(
-                           isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
-                           for mode in [*node.args[1:2], *(k.value for k in node.keywords if k.arg == 'mode')])
-                       for node in ast.walk(ast.parse(body)))
+            return python_writes(body)
     return False
 
 
@@ -960,6 +965,116 @@ def process_heredoc_denial(command):
         if match['delimiter'][0] not in '\'"\\':
             return 'process-capable heredoc rule (Python heredoc needs a quoted delimiter)'
         index = end + 1
+    return None
+
+
+def shell_raw_words(text):
+    """Keep raw shell words and offsets; quotes and escapes never lose their identity."""
+    words, index = [], 0
+    while index < len(text):
+        if text[index].isspace():
+            if text[index] == '\n':
+                words.append(('\n', '\n', index, index + 1))
+            index += 1
+            continue
+        start, quote = index, ''
+        if text[index] in ';&|()<>`':
+            index += 1
+            words.append((text[start:index], text[start:index], start, index))
+            continue
+        while index < len(text):
+            char = text[index]
+            if char == '\\' and quote != "'":
+                index += 2
+                if index > len(text):
+                    raise ValueError('unfinished shell escape')
+                continue
+            if char == quote:
+                quote = ''
+            elif not quote and char in "'\"":
+                quote = char
+            elif not quote and (char.isspace() or char in ';&|()<>`'):
+                break
+            index += 1
+        if quote:
+            raise ValueError('unfinished shell quote')
+        raw = text[start:index]
+        values = shlex.split(raw, comments=False)
+        if len(values) != 1:
+            raise ValueError('ambiguous shell word')
+        words.append((raw, values[0], start, index))
+    return words
+
+
+def shell_without_heredoc_bodies(command):
+    """Keep headers and following shell commands, without interpreting data as shell words."""
+    if re.match(r'[ \t]*(?:cd +[\w./-]+ +&& +)?git +commit\b', command) and '<<' in command:
+        return ''  # The existing whole-command commit-message check runs first.
+    lines, kept, pending = command.splitlines(keepends=True), [], []
+    for line in lines:
+        if pending:
+            delimiter, tabs = pending[0]
+            if (line.lstrip('\t') if tabs else line).removesuffix('\n') == delimiter:
+                pending.pop(0)
+            continue
+        kept.append(line)
+        for match in re.finditer(r"(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", line):
+            pending.append((shlex.split(match[2])[0], bool(match[1])))
+    return ''.join(kept)
+
+
+def python_inline_denial(command):
+    """Check every Python -c word, including wrapper arguments and nested shell strings."""
+    pending = [shell_without_heredoc_bodies(command)]
+    while pending:
+        text = pending.pop()
+        try:
+            tokens = shell_raw_words(text)
+        except ValueError:
+            return 'process-capable python -c rule'
+        segments, current = [], []
+        for token in tokens:
+            if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
+                segments.append(current)
+                current = []
+            else:
+                current.append(token)
+        segments.append(current)
+        code_words = set()
+        for words in segments:
+            for index, (raw, value, start, end) in enumerate(words):
+                if not re.fullmatch(r'python(?:3(?:\.\d+)?)?', os.path.basename(value)):
+                    continue
+                flags = ''
+                for cursor in range(index + 1, len(words)):
+                    option = words[cursor][1]
+                    match = re.match(r'^-([a-zA-Z]*?c)', option)
+                    if not match:
+                        if option.startswith('-'):
+                            flags += option[1:]
+                            continue
+                        break
+                    flags += match[1]
+                    attached = words[cursor][0][len(match[0]):]
+                    code_word = words[cursor] if attached else words[cursor + 1] if cursor + 1 < len(words) else None
+                    code_raw = attached if attached else code_word[0] if code_word else ''
+                    code = code_raw[1:-1]
+                    literal = (len(code_raw) >= 2 and (
+                        code_raw[0] == code_raw[-1] == "'" and "'" not in code
+                        or code_raw[0] == code_raw[-1] == '"' and not any(char in code for char in '$`\\"')))
+                    reasons = []
+                    admitted = literal and (inert_python(code) or 'I' in flags and (
+                        inert_python(code, isolated=True) or literal_git_read_python(code, reasons)))
+                    if raw != value or re.search(r'[$`*?\[\]{}]', raw) or not admitted:
+                        return 'process-capable python -c rule' + (': ' + reasons[0] if reasons else '')
+                    code_words.add(code_word[2])
+                    rest = text[:start] + text[code_word[3]:]
+                    if python_writes(code) and not check_only_shell(rest):
+                        return 'python -c then run rule'
+                    break
+        for raw, value, start, end in tokens:
+            if start not in code_words and any(char.isspace() for char in value):
+                pending.append(value)
     return None
 
 
@@ -1398,6 +1513,9 @@ def pre(data):
                 reason = writer_gh_denial(file_text_removed)
                 if reason:
                     deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + reason)
+                reason = python_inline_denial(command)
+                if reason:
+                    deny(publication_reason + ' Rule: ' + reason + '.')
             except Exception:
                 deny(publication_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''

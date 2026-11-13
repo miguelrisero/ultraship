@@ -27,6 +27,46 @@ class WriterHeredocTests(unittest.TestCase):
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
+    def test_process_capable_python_inline_strings_are_denied(self):
+        code = "import subprocess; subprocess.run([\"git\", \"pu\" + \"sh\"])"
+        for command in (
+            'python3 -c "import subprocess; subprocess.run([\'git\', \'pu\' + \'sh\'])"',
+            f"python3 -Ic '{code}'", f"python3 -c'{code}'", f"X=$(python3 -c '{code}')",
+            'bash -c "python3 -c \'import sys; print(sys.argv)\'"',
+            *(f"{python} -c '{code}'" for python in (
+                'uv run python', 'env python3', '/usr/bin/python3', 'python3.12',
+                'timeout 5 python3', 'xargs python3', 'nohup python3', 'sudo python3')),
+            'python3 -c "print($(echo 1))"', 'python3 -c a*b',
+            "python3 -c 'import sys; print(sys.argv)'", "python3 -c 'print(1)",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_inert_python_inline_strings_are_admitted(self):
+        for command in (
+            "python3 -c 'print(1)'", 'python3 -c "print(1)"',
+            'python3 -I -c \'import json; print(json.dumps({"a": 1}))\'',
+            "python3 -Ic'print(1)'", 'python3 -m pytest -q',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command))
+
+    def test_inline_python_write_requires_check_only_remainder(self):
+        write = 'python3 -c \'open("r.sh", "w").write("echo x")\''
+        self.assertTrue(self.denied(write + ' && bash r.sh'))
+        self.assertIn('python -c then run rule', self.reason)
+        self.assertFalse(self.denied(write + ' && bash -n r.sh'))
+        self.assertFalse(self.denied(write + ' && cat r.sh'))
+
+    def test_inline_literal_git_read_requires_isolation_and_names_reason(self):
+        code = 'import subprocess; subprocess.run(["git", "branch", "--show-current"])'
+        self.assertFalse(self.denied(f"python3 -I -c '{code}'"))
+        self.assertTrue(self.denied(f"python3 -c '{code}'"))
+        bad = code.replace('"branch", "--show-current"', '"status"')
+        self.assertTrue(self.denied(f"python3 -I -c '{bad}'"))
+        self.assertIn('process-capable python -c rule: git read requires', self.reason)
+
     def test_python_helper_without_import_is_denied(self):
         body = "def git(*args):\n    return subprocess.check_output(['git', *args])\n"
         for operator, delimiter, indent in (('<<', 'EOF', ''), ('<<', "'EOF'", ''),
