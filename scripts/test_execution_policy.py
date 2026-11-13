@@ -100,6 +100,75 @@ class ReviewerSearchTests(unittest.TestCase):
             with self.subTest(tool=tool, arguments=arguments):
                 self.assertEqual(self.decision(tool, arguments), {})
 
+    def test_normalized_protected_paths_are_denied(self):
+        for protected in (r'/fixture/repo/tests\mutation\x.txt',
+                          '/fixture/repo/tests//mutation/x.txt',
+                          '/fixture/repo/tests/./mutation/x.txt',
+                          '/fixture/repo/tests/other/../mutation/x.txt'):
+            for tool, arguments in (
+                ('Read', {'file_path': protected}),
+                ('LSP', {'filePath': protected}),
+                ('Grep', {'path': protected, 'pattern': 'identifier'}),
+                ('Grep', {'glob': protected, 'pattern': 'identifier'}),
+                ('Glob', {'pattern': protected}),
+                ('mcp__fff__grep', {'query': protected + ' identifier'}),
+                ('mcp__fff__find_files', {'query': protected}),
+                ('mcp__fff__multi_grep', {'patterns': ['identifier', protected], 'constraints': 'src/'}),
+                ('mcp__fff__multi_grep', {'patterns': ['identifier'], 'constraints': protected}),
+            ):
+                with self.subTest(tool=tool, arguments=arguments):
+                    self.assert_denied(tool, arguments)
+
+    def test_malformed_reviewer_arguments_and_classifier_errors_fail_closed(self):
+        for tool, field in (('Read', 'file_path'), ('LSP', 'filePath'),
+                            ('Grep', 'path'), ('Grep', 'glob'), ('Glob', 'pattern'),
+                            ('mcp__fff__grep', 'query'), ('mcp__fff__find_files', 'query'),
+                            ('mcp__fff__multi_grep', 'constraints')):
+            for value in (None, 42, False, {}, ['src/']):
+                with self.subTest(tool=tool, field=field, value=value):
+                    self.assert_denied(tool, {field: value, 'path': '/fixture/repo/src'}
+                                       if field != 'path' else {field: value})
+        for patterns in (None, 'identifier', 42, {}, [None], ['identifier', 42]):
+            with self.subTest(patterns=patterns):
+                self.assert_denied('mcp__fff__multi_grep', {'patterns': patterns, 'constraints': 'src/'})
+        with patch.object(ultraship.re, 'search', side_effect=ValueError('synthetic classifier error')):
+            self.assert_denied('Read', {'file_path': '/fixture/repo/src/x.txt'})
+
+    def test_root_home_and_current_directory_do_not_scope_searches(self):
+        with patch.object(ultraship.Path, 'home', return_value=Path('/fixture/home')):
+            for directory in ('/', '//', '/fixture/home', '~', '~/', '.', './',
+                              '/fixture/repo', '/fixture/repo/src/..'):
+                for tool, arguments in (
+                    ('Grep', {'path': directory, 'pattern': 'identifier'}),
+                    ('Glob', {'path': directory, 'pattern': '**/*.py'}),
+                    ('Grep', {'glob': directory.rstrip('/') + '/**/*.py', 'pattern': 'identifier'}),
+                    ('Glob', {'pattern': directory.rstrip('/') + '/**/*.py'}),
+                    ('mcp__fff__grep', {'query': directory.rstrip('/') + '/ identifier'}),
+                    ('mcp__fff__multi_grep', {'patterns': ['identifier'],
+                                             'constraints': directory.rstrip('/') + '/**/*.py'}),
+                    ('mcp__fff__find_files', {'query': directory.rstrip('/') + '/**/*.py identifier'}),
+                ):
+                    with self.subTest(tool=tool, arguments=arguments):
+                        self.assert_denied(tool, arguments, cwd='/fixture/repo')
+
+    def test_fff_fixed_directory_globs_scope_all_three_search_tools(self):
+        for constraint in ('src/**/*.py', '/fixture/repo/src/**/*.py', 'src/./**/*.py'):
+            for tool, arguments in (
+                ('mcp__fff__grep', {'query': constraint + ' identifier'}),
+                ('mcp__fff__multi_grep', {'patterns': ['identifier'], 'constraints': constraint}),
+                ('mcp__fff__find_files', {'query': 'identifier ' + constraint}),
+            ):
+                with self.subTest(tool=tool, arguments=arguments):
+                    self.assertEqual(self.decision(tool, arguments, cwd='/fixture/repo'), {})
+        for constraint in ('*.py', '**/src/*.py', '!src/**/*.py'):
+            for tool, arguments in (
+                ('mcp__fff__grep', {'query': constraint + ' identifier'}),
+                ('mcp__fff__multi_grep', {'patterns': ['identifier'], 'constraints': constraint}),
+                ('mcp__fff__find_files', {'query': 'identifier ' + constraint}),
+            ):
+                with self.subTest(tool=tool, arguments=arguments):
+                    self.assert_denied(tool, arguments, cwd='/fixture/repo')
+
     def test_every_reviewer_suffix_uses_the_shared_role_boundary(self):
         suffixes = [path.stem for path in (ROOT / 'plugins/ship/agents').glob('reviewer--*.md')]
         self.assertTrue(suffixes)

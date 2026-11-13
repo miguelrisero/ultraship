@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import posixpath
 import re
 import shlex
 import sys
@@ -2223,36 +2224,74 @@ def pre(data):
                  'with the evidence you have and list what stays unconfirmed.')
         counter.write_text(str(used + 1))
     if role(data, 'reviewer') and (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')):
-        fields = ('file_path', 'filePath', 'path', 'glob')
-        if tool == 'Glob':
-            fields += ('pattern',)
-        if tool.startswith('mcp__fff__'):
-            fields += ('query', 'constraints', 'patterns')
-        values = []
-        for field in fields:
-            value = tin.get(field)
-            values.extend(value if isinstance(value, list) else [value])
-        if any(isinstance(value, str) and re.search(r'(?<![\w.-])tests/mutation(/|$)', value)
-               for value in values):
-            deny('Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.')
-        if tool in ('Grep', 'Glob', 'mcp__fff__grep', 'mcp__fff__multi_grep', 'mcp__fff__find_files'):
-            scoped = isinstance(tin.get('path'), str) and bool(tin['path'].strip())
-            if tool in ('Grep', 'Glob'):
-                pattern = tin.get('glob' if tool == 'Grep' else 'pattern') or ''
-                directory, separator, _ = pattern.partition('/')
-                scoped |= bool(separator and directory and not any(char in directory for char in '*?[{!'))
-            else:
-                constraints = (tin.get('constraints') or '').split()
-                for token in (tin.get('query') or '').split():
-                    if '/' not in token and '.' not in token and not token.startswith(('!', '*')):
-                        break
-                    constraints.append(token)
-                scoped |= any(token.endswith('/') and not token.startswith('!')
-                              and token.strip('/') and not any(char in token for char in '*?[{')
-                              for token in constraints)
-            if not scoped:
-                deny('Reviewers must scope searches to an explicit path or positive directory constraint. '
-                     'Report failed or empty searches; never widen the scope.')
+        try:
+            fields = ('file_path', 'filePath', 'path', 'glob')
+            if tool == 'Glob':
+                fields += ('pattern',)
+            if tool.startswith('mcp__fff__'):
+                fields += ('query', 'constraints', 'patterns')
+            values = []
+            for field in fields:
+                if field not in tin:
+                    continue
+                value = tin[field]
+                if field == 'patterns':
+                    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                        deny('Reviewers require a list of strings for search patterns.')
+                    values.extend(value)
+                else:
+                    if not isinstance(value, str):
+                        deny('Reviewers require string paths, queries, and constraints.')
+                    values.append(value)
+
+            def normalize(value):
+                return posixpath.normpath(value.replace('\\', '/')).replace('//', '/')
+
+            if any(re.search(r'(?<![\w.-])tests/mutation(/|$)', normalize(token.lstrip('!')))
+                   for value in values for token in [value, *value.split()]):
+                deny('Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.')
+            if tool in ('Grep', 'Glob', 'mcp__fff__grep', 'mcp__fff__multi_grep', 'mcp__fff__find_files'):
+                home = normalize(str(Path.home()))
+                cwd = normalize(data.get('cwd') or str(Path.cwd()))
+
+                def bounded(directory):
+                    if not directory.strip() or directory.startswith('!'):
+                        return False
+                    directory = directory.replace('\\', '/')
+                    if directory == '~' or directory.startswith('~/'):
+                        directory = home + directory[1:]
+                    absolute = normalize(posixpath.join(cwd, directory))
+                    return absolute not in ('/', home, cwd)
+
+                def directory_constraint(token):
+                    if token.startswith('!'):
+                        return False
+                    token = token.replace('\\', '/')
+                    prefix = re.split(r'[*?\[{]', token, maxsplit=1)[0]
+                    directory = prefix.rpartition('/')[0] if '/' in prefix else ''
+                    if prefix.startswith('/') and not directory:
+                        directory = '/'
+                    return bounded(directory)
+
+                scoped = bounded(tin.get('path', ''))
+                if tool in ('Grep', 'Glob'):
+                    scoped |= directory_constraint(tin.get('glob' if tool == 'Grep' else 'pattern', ''))
+                else:
+                    constraints = tin.get('constraints', '').split()
+                    query = tin.get('query', '').split()
+                    if tool == 'mcp__fff__grep':
+                        for token in query:
+                            if '/' not in token and '.' not in token and not token.startswith(('!', '*')):
+                                break
+                            constraints.append(token)
+                    elif tool == 'mcp__fff__find_files':
+                        constraints.extend(query)
+                    scoped |= any(directory_constraint(token) for token in constraints)
+                if not scoped:
+                    deny('Reviewers must scope searches to an explicit path or positive directory constraint. '
+                         'Report failed or empty searches; never widen the scope.')
+        except Exception:
+            deny('Reviewers cannot proceed when search scope validation fails. Report the blocked scope to the coordinator.')
 
 
 def owed_file(data):
