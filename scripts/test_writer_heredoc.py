@@ -24,16 +24,308 @@ class WriterHeredocTests(unittest.TestCase):
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
+        self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
-    def test_python_helper_in_heredoc_is_data(self):
+    def test_python_helper_without_import_is_denied(self):
         body = "def git(*args):\n    return subprocess.check_output(['git', *args])\n"
         for operator, delimiter, indent in (('<<', 'EOF', ''), ('<<', "'EOF'", ''),
                                             ('<<', '"EOF"', ''), ('<<', '\\EOF', ''),
                                             ('<<-', "'EOF'", '\t')):
             with self.subTest(operator=operator, delimiter=delimiter):
                 script = indent + body.replace('\n', '\n' + indent).rstrip('\t')
-                self.assertFalse(self.denied(f'python3 - {operator}{delimiter}\n{script}{indent}EOF\n'))
+                self.assertTrue(self.denied(f'python3 - {operator}{delimiter}\n{script}{indent}EOF\n'))
+
+    W14 = r'''cd /w/wt-inbox && git add -- backend/api/tests/test_loop_result_provenance_census.py && python3 -I - <<'PY'
+import hashlib
+import subprocess
+from pathlib import Path
+root = '/w/wt-inbox'
+p = 'backend/api/tests/test_loop_result_provenance_census.py'
+def git(*args):
+    return subprocess.check_output(['git', '-C', root, *args])
+assert git('branch', '--show-current').strip() == b'drv/inbox-6943-int'
+assert git('rev-parse', 'HEAD').strip() == b'e57ccb0b1494ee72e4b840afa2ece96788ec19e9'
+assert git('diff', '--cached', '--name-only', '-z') == p.encode() + b'\0'
+before = git('show', 'HEAD:' + p)
+staged = git('show', ':' + p)
+lines = before.splitlines(keepends=True)
+assert lines[269] == b'        "fbde5af8b0bd0d664b737d760a339cc94902c7d50dc48fdc27483c8b1c7ba4b4",\n'
+lines[269] = b'        "3e2c44fa1bbe4f811bceb26e102fccca7d81cf3cf2c6a1f98a1ee56fa8fd536a",\n'
+assert staged == b''.join(lines)
+assert Path(root, p).read_bytes() == staged
+assert hashlib.sha256(staged).hexdigest() == 'a5e96776c9941ec83cfb3b40f5baebeb45c3ddfe1b152854fa15e2af60c76fb5'
+print('PASS: staged content equals the exact approved one-line edit')
+PY
+if [ "$?" -eq 0 ]; then git commit -m "test(census): re-pin the task offer forecast closure"; else exit 1; fi
+'''
+
+    def test_w14_requires_fsmonitor_pair(self):
+        self.assertTrue(self.denied(self.W14))
+        self.assertIn('fsmonitor rule', self.reason)
+        amended = self.W14.replace("root, *args", "root, '-c', 'core.fsmonitor=false', *args")
+        self.assertFalse(self.denied(amended))
+        self.assertFalse(ultraship.runs_heredoc_output(amended))
+        self.assertNotEqual(ultraship.python_heredoc_shell(amended, inert_only=True), amended)
+
+    def test_literal_git_read_commands(self):
+        for argv in (
+            "'-c', 'core.fsmonitor=false', 'rev-parse', '--verify', 'HEAD'", "'branch', '--show-current'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--cached', '--name-only'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--numstat', '--no-textconv'",
+            "'-c', 'core.fsmonitor=false', 'show', 'HEAD:x'",
+            "'-c', 'core.fsmonitor=false', 'status', '--porcelain'",
+            "'-c', 'core.fsmonitor=false', 'ls-files', '--stage'",
+        ):
+            with self.subTest(argv=argv):
+                self.assertFalse(self.denied("python3 -I - <<'PY'\nimport subprocess\n"
+                                             f"subprocess.run(['git', {argv}], text=True)\nPY\n"))
+
+    def test_literal_git_read_requires_isolation_and_literal_lead(self):
+        body = "import subprocess\nsubprocess.run(['git', '-c', 'core.fsmonitor=false', 'rev-parse', 'HEAD'])\n"
+        literal_reason = ('process-capable heredoc rule (literal git read needs -I, '
+                          'a cd/date/git add lead and a quoted delimiter)')
+        start_reason = 'process-capable heredoc rule (interpreter heredoc must start the command)'
+        for header, delimiter, reason in (('python3 -', "'PY'", literal_reason),
+                                          ('echo x && python3 -I -', "'PY'", start_reason),
+                                          ('PYTHONHASHSEED=0 python3 -I -', "'PY'", start_reason),
+                                          ('GIT_CONFIG_COUNT=0 python3 -I -', "'PY'", start_reason),
+                                          ('python3 -I -', 'PY', literal_reason)):
+            with self.subTest(header=header, delimiter=delimiter):
+                self.assertTrue(self.denied(header + ' <<' + delimiter + '\n' + body + 'PY\n'))
+                self.assertIn(reason, self.reason)
+
+    def test_python_heredoc_header_suffixes_are_denied(self):
+        for suffix in ('; true', ' | sh', ' > /w/out.json'):
+            with self.subTest(suffix=suffix):
+                command = "python3 - <<'PY'" + suffix + "\nprint('git push origin HEAD')\nPY\n"
+                self.assertTrue(self.denied(command))
+                self.assertIn('unsupported interpreter header', self.reason)
+
+    def test_writer_line_separators_are_denied(self):
+        for separator in ('\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85', chr(0x2028), chr(0x2029)):
+            with self.subTest(separator=repr(separator)):
+                command = ("python3 -I - <<'PY'\nimport subprocess\n"
+                           "subprocess.run(['git', 'rev-parse', 'HEAD'])\n# " + separator + 'PY\n'
+                           "__import__('subprocess').run(['git', 'pu' + 'sh', 'origin', 'HEAD'])\nPY\n")
+                self.assertTrue(self.denied(command))
+                self.assertIn('Rule: line separator rule.', self.reason)
+
+    def test_unsupported_heredoc_headers_are_denied(self):
+        unsupported_reason = 'process-capable heredoc rule (unsupported interpreter header)'
+        start_reason = 'process-capable heredoc rule (interpreter heredoc must start the command)'
+        for header, reason in (("python3 - 2>&1 <<'PY'", unsupported_reason),
+                               ("python3 -<<'PY'", unsupported_reason),
+                               ("python3 - 0<<'PY'", unsupported_reason),
+                               ("<<'PY' python3 -", start_reason),
+                               ("python3 - <<'PY-END'", unsupported_reason),
+                               ("/usr/bin/python3 - <<'PY'", unsupported_reason),
+                               ("$PYTHON - <<'PY'", start_reason),
+                               ("`which python3` - <<'PY'", start_reason),
+                               ("python3 -I - <<'PY' <<'OTHER'", unsupported_reason),
+                               ("cat <<'PY' | python3 -", start_reason)):
+            with self.subTest(header=header):
+                delimiter = 'PY-END' if 'PY-END' in header else 'PY'
+                command = (header + "\nimport subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\n"
+                           + delimiter + '\n')
+                self.assertTrue(self.denied(command))
+                self.assertIn(reason, self.reason)
+
+    def test_quoted_cat_commit_message_is_data(self):
+        command = ('git commit -m "$(cat <<\'EOF\'\nfix: x\n\n'
+                   "- Admit `python3 -I - <<'PY'` bodies.\nEOF\n)\"\n")
+        self.assertFalse(self.denied(command))
+
+    def test_commit_stdin_message_is_data(self):
+        for lead in ('', 'cd /w/lane && '):
+            with self.subTest(lead=lead):
+                self.assertFalse(self.denied(lead + "git commit --verbose -F - <<'EOF'\nfix: x\n\n"
+                                             "- Admit `python3 -I - <<'PY'` bodies.\nEOF\n"))
+
+    def test_commit_stdin_escaped_delimiter_is_denied(self):
+        command = r'''git commit -F - <<"\$X"
+fix: x
+$X
+python3 -I - <<'PY'
+import subprocess
+subprocess.run(['git', 'pu' + 'sh'])
+PY
+: <<'TAIL'
+\$X
+TAIL
+'''
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (commit message heredoc must be the whole command)', self.reason)
+
+    def test_commit_cat_escaped_delimiter_is_denied(self):
+        command = r'''git commit -m "$(cat <<"\$X"
+fix: x
+$X
+)"
+python3 -I - <<'PY'
+import subprocess
+subprocess.run(['git', 'pu' + 'sh'])
+PY
+: <<'TAIL'
+\$X
+TAIL
+'''
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (commit message heredoc must be the whole command)', self.reason)
+
+    def test_commit_message_after_unclosed_heredoc_is_denied(self):
+        command = ("bash <<'SH'\ngit commit -m \"$(cat <<'X'\nSH\npython3 -I - <<'PY'\n"
+                   "import subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\nPY\nX\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (interpreter heredoc must start the command)', self.reason)
+
+    def test_commit_message_after_open_quote_is_denied(self):
+        command = ('echo "\ngit commit -m "$(cat <<\'X\'\n"\npython3 -I - <<\'PY\'\n'
+                   "import subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\nPY\nX\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (interpreter heredoc must start the command)', self.reason)
+
+    def test_commit_message_inside_multiline_quote_is_denied(self):
+        for header in ("git commit -F - <<'X'", "git commit -m \"$(cat <<'X'"):
+            with self.subTest(header=header):
+                command = (": '\n" + header + "\n'\npython3 -I - <<'PY'\nimport subprocess\n"
+                           "subprocess.run(['git', 'pu' + 'sh'])\nPY\n: '\nX\n'\n")
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable heredoc rule', self.reason)
+
+    def test_interpreter_cat_substitution_is_denied(self):
+        unsupported_reason = 'process-capable heredoc rule (unsupported interpreter header)'
+        start_reason = 'process-capable heredoc rule (interpreter heredoc must start the command)'
+        for consumer, reason in (('python3 -c', unsupported_reason),
+                                 ('P=python3; $P -c', start_reason), ('sh -c', start_reason)):
+            with self.subTest(consumer=consumer):
+                command = (consumer + ' "$(cat <<\'EOF\'\nimport subprocess\n'
+                           "subprocess.run(['git', 'pu' + 'sh'])\nEOF\n)\"\n")
+                self.assertTrue(self.denied(command))
+                self.assertIn(reason, self.reason)
+
+    def test_other_heredoc_headers_keep_scanning(self):
+        command = ("sh <<'SH'\npython3 -I - <<'PY'\nimport subprocess\n"
+                   "subprocess.run(['git', 'pu' + 'sh'])\nPY\nSH\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('Rule: process-capable heredoc rule (interpreter heredoc must start the command).', self.reason)
+
+    def test_git_helper_must_forward_args_at_argv_end(self):
+        for argv in ("['git', '-c', 'core.fsmonitor=false', 'diff']",
+                     "['git', '-c', 'core.fsmonitor=false', *args, 'diff']"):
+            with self.subTest(argv=argv):
+                body = ("import subprocess\ndef git(*args):\n"
+                        f"    return subprocess.run({argv})\ngit('--name-only')\n")
+                self.assertTrue(self.denied("python3 -I - <<'PY'\n" + body + 'PY\n'))
+                self.assertIn('Rule: process-capable heredoc rule.', self.reason)
+
+    def test_git_rev_parse_requires_fsmonitor_pair(self):
+        for revision in ('HEAD', ':x'):
+            with self.subTest(revision=revision):
+                body = f"import subprocess\nsubprocess.run(['git', 'rev-parse', {revision!r}])\n"
+                self.assertTrue(self.denied("python3 -I - <<'PY'\n" + body + 'PY\n'))
+                self.assertIn('fsmonitor rule', self.reason)
+
+    def test_git_show_refuses_separator_and_message_search(self):
+        for arguments in ("'--', 'HEAD:x'", "':/message'", "'HEAD:x', ':/'"):
+            with self.subTest(arguments=arguments):
+                body = ("import subprocess\nsubprocess.run(['git', '-c', 'core.fsmonitor=false', 'show', "
+                        + arguments + '])\n')
+                self.assertTrue(self.denied("python3 -I - <<'PY'\n" + body + 'PY\n'))
+                self.assertIn('literal git read show object', self.reason)
+
+    def test_git_diff_double_separator_has_named_reason(self):
+        body = ("import subprocess\nsubprocess.run(['git', '-c', 'core.fsmonitor=false', "
+                "'diff', '--name-only', '--', '--'])\n")
+        self.assertTrue(self.denied("python3 -I - <<'PY'\n" + body + 'PY\n'))
+        self.assertIn('process-capable heredoc rule: literal git read options: --.', self.reason)
+
+    def test_literal_git_read_refuses_unsafe_argv(self):
+        for argv in (
+            "'pu' + 'sh'", "'push', 'origin', 'HEAD'",
+            "'-c', 'core.fsmonitor=true', 'status'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--cached', '--name-only', '--output=x'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--cached', '--name-only', '--ext-diff'",
+            "'-c', 'core.fsmonitor=false', 'show', 'HEAD'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--cached'",
+            "'-c', 'core.fsmonitor=false', 'diff', '--', '--name-only'",
+            "'-c', 'core.fsmonitor=false', 'branch', '-D', 'x'",
+            "'-C', '-bad', 'rev-parse', 'HEAD'",
+            "'-c', 'alias.x=push', 'rev-parse', 'HEAD'",
+            "'diff', '--cached', '--name-only'",
+        ):
+            with self.subTest(argv=argv):
+                for helper in (False, True):
+                    body = ("import subprocess\ndef git(*args):\n"
+                            "    return subprocess.check_output(['git', *args])\n"
+                            f"git({argv})\n" if helper else
+                            f"import subprocess\nsubprocess.run(['git', {argv}])\n")
+                    self.assertTrue(self.denied("python3 -I - <<'PY'\n" + body + 'PY\n'))
+                    self.assertIn('Rule: process-capable heredoc rule.' if argv == "'pu' + 'sh'"
+                                  else 'process-capable heredoc rule: ', self.reason)
+                    self.assertNotIn('unsupported interpreter header', self.reason)
+
+    def test_literal_git_read_rejects_writes_and_rebinding(self):
+        body = "import subprocess\nsubprocess.run(['git', '-c', 'core.fsmonitor=false', 'status'])\n"
+        for write in ("open('x', 'w').write('x')", "Path('x').write_text('x')", "Path('x').unlink()",
+                      "Path('x').replace('y')", "Path('x').chmod(0o755)", "Path('x').mkdir()"):
+            with self.subTest(write=write):
+                self.assertTrue(self.denied("python3 -I - <<'PY'\nfrom pathlib import Path\n" + body + write + '\nPY\n'))
+                self.assertIn('Rule: process-capable heredoc rule.', self.reason)
+        for extra in ("root = '/other'\n", "def f(root):\n    return root\n"):
+            command = self.W14.replace("root, *args", "root, '-c', 'core.fsmonitor=false', *args")
+            self.assertTrue(self.denied(command.replace("p = 'backend", extra + "p = 'backend")))
+
+    def test_literal_git_read_requires_exact_process_and_helper_forms(self):
+        bodies = (
+            "import subprocess as sp\nsp.run(['git', 'rev-parse', 'HEAD'])",
+            "from subprocess import run\nrun(['git', 'rev-parse', 'HEAD'])",
+            "import subprocess\nf = subprocess.run\nf(['git', 'rev-parse', 'HEAD'])",
+            "import subprocess\nsubprocess.run(['git', 'rev-parse', 'HEAD'], shell=True)",
+            "import subprocess\nsubprocess.run(['git', 'rev-parse', 'HEAD'], text=1)",
+            "import subprocess\nsubprocess.run(['git', '--no-pager', 'rev-parse', 'HEAD'])",
+            "import subprocess\ns = 'rev-parse'\nsubprocess.run(['git', s, 'HEAD'])",
+            "import subprocess\ndef git(*args):\n    return subprocess.run(['git', *args])\ngit(args='status')",
+            "import subprocess\ndef git(*args):\n    return subprocess.run(['git', *args])\nf = git\nf('rev-parse')",
+            "import subprocess\ndef git(x, *args):\n    return subprocess.run(['git', *args])\ngit('rev-parse')",
+            "import subprocess\ndef git(*args):\n    return subprocess.run(['git', *args])\ngit = print\ngit('rev-parse')",
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                self.assertTrue(self.denied("python3 -I - <<'PY'\n" + body + '\nPY\n'))
+                self.assertIn('process-capable heredoc rule', self.reason)
+                self.assertNotIn('unsupported interpreter header', self.reason)
+        for header in ('''python -c 'import os; os.system("git "+"pu"+"sh")' ''',
+                       "python3 -c 'print(1)'", 'python3 -m module', 'python3 -O -'):
+            with self.subTest(header=header):
+                self.assertTrue(self.denied(header + " <<'PY'\nimport subprocess\n"
+                                           "subprocess.run(['git', 'rev-parse', 'HEAD'])\nPY\n"))
+
+    def test_process_capable_heredocs_on_every_line(self):
+        body = "import subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\n"
+        for lead in ('', 'echo ready\n'):
+            for python in ('python', 'python3', 'python3.14'):
+                with self.subTest(lead=lead, python=python):
+                    self.assertTrue(self.denied(lead + python + " - <<'PY'\n" + body + 'PY\n'))
+                    self.assertIn('process-capable heredoc rule', self.reason)
+        self.assertTrue(self.denied("python3 - <<'PY'\nimport subprocess\n"
+                                    "subprocess.run(['sh', 'x.sh'])\nPY\ngit status\n"))
+
+    def test_named_writer_denial_rules(self):
+        cases = (
+            ("python3 - <<'PY'\nimport subprocess\nsubprocess.run(['sh', 'x.sh'])\nPY\n",
+             'process-capable heredoc rule'),
+            ('git push origin HEAD', 'git remote writer rule (push)'),
+            ("python3 - <<'PY'\nopen('x.sh', 'w').write('x')\nPY\nsh x.sh\n", 'heredoc-then-run rule'),
+            ('npm publish', "WRITER_BASH 'npm publish'"),
+        )
+        for command, reason in cases:
+            with self.subTest(reason=reason):
+                self.assertTrue(self.denied(command))
+                self.assertIn(reason, self.reason)
+        self.assertTrue(self.denied("python3 - <<'PY'\nimport subprocess\n"
+                                    "subprocess.run(['git', '-c', 'core.fsmonitor=false', 'diff', '--name-only', '--output=x'])\nPY\n"))
+        self.assertIn('literal git read options: --output=x', self.reason)
 
     def test_inert_python_file_edit_is_file_text(self):
         body = ("p = '.github/scripts/merge-queue-gate-status.test.mjs'\n"
@@ -591,6 +883,7 @@ PY
 
         with patch.object(ultraship, 'python_heredoc_shell', side_effect=ValueError('classifier failed')):
             self.assertTrue(self.denied('echo hi'))
+            self.assertIn('classifier exception', self.reason)
 
     def test_read_only_loop_paths_are_file_text(self):
         command = ("python3 - <<'EOF'\nfrom pathlib import Path\n"
@@ -707,6 +1000,68 @@ PY
         for command in commands:
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
+
+    def test_partly_quoted_commit_hides_fake_python_header_is_denied(self):
+        command = ("git commit -F - <<'E'F\npython3 - <<'FAKE'\ns = \"\"\"\nEF\n"
+                   "python3 -I - <<'PY'\nimport subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\n"
+                   "PY\n: <<'TAIL'\n\"\"\"\nFAKE\nTAIL\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (commit message heredoc must be the whole command)',
+                      self.reason)
+
+    def test_fake_python_header_in_cat_or_tee_body_is_denied(self):
+        for header in ("cat > /dev/null <<'EOF'", "tee x.txt <<'EOF'", 'cat <<EOF >/dev/null'):
+            with self.subTest(header=header):
+                command = (header + "\npython3 - <<'FAKE'\ns = \"\"\"\nEOF\n"
+                           "python3 -I - <<'PY'\nimport subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\n"
+                           "PY\n: <<'TAIL'\n\"\"\"\nFAKE\nTAIL\n")
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable heredoc rule (interpreter heredoc must start the command)',
+                              self.reason)
+
+    def test_fake_python_header_in_second_line_commit_body_is_denied(self):
+        command = ("echo ready\ngit commit -F - <<'EOF'\npython3 - <<'FAKE'\ns = \"\"\"\nEOF\n"
+                   "python3 -I - <<'PY'\nimport subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\n"
+                   "PY\n: <<'TAIL'\n\"\"\"\nFAKE\nTAIL\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (interpreter heredoc must start the command)',
+                      self.reason)
+
+    def test_fake_python_header_in_open_double_quote_is_denied(self):
+        for header in ('echo "python3 - <<\'FAKE\'', 'echo "\npython3 - <<\'FAKE\''):
+            with self.subTest(header=header):
+                command = (header + '\ns = """\n' + "python3 -I - <<'PY'\nimport subprocess\n"
+                           "subprocess.run(['git', 'pu' + 'sh'])\nPY\n: <<'TAIL'\n\"\"\"\nFAKE\nTAIL\n")
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable heredoc rule (interpreter heredoc must start the command)',
+                              self.reason)
+
+    def test_unquoted_python_heredoc_command_substitution_is_denied(self):
+        command = ("python3 - <<PY\n"
+                   "print('''$(python3 -c \"import subprocess; subprocess.run(['git', 'pu' + 'sh'])\")''')\n"
+                   "PY\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (Python heredoc needs a quoted delimiter)', self.reason)
+
+    def test_unquoted_python_heredoc_joined_terminator_is_denied(self):
+        command = ("python3 - <<EOF\ns = '''\nE\\\nOF\npython3 -I - <<'PY'\n"
+                   "import subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\nPY\n: <<'TAIL'\n'''\nEOF\nTAIL\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (Python heredoc needs a quoted delimiter)', self.reason)
+
+    def test_commit_cat_delimiter_prefix_early_end_is_denied(self):
+        command = ('git commit -m "$(cat <<\'EOF\'\nfix: x\nEOF)"\n'
+                   "python3 -I - <<'PY'\nimport subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\n"
+                   'PY\n: "\nEOF\n)"\n')
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (commit message heredoc must be the whole command)',
+                      self.reason)
+
+    def test_commit_stdin_delimiter_prefix_message_is_denied(self):
+        command = "git commit -F - <<'EOF'\nfix: x\nEOF)\nEOF\n"
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (commit message heredoc must be the whole command)',
+                      self.reason)
 
 
 if __name__ == '__main__':

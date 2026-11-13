@@ -32,7 +32,7 @@ assert subprocess.check_output(['git', 'status', '--porcelain']) == b''
 receipt = {'byte_count': len(committed), 'pushed': False}
 Path('receipt.json').write_text(json.dumps(receipt) + '\\n')
 PY"""
-        self.assertEqual(self.admission(command), {})
+        self.assertEqual(self.admission(command)['hookSpecificOutput']['permissionDecision'], 'deny')
 
     def test_literal_awk_field_filters_are_admitted(self):
         for command in (

@@ -67,10 +67,10 @@ INERT_MEMBERS = {
     'pathlib': {'Path'},
 }
 # A `Path` may only read, test, delete or write its own literal path; its other methods rename, link or open files.
-PATH_METHODS = {'read_text', 'exists', 'write_text', 'unlink'}
+PATH_METHODS = {'read_text', 'read_bytes', 'exists', 'write_text', 'unlink'}
 LOADABLE = re.compile(r'\.(?:py[cdiow]?|pth|so)(?:$|[^A-Za-z0-9])', re.I)
 INERT_ATTRIBUTES = {
-    'Path', 'read_text', 'write_text', 'exists', 'open', 'read', 'write', 'close', 'name', 'parent', 'with_suffix',
+    'Path', 'read_text', 'read_bytes', 'write_text', 'exists', 'open', 'read', 'write', 'close', 'name', 'parent', 'with_suffix',
     'replace', 'split', 'rsplit', 'join', 'strip', 'lstrip', 'rstrip', 'splitlines', 'startswith', 'endswith',
     'find', 'index', 'count', 'lower', 'upper', 'encode', 'decode', 'append', 'extend', 'insert', 'pop', 'get',
     'items', 'keys', 'values', 'group', 'groups', 'sub', 'compile', 'search', 'fullmatch', 'findall', 'escape',
@@ -174,6 +174,200 @@ def inert_python(body, isolated=False):
             if not paths or not all(writable(path) for path in paths):
                 return False
     return inert_paths(tree, literals, bound)
+
+
+def git_read_argv(argv):
+    """Return the refusal rule for a literal Git argv, or an empty string for a safe read."""
+    if not argv or argv[0] != 'git':
+        return 'literal git read argv'
+    words, fsmonitor = argv[1:], False
+    while words and words[0].startswith('-'):
+        if len(words) < 2:
+            return 'literal git read global options'
+        option, value = words[:2]
+        if option == '-c' and value == 'core.fsmonitor=false':
+            fsmonitor = True
+        elif option != '-C' or value.startswith('-'):
+            return 'literal git read global options'
+        words = words[2:]
+    if not words:
+        return 'literal git read subcommand'
+    subcommand, arguments = words[0], words[1:]
+    options = {
+        'rev-parse': {'--verify', '--short', '--abbrev-ref', '--symbolic-full-name', '--show-toplevel', '--git-dir', '-q'},
+        'branch': {'--show-current'},
+        'diff': {'--cached', '--staged', '--name-only', '--name-status', '--numstat', '--stat', '-z',
+                 '--no-ext-diff', '--no-textconv'},
+        'show': set(),
+        'status': {'--porcelain', '--short', '-s', '-z', '-b', '--branch'},
+        'ls-files': {'-z', '-s', '--stage', '--cached'},
+    }
+    if subcommand not in options:
+        return 'literal git read subcommand'
+    if subcommand in {'rev-parse', 'diff', 'show', 'status', 'ls-files'} and not fsmonitor:
+        return 'git read requires -c core.fsmonitor=false (fsmonitor rule)'
+    separator = arguments.index('--') if '--' in arguments else len(arguments)
+    option_words = arguments[:separator]
+    positional = [word for word in option_words if not word.startswith('-')] + arguments[separator + 1:]
+    if (any(word.startswith('-') and word not in options[subcommand] for word in option_words)
+            or any(word.startswith('-') for word in positional)):
+        return 'literal git read options: ' + next((
+            word for word in arguments if word.startswith('-') and word != '--'
+            and (word not in options[subcommand] or word in positional)), '--')
+    if subcommand == 'branch' and arguments != ['--show-current']:
+        return 'literal git read branch options'
+    if subcommand == 'diff' and not (
+            {'--name-only', '--name-status'} & set(option_words)
+            or {'--numstat', '--stat'} & set(option_words) and '--no-textconv' in option_words):
+        return 'literal git read diff output'
+    if subcommand == 'show' and ('--' in arguments or not positional
+                                 or any(':' not in word or word.startswith(':/') for word in positional)):
+        return 'literal git read show object'
+    return ''
+
+
+def literal_git_read_python(body, reasons=None):
+    """Whether a body uses subprocess only for checked literal Git reads and writes no file."""
+    try:
+        tree = ast.parse(body)
+    except (SyntaxError, ValueError):
+        return False
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    bound = [node.id for node in ast.walk(tree) if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load)]
+    bound += [node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)]
+    bound += [name for node in ast.walk(tree) if isinstance(node, (ast.Global, ast.Nonlocal)) for name in node.names]
+    bound += [node.name for node in ast.walk(tree) if isinstance(
+        node, (ast.ExceptHandler, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name]
+    bound += [(alias.asname or alias.name).split('.')[0] for node in ast.walk(tree)
+              if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names]
+    literals = {node.targets[0].id: node.value.value for node in tree.body
+                if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                and bound.count(node.targets[0].id) == 1 and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)}
+
+    def word(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Name):
+            return literals.get(node.id)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, right = word(node.left), word(node.right)
+            if left is not None and right is not None:
+                return left + right
+        return None
+
+    imports, calls, helpers = [], set(), {}
+    for statement in tree.body:
+        if not isinstance(statement, (ast.Import, ast.ImportFrom)):
+            break
+        if isinstance(statement, ast.Import) and any(alias.name == 'subprocess' for alias in statement.names):
+            if len(statement.names) != 1 or statement.names[0].asname:
+                return False
+            imports.append(statement)
+    if len(imports) != 1 or bound.count('subprocess') != 1:
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name) or node.id != 'subprocess':
+            continue
+        attribute = parents.get(node)
+        call = parents.get(attribute)
+        if not (isinstance(attribute, ast.Attribute) and attribute.value is node
+                and attribute.attr in {'check_output', 'run'} and isinstance(call, ast.Call) and call.func is attribute
+                and len(call.args) == 1 and isinstance(call.args[0], ast.List)
+                and all(k.arg == 'text' and isinstance(k.value, ast.Constant) and type(k.value.value) is bool
+                        for k in call.keywords) and len(call.keywords) <= 1):
+            return False
+        calls.add(call)
+    if not calls:
+        return False
+    for call in calls:
+        elements = call.args[0].elts
+        if not elements or not isinstance(elements[0], ast.Constant) or elements[0].value != 'git':
+            return False
+        owner = parents.get(call)
+        helper = parents.get(owner)
+        if isinstance(owner, ast.Return):
+            if not (isinstance(helper, ast.FunctionDef) and helper in tree.body and helper.body == [owner]
+                    and not helper.decorator_list and not helper.returns and not getattr(helper, 'type_params', [])
+                    and not helper.args.posonlyargs and not helper.args.args and not helper.args.kwonlyargs
+                    and not helper.args.defaults and not helper.args.kw_defaults and not helper.args.kwarg
+                    and helper.args.vararg and not helper.args.vararg.annotation and bound.count(helper.name) == 1):
+                return False
+            helpers[helper.name] = helper
+        else:
+            helper = None
+        starred = [node for node in elements if isinstance(node, ast.Starred)]
+        if (helper or starred) and not (helper and len(starred) == 1 and elements[-1] is starred[0]
+                            and isinstance(starred[0].value, ast.Name)
+                            and starred[0].value.id == helper.args.vararg.arg):
+            return False
+        prefix = elements[:-1] if starred else elements
+        # Global options and the subcommand remain literal; only -C may reference a fixed module string.
+        cursor = 1
+        while cursor < len(prefix) and isinstance(prefix[cursor], ast.Constant) and prefix[cursor].value in {'-C', '-c'}:
+            if cursor + 1 >= len(prefix):
+                return False
+            value = prefix[cursor + 1]
+            if not (isinstance(value, ast.Constant) or prefix[cursor].value == '-C' and isinstance(value, ast.Name)):
+                return False
+            cursor += 2
+        if cursor < len(prefix) and not isinstance(prefix[cursor], ast.Constant):
+            return False
+        uses = []
+        if helper:
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Name) or node.id != helper.name:
+                    continue
+                use = parents.get(node)
+                if not (isinstance(use, ast.Call) and use.func is node and not use.keywords
+                        and not any(isinstance(arg, ast.Starred) for arg in use.args)):
+                    return False
+                uses.append(use)
+        else:
+            uses = [None]
+        for use in uses:
+            effective = prefix + (use.args if use is not None else [])
+            if len(effective) <= cursor or not isinstance(effective[cursor], ast.Constant):
+                return False
+            argv = [word(node) for node in effective]
+            if any(value is None for value in argv):
+                return False
+            index = 1
+            while index < len(argv) and argv[index].startswith('-'):
+                if (index + 1 >= len(argv) or not isinstance(effective[index], ast.Constant)
+                        or not (isinstance(effective[index + 1], ast.Constant)
+                                or argv[index] == '-C' and isinstance(effective[index + 1], ast.Name))):
+                    return False
+                index += 2
+            if index >= len(effective) or not isinstance(effective[index], ast.Constant):
+                return False
+            reason = git_read_argv(argv)
+            if reason:
+                if reasons is not None:
+                    reasons.append(reason)
+                return False
+        if helper and not uses:
+            return False
+    # Remove only the proved calls and helpers, then apply the existing inert checks to all remaining code.
+    class RemoveReads(ast.NodeTransformer):
+        def visit_Call(self, node):
+            return ast.copy_location(ast.Constant(value=''), node) if node in calls or (
+                isinstance(node.func, ast.Name) and node.func.id in helpers) else self.generic_visit(node)
+
+    tree.body = [node for node in tree.body if node not in imports and node not in helpers.values()]
+    tree = RemoveReads().visit(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and (node.attr in {'write', 'write_text', 'unlink', 'replace', 'chmod', 'mkdir'}
+                                               or isinstance(node.ctx, (ast.Store, ast.Del))):
+            return False
+        if isinstance(node, ast.Call) and (getattr(node.func, 'id', None) == 'open'
+                                          or getattr(node.func, 'attr', None) == 'open'):
+            offset = 1 if isinstance(node.func, ast.Name) else 0
+            modes = [*node.args[offset:offset + 1], *(k.value for k in node.keywords if k.arg == 'mode')]
+            if any(not isinstance(mode, ast.Constant) or not isinstance(mode.value, str)
+                   or not set(mode.value) <= set('rbt') for mode in modes):
+                return False
+    return inert_python(ast.unparse(tree))
 
 
 def resolved_path(node, assigned, depth=0):
@@ -424,9 +618,16 @@ def inert_paths(tree, literals, bound):
         call = parents.get(node)
         if not (isinstance(call, ast.Call) and call.func is node) or bound.count('Path') != imported:
             return False
+        owner = parents.get(call)
+        if (not call.keywords and call.args and isinstance(owner, ast.Attribute) and owner.attr == 'read_bytes'
+                and all(isinstance(part, ast.Constant) and isinstance(part.value, str)
+                        or isinstance(part, ast.Name) and isinstance(literals.get(part.id), str)
+                        for part in call.args)):
+            if not used(call, [None]):
+                return False
+            continue
         if call.keywords or len(call.args) != 1:
             return False
-        owner = parents.get(call)
         if isinstance(owner, ast.Attribute):
             if not used(call, constructed(call)):
                 return False
@@ -520,6 +721,8 @@ def read_only_shell(command):
 
 # Literal `cd` and `date` steps run no file, so they may lead a Python heredoc; the scan still reads them.
 PYTHON_LEAD = r'(?:(?:cd +[\w./-]+|date(?: +[-+\w%:]+)*) +&& +)*'
+# A writer may already run `git add` alone, so this lead adds no capability.
+GIT_READ_LEAD = r'[ \t]*(?:(?:cd +[\w./-]+|date(?: +[-+\w%:]+)*|git +add +--(?: +[\w./-]+)+) +&& +)*'
 
 
 def check_only_shell(command):
@@ -543,6 +746,8 @@ def runs_heredoc_output(command):
     for end in range(1, len(lines)):
         if (lines[end].lstrip('\t') if match['tabs'] else lines[end]).removesuffix('\n') == delimiter:
             body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
+            if literal_git_read_python(body):
+                return False
             # The written files exist only after the script, so only a later or a background command can run them.
             if check_only_shell(''.join(lines[end + 1:])) and not re.search(r'(?<!&)&(?![&>])', match['lead']):
                 return False
@@ -571,7 +776,7 @@ def python_heredoc_shell(command, inert_only=False):
     # Shell interpreters, ambiguous headers, and expandable bodies keep the full scan.
     # `inert_only` keeps every body that can run a process, because its strings can reach a publish command.
     lines = command.splitlines(keepends=True)
-    match = PYTHON_HEREDOC.fullmatch(lines[0]) if lines else None
+    match = ANY_PYTHON_HEREDOC.fullmatch(lines[0]) if lines else None
     if not match:
         return command
     delimiter = shlex.split(match['delimiter'])[0]
@@ -580,6 +785,11 @@ def python_heredoc_shell(command, inert_only=False):
         if candidate.removesuffix('\n') == delimiter:
             remainder = ''.join(lines[end + 1:])
             body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[1:end])
+            if (match['delimiter'][0] in '\'"\\' and 'I' in match['flags']
+                    and re.fullmatch(GIT_READ_LEAD, match['lead']) and literal_git_read_python(body)):
+                return lines[0] + remainder
+            if not PYTHON_HEREDOC.fullmatch(lines[0]):
+                return command
             # A quoted delimiter keeps the body away from the shell, so an inert script is only file text.
             # Only a `cd` or `date` may lead it and only a read-only remainder may follow it, because another command
             # could run the file it writes.
@@ -692,6 +902,67 @@ def cat_heredoc_data(command):
     return command
 
 
+def process_heredoc_denial(command):
+    """Check Python stdin bodies and keep quoted commit messages as data."""
+    lines = cat_heredoc_data(command).splitlines(keepends=True)
+    index = 0
+    while index < len(lines):
+        operators = list(re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
+                                    r"(?P<delimiter>'[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", lines[index]))
+        if not operators:
+            index += 1
+            continue
+        match = operators[0]
+        prefix = lines[index][:match.start()]
+        commit_lead = r'[ \t]*(?:cd +[\w./-]+ +&& +)?git +commit(?: +(?:-[a-zA-Z]|--[\w-]+))* +'
+        message_data = index == 0 and re.match(commit_lead, prefix)
+        if message_data and (len(operators) != 1
+                             or not re.fullmatch(commit_lead + r'(?:-m +"\$\(cat[ \t]*|-F +- +)', prefix)
+                             or lines[index][match.end():].strip()
+                             or not re.fullmatch(r"'[A-Za-z0-9_]+'|\"[A-Za-z0-9_]+\"", match['delimiter'])):
+            return 'process-capable heredoc rule (commit message heredoc must be the whole command)'
+        interpreter = re.search(r'(?<![\w.-])(?:[\w./-]*/)?python(?:3(?:\.\d+)?)?(?=[ \t<]|$)', lines[index])
+        if message_data:
+            pass
+        elif interpreter or '$' in prefix or '`' in prefix:
+            lead = lines[index][:interpreter.start()] if interpreter else prefix
+            if index != 0 or not re.fullmatch(GIT_READ_LEAD, lead):
+                return 'process-capable heredoc rule (interpreter heredoc must start the command)'
+            header = re.fullmatch(re.escape(lead) + PYTHON_STDIN, lines[index])
+            if len(operators) != 1 or not header:
+                return 'process-capable heredoc rule (unsupported interpreter header)'
+        else:
+            index += 1
+            continue
+        delimiter = shlex.split(match['delimiter'])[0]
+        end = index + 1
+        while end < len(lines) and (lines[end].lstrip('\t') if match['tabs'] else lines[end]).removesuffix('\n') != delimiter:
+            end += 1
+        if message_data:
+            remainder = ''.join(lines[end + 1:])
+            complete = remainder in (')"', ')"\n') if '-m' in prefix.split() else not remainder
+            if end == len(lines) or not complete or any(
+                    (line.lstrip('\t') if match['tabs'] else line).startswith(delimiter)
+                    for line in lines[index + 1:end]):
+                return 'process-capable heredoc rule (commit message heredoc must be the whole command)'
+            return None
+        if end == len(lines):
+            return 'process-capable heredoc rule (unterminated body)'
+        body = ''.join(line.lstrip('\t') if match['tabs'] else line for line in lines[index + 1:end])
+        reasons = []
+        literal_read = literal_git_read_python(body, reasons)
+        if literal_read and not ('I' in header['flags'] and re.fullmatch(GIT_READ_LEAD, lead)
+                                 and match['delimiter'][0] in '\'"\\'):
+            return ('process-capable heredoc rule (literal git read needs -I, '
+                    'a cd/date/git add lead and a quoted delimiter)')
+        if not (inert_python(body) or literal_read or 'I' in header['flags'] and inert_python(body, isolated=True)):
+            return 'process-capable heredoc rule' + (': ' + reasons[0] if reasons else '')
+        if match['delimiter'][0] not in '\'"\\':
+            return 'process-capable heredoc rule (Python heredoc needs a quoted delimiter)'
+        index = end + 1
+    return None
+
+
 def git_push(command):
     reduced = literal_variables(literal_ps_awk_filter(python_heredoc_shell(cat_heredoc_data(command))))
     try:
@@ -699,7 +970,7 @@ def git_push(command):
     except ValueError:
         # A reduction that leaves unbalanced quotes misread the shell, so the original command is scanned.
         reduced = command
-    return runs_heredoc_output(command) or shell_git_push(reduced)
+    return ('heredoc-then-run rule' if runs_heredoc_output(command) else shell_git_push(reduced))
 
 
 SAFE_VALUE = r'[\w./@%+:,-]+'
@@ -851,7 +1122,7 @@ def shell_git_push(command):
             if re.search(r'\bgit\b', text) and (
                     re.search(r'\b(?:push|send-pack|http-push)\b', text.translate(str.maketrans('', '', '$`*?[]{},')))
                     or re.search(r'[$`\\]', text)):
-                return True
+                return 'git unparseable writer or expansion rule'
             continue
         # An expansion or glob can assemble the executable (`$'git' $'push'`), so with any
         # `push` spelling it denies. Exclude only the literal receipt keys `pushed:` and `pushes:` before
@@ -894,7 +1165,7 @@ def shell_git_push(command):
             spelled = any(word in re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', token).translate(expansion)
                           for token in tokens for word in ('push', 'send-pack'))
         if not literal_globs and any(set(token) & set('$`*?[{') for token in tokens) and spelled:
-            return True
+            return 'git writer expansion or glob rule'
         expect_subcommand = skip_value = folder_value = False
         # Only a `git` that starts a command reads its own arguments; `eval git -C "$W"` or `watch git ...`
         # re-reads them, where a quoted value can split again.
@@ -928,14 +1199,14 @@ def shell_git_push(command):
             # An expansion, glob, quoting form, or redirection before the subcommand can hide it,
             # so it denies. Writers write `git -C . status 2>&1`, never `git $'push'` or `git {push,}`.
             if expect_subcommand and set(token) & set('(`<>${*?['):
-                return True
+                return 'git hidden subcommand rule'
             # An alias that runs a shell command (`!sh`) or a remote writer turns any subcommand into a push.
             if expect_subcommand and (
                     value_option == '-c' and alias_runs_writer(token)
                     or token.startswith('-c') and token != '-c' and alias_runs_writer(token[2:])
                     or value_option == '--config-env' and token.lower().startswith('alias.')
                     or token.lower().startswith('--config-env=alias.')):
-                return True
+                return 'git configured alias writer rule'
             if skip_value:
                 skip_value = folder_value = False
                 value_option = None
@@ -947,7 +1218,7 @@ def shell_git_push(command):
                     value_option = token
                     continue
                 if token in REMOTE_WRITERS:
-                    return True
+                    return f'git remote writer rule ({token})'
                 # Options and other non-word tokens stay pending; a plain word is the subcommand.
                 if re.fullmatch(r'[a-z][a-z0-9-]*', token):
                     expect_subcommand = False
@@ -956,16 +1227,16 @@ def shell_git_push(command):
             base = os.path.basename(re.sub(r'\$(?:[A-Za-z_]\w*|\{[^}]*\})', '*', token))
             if base in REMOTE_WRITER_NAMES or command_word and set(base) & set('*?[') and base.strip('*?') and any(
                     fnmatch.fnmatchcase(name, base) for name in REMOTE_WRITER_NAMES):
-                return True
+                return 'git remote writer executable rule'
             if command_word and base in WRAPPERS:
                 wrapper, wrapper_value = base, False
             # Git reads `GIT_CONFIG_*` from the environment, so a value that spells a remote writer can alias one,
             # and a key or parameter list that defines an alias can, whatever the value.
             if re.match(r'GIT_\w*=', token) and any(word in token for word in REMOTE_WRITERS):
-                return True
+                return 'git writer environment rule'
             if (re.match(r'GIT_CONFIG_(?:KEY_\w*|PARAMETERS)=', token)
                     and (re.search(r'alias', token, re.I) or set(token) & set('$`\\'))):
-                return True
+                return 'git alias environment rule'
             if os.path.basename(token) == 'git':
                 expect_subcommand = True
                 git_command = command_start
@@ -1109,15 +1380,26 @@ def pre(data):
                                   'commit grants permit local base-branch merges into their own lane branch. '
                                   'Return this step to your driver; the driver may run it.')
             try:
+                command = tin.get('command', '')
+                if any(char in command for char in ('\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85',
+                                                     chr(0x2028), chr(0x2029))):
+                    deny(publication_reason + ' Rule: line separator rule.')
+                reason = process_heredoc_denial(command)
+                if reason:
+                    deny(publication_reason + ' Rule: ' + reason + '.')
                 # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
-                file_text_removed = python_heredoc_shell(cat_heredoc_data(tin.get('command', '')), inert_only=True)
-                if git_push(tin.get('command', '')) or WRITER_BASH.search(file_text_removed):
-                    deny(publication_reason)
+                file_text_removed = python_heredoc_shell(cat_heredoc_data(command), inert_only=True)
+                reason = git_push(command)
+                if reason:
+                    deny(publication_reason + ' Rule: ' + reason + '.')
+                match = WRITER_BASH.search(file_text_removed)
+                if match:
+                    deny(publication_reason + ' Rule: WRITER_BASH ' + repr(match[2].strip()) + '.')
                 reason = writer_gh_denial(file_text_removed)
                 if reason:
-                    deny(reason)
+                    deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + reason)
             except Exception:
-                deny(publication_reason)
+                deny(publication_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''
         if tool in ('Edit', 'Write', 'NotebookEdit') and (
                 HARNESS_PATH.search(target) or target.startswith(str(Path.home() / '.claude') + '/')):
