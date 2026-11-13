@@ -432,6 +432,9 @@ def isolated_writes(tree, bound):
             if (any(isinstance(argument, ast.Starred) for argument in node.args)
                     or any(keyword.arg not in {'mode', 'encoding', 'newline', 'errors'} for keyword in node.keywords)):
                 return False
+            # Called on the class (`Path.open`, an alias, `type(...)`), the first argument is the path, not the mode.
+            if not builtin_open and len(node.args) > 1:
+                return False
             offset = 1 if builtin_open else 0
             modes = [*node.args[offset:offset + 1],
                      *(keyword.value for keyword in node.keywords if keyword.arg == 'mode')]

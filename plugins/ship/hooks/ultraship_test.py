@@ -322,6 +322,9 @@ class PythonHeredocGuardTests(unittest.TestCase):
             ('python3 -I -', "from pathlib import Path\nroot = Path('/repo')\n(root / 'x.sh').chmod(0o755)",
              'sh /repo/x.sh', True),
             ('python3 -I -', "from pathlib import Path\nPath.open('t', 'w').write('x')", 'sh t', True),
+            ('python3 -I -', "from pathlib import Path\nclass_ = Path\nclass_.open('t', 'w').write('x')", 'sh t', True),
+            ('python3 -I -', "import pathlib\npathlib.Path.open('t', 'w').write('x')", 'sh t', True),
+            ('python3 -I -', "from pathlib import Path\ntype(Path('/repo')).open('t', 'w').write('x')", 'sh t', True),
         )
         for interpreter, body, remainder, expected in cases:
             with self.subTest(interpreter=interpreter, remainder=remainder):
