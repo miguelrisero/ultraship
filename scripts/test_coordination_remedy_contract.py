@@ -117,6 +117,11 @@ class CoordinationRemedyContractTests(unittest.TestCase):
 
     def test_contract_requires_known_formatting_findings_and_blocks_unknown_evidence(self):
         self.assertIn(
+            'Attribute a pathless hook refusal by elimination only when every enabled PreToolUse '
+            'hook that matches the tool and can emit each returned finding is a named formatting producer.',
+            self.refusals,
+        )
+        self.assertIn(
             'Require every returned finding to match a known `text_lint.py` formatting message.',
             self.refusals,
             'Every returned finding must match a known text_lint formatting message',
