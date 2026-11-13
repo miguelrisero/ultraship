@@ -1117,6 +1117,11 @@ PY
             "from pathlib import Path\np = Path('/w/x.txt')\n"
             "p.write_text('git push origin HEAD')\np.replace('/w/traceback.py')\n",
             "from pathlib import Path\nw = Path('/w/x.sh').write_text\nw('git push origin HEAD')\n",
+            "from pathlib import Path\nc = Path\nPath('/w/x.txt').write_text('x')\nc.replace(Path('/w/x.txt'), '/w/traceback.py')\n",
+            "import pathlib\npathlib.Path('/w/x.txt').write_text('x')\n"
+            "pathlib.Path.replace(pathlib.Path('/w/x.txt'), '/w/traceback.py')\n",
+            "from pathlib import Path\nPath('/w/x.txt').write_text('x')\n"
+            "type(Path('/w/x.txt')).replace(Path('/w/x.txt'), '/w/traceback.py')\n",
         )
         for body in bodies:
             with self.subTest(body=body):

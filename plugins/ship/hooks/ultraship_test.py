@@ -327,9 +327,11 @@ class PythonHeredocGuardTests(unittest.TestCase):
             ('python3 -I -', "from pathlib import Path\ntype(Path('/repo')).open('t', 'w').write('x')", 'sh t', True),
         )
         for interpreter, body, remainder, expected in cases:
-            with self.subTest(interpreter=interpreter, remainder=remainder):
+            with self.subTest(interpreter=interpreter, body=body, remainder=remainder):
                 command = f"cd /repo && {interpreter} <<'PY'\n{body}\nPY\n{remainder}\n"
                 self.assertEqual(ultraship.runs_heredoc_output(command), expected)
+                if 'Path.open' in body or 'class_' in body or 'type(' in body:
+                    self.assertFalse(ultraship.inert_python(body, isolated=True))
 
 
 class WriterGitHubGuardTests(unittest.TestCase):
