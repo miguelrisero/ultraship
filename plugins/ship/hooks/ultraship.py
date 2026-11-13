@@ -1320,6 +1320,84 @@ def git_read_words(words):
         re.fullmatch(r'-[nilwEFvz]+|-[ABC][0-9]*|--|(?!-).*', word, re.S) for word in words[1:])
 
 
+def literal_search_shell(command):
+    """Recognize one literal cd/find/grep/ls chain without granting any process or write option."""
+    text = command.removesuffix('\n')
+    if not text or '\n' in text:
+        return False
+    spans = single_quoted_spans(text)
+    if spans is None:
+        return False
+    outside = ''.join('_' if quoted else span for span, quoted in spans)
+    if re.search(r'[$`\\"()<>;|!{}#~]', outside):
+        return False
+    tokens = list(re.finditer(r"'[^']*'|[^\s']+", text))
+    segments, current, end = [], [], 0
+    for token in tokens:
+        if text[end:token.start()].strip() or end and token.start() == end:
+            return False
+        raw = token[0]
+        if raw == '&&':
+            if text[token.start() - 1:token.start()] != ' ' or text[token.end():token.end() + 1] != ' ' or not current:
+                return False
+            segments.append(current)
+            current = []
+        else:
+            if '&' in raw and not raw.startswith("'"):
+                return False
+            current.append(raw)
+        end = token.end()
+    if not current:
+        return False
+    segments.append(current)
+    plain = lambda word: re.fullmatch(r'[\w./:@%+,-]+', word) is not None
+    path = lambda word: plain(word) and not word.startswith('-')
+    value = lambda word: plain(word) or len(word) >= 2 and word[0] == word[-1] == "'"
+    for words in segments:
+        command, arguments = words[0], words[1:]
+        if command == 'cd':
+            if len(arguments) != 1 or not path(arguments[0]):
+                return False
+        elif command == 'find':
+            cursor = 0
+            while cursor < len(arguments) and path(arguments[cursor]):
+                cursor += 1
+            if not cursor:
+                return False
+            while cursor < len(arguments):
+                if (arguments[cursor] not in {'-name', '-iname', '-path', '-ipath', '-type', '-maxdepth', '-mindepth'}
+                        or cursor + 1 >= len(arguments) or not value(arguments[cursor + 1])):
+                    return False
+                cursor += 2
+        elif command == 'grep':
+            cursor = 0
+            while cursor < len(arguments) and arguments[cursor].startswith('-'):
+                option = arguments[cursor]
+                if option in {'-A', '-B', '-C', '-m'}:
+                    cursor += 1
+                    if cursor == len(arguments) or not arguments[cursor].isdigit():
+                        return False
+                elif not re.fullmatch(r'-[nEFiwlLcrRHhsvqox]+', option):
+                    return False
+                cursor += 1
+            if (cursor + 1 >= len(arguments) or not value(arguments[cursor])
+                    or not all(path(word) for word in arguments[cursor + 1:])):
+                return False
+        elif command == 'ls':
+            cursor = 0
+            while cursor < len(arguments) and arguments[cursor].startswith('-'):
+                if not re.fullmatch(r'-[laAhdtrS1R]+', arguments[cursor]):
+                    return False
+                cursor += 1
+            if cursor == len(arguments) or not all(
+                    not word.startswith('-') and re.fullmatch(r'[\w./:@%+,*?-]+', word)
+                    for word in arguments[cursor:]):
+                return False
+        else:
+            return False
+    return True
+
+
 def shell_git_push(command):
     """Scan Git commands and shell-wrapper strings without regex backtracking."""
     values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
@@ -1380,7 +1458,8 @@ def shell_git_push(command):
         else:
             spelled = any(word in re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', token).translate(expansion)
                           for token in tokens for word in ('push', 'send-pack'))
-        if not literal_globs and any(set(token) & set('$`*?[{') for token in tokens) and spelled:
+        literal_search = literal_search_shell(text)
+        if not (literal_globs or literal_search) and any(set(token) & set('$`*?[{') for token in tokens) and spelled:
             return 'git writer expansion or glob rule'
         expect_subcommand = skip_value = folder_value = False
         # Only a `git` that starts a command reads its own arguments; `eval git -C "$W"` or `watch git ...`
