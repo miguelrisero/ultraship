@@ -1136,7 +1136,7 @@ def nested_shell_strings(tokens):
                 start -= 1
             while end < len(tokens) and tokens[end][0] not in separators:
                 end += 1
-            if all(not unresolved_shell_word(word[0]) for word in tokens[start:end]):
+            if all('$' not in word[0] and '`' not in word[0] for word in tokens[start:end]):
                 continue
         arguments = []
         for argument in tokens[index + 1:]:
