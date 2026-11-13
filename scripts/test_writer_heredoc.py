@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import signal
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,12 +17,14 @@ spec.loader.exec_module(ultraship)
 class WriterHeredocTests(unittest.TestCase):
     BYTECODE_FLAGS = ('-I -B', '-B -I', '-B', '-IB', '-BI')
 
-    def denied(self, command):
+    def denied(self, command, cwd=None):
         output = io.StringIO()
+        payload = {'agent_type': 'ship:writer--sol', 'tool_name': 'Bash', 'tool_input': {'command': command}}
+        if cwd is not None:
+            payload['cwd'] = cwd
         with contextlib.redirect_stdout(output):
             try:
-                ultraship.pre({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
-                               'tool_input': {'command': command}})
+                ultraship.pre(payload)
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
@@ -377,6 +380,63 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('inline interpreter code rule' if command.startswith('flock')
                               else 'process-capable python -c rule', self.reason)
+
+    def test_wrapper_attached_code_values_are_checked(self):
+        for command in ("script -qc'node -e x' /dev/null", "flock f -c'node -e x'", "su -c'node -e x'",
+                        "script -Ologc.txt -c 'node -e x' /dev/null"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (node)', self.reason)
+
+    def test_comment_inside_process_substitution_is_denied(self):
+        for command in ("cat <(true #); printf '%s' 'x' | node",
+                        "echo x >(true #); printf '%s' 'x' | node"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_comment_quote_cannot_hide_continued_interpreter(self):
+        for command in ("# '\npyth\\\non3 -c 'import os; os.system(chr(105)+chr(100))'",
+                        "echo x # '\nno\\\nde -e 'require(1)'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (node)' if command.startswith('echo')
+                              else 'process-capable python -c rule', self.reason)
+
+    def test_nested_shell_keeps_intermediate_pipe_state(self):
+        body = 'import subprocess; subprocess.run(["git", "pu" + "sh"])'
+        command = "sh -c 'printf \"%s\\n\" \"" + body.replace('"', '\\"') + "\" | sh -c \"python3 -I\"'"
+        for command in (command, 'bash -c \'cat f | bash -c "bash -c node"\''):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (unresolved command word)' if command.startswith('sh')
+                              else 'inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_program_after_literal_cd_is_admitted(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        for directory in ('frontend', 'backend', 'x'):
+            (root / directory).mkdir()
+        for command in ('cd frontend && bun test', 'cd frontend && bun install', 'cd frontend && bun run lint',
+                        'pushd frontend && bun test', 'cd x && deno test', 'cd backend && python3 scripts/x.py'):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command, cwd=str(root)))
+
+    def test_relative_program_after_unsafe_cd_is_denied(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        for directory in ('frontend', 'backend', 'x'):
+            (root / directory).mkdir()
+        (root / 'proc-fd').symlink_to('/proc/self/fd', target_is_directory=True)
+        for command in ('cd /dev && node stdin', 'cd ../x && node 0', 'cd $X && node 0', 'cd - && node 0',
+                        'cd && node 0', 'cd ~/x && node 0', 'CDPATH=x; cd x && node 0',
+                        'setopt cdable_vars; cd x && node 0', 'cd missing && node 0',
+                        'cd x && cd frontend && node 0', 'cd proc-fd && node 0'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command, cwd=str(root)))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):

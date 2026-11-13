@@ -1019,7 +1019,7 @@ def shell_raw_words(text):
             continue
         if (text[index] == '#' and (not index or text[index - 1].isspace()
                                      or text[index - 1] in ';&|(<>' or backtick)):
-            if backtick or any(kind == '$' for kind in parentheses):
+            if backtick or parentheses:
                 raise ValueError('comment inside command substitution')
             end = text.find('\n', index)
             index = len(text) if end < 0 else end
@@ -1105,7 +1105,7 @@ def nested_shell_strings(tokens):
         if name in {'script', 'flock', 'su'}:
             def command_candidate(option):
                 prefix = option.partition('=')[0]
-                return bool(re.fullmatch(r'-[A-Za-z]*c[A-Za-z]*', option)) or (
+                return (option.startswith('-') and not option.startswith('--') and 'c' in option) or (
                     prefix.startswith('--') and len(prefix) > 2 and (
                         '--command'.startswith(prefix) or name == 'su' and '--session-command'.startswith(prefix)))
             if not any(command_candidate(word[1]) for word in arguments):
@@ -1120,16 +1120,41 @@ def nested_shell_strings(tokens):
             cursor = 0
             while cursor < len(arguments):
                 option = arguments[cursor][1]
+                if option.startswith('-') and not option.startswith('--') and option != '-':
+                    flag_letters = {'script': 'qfea', 'flock': 'sxunoF', 'su': 'lmp'}[name]
+                    value_letters = {'script': 'OIBTm', 'flock': 'wE', 'su': 'sgGw'}[name]
+                    offset = 1
+                    while offset < len(option):
+                        letter = option[offset]
+                        if letter == 'c' or letter in value_letters:
+                            if offset + 1 < len(option):
+                                if letter == 'c':
+                                    word = arguments[cursor]
+                                    yield (word[0][offset + 1:], option[offset + 1:], word[2] + offset + 1, word[3])
+                            else:
+                                cursor += 1
+                                if cursor >= len(arguments):
+                                    raise ValueError('missing wrapper option value')
+                                if letter == 'c':
+                                    yield arguments[cursor]
+                            break
+                        if letter not in flag_letters:
+                            raise ValueError('ambiguous command wrapper option')
+                        offset += 1
+                    cursor += 1
+                    continue
                 command_option, separator, attached = option.partition('=')
                 code_option = command_candidate(option)
                 if code_option and not separator:
                     if cursor + 1 >= len(arguments):
                         raise ValueError('missing wrapper program')
                     yield arguments[cursor + 1]
-                    break
+                    cursor += 2
+                    continue
                 if code_option and separator:
                     yield (arguments[cursor][0], attached, arguments[cursor][2], arguments[cursor][3])
-                    break
+                    cursor += 1
+                    continue
                 if option in value_options[name]:
                     cursor += 2
                 elif option in flags[name] or not option.startswith('-'):
@@ -1165,9 +1190,17 @@ def nested_shell_strings(tokens):
 
 def shell_line_continuations(text):
     """Join shell continuations while preserving literal single-quoted code."""
-    kept, quote, index = [], '', 0
+    kept, quote, index, comment = [], '', 0, False
     while index < len(text):
         char = text[index]
+        before = kept[-1][-1:] if kept else ''
+        if not quote and char == '#' and (not before or before.isspace() or before in ';&|(<>' ):
+            comment = True
+        if comment:
+            kept.append(char)
+            index += 1
+            comment = char != '\n'
+            continue
         if char == '\\' and quote != "'":
             if text[index:index + 2] == '\\\n':
                 index += 2
@@ -1194,6 +1227,17 @@ def unresolved_shell_word(raw):
 def nested_work_exceeded(tokens, seen):
     return len(seen) > 64 or len(tokens) * sum(
         os.path.basename(token[1]) in STRING_WRAPPERS for token in tokens) > 50000
+
+
+def shell_input_state(tokens, inherited=(False, False, False)):
+    redirected = inherited[2] or any(token[0] == '<' for token in tokens)
+    piped = inherited[0] or redirected or any(token[1] == 'coproc' for token in tokens) or any(
+        token[0] == '|'
+        and not (index and tokens[index - 1][0] == '|' and tokens[index - 1][3] == token[2])
+        and not (index + 1 < len(tokens) and tokens[index + 1][0] == '|' and tokens[index + 1][2] == token[3])
+        for index, token in enumerate(tokens))
+    directory = inherited[1] or any(token[1] in {'cd', 'pushd'} for token in tokens)
+    return piped, directory, redirected
 
 
 def python_program(arguments):
@@ -1234,13 +1278,15 @@ def python_program(arguments):
 def python_inline_denial(command):
     """Check every Python -c word, including wrapper arguments and nested shell strings."""
     shell = shell_line_continuations(shell_without_heredoc_bodies(command))
-    pending = [shell]
+    pending = [(shell, (False, False, False))]
     seen = set()
     while pending:
-        text = shell_line_continuations(pending.pop())
-        if text in seen:
+        text, inherited = pending.pop()
+        text = shell_line_continuations(text)
+        identity = (text, inherited)
+        if identity in seen:
             continue
-        seen.add(text)
+        seen.add(identity)
         try:
             tokens = shell_raw_words(text)
         except ValueError:
@@ -1285,7 +1331,8 @@ def python_inline_denial(command):
                     if python_writes(code, isolated=isolated) and (not check_only_shell(rest) or text != shell):
                         return 'python -c then run rule'
                     break
-        pending.extend(token[1] for token in nested_shell_strings(tokens))
+        state = shell_input_state(tokens, inherited)
+        pending.extend((token[1], state) for token in nested_shell_strings(tokens))
     return None
 
 
@@ -1327,18 +1374,59 @@ def stdin_program_path(value):
             or resolved.startswith(('/dev/', '/proc/')))
 
 
-def inline_interpreter_denial(command):
-    shell = literal_variables(shell_without_heredoc_bodies(command))
-    lines = command.splitlines(keepends=True)
-    if lines and ANY_PYTHON_HEREDOC.fullmatch(lines[0]) and not process_heredoc_denial(command):
-        shell = shell[len(lines[0]):]
-    pending = [shell]
-    seen = set()
+def safe_directory_state(command, cwd=None):
+    """Prove one literal directory step stays outside device and process filesystems."""
+    pending, seen, targets = [shell_without_heredoc_bodies(command)], set(), []
     while pending:
         text = shell_line_continuations(pending.pop())
         if text in seen:
             continue
         seen.add(text)
+        if 'CDPATH' in text or 'cdable_vars' in text:
+            return False
+        try:
+            tokens = shell_raw_words(text)
+            if nested_work_exceeded(tokens, seen):
+                return False
+            for index, token in enumerate(tokens):
+                if token[1] not in {'cd', 'pushd'}:
+                    continue
+                cursor = index + 1
+                while cursor < len(tokens) and tokens[cursor][1] in {'-L', '-P', '-e', '-@'}:
+                    cursor += 1
+                if cursor >= len(tokens):
+                    return False
+                raw, target = tokens[cursor][:2]
+                if (unresolved_shell_word(raw) or not target or target.startswith(('-', '~', '/'))
+                        or '..' in target.split('/') or not re.fullmatch(r'[\w./-]+', target)):
+                    return False
+                targets.append(target)
+            pending.extend(token[1] for token in nested_shell_strings(tokens))
+        except ValueError:
+            return False
+    if len(targets) != 1:
+        return False
+    base = os.path.realpath(cwd or os.getcwd())
+    target = os.path.realpath(os.path.join(base, targets[0]))
+    forbidden = lambda path: path in {'/proc', '/dev'} or path.startswith(('/proc/', '/dev/'))
+    return not forbidden(base) and not forbidden(target) and os.path.isdir(target)
+
+
+def inline_interpreter_denial(command, cwd=None):
+    safe_directory = safe_directory_state(command, cwd)
+    shell = literal_variables(shell_without_heredoc_bodies(command))
+    lines = command.splitlines(keepends=True)
+    if lines and ANY_PYTHON_HEREDOC.fullmatch(lines[0]) and not process_heredoc_denial(command):
+        shell = shell[len(lines[0]):]
+    pending = [(shell, (False, False, False))]
+    seen = set()
+    while pending:
+        text, inherited = pending.pop()
+        text = shell_line_continuations(text)
+        identity = (text, inherited)
+        if identity in seen:
+            continue
+        seen.add(identity)
         try:
             tokens = shell_raw_words(text)
         except ValueError:
@@ -1347,15 +1435,9 @@ def inline_interpreter_denial(command):
             return 'inline interpreter code rule (nesting limit)'
         nested = list(nested_shell_strings(tokens))
         input_tokens = shell_raw_words(shell_line_continuations(shell))
-        redirected = any(token[0] == '<' for source in (input_tokens, tokens) for token in source)
-        piped_input = redirected or any(token[1] == 'coproc' for source in (input_tokens, tokens) for token in source) or any(
-            token[0] == '|'
-            and not (index and source[index - 1][0] == '|' and source[index - 1][3] == token[2])
-            and not (index + 1 < len(source) and source[index + 1][0] == '|'
-                     and source[index + 1][2] == token[3])
-            for source in (input_tokens, tokens) for index, token in enumerate(source))
-        relative_program_denied = piped_input or any(
-            token[1] in {'cd', 'pushd'} for source in (input_tokens, tokens) for token in source)
+        state = shell_input_state(tokens, shell_input_state(input_tokens, inherited))
+        piped_input, directory, redirected = state
+        relative_program_denied = piped_input or directory and not safe_directory
         if re.search(r'(?:\$\([^\n]*\)|`[^`\n]*`)[ \t]+(?:-[ceEpr]\b|--(?:eval|print)\b|-[a-zA-Z]*[ce]\b)', text):
             return 'inline interpreter code rule (unresolved command word)'
         segments, words, piped = [], [], False
@@ -1439,7 +1521,7 @@ def inline_interpreter_denial(command):
                     if (piped_input or piped) and (kind not in {'c', 'm', 'script'} or operand >= len(arguments)
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
-        pending.extend(token[1] for token in nested)
+        pending.extend((token[1], state) for token in nested)
     return None
 
 
@@ -1967,7 +2049,7 @@ def pre(data):
                 reason = python_inline_denial(command)
                 if reason:
                     deny(publication_reason + ' Rule: ' + reason + '.')
-                reason = inline_interpreter_denial(command)
+                reason = inline_interpreter_denial(command, data.get('cwd'))
                 if reason:
                     deny(publication_reason + ' Rule: ' + reason + '.')
             except Exception:
