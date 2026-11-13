@@ -118,13 +118,18 @@ class WriterHeredocTests(unittest.TestCase):
             "grep -n '^<<<<<<<' a.py; python3 <<< 'import os'",
             "grep \\' x && python3 <<< 'import os'",
             "grep -n '^<<<<<<< a.py",
-            "echo 'a\n\" '; python3 <<< 'import os' # \"",
+            "echo 'a\n'<<<'\n'",
             "grep -n $'\\'' a.py; python3 <<< x # '",
             'grep -n "$(python3 <<< \'import os\')" a.py',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
                 self.assertIn('heredoc reader not on the allowlist', self.reason)
+        for line in ("a $'x' '<<'", "a '<<' # x", "a `b` '<<'", 'a "$(b)" \'<<\'', 'a "${b}" \'<<\'',
+                     'a "$[1]" \'<<\'', "a '<<"):
+            with self.subTest(line=line):
+                self.assertEqual(ultraship.literal_quotes_removed(line), line)
+        self.assertEqual(ultraship.literal_quotes_removed("a \\' <<< \\' '<<'"), "a \\' <<< \\' ")
 
     def test_program_from_pipe_is_denied(self):
         for command in ("printf '%s' x | python3", 'echo x | node', 'cat f | perl'):

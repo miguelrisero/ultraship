@@ -937,7 +937,7 @@ def data_reader_header(line):
 
 def literal_quotes_removed(line):
     """Drop single-quoted text; keep the whole line when bash could read its quotes differently."""
-    if "$'" in line or '#' in line or '`' in line:
+    if re.search(r"\$['(\[{]|[#`]", line):
         return line
     kept, index = [], 0
     while index < len(line):
