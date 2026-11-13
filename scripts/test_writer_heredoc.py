@@ -130,6 +130,7 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(ultraship.literal_quotes_removed(line), line)
         self.assertEqual(ultraship.literal_quotes_removed("a \\' <<< \\' '<<'"), "a \\' <<< \\' ")
+        self.assertEqual(ultraship.literal_quotes_removed('a "x\\"y" \'<<\''), 'a "x\\"y" ')
 
     def test_program_from_pipe_is_denied(self):
         for command in ("printf '%s' x | python3", 'echo x | node', 'cat f | perl'):
