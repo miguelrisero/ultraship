@@ -1213,8 +1213,11 @@ def inline_interpreter_denial(command):
             else:
                 words.append(token)
         segments.append((words, piped))
+        shell_programs = set(nested_shell_strings(tokens))
         for words, piped in segments:
             for index, (raw, value, start, end) in enumerate(words):
+                if value in shell_programs:
+                    continue
                 arguments = [word[1] for word in words[index + 1:]]
                 unresolved = raw != value or bool(re.search(r'[$`*?\[\]{}]', raw))
                 command_position = index == 0 or all(
@@ -1232,6 +1235,12 @@ def inline_interpreter_denial(command):
                 if '<' in segment_text or re.search(r'[<>][ \t]*\(', text[end:]):
                     return 'inline interpreter code rule (program from a pipe)'
                 if name != 'python':
+                    short, long, subcommands = INLINE_INTERPRETERS[name]
+                    if (name == 'deno' and arguments[:1] and arguments[0] in {'eval', 'repl', 'run'}
+                            or any(argument in subcommands or argument.split('=', 1)[0] in long
+                                   or argument.startswith('-') and not argument.startswith('--')
+                                   and bool(set(argument[1:]) & set(short)) for argument in arguments[:1])):
+                        return f'inline interpreter code rule ({name})'
                     if arguments == ['--version']:
                         continue
                     script = arguments[0] if arguments else ''
