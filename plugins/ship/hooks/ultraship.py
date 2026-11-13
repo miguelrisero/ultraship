@@ -955,6 +955,8 @@ def process_heredoc_denial(command):
                     'a cd/date/git add lead and a quoted delimiter)')
         if not (inert_python(body) or literal_read or 'I' in header['flags'] and inert_python(body, isolated=True)):
             return 'process-capable heredoc rule' + (': ' + reasons[0] if reasons else '')
+        if match['delimiter'][0] not in '\'"\\':
+            return 'process-capable heredoc rule (Python heredoc needs a quoted delimiter)'
         index = end + 1
     return None
 

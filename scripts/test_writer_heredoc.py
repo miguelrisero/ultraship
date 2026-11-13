@@ -1036,6 +1036,19 @@ PY
                 self.assertIn('process-capable heredoc rule (interpreter heredoc must start the command)',
                               self.reason)
 
+    def test_unquoted_python_heredoc_command_substitution_is_denied(self):
+        command = ("python3 - <<PY\n"
+                   "print('''$(python3 -c \"import subprocess; subprocess.run(['git', 'pu' + 'sh'])\")''')\n"
+                   "PY\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (Python heredoc needs a quoted delimiter)', self.reason)
+
+    def test_unquoted_python_heredoc_joined_terminator_is_denied(self):
+        command = ("python3 - <<EOF\ns = '''\nE\\\nOF\npython3 -I - <<'PY'\n"
+                   "import subprocess\nsubprocess.run(['git', 'pu' + 'sh'])\nPY\n: <<'TAIL'\n'''\nEOF\nTAIL\n")
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (Python heredoc needs a quoted delimiter)', self.reason)
+
 
 if __name__ == '__main__':
     unittest.main()
