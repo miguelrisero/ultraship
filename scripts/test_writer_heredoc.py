@@ -347,6 +347,22 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertFalse(self.denied('a=(1 2); echo ok'))
         self.assertFalse(self.denied('head=$(git -C /w rev-parse HEAD)trailing'))
 
+    def test_shell_comments_preserve_following_program_checks(self):
+        self.assertTrue(self.denied("# it's\nprintf %s x | node\n# '"))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        self.assertFalse(self.denied("ls # it's fine"))
+        self.assertFalse(self.denied('echo word#literal'))
+
+    def test_coprocess_interpreters_read_stdin(self):
+        for command in ('coproc node; print -p x; coproc true; wait',
+                        'coproc python3 -B; print -p x; coproc true; wait'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_wrapper_words_without_command_options_remain_data(self):
+        self.assertFalse(self.denied('grep -n script -r src'))
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))

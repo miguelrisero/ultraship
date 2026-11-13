@@ -1017,6 +1017,10 @@ def shell_raw_words(text):
                 words.append(('\n', '\n', index, index + 1))
             index += 1
             continue
+        if text[index] == '#':
+            end = text.find('\n', index)
+            index = len(text) if end < 0 else end
+            continue
         start, quote = index, ''
         if text[index] in ';&|()<>`':
             if text[index] == '(':
@@ -1094,6 +1098,9 @@ def nested_shell_strings(tokens):
                 break
             arguments.append(argument)
         if name in {'script', 'flock', 'su'}:
+            if not any(word[1] in {'-c', '--command'} or word[1].startswith('--command=')
+                       or name == 'script' and re.fullmatch(r'-[qfea]*c', word[1]) for word in arguments):
+                continue
             value_options = {'script': {'-O', '-I', '-B', '-T', '-m', '--log-out', '--log-in', '--log-io',
                                          '--log-timing', '--logging-format'},
                              'flock': {'-w', '-E', '--wait', '--timeout', '--conflict-exit-code'},
@@ -1330,7 +1337,7 @@ def inline_interpreter_denial(command):
         nested = list(nested_shell_strings(tokens))
         input_tokens = shell_raw_words(shell_line_continuations(shell))
         redirected = any(token[0] == '<' for source in (input_tokens, tokens) for token in source)
-        piped_input = redirected or any(
+        piped_input = redirected or any(token[1] == 'coproc' for source in (input_tokens, tokens) for token in source) or any(
             token[0] == '|'
             and not (index and source[index - 1][0] == '|' and source[index - 1][3] == token[2])
             and not (index + 1 < len(source) and source[index + 1][0] == '|'
