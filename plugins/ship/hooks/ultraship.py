@@ -418,6 +418,9 @@ def isolated_writes(tree, bound):
             return False
         if isinstance(node, ast.Name) and node.id == 'open' and id(node) not in calls:
             return False
+        # A method read off the class (`Path.open('t', 'w')`) takes the path as its first argument.
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == 'Path':
+            return False
         if isinstance(node, ast.Attribute) and node.attr in {
                 'write_text', 'chmod', 'mkdir', 'unlink', 'open', 'replace'} and id(node) not in calls:
             return False
