@@ -734,6 +734,19 @@ def check_only_shell(command):
         read_only_shell(segment) or re.fullmatch(r'(?:ba|z)?sh +-n +[\w./][\w./-]*', segment) for segment in segments)
 
 
+def python_writes(body, isolated=False):
+    """Count write methods only in the modes that admit them."""
+    methods = {'write_text', 'unlink'} | ({'chmod', 'mkdir', 'replace'} if isolated else set())
+    return any(isinstance(node, ast.Attribute) and node.attr in methods
+               or isinstance(node, ast.Call) and (
+                   getattr(node.func, 'id', None) == 'open' or getattr(node.func, 'attr', None) == 'open') and not all(
+                   isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
+                   for mode in [*node.args[(1 if isinstance(node.func, ast.Name) else 0):
+                                          (2 if isinstance(node.func, ast.Name) else 1)],
+                                *(k.value for k in node.keywords if k.arg == 'mode')])
+               for node in ast.walk(ast.parse(body)))
+
+
 def runs_heredoc_output(command):
     """Whether a Python heredoc that can write files is followed by a command that can run one.
 
@@ -754,11 +767,7 @@ def runs_heredoc_output(command):
             if not inert_python(body):
                 return True
             # An inert script writes only through `open` with a write mode or a `Path` write method.
-            return any(isinstance(node, ast.Attribute) and node.attr in {'write_text', 'unlink'}
-                       or isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'open' and not all(
-                           isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) <= set('rbt')
-                           for mode in [*node.args[1:2], *(k.value for k in node.keywords if k.arg == 'mode')])
-                       for node in ast.walk(ast.parse(body)))
+            return python_writes(body, isolated='I' in match['flags'] and not inert_python(body))
     return False
 
 
@@ -902,14 +911,30 @@ def cat_heredoc_data(command):
     return command
 
 
-def process_heredoc_denial(command):
+HEREDOC_READERS = {'cat', 'tee', 'grep', 'head', 'tail', 'wc'}
+
+
+def data_reader_header(line):
+    """Admit only literal data readers, their words, and literal output paths."""
+    word = r'[\w./:@%+,=-]+'
+    path = r'[\w./:@%+,-]+'
+    argument = rf'(?:{word}|>>?[ \t]*{path})'
+    delimiter = r"(?:'[A-Za-z0-9_]+'|\"[A-Za-z0-9_]+\"|\\?[A-Za-z0-9_]+)"
+    operator = rf"(?:<<<[ \t]*(?:'[^'\n<]*'|{word})|<<-?[ \t]*{delimiter})"
+    return re.fullmatch(rf'[ \t]*(?:cd +{path} +&& +)*(?:' + '|'.join(sorted(HEREDOC_READERS))
+                        + rf')(?:[ \t]+{argument})*[ \t]*{operator}(?:[ \t]+{argument})*[ \t]*\n?', line) is not None
+
+
+def process_heredoc_denial(command, readers=False):
     """Check Python stdin bodies and keep quoted commit messages as data."""
-    lines = cat_heredoc_data(command).splitlines(keepends=True)
+    lines = (command if readers else cat_heredoc_data(command)).splitlines(keepends=True)
     index = 0
     while index < len(lines):
         operators = list(re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
                                     r"(?P<delimiter>'[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", lines[index]))
         if not operators:
+            if readers and '<<' in lines[index] and not data_reader_header(lines[index]):
+                return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
             index += 1
             continue
         match = operators[0]
@@ -932,7 +957,25 @@ def process_heredoc_denial(command):
             if len(operators) != 1 or not header:
                 return 'process-capable heredoc rule (unsupported interpreter header)'
         else:
-            index += 1
+            if readers:
+                if (len(operators) != 1 or not data_reader_header(lines[index])
+                        or not data_reader_header(lines[index].replace('\\\n', ''))):
+                    return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
+                delimiter = shlex.split(match['delimiter'])[0]
+                end = index + 1
+                while end < len(lines):
+                    body_line = lines[end].lstrip('\t') if match['tabs'] else lines[end]
+                    if body_line.removesuffix('\n') == delimiter:
+                        break
+                    if match['delimiter'][0] not in '\'"\\' and (
+                            '$' in body_line or '`' in body_line or body_line.removesuffix('\n').endswith('\\')):
+                        return 'process-capable heredoc rule (expandable data body)'
+                    end += 1
+                if end == len(lines):
+                    return 'process-capable heredoc rule (unterminated body)'
+                index = end + 1
+            else:
+                index += 1
             continue
         delimiter = shlex.split(match['delimiter'])[0]
         end = index + 1
@@ -960,6 +1003,664 @@ def process_heredoc_denial(command):
         if match['delimiter'][0] not in '\'"\\':
             return 'process-capable heredoc rule (Python heredoc needs a quoted delimiter)'
         index = end + 1
+    if readers and '\\\n' in command:
+        return process_heredoc_denial(command.replace('\\\n', ''), readers=True)
+    return None
+
+
+def shell_raw_words(text):
+    """Keep raw shell words and offsets; quotes and escapes never lose their identity."""
+    words, index, parentheses, backtick = [], 0, [], False
+    while index < len(text):
+        if text[index].isspace():
+            if text[index] == '\n':
+                words.append(('\n', '\n', index, index + 1))
+            index += 1
+            continue
+        if (text[index] == '#' and (not index or text[index - 1].isspace()
+                                     or text[index - 1] in ';&|(<>' or backtick)):
+            if backtick or parentheses:
+                raise ValueError('comment inside command substitution')
+            end = text.find('\n', index)
+            index = len(text) if end < 0 else end
+            continue
+        start, quote = index, ''
+        if text[index] in ';&|()<>`':
+            if text[index] == '`':
+                backtick = not backtick
+            if text[index] == '(':
+                before = text[index - 1] if index else ''
+                array = before == '=' and bool(re.search(r'(?:^|[\s;&|()<>])[A-Za-z_]\w*=$', text[:index]))
+                if before and not before.isspace() and before not in ';&|()<>$' and not array:
+                    raise ValueError('word-internal shell group')
+                parentheses.append(before if before in '$<>=' and before else '')
+            elif text[index] == ')' and parentheses:
+                substitution = parentheses.pop()
+                after = text[index + 1:index + 2]
+                if not substitution and after and not after.isspace() and after not in ';&|()<>':
+                    raise ValueError('word suffix after shell group')
+            index += 1
+            words.append((text[start:index], text[start:index], start, index))
+            continue
+        while index < len(text):
+            char = text[index]
+            if not quote and text[index:index + 2] == "$'":
+                raise ValueError('ANSI-C shell quote')
+            if char == '\\' and quote != "'":
+                index += 2
+                if index > len(text):
+                    raise ValueError('unfinished shell escape')
+                continue
+            if char == quote:
+                quote = ''
+            elif not quote and char in "'\"":
+                quote = char
+            elif not quote and (char.isspace() or char in ';&|()<>`'):
+                break
+            index += 1
+        if quote:
+            raise ValueError('unfinished shell quote')
+        raw = text[start:index]
+        values = shlex.split(raw, comments=False)
+        if len(values) != 1:
+            raise ValueError('ambiguous shell word')
+        words.append((raw, values[0], start, index))
+    return words
+
+
+def shell_without_heredoc_bodies(command):
+    """Keep headers and following shell commands, without interpreting data as shell words."""
+    lines, kept, pending = command.splitlines(keepends=True), [], []
+    if (lines and re.fullmatch(r'[ \t]*(?:cd +[\w./-]+ +&& +)?git +commit(?: +(?:-[a-zA-Z]|--[\w-]+))* +'
+                              r'(?:-m +"\$\(cat[ \t]*|-F +- +)<<-?[ \t]*(?:\'[A-Za-z0-9_]+\'|"[A-Za-z0-9_]+")\n', lines[0])
+            and not process_heredoc_denial(command)):
+        return ''
+    for line in lines:
+        if pending:
+            delimiter, tabs, quoted = pending[0]
+            if (line.lstrip('\t') if tabs else line).removesuffix('\n') == delimiter:
+                pending.pop(0)
+            continue
+        kept.append(line)
+        for match in re.finditer(r"(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", line):
+            pending.append((shlex.split(match[2])[0], bool(match[1]), match[2][0] in '\'"\\'))
+    return ''.join(kept)
+
+
+SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'mksh', 'yash', 'rbash', 'ash'}
+STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su'}
+
+
+def grep_data_token(tokens, index):
+    start = index
+    while start and tokens[start - 1][0] not in {';', '&', '|', '(', ')', '`', '\n'}:
+        start -= 1
+    while start < index and re.match(r'[A-Za-z_]\w*=', tokens[start][1]):
+        start += 1
+    if tokens[start][0] in {'grep', 'egrep', 'fgrep'}:
+        return index > start
+    if tokens[start][0] == 'rg':
+        end = start + 1
+        while end < len(tokens) and tokens[end][0] not in {';', '&', '|', '(', ')', '`', '\n'}:
+            end += 1
+        return index > start and not any(word[1].startswith('--pre') for word in tokens[start:end])
+    if tokens[start][0] != 'git':
+        return False
+    cursor = start + 1
+    values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path'}
+    while cursor < index:
+        option = tokens[cursor][1]
+        if option in values:
+            cursor += 2
+        elif len(option) > 2 and option.startswith(('-C', '-c')):
+            cursor += 1
+        elif option.partition('=')[0] in values and '=' in option:
+            cursor += 1
+        elif option in {'--no-pager', '--paginate', '-p'}:
+            cursor += 1
+        else:
+            break
+    return cursor < index and tokens[cursor][0] == 'grep'
+
+
+def nested_shell_strings(tokens):
+    """Keep the identity of each argument that a shell or string wrapper can execute."""
+    for index, token in enumerate(tokens):
+        name = os.path.basename(token[1])
+        if name not in STRING_WRAPPERS:
+            continue
+        grep_data = grep_data_token(tokens, index)
+        if grep_data:
+            start, end = index, index + 1
+            separators = {';', '&', '|', '(', ')', '`', '\n'}
+            while start and tokens[start - 1][0] not in separators:
+                start -= 1
+            while end < len(tokens) and tokens[end][0] not in separators:
+                end += 1
+            command = start
+            while command < index and re.match(r'[A-Za-z_]\w*=', tokens[command][1]):
+                command += 1
+            resolved = True
+            for position in range(start, end):
+                raw = tokens[position][0]
+                if position <= command or position == index:
+                    resolved = resolved and not unresolved_shell_word(raw)
+                else:
+                    spans = single_quoted_spans(raw)
+                    resolved = resolved and '$' not in raw and '`' not in raw and spans is not None and not any(
+                        span.startswith('=') for span, single in (spans or []) if not single)
+            if resolved:
+                continue
+        try:
+            arguments = []
+            for argument in tokens[index + 1:]:
+                if argument[0] in {';', '&', '|', '(', ')', '`', '\n'}:
+                    break
+                arguments.append(argument)
+            if name in {'script', 'flock', 'su'}:
+                def command_candidate(option):
+                    prefix = option.partition('=')[0]
+                    return (option.startswith('-') and not option.startswith('--') and 'c' in option) or (
+                        prefix.startswith('--') and len(prefix) > 2 and (
+                            '--command'.startswith(prefix) or name == 'su' and '--session-command'.startswith(prefix)))
+                if not any(command_candidate(word[1]) for word in arguments):
+                    continue
+                value_options = {'script': {'-O', '-I', '-B', '-T', '-m', '--log-out', '--log-in', '--log-io',
+                                             '--log-timing', '--logging-format'},
+                                 'flock': {'-w', '-E', '--wait', '--timeout', '--conflict-exit-code'},
+                                 'su': {'-s', '-g', '-G', '-w', '--shell', '--group', '--supp-group', '--whitelist-environment'}}
+                flags = {'script': {'-q', '-f', '-e', '-a', '--quiet', '--flush', '--return', '--append'},
+                         'flock': {'-s', '-x', '-u', '-n', '-o', '-F', '--shared', '--exclusive', '--unlock', '--nonblock', '--close', '--no-fork'},
+                         'su': {'-', '-l', '-m', '-p', '--login', '--preserve-environment'}}
+                cursor = 0
+                while cursor < len(arguments):
+                    option = arguments[cursor][1]
+                    if option.startswith('-') and not option.startswith('--') and option != '-':
+                        flag_letters = {'script': 'qfea', 'flock': 'sxunoF', 'su': 'lmp'}[name]
+                        value_letters = {'script': 'OIBTm', 'flock': 'wE', 'su': 'sgGw'}[name]
+                        offset = 1
+                        while offset < len(option):
+                            letter = option[offset]
+                            if letter == 'c' or letter in value_letters:
+                                if offset + 1 < len(option):
+                                    if letter == 'c':
+                                        word = arguments[cursor]
+                                        yield (word[0][offset + 1:], option[offset + 1:], word[2] + offset + 1, word[3])
+                                else:
+                                    cursor += 1
+                                    if cursor >= len(arguments):
+                                        raise ValueError('missing wrapper option value')
+                                    if letter == 'c':
+                                        yield arguments[cursor]
+                                break
+                            if letter not in flag_letters:
+                                raise ValueError('ambiguous command wrapper option')
+                            offset += 1
+                        cursor += 1
+                        continue
+                    command_option, separator, attached = option.partition('=')
+                    code_option = command_candidate(option)
+                    if code_option and not separator:
+                        if cursor + 1 >= len(arguments):
+                            raise ValueError('missing wrapper program')
+                        yield arguments[cursor + 1]
+                        cursor += 2
+                        continue
+                    if code_option and separator:
+                        yield (arguments[cursor][0], attached, arguments[cursor][2], arguments[cursor][3])
+                        cursor += 1
+                        continue
+                    if option in value_options[name]:
+                        cursor += 2
+                    elif option in flags[name] or not option.startswith('-'):
+                        cursor += 1
+                    else:
+                        raise ValueError('ambiguous command wrapper option')
+                continue
+            if name in {'eval', 'watch'}:
+                yield from arguments
+                if arguments:
+                    yield ('', ' '.join(word[1] for word in arguments), arguments[0][2], arguments[-1][3])
+                continue
+            for cursor, argument in enumerate(arguments):
+                option = argument[1]
+                code = (option in {'-S', '--split-string'} if name == 'env'
+                        else bool(re.fullmatch(r'-[a-zA-Z]*c[a-zA-Z]*', option)))
+                if code:
+                    if cursor + 1 >= len(arguments):
+                        raise ValueError('missing wrapper program')
+                    operand = arguments[cursor + 1]
+                    if name == 'env':
+                        value = operand[1] + ' ' + shlex.join(word[1] for word in arguments[cursor + 2:])
+                        yield (operand[0], value, operand[2], arguments[-1][3])
+                    else:
+                        yield from arguments[cursor + 1:]
+                elif name == 'env' and option.startswith(('-S', '--split-string=')):
+                    value = option[2:] if option.startswith('-S') else option.split('=', 1)[1]
+                    if not value:
+                        raise ValueError('missing env split string')
+                    value += ' ' + shlex.join(word[1] for word in arguments[cursor + 1:])
+                    yield (argument[0], value, argument[2], arguments[-1][3])
+        except ValueError:
+            if not grep_data:
+                raise
+
+
+def shell_line_continuations(text):
+    """Join shell continuations while preserving literal single-quoted code."""
+    kept, quote, index, comment = [], '', 0, False
+    while index < len(text):
+        char = text[index]
+        before = kept[-1][-1:] if kept else ''
+        if not quote and char == '#' and (not before or before.isspace() or before in ';&|(<>' ):
+            comment = True
+        if comment:
+            kept.append(char)
+            index += 1
+            comment = char != '\n'
+            continue
+        if char == '\\' and quote != "'":
+            if text[index:index + 2] == '\\\n':
+                index += 2
+                continue
+            kept.append(text[index:index + 2])
+            index += 2
+            continue
+        if char == quote:
+            quote = ''
+        elif not quote and char in "'\"":
+            quote = char
+        kept.append(char)
+        index += 1
+    return ''.join(kept)
+
+
+def unresolved_shell_word(raw):
+    """Treat expansion markers conservatively; single quotes protect only glob characters."""
+    spans = single_quoted_spans(raw)
+    return '$' in raw or '`' in raw or spans is None or any(
+        re.search(r'[*?\[{]|^=', span) for span, single in spans if not single)
+
+
+def nested_work_exceeded(tokens, seen):
+    return len(seen) > 64 or len(tokens) * sum(
+        os.path.basename(token[1]) in STRING_WRAPPERS for token in tokens) > 50000
+
+
+def shell_input_state(tokens, text, inherited=(False, False, False)):
+    redirected = inherited[2] or any(token[0] == '<' for token in tokens)
+    output_input = any(token[0] == '(' and token[2] > 0 and text[token[2] - 1] == '>' for token in tokens)
+    piped = inherited[0] or redirected or output_input or any(token[1] == 'coproc' for token in tokens) or any(
+        token[0] == '|'
+        and not (index and tokens[index - 1][0] == '|' and tokens[index - 1][3] == token[2])
+        and not (index + 1 < len(tokens) and tokens[index + 1][0] == '|' and tokens[index + 1][2] == token[3])
+        for index, token in enumerate(tokens))
+    directory = inherited[1] or any(token[1] in {'cd', 'pushd'} for token in tokens)
+    return piped, directory, redirected
+
+
+def python_program(arguments):
+    """Return the program kind, flags, word index, and attached operand offset."""
+    flags, cursor = '', 0
+    while cursor < len(arguments):
+        option = arguments[cursor]
+        if option == '--':
+            return ('script' if cursor + 1 < len(arguments) else 'stdin', flags, cursor + 1, 0)
+        if option == '-' or not option.startswith('-'):
+            return ('stdin' if option == '-' else 'script', flags, cursor, 0)
+        if option == '--check-hash-based-pycs':
+            cursor += 2
+            continue
+        if option.startswith('--check-hash-based-pycs='):
+            cursor += 1
+            continue
+        if option.startswith('--'):
+            return 'unknown', flags, cursor, 0
+        offset = 1
+        while offset < len(option):
+            flag = option[offset]
+            if flag in 'cm':
+                attached = offset + 1 < len(option)
+                return flag, flags, cursor if attached else cursor + 1, offset + 1 if attached else 0
+            if flag in 'WX':
+                if offset + 1 == len(option):
+                    cursor += 1
+                break
+            if flag not in 'bBdEhiIOPqRsSuvVx':
+                return 'unknown', flags, cursor, 0
+            flags += flag
+            offset += 1
+        cursor += 1
+    return 'stdin', flags, cursor, 0
+
+
+def python_inline_denial(command):
+    """Check every Python -c word, including wrapper arguments and nested shell strings."""
+    shell = shell_line_continuations(shell_without_heredoc_bodies(command))
+    pending = [(shell, (False, False, False))]
+    seen = set()
+    while pending:
+        text, inherited = pending.pop()
+        text = shell_line_continuations(text)
+        identity = (text, inherited)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        try:
+            tokens = shell_raw_words(text)
+        except ValueError:
+            return 'process-capable python -c rule'
+        if nested_work_exceeded(tokens, seen):
+            return 'process-capable python -c rule (nesting limit)'
+        segments, current = [], []
+        for token in tokens:
+            if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
+                segments.append(current)
+                current = []
+            else:
+                current.append(token)
+        segments.append(current)
+        for words in segments:
+            for index, (raw, value, start, end) in enumerate(words):
+                if grep_data_token(words, index):
+                    continue
+                if not re.fullmatch(r'python(?:3(?:\.\d+)?)?', os.path.basename(value)):
+                    continue
+                arguments = words[index + 1:]
+                kind, flags, operand, offset = python_program([word[1] for word in arguments])
+                if any(unresolved_shell_word(word[0]) for word in arguments[:operand + (kind != 'c')]):
+                    return 'process-capable python -c rule'
+                if kind != 'c':
+                    if any(re.match(r'^-[bBdEhiIOPqRsSuvVx]*c', word[1]) for word in arguments):
+                        return 'process-capable python -c rule'
+                    continue
+                if operand >= len(arguments):
+                    return 'process-capable python -c rule'
+                for code_word in [arguments[operand]]:
+                    code_raw = code_word[0][offset:]
+                    code = code_raw[1:-1]
+                    literal = (len(code_raw) >= 2 and (
+                        code_raw[0] == code_raw[-1] == "'" and "'" not in code
+                        or code_raw[0] == code_raw[-1] == '"' and not any(char in code for char in '$`\\"')))
+                    reasons = []
+                    admitted = literal and (inert_python(code) or 'I' in flags and (
+                        inert_python(code, isolated=True) or literal_git_read_python(code, reasons)))
+                    if raw != value or re.search(r'[$`*?\[\]{}]', raw) or not admitted:
+                        return 'process-capable python -c rule' + (': ' + reasons[0] if reasons else '')
+                    rest = text[:start] + text[code_word[3]:]
+                    isolated = 'I' in flags and not inert_python(code)
+                    if python_writes(code, isolated=isolated) and (not check_only_shell(rest) or text != shell):
+                        return 'python -c then run rule'
+                    break
+        state = shell_input_state(tokens, text, inherited)
+        pending.extend((token[1], state) for token in nested_shell_strings(tokens))
+    return None
+
+
+# Each interpreter lists short inline-code/module flags, long flags, and code subcommands.
+INLINE_INTERPRETERS = {
+    'node': ('ep', {'--eval', '--print'}, set()),
+    'nodejs': ('ep', {'--eval', '--print'}, set()),
+    'perl': ('eEpMm', set(), set()),
+    'ruby': ('e', set(), set()),
+    'php': ('r', set(), set()),
+    'pypy': ('cm', set(), set()),
+    'pypy3': ('cm', set(), set()),
+    'lua': ('e', set(), set()),
+    'luajit': ('e', set(), set()),
+    'deno': ('', set(), {'eval'}),
+    'bun': ('ep', {'--eval', '--print'}, set()),
+    'Rscript': ('e', set(), set()),
+    'osascript': ('e', set(), set()),
+}
+
+
+def interpreter_name(value):
+    base = os.path.basename(value)
+    for name in INLINE_INTERPRETERS:
+        if re.fullmatch(re.escape(name) + r'(?:\d+(?:\.\d+)*|(?:\.\d+)+)?', base):
+            return name
+    return 'python' if re.fullmatch(r'python(?:3(?:\.\d+)?)?', base) else None
+
+
+def code_option(value):
+    return bool(re.match(r'--(?:eval|print)(?:=|$)|-[ceEpr]|-[a-zA-Z]*[ceE]', value))
+
+
+def stdin_program_path(value):
+    path = os.path.normpath(re.sub(r'/+', '/', value))
+    resolved = os.path.normpath(os.path.join(os.getcwd(), path))
+    return (value == '-' or '..' in value.split('/') or path in {'dev', 'proc'}
+            or path.startswith(('dev/', 'proc/')) or resolved in {'/dev', '/proc'}
+            or resolved.startswith(('/dev/', '/proc/')))
+
+
+def unsafe_script_path(value, base):
+    path = os.path.realpath(os.path.join(base, value))
+    return path in {'/proc', '/dev'} or path.startswith(('/proc/', '/dev/'))
+
+
+def chdir_wrapper_present(command):
+    pending, seen = [shell_without_heredoc_bodies(command)], set()
+    while pending:
+        text = shell_line_continuations(pending.pop())
+        if text in seen:
+            continue
+        seen.add(text)
+        try:
+            tokens = shell_raw_words(text)
+            if nested_work_exceeded(tokens, seen):
+                return True
+            for index, token in enumerate(tokens):
+                name = os.path.basename(token[1])
+                if name in {'chroot', 'nsenter', 'unshare', 'setpriv', 'runuser', 'su', 'systemd-run', 'doas'}:
+                    if index + 1 < len(tokens):
+                        return True
+                if name not in {'env', 'sudo'}:
+                    continue
+                flags = {'env': {'-i', '--ignore-environment', '-0', '--null', '-v', '--debug'},
+                         'sudo': {'-n', '--non-interactive', '-E', '--preserve-env', '-H', '--set-home',
+                                  '-k', '-K', '-S', '-b', '--background'}}[name]
+                values = {'env': {'-u', '--unset', '-S', '--split-string'},
+                          'sudo': {'-u', '--user', '-g', '--group', '-p', '--prompt', '-h', '--host'}}[name]
+                cursor = index + 1
+                while cursor < len(tokens):
+                    option = tokens[cursor][1]
+                    if not option.startswith('-'):
+                        if re.match(r'[A-Za-z_]\w*=', option):
+                            cursor += 1
+                            continue
+                        break
+                    if option == '--':
+                        break
+                    if option in flags:
+                        cursor += 1
+                    elif option in values:
+                        if name == 'env' and option in {'-S', '--split-string'}:
+                            if cursor + 1 >= len(tokens):
+                                return True
+                            payload = tokens[cursor + 1][1]
+                            if '\\' in payload or '$' in payload:
+                                return True
+                            pending.append('env ' + payload)
+                        cursor += 2
+                    elif '=' in option and option.partition('=')[0] in values:
+                        if name == 'env' and option.startswith('--split-string='):
+                            payload = option.partition('=')[2]
+                            if '\\' in payload or '$' in payload:
+                                return True
+                            pending.append('env ' + payload)
+                        cursor += 1
+                    elif name == 'env' and option.startswith('-S') and len(option) > 2:
+                        payload = option[2:]
+                        if '\\' in payload or '$' in payload:
+                            return True
+                        pending.append('env ' + payload)
+                        cursor += 1
+                    else:
+                        return True
+            pending.extend(token[1] for token in nested_shell_strings(tokens))
+        except ValueError:
+            return True
+    return False
+
+
+def safe_directory_state(command, cwd=None):
+    """Prove one literal directory step stays outside device and process filesystems."""
+    pending, seen, targets = [shell_without_heredoc_bodies(command)], set(), []
+    while pending:
+        text = shell_line_continuations(pending.pop())
+        if text in seen:
+            continue
+        seen.add(text)
+        if 'CDPATH' in text or 'cdable_vars' in text:
+            return False
+        try:
+            tokens = shell_raw_words(text)
+            if nested_work_exceeded(tokens, seen):
+                return False
+            for index, token in enumerate(tokens):
+                if token[1] not in {'cd', 'pushd'}:
+                    continue
+                cursor = index + 1
+                while cursor < len(tokens) and tokens[cursor][1] in {'-L', '-P', '-e', '-@'}:
+                    cursor += 1
+                if cursor >= len(tokens):
+                    return False
+                raw, target = tokens[cursor][:2]
+                if (unresolved_shell_word(raw) or not target or target.startswith(('-', '~'))
+                        or '..' in target.split('/') or not re.fullmatch(r'[\w./-]+', target)):
+                    return False
+                targets.append(target)
+            pending.extend(token[1] for token in nested_shell_strings(tokens))
+        except ValueError:
+            return False
+    if len(targets) != 1:
+        return False
+    base = os.path.realpath(cwd or os.getcwd())
+    target = os.path.realpath(os.path.join(base, targets[0]))
+    forbidden = lambda path: path in {'/proc', '/dev'} or path.startswith(('/proc/', '/dev/'))
+    return not forbidden(base) and not forbidden(target) and os.path.isdir(target)
+
+
+def inline_interpreter_denial(command, cwd=None):
+    chdir_wrapper = chdir_wrapper_present(command)
+    safe_directory = not chdir_wrapper and safe_directory_state(command, cwd)
+    base = os.path.realpath(cwd or os.getcwd())
+    safe_base = base not in {'/proc', '/dev'} and not base.startswith(('/proc/', '/dev/'))
+    shell = literal_variables(shell_without_heredoc_bodies(command))
+    lines = command.splitlines(keepends=True)
+    if lines and ANY_PYTHON_HEREDOC.fullmatch(lines[0]) and not process_heredoc_denial(command):
+        shell = shell[len(lines[0]):]
+    pending = [(shell, (False, False, False))]
+    seen = set()
+    while pending:
+        text, inherited = pending.pop()
+        text = shell_line_continuations(text)
+        identity = (text, inherited)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        try:
+            tokens = shell_raw_words(text)
+        except ValueError:
+            return 'inline interpreter code rule (unresolved command word)'
+        if nested_work_exceeded(tokens, seen):
+            return 'inline interpreter code rule (nesting limit)'
+        nested = list(nested_shell_strings(tokens))
+        input_tokens = shell_raw_words(shell_line_continuations(shell))
+        state = shell_input_state(tokens, text, shell_input_state(input_tokens, shell_line_continuations(shell), inherited))
+        piped_input, directory, redirected = state
+        if re.search(r'(?:\$\([^\n]*\)|`[^`\n]*`)[ \t]+(?:-[ceEpr]\b|--(?:eval|print)\b|-[a-zA-Z]*[ce]\b)', text):
+            return 'inline interpreter code rule (unresolved command word)'
+        segments, words, piped = [], [], False
+        for token in tokens:
+            raw = token[0]
+            if raw in {';', '&', '|', '(', ')', '`', '\n'}:
+                if words:
+                    segments.append((words, piped))
+                    words = []
+                if raw != '\n':
+                    piped = raw == '|' or raw == '(' and token[2] > 0 and text[token[2] - 1] == '>'
+            else:
+                words.append(token)
+        segments.append((words, piped))
+        shell_programs = set()
+        for index, token in enumerate(tokens):
+            if os.path.basename(token[1]) not in SHELL_INTERPRETERS:
+                continue
+            cursor = index + 1
+            while cursor < len(tokens):
+                option = tokens[cursor][1]
+                if option in {'-o', '+o', '-O', '+O'}:
+                    cursor += 2
+                    continue
+                if re.fullmatch(r'-[a-zA-Z]*c[a-zA-Z]*', option):
+                    if cursor + 1 < len(tokens):
+                        shell_programs.add(tokens[cursor + 1][2])
+                    break
+                if option.startswith('-') and option != '--':
+                    cursor += 1
+                    continue
+                break
+        for words, piped in segments:
+            reads_pipe = inherited[0] or piped or any(word[0] == '<' for word in words)
+            segment_relative_denied = (redirected or not safe_base or chdir_wrapper
+                                       or directory and not safe_directory or reads_pipe)
+            first = next((word for word in words if not re.match(r'[A-Za-z_]\w*=', word[1])), None)
+            if (piped_input and first and first[0] != '[' and first[1] != '$?'
+                    and unresolved_shell_word(first[0])):
+                return 'inline interpreter code rule (unresolved command word)'
+            for index, (raw, value, start, end) in enumerate(words):
+                arguments = [word[1] for word in words[index + 1:]]
+                unresolved = raw != '[' and value != '$?' and start not in shell_programs and unresolved_shell_word(raw)
+                names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
+                joined_code = unresolved_shell_word(raw) and bool(re.search(
+                    rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw))
+                if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
+                                                   or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'}):
+                    return 'inline interpreter code rule (unresolved command word)'
+                if grep_data_token(words, index):
+                    continue
+                name = interpreter_name(value)
+                if not name:
+                    continue
+                segment_text = text[words[0][2]:words[-1][3]]
+                if redirected or any(word[0] == '<' for word in words) or re.search(r'[<>][ \t]*\(|=\(', text[end:]):
+                    return 'inline interpreter code rule (program from a pipe)'
+                if not arguments and not piped:
+                    if piped_input or any(token[0] in {'<', '|', '('} or token[0] == '{'
+                                          for token in input_tokens + tokens):
+                        return 'inline interpreter code rule (program from a pipe)'
+                    continue
+                if name != 'python':
+                    short, long, subcommands = INLINE_INTERPRETERS[name]
+                    if (name == 'deno' and arguments[:1] and arguments[0] in {'eval', 'repl', 'run'}
+                            or any(argument in subcommands or argument.split('=', 1)[0] in long
+                                   or argument.startswith('-') and not argument.startswith('--')
+                                   and bool(set(argument[1:]) & set(short)) for argument in arguments[:1])):
+                        return f'inline interpreter code rule ({name})'
+                    if arguments == ['--version']:
+                        continue
+                    script = arguments[0] if arguments else ''
+                    if (not script or script.startswith('-') or stdin_program_path(script) or unsafe_script_path(script, base)
+                            or (segment_relative_denied or piped) and not os.path.isabs(script)
+                            or not re.fullmatch(r'[\w./:@%+,-]+', words[index + 1][0])):
+                        return ('inline interpreter code rule (program from a pipe)' if piped_input or stdin_program_path(script) or unsafe_script_path(script, base)
+                                or (segment_relative_denied or piped) and script and not os.path.isabs(script)
+                                else f'inline interpreter code rule ({name})')
+                elif not arguments or any(stdin_program_path(argument) for argument in arguments):
+                    return 'inline interpreter code rule (program from a pipe)'
+                else:
+                    kind, flags, operand, offset = python_program(arguments)
+                    if (kind == 'script' and operand < len(arguments) and (
+                            (segment_relative_denied or piped) and not os.path.isabs(arguments[operand])
+                            or unsafe_script_path(arguments[operand], base))):
+                        return 'inline interpreter code rule (program from a pipe)'
+                    if (piped_input or piped) and (kind not in {'c', 'm', 'script'} or operand >= len(arguments)
+                                        or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
+                        return 'inline interpreter code rule (program from a pipe)'
+        pending.extend((token[1], state) for token in nested)
     return None
 
 
@@ -1104,14 +1805,97 @@ def git_read_words(words):
         re.fullmatch(r'-[nilwEFvz]+|-[ABC][0-9]*|--|(?!-).*', word, re.S) for word in words[1:])
 
 
+def literal_search_shell(command):
+    """Recognize one literal cd/find/grep/ls chain without granting any process or write option."""
+    text = command.removesuffix('\n')
+    if not text or '\n' in text:
+        return False
+    spans = single_quoted_spans(text)
+    if spans is None:
+        return False
+    outside = ''.join('_' if quoted else span for span, quoted in spans)
+    if re.search(r'[$`\\"()<>;|!{}#~]', outside):
+        return False
+    tokens = list(re.finditer(r"'[^']*'|[^\s']+", text))
+    segments, current, end = [], [], 0
+    for token in tokens:
+        if text[end:token.start()].strip() or end and token.start() == end:
+            return False
+        raw = token[0]
+        if raw == '&&':
+            if text[token.start() - 1:token.start()] != ' ' or text[token.end():token.end() + 1] != ' ' or not current:
+                return False
+            segments.append(current)
+            current = []
+        else:
+            if '&' in raw and not raw.startswith("'"):
+                return False
+            current.append(raw)
+        end = token.end()
+    if not current:
+        return False
+    segments.append(current)
+    plain = lambda word: re.fullmatch(r'[\w./:@%+,-]+', word) is not None
+    path = lambda word: plain(word) and not word.startswith('-')
+    value = lambda word: plain(word) or len(word) >= 2 and word[0] == word[-1] == "'"
+    for words in segments:
+        command, arguments = words[0], words[1:]
+        if command == 'cd':
+            if len(arguments) != 1 or not path(arguments[0]):
+                return False
+        elif command == 'find':
+            cursor = 0
+            while cursor < len(arguments) and path(arguments[cursor]):
+                cursor += 1
+            if not cursor:
+                return False
+            while cursor < len(arguments):
+                if (arguments[cursor] not in {'-name', '-iname', '-path', '-ipath', '-type', '-maxdepth', '-mindepth'}
+                        or cursor + 1 >= len(arguments) or not value(arguments[cursor + 1])):
+                    return False
+                cursor += 2
+        elif command == 'grep':
+            cursor = 0
+            while cursor < len(arguments) and arguments[cursor].startswith('-'):
+                option = arguments[cursor]
+                if option in {'-A', '-B', '-C', '-m'}:
+                    cursor += 1
+                    if cursor == len(arguments) or not arguments[cursor].isdigit():
+                        return False
+                elif not re.fullmatch(r'-[nEFiwlLcrRHhsvqox]+', option):
+                    return False
+                cursor += 1
+            if (cursor + 1 >= len(arguments) or not value(arguments[cursor])
+                    or arguments[cursor].startswith("'-")
+                    or not all(path(word) for word in arguments[cursor + 1:])):
+                return False
+        elif command == 'ls':
+            cursor = 0
+            while cursor < len(arguments) and arguments[cursor].startswith('-'):
+                if not re.fullmatch(r'-[laAhdtrS1R]+', arguments[cursor]):
+                    return False
+                cursor += 1
+            if cursor == len(arguments) or not all(
+                    not word.startswith('-') and re.fullmatch(r'[\w./:@%+,*?-]+', word)
+                    for word in arguments[cursor:]):
+                return False
+        else:
+            return False
+    return True
+
+
 def shell_git_push(command):
     """Scan Git commands and shell-wrapper strings without regex backtracking."""
     values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
               '--config-env', '--super-prefix', '--attr-source', '--shallow-file'}
     folders = {'-C', '--git-dir', '--work-tree'}
     pending = [command]
+    seen = set()
     while pending:
         text = pending.pop().replace('\\' + '\n', '')
+        if text in seen:
+            continue
+        seen.add(text)
         try:
             lexer = shlex.shlex(text, posix=True, punctuation_chars='();<>|&`')
             lexer.whitespace_split = True
@@ -1164,7 +1948,8 @@ def shell_git_push(command):
         else:
             spelled = any(word in re.sub(r'(?<!\w)push(?:ed|es)(?=\s*:)', '', token).translate(expansion)
                           for token in tokens for word in ('push', 'send-pack'))
-        if not literal_globs and any(set(token) & set('$`*?[{') for token in tokens) and spelled:
+        literal_search = literal_search_shell(text)
+        if not (literal_globs or literal_search) and any(set(token) & set('$`*?[{') for token in tokens) and spelled:
             return 'git writer expansion or glob rule'
         expect_subcommand = skip_value = folder_value = False
         # Only a `git` that starts a command reads its own arguments; `eval git -C "$W"` or `watch git ...`
@@ -1381,8 +2166,7 @@ def pre(data):
                                   'Return this step to your driver; the driver may run it.')
             try:
                 command = tin.get('command', '')
-                if any(char in command for char in ('\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85',
-                                                     chr(0x2028), chr(0x2029))):
+                if any(char.isspace() and char not in ' \t\n' for char in command):
                     deny(publication_reason + ' Rule: line separator rule.')
                 reason = process_heredoc_denial(command)
                 if reason:
@@ -1398,6 +2182,15 @@ def pre(data):
                 reason = writer_gh_denial(file_text_removed)
                 if reason:
                     deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + reason)
+                reason = process_heredoc_denial(command, readers=True)
+                if reason:
+                    deny(publication_reason + ' Rule: ' + reason + '.')
+                reason = python_inline_denial(command)
+                if reason:
+                    deny(publication_reason + ' Rule: ' + reason + '.')
+                reason = inline_interpreter_denial(command, data.get('cwd'))
+                if reason:
+                    deny(publication_reason + ' Rule: ' + reason + '.')
             except Exception:
                 deny(publication_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''

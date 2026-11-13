@@ -48,6 +48,28 @@ class WriterFalsePublishTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.decision(command).get('permissionDecision'), 'deny')
 
+    def test_literal_read_only_search_chain_is_admitted(self):
+        command = ("cd /w/ultraship-hookfix && find . -name CLAUDE.md && "
+                   "grep -nE 'shell_git_push|python_heredoc_shell|runs_heredoc_output|inert_python|WRITER_BASH|INERT_ATTRIBUTES|PATH_METHODS' "
+                   "plugins/ship/hooks/ultraship.py scripts/test_writer_heredoc.py plugins/ship/hooks/ultraship_test.py "
+                   "&& ls /w/scratch/hookfix2-diag && ls /w/scratch/*slot*\n")
+        self.assertTrue(ultraship.literal_search_shell(command))
+        self.assertAdmitted(command, "find . -name '*push*' && ls /w/*push*",
+                            "grep -n -A 2 'push' README.md && ls /w/*push*")
+
+    def test_search_admission_refuses_process_write_and_shell_shapes(self):
+        commands = [f'find . {option} x' for option in (
+            '-exec', '-execdir', '-ok', '-okdir', '-delete', '-fprint', '-fprintf', '-fls')]
+        commands += ['find . > x', 'grep x README.md > x', 'find $(echo .)', 'ls `echo x`',
+                     'find . | cat', 'find .; ls x', 'find . -name *x*', 'grep *x* README.md',
+                     'g?t status', 'find . && git status', 'find . && python3 x.py',
+                     "find . -name x'*push*'", 'find .&& ls /w/*push*',
+                     "grep '--filter=md:git push origin HEAD' x README.md && ls /w/*push*"]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFalse(ultraship.literal_search_shell(command))
+                self.assertDenied(command + ' && ls /w/*push*', command + ' && git push origin HEAD')
+
     def test_png_identity_check_during_a_staged_merge_is_admitted(self):
         self.assertDenied(
             "cd /w/lane && python3 -I - <<'PY'\nimport subprocess\npath = 'docs/screens/onboarding.png'\n"

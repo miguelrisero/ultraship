@@ -4,6 +4,8 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import signal
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,17 +17,655 @@ spec.loader.exec_module(ultraship)
 class WriterHeredocTests(unittest.TestCase):
     BYTECODE_FLAGS = ('-I -B', '-B -I', '-B', '-IB', '-BI')
 
-    def denied(self, command):
+    def denied(self, command, cwd=None):
         output = io.StringIO()
+        payload = {'agent_type': 'ship:writer--sol', 'tool_name': 'Bash', 'tool_input': {'command': command}}
+        if cwd is not None:
+            payload['cwd'] = cwd
         with contextlib.redirect_stdout(output):
             try:
-                ultraship.pre({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
-                               'tool_input': {'command': command}})
+                ultraship.pre(payload)
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
+
+    def test_process_capable_python_inline_strings_are_denied(self):
+        code = "import subprocess; subprocess.run([\"git\", \"pu\" + \"sh\"])"
+        for command in (
+            'python3 -c "import subprocess; subprocess.run([\'git\', \'pu\' + \'sh\'])"',
+            f"python3 -Ic '{code}'", f"python3 -c'{code}'", f"X=$(python3 -c '{code}')",
+            'bash -c "python3 -c \'import sys; print(sys.argv)\'"',
+            *(f"{python} -c '{code}'" for python in (
+                'uv run python', 'env python3', '/usr/bin/python3', 'python3.12',
+                'timeout 5 python3', 'xargs python3', 'nohup python3', 'sudo python3')),
+            'python3 -c "print($(echo 1))"', 'python3 -c a*b',
+            "python3 -c 'import sys; print(sys.argv)'", "python3 -c 'print(1)",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_inert_python_inline_strings_are_admitted(self):
+        for command in (
+            "python3 -c 'print(1)'", 'python3 -c "print(1)"',
+            'python3 -I -c \'import json; print(json.dumps({"a": 1}))\'',
+            "python3 -Ic'print(1)'", 'python3 -m pytest -q',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command))
+
+    def test_inline_python_write_requires_check_only_remainder(self):
+        write = 'python3 -c \'open("r.sh", "w").write("echo x")\''
+        self.assertTrue(self.denied(write + ' && bash r.sh'))
+        self.assertIn('python -c then run rule', self.reason)
+        self.assertFalse(self.denied(write + ' && bash -n r.sh'))
+        self.assertFalse(self.denied(write + ' && cat r.sh'))
+
+    def test_inline_literal_git_read_requires_isolation_and_names_reason(self):
+        code = 'import subprocess; subprocess.run(["git", "branch", "--show-current"])'
+        self.assertFalse(self.denied(f"python3 -I -c '{code}'"))
+        self.assertTrue(self.denied(f"python3 -c '{code}'"))
+        bad = code.replace('"branch", "--show-current"', '"status"')
+        self.assertTrue(self.denied(f"python3 -I -c '{bad}'"))
+        self.assertIn('process-capable python -c rule: git read requires', self.reason)
+
+    def test_other_interpreter_inline_code_is_denied(self):
+        for interpreter, option in (
+            ('node', '-e'), ('node', '-p'), ('node', '--eval=x'), ('nodejs', '-e'),
+            ('perl', '-e'), ('perl', '-ne'), ('perl', '-MPOSIX -e'), ('perl', '-E'),
+            ('perl5.36', '-lne'), ('pypy3', '-c'), ('pypy3.10', '-m'), ('ruby', '-e'),
+            ('php', '-r'), ('deno', 'eval'), ('bun', '-e'), ('osascript', '-e'),
+            ('Rscript', '-e'), ('lua', '-e'), ('luajit', '-e'),
+        ):
+            with self.subTest(interpreter=interpreter, option=option):
+                self.assertTrue(self.denied(f'{interpreter} {option} x'))
+                self.assertIn('inline interpreter code rule (', self.reason)
+
+    def test_unresolved_inline_command_words_are_denied(self):
+        for command in ('"python3" -c x', "pyth''on3 -c x", r'p\ython3 -c x',
+                        '$P -c x', '$(which node) -e x'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+        self.assertTrue(self.denied('$P -c x'))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_heredoc_reader_allowlist_denies_interpreters_and_wrappers(self):
+        for reader in ('node -', 'node', 'perl', 'pypy3 -', 'ruby', '"python3" -',
+                       "pyth''on3 -", 'env node', 'X=1 node'):
+            with self.subTest(reader=reader):
+                self.assertTrue(self.denied(reader + " <<'EOF'\nx\nEOF\n"))
+                self.assertIn('process-capable heredoc rule (heredoc reader not on the allowlist)', self.reason)
+        for command in ("cat <<'EOF' | node\nx\nEOF\n", "cat <<'EOF' |\nx\nEOF\nnode\n",
+                        "env cat <<'EOF'\nx\nEOF\n", "cat <<'EOF'; node\nx\nEOF\n"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('heredoc reader not on the allowlist', self.reason)
+
+    def test_here_strings_require_data_reader(self):
+        for reader in ('python3', 'node', 'perl'):
+            with self.subTest(reader=reader):
+                self.assertTrue(self.denied(reader + " <<< 'abc'"))
+                self.assertIn('heredoc reader not on the allowlist', self.reason)
+
+    def test_program_from_pipe_is_denied(self):
+        for command in ("printf '%s' x | python3", 'echo x | node', 'cat f | perl'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_data_readers_and_script_operands_are_admitted(self):
+        for command in ('node --version', 'node script.js', 'perl script.pl',
+                        "cat > notes.md <<'EOF'\ntext\nEOF\n", "tee x.txt <<'EOF'\ntext\nEOF\n",
+                        "grep x <<< 'abc'"):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command))
+
+    def test_commit_prefix_keeps_later_inline_code_checked(self):
+        command = ('git commit -m x\n: <<\'Z\'\nZ\n'
+                   'python3 -c \'import subprocess; subprocess.run(["git", "pu" + "sh"])\'')
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule', self.reason)
+        self.assertIn('process-capable python -c rule', ultraship.python_inline_denial(command))
+
+    def test_expansions_cannot_assemble_inline_interpreter(self):
+        for command in ('$P -c x', 'py${X}thon3 -c x', 'python3${IFS}-c x'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_python_value_options_keep_inline_code_checked(self):
+        code = 'import subprocess; subprocess.run(["git", "pu" + "sh"])'
+        for flags in ('-W ignore', '-X dev', '-Wignore', '-Xdev', '-m module', '-- script.py'):
+            with self.subTest(flags=flags):
+                self.assertTrue(self.denied(f"python3 {flags} -c '{code}'"))
+                self.assertIn('process-capable python -c rule', self.reason)
+        self.assertFalse(self.denied("python3 -W ignore -c 'print(1)'"))
+
+    def test_inline_newline_operators_terminate_recursion(self):
+        self.assertFalse(self.denied("python3 -c 'print(1)'\ncat x\n"))
+        self.assertTrue(self.denied("cat x\npython3 -c 'import sys; print(sys.argv)'\n"))
+        self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_named_interpreters_refuse_unlisted_code_options(self):
+        for command in ('php -B x', 'node --import x', 'deno run x', 'bun --preload x'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (', self.reason)
+
+    def test_stdin_paths_cannot_supply_interpreter_programs(self):
+        for reader in ('python3', 'node', 'perl'):
+            for path in ('-', '/dev/stdin', '/dev/fd/0', '/proc/self/fd/0'):
+                with self.subTest(reader=reader, path=path):
+                    self.assertTrue(self.denied(f'cat f | {reader} {path}'))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_redirects_and_process_substitution_cannot_supply_programs(self):
+        for command in ('node <(echo x)', 'perl < x', 'python3 < x', 'python3 /dev/stdin'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_unquoted_data_heredoc_expansions_are_denied(self):
+        for body in ('$(python3 -c x)', '`node -e x`', '${PROGRAM}'):
+            with self.subTest(body=body):
+                self.assertTrue(self.denied('cat <<EOF\n' + body + '\nEOF\n'))
+                self.assertIn('process-capable heredoc rule', self.reason)
+
+    def test_warning_operand_cannot_hide_real_python_code(self):
+        code = 'import subprocess; subprocess.run(["git", "pu" + "sh"])'
+        for flags in ('-W ignore', "-Wc'print(1)'", '-X I'):
+            with self.subTest(flags=flags):
+                self.assertTrue(self.denied(f"python3 {flags} -c '{code}'"))
+                self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_nested_python_write_checks_outer_consumer(self):
+        command = 'bash -c "python3 -c \'open(\\"r.sh\\", \\"w\\").write(\\"echo x\\")\'" && bash r.sh'
+        self.assertTrue(self.denied(command))
+        self.assertIn('python -c then run rule', self.reason)
+
+    def test_path_open_write_keeps_consumers_denied(self):
+        code = 'from pathlib import Path; Path("r.sh").open("w").write("echo x")'
+        self.assertTrue(self.denied(f"python3 -I -c '{code}' && bash r.sh"))
+        self.assertIn('python -c then run rule', self.reason)
+        self.assertTrue(self.denied("python3 -I - <<'EOF'\n" + code + '\nEOF\nbash r.sh'))
+        self.assertIn('heredoc-then-run rule', self.reason)
+
+    def test_plain_quoted_arguments_do_not_reparse_as_programs(self):
+        self.assertFalse(self.denied('echo "it\'s fine"'))
+
+    def test_shell_options_and_string_wrappers_keep_nested_code_checked(self):
+        script = "python3 -c 'import sys; print(sys.argv)'"
+        for wrapper in ('bash -o pipefail -c', 'sh -ec', 'bash --norc -c', 'env -S', 'eval'):
+            with self.subTest(wrapper=wrapper):
+                self.assertTrue(self.denied(f'{wrapper} "{script}"'))
+                self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_wrapper_option_values_cannot_hide_unresolved_interpreters(self):
+        for wrapper in ('timeout --signal=TERM 5', 'env -u A'):
+            with self.subTest(wrapper=wrapper):
+                self.assertTrue(self.denied(f"{wrapper} $P -c 'x'"))
+                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_shell_program_skip_uses_token_offset(self):
+        command = "bash -c '$P'; timeout --signal=TERM 5 '$P' -c 'x'"
+        self.assertTrue(self.denied(command))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_ansi_quoted_node_option_is_denied(self):
+        self.assertTrue(self.denied("node $'-e' 'require(\"child_process\").execSync(\"git \" + \"pu\" + \"sh\")'"))
+        self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_python_pipe_stdin_operand_keeps_trailing_arguments_denied(self):
+        command = ('printf \'%s\' \'import subprocess; subprocess.run(["git", "pu" + "sh"])\' '
+                   '| python3 - ignored')
+        self.assertTrue(self.denied(command))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_env_split_string_keeps_later_code_arguments_checked(self):
+        code = 'require("child_process").execSync("git " + "pu" + "sh")'
+        self.assertTrue(self.denied(f"env -S 'node' -e '{code}'"))
+        self.assertIn('inline interpreter code rule', self.reason)
+
+    def test_wrapper_program_attribution_keeps_direct_tokens_checked(self):
+        command = "bash -o -c $P -c 'x'"
+        self.assertTrue(self.denied(command))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_unresolved_attached_and_multiline_code_options_are_denied(self):
+        for command in ("P=python3; $P -Ic'import os'", "P=perl; $P -we'system(1)'",
+                        "P=perl; $P '-e\nsystem(1)'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule', self.reason)
+
+    def test_additional_string_wrappers_scan_programs(self):
+        for command in ('watch -n 9 \'python3 -c "import sys; print(sys.argv)"\'',
+                        'script -qc \'python3 -c "import sys"\' /dev/null', "flock f -c 'node -e x'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule' if command.startswith('flock')
+                              else 'process-capable python -c rule', self.reason)
+
+    def test_github_run_watch_is_a_read_only_command(self):
+        self.assertFalse(self.denied('gh run watch 123 --exit-status'))
+
+    def test_unquoted_heredoc_backslash_cannot_move_end_line(self):
+        self.assertTrue(self.denied('cat > a <<EOF\nx\\\nEOF\necho ok\nEOF'))
+        self.assertIn('process-capable heredoc rule (expandable data body)', self.reason)
+
+    def test_bare_interpreter_groups_cannot_read_stdin(self):
+        for command in ("printf '%s' 'x' | (node)", "printf '%s' 'x' | { node; }", '(node) < x.js'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (unresolved command word)' if '{' in command
+                              else 'inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_ansi_quote_at_any_word_position_is_denied(self):
+        for command in (r'''echo x$'\''; bun --eval 'require("child_process")' #' ''', "echo $'text'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_relative_stdin_paths_cannot_supply_program(self):
+        for command in ("printf '%s' 'x' | node ../../../../../../dev/stdin",
+                        "cd / && printf '%s' 'x' | node dev/stdin"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_shell_continuations_cannot_hide_interpreter_or_code_option(self):
+        code = "'import os; os.system(chr(103))'"
+        for command in ('pyth\\\non3 -c ' + code, '"pyth\\\non3" -c ' + code, 'python3 -\\\nc ' + code):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+        self.assertFalse(self.denied("python3 -c 'print(\\\n1)'"))
+
+    def test_all_non_shell_whitespace_is_denied(self):
+        for separator in (chr(0x3000), chr(0x1f)):
+            command = "python3 -c '#'" + separator + "'\nimport subprocess; subprocess.run((\"git\", \"pu\" + \"sh\"))'"
+            self.assertTrue(self.denied(command))
+            self.assertIn('line separator rule', self.reason)
+
+    def test_unresolved_pipeline_command_cannot_supply_program(self):
+        for command in ("N=node; printf '%s' 'x' | $N", "printf '%s' 'x' | =node"):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+        self.assertFalse(self.denied("git diff | grep -n 'foo'"))
+
+    def test_leading_input_redirect_keeps_later_python_stdin_denied(self):
+        self.assertTrue(self.denied("< <(printf '%s' 'x') python3 -I"))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_legacy_data_body_scan_preserves_base_denial_reasons(self):
+        command = ('cat > f.sh <<\'EOF\'\npython3 - <<\'PY\'\nimport subprocess\n'
+                   'subprocess.run(("git", "pu" + "sh"))\nPY\nEOF\nbash f.sh')
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule (interpreter heredoc must start the command)', self.reason)
+        self.assertTrue(self.denied('cat <<EOF\n$(git push)\nEOF'))
+        self.assertIn('git writer expansion or glob rule', self.reason)
+
+    def test_python_option_values_cannot_supply_pipe_program(self):
+        for flags in ('-W ignore', '-Wignore', '-X dev', '--check-hash-based-pycs always'):
+            command = "printf '%s\\n' 'import subprocess' | python3 " + flags
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_command_pipeline_input_reaches_grouped_python(self):
+        for command in ("printf '%s' 'x' | (python3 -I)", "printf '%s' 'x' |& python3 -I",
+                        "printf '%s' 'x' | { python3 -I; }"):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule', self.reason)
+
+    def test_python_clusters_consume_warning_and_runtime_option_values(self):
+        for flags in ('-bW ignore', '-IX dev', '-IWignore'):
+            self.assertTrue(self.denied("printf '%s' 'x' | python3 " + flags))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_program_after_directory_change_is_denied(self):
+        for command in ("cd /dev && printf '%s' 'x' | node stdin",
+                        "cd /dev/fd && printf '%s' 'x' | python3 0", 'cd /dev && node stdin'):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        self.assertFalse(self.denied('node scripts/build.js'))
+
+    def test_nested_text_contributes_pipeline_and_directory_state(self):
+        for command in ('sh -c "printf \'%s\' \'x\' | python3 -I"',
+                        'eval "printf \'%s\' \'x\' | python3 -I"',
+                        'sh -c "cd /dev && printf \'%s\' \'x\' | node stdin"'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_word_internal_glob_groups_cannot_hide_interpreters(self):
+        # These process calls remain classifier input only.
+        for command in ("/usr/bin/pyth(o)n3 -c 'import os; os.system(chr(103))'",
+                        "cd /usr/bin && env (p)ython3 -c 'import os; os.system(chr(103))'",
+                        "/usr/bin/pyth@(o)n3 -c 'import os; os.system(chr(103))'", "/usr/bin/no(d)e -e 'x'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+        self.assertFalse(self.denied('a=(1 2); echo ok'))
+        self.assertFalse(self.denied('head=$(git -C /w rev-parse HEAD)trailing'))
+
+    def test_shell_comments_preserve_following_program_checks(self):
+        self.assertTrue(self.denied("# it's\nprintf %s x | node\n# '"))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        self.assertFalse(self.denied("ls # it's fine"))
+        self.assertFalse(self.denied('echo word#literal'))
+
+    def test_coprocess_interpreters_read_stdin(self):
+        for command in ('coproc node; print -p x; coproc true; wait',
+                        'coproc python3 -B; print -p x; coproc true; wait'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_wrapper_words_without_command_options_remain_data(self):
+        self.assertFalse(self.denied('grep -n script -r src'))
+
+    def test_comment_after_substitution_cannot_hide_pipeline(self):
+        for command in ("echo $(true)#; printf '%s' 'x' | node",
+                        "echo `true #`; printf '%s' 'x' | node"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule' if '`' in command
+                              else 'inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_wrapper_code_bundles_and_command_prefixes_are_checked(self):
+        for command in ('script -qec \'python3 -c "import os"\' /dev/null', "flock f --comm 'node -e x'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule' if command.startswith('flock')
+                              else 'process-capable python -c rule', self.reason)
+
+    def test_wrapper_attached_code_values_are_checked(self):
+        for command in ("script -qc'node -e x' /dev/null", "flock f -c'node -e x'", "su -c'node -e x'",
+                        "script -Ologc.txt -c 'node -e x' /dev/null"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (node)', self.reason)
+
+    def test_comment_inside_process_substitution_is_denied(self):
+        for command in ("cat <(true #); printf '%s' 'x' | node",
+                        "echo x >(true #); printf '%s' 'x' | node"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_comment_quote_cannot_hide_continued_interpreter(self):
+        for command in ("# '\npyth\\\non3 -c 'import os; os.system(chr(105)+chr(100))'",
+                        "echo x # '\nno\\\nde -e 'require(1)'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (node)' if command.startswith('echo')
+                              else 'process-capable python -c rule', self.reason)
+
+    def test_nested_shell_keeps_intermediate_pipe_state(self):
+        body = 'import subprocess; subprocess.run(["git", "pu" + "sh"])'
+        command = "sh -c 'printf \"%s\\n\" \"" + body.replace('"', '\\"') + "\" | sh -c \"python3 -I\"'"
+        for command in (command, 'bash -c \'cat f | bash -c "bash -c node"\''):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (unresolved command word)' if command.startswith('sh')
+                              else 'inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_program_after_literal_cd_is_admitted(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        for directory in ('frontend', 'backend', 'x'):
+            (root / directory).mkdir()
+        for command in ('cd frontend && bun test', 'cd frontend && bun install', 'cd frontend && bun run lint',
+                        'pushd frontend && bun test', 'cd x && deno test', 'cd backend && python3 scripts/x.py'):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command, cwd=str(root)))
+
+    def test_relative_program_after_unsafe_cd_is_denied(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        for directory in ('frontend', 'backend', 'x'):
+            (root / directory).mkdir()
+        (root / 'proc-fd').symlink_to('/proc/self/fd', target_is_directory=True)
+        for command in ('cd /dev && node stdin', 'cd ../x && node 0', 'cd $X && node 0', 'cd - && node 0',
+                        'cd && node 0', 'cd ~/x && node 0', 'CDPATH=x; cd x && node 0',
+                        'setopt cdable_vars; cd x && node 0', 'cd missing && node 0',
+                        'cd x && cd frontend && node 0', 'cd proc-fd && node 0'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command, cwd=str(root)))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_interpreter_name_after_grep_is_data(self):
+        for command in ('ps aux | grep python', 'ps aux | grep node', 'ps aux | grep -i python3'):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command))
+        for command in ('ps aux | grep python | node', 'ps aux | xargs python'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_output_process_substitution_is_piped_input(self):
+        for command in ('printf \'%s\' \'import subprocess; subprocess.run(("git", "pu" + "sh"))\' > >(python3 -I)',
+                        'echo x > >(python3 -B)'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        self.assertFalse(self.denied('echo x > >(python3 -m json.tool)'))
+
+    def test_chdir_wrapper_makes_relative_programs_unsafe(self):
+        for command in ('env -C /dev/fd python3 0', 'env --chdir=/dev/fd node 0',
+                        "env -C /dev/fd sh -c 'cd . && python3 0'", "env -S '-C /dev/fd node 0'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_wrapper_words_in_grep_segments_are_data(self):
+        self.assertFalse(self.denied('grep -n script -rc src'))
+        self.assertFalse(self.denied('git grep -n script -c'))
+        self.assertTrue(self.denied("grep x src; script -qc 'node -e x' /dev/null"))
+        self.assertIn('inline interpreter code rule (node)', self.reason)
+
+    def test_output_substitution_state_reaches_nested_texts(self):
+        for command in ("echo x > >(sh -c 'python3 -I')", "echo x > >(sh -c 'true; python3 -I')"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_program_before_pipe_is_admitted(self):
+        for command in ('bun test 2>&1 | tail -20', 'bun run lint | head -50', 'python3 scripts/check.py | head'):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command))
+        self.assertTrue(self.denied('cat x | bun run build'))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_absolute_literal_cd_target_is_admitted(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / 'frontend').mkdir()
+        self.assertFalse(self.denied(f'cd {root}/frontend && bun test', cwd=str(root)))
+        self.assertTrue(self.denied('cd /proc/self/fd && node 0', cwd=str(root)))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_rg_patterns_are_data(self):
+        self.assertFalse(self.denied('rg -n node -t ts'))
+        self.assertTrue(self.denied('rg --pre node -e x src'))
+        self.assertIn('inline interpreter code rule (node)', self.reason)
+
+    def test_relative_script_pipe_exemption_keeps_input_and_symlinks_denied(self):
+        for command in ('bun test 2>&1 | tail -20', 'bun run lint | head -50',
+                        'python3 scripts/check.py | head', 'node ./x.js | cat'):
+            self.assertFalse(self.denied(command))
+        for command in ("sh -c 'node ./rel.js' | cat", "printf x | sh -c 'node ./0'", 'cat code.py | python3 ./0'):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / 'script').symlink_to('/proc/self/fd', target_is_directory=True)
+        self.assertTrue(self.denied('node ./script', cwd=str(root)))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_namespace_and_unknown_wrappers_make_relative_programs_unsafe(self):
+        for command in ('chroot /dev/fd node 0', 'nsenter --wd=/dev/fd node 0', 'sudo --unknownopt node ./x.js'):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        self.assertFalse(self.denied('sudo -n node ./x.js'))
+        self.assertFalse(self.denied('env FOO=1 node scripts/x.js'))
+
+    def test_python_inline_check_keeps_grep_words_as_data(self):
+        self.assertFalse(self.denied('grep -n python3 -c src'))
+        self.assertFalse(self.denied('grep -c python -r src'))
+        self.assertTrue(self.denied("cat x | python3 -c 'import os'"))
+        self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_git_global_options_preserve_grep_data_words(self):
+        self.assertFalse(self.denied('git -C . grep -n node -- src'))
+        self.assertFalse(self.denied('git --no-pager grep -n python src'))
+        self.assertFalse(self.denied('git grep -n script -c'))
+
+    def test_chdir_scan_stops_at_program_word(self):
+        for command in ('env NODE_ENV=production node scripts/build.js --check',
+                        'sudo -n node ./x.js --chunk', 'env FOO=1 node scripts/x.js -C 3'):
+            self.assertFalse(self.denied(command))
+        for command in ("env -S '-C /dev/fd node 0'", 'env -C /dev/fd node 0'):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_git_attached_global_options_preserve_grep_data(self):
+        self.assertFalse(self.denied('git -C. grep -n node -- src'))
+        self.assertFalse(self.denied('git -ccolor.ui=never grep -n node src'))
+
+    def test_env_split_string_forms_are_chdir_checked(self):
+        for command in ("env -S'-C /dev/fd node 0'", "env --split-string='-C /dev/fd node 0'",
+                        "env --split-string '-C /dev/fd node 0'", "env -S'--chdir=/dev/fd node 0'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_env_split_string_escapes_fail_closed(self):
+        for command in (r"env -S'-C\_/dev/fd node 0'", r"env -S '-C\_/dev/fd node 0'",
+                        r"env --split-string='-C\_/dev/fd node 0'", r"env --split-string '-C\_/dev/fd node 0'",
+                        "env -S '${X} node ./x.js'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule', self.reason)
+        self.assertFalse(self.denied("env -S'FOO=1 node ./x.js'"))
+
+    def test_unresolved_grep_segment_keeps_nested_shell_scan(self):
+        self.assertTrue(self.denied('grep -rn "$PAT" src eval \'node -e 1\''))
+        self.assertIn('inline interpreter code rule (node)', self.reason)
+        self.assertFalse(self.denied("grep -rn x eval 'node -e 1'"))
+        self.assertFalse(self.denied('grep -rn eval "$DIR"'))
+        self.assertFalse(self.denied('grep -rn eval src/*.py | head'))
+        self.assertFalse(self.denied('grep -rn eval *.py | wc -l'))
+        self.assertTrue(self.denied("gre? -rn x eval 'node -e 1'"))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+        self.assertFalse(self.denied('grep -n script -rc "$DIR"'))
+
+    def test_joined_named_interpreter_code_is_denied(self):
+        for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule', self.reason)
+
+    def test_nested_work_limit_denies_large_eval_chain(self):
+        command = 'eval ' * 3000 + "node -e 'x'"
+        self.assertTrue(self.denied(command))
+        self.assertIn('(nesting limit)', self.reason)
+        self.assertIn('(nesting limit)', ultraship.inline_interpreter_denial(command))
+
+    def test_unresolved_interpreter_subcommands_are_denied(self):
+        for command in ("DENO=deno; $DENO eval 'console.log(1)'", 'DENO=deno; $DENO run https://example.invalid/mod.ts',
+                        'DENO=deno; $DENO repl', 'D=deno; "$D" eval x'):
+            self.assertTrue(self.denied(command))
+            self.assertIn('process-capable python -c rule' if 'console.log' in command
+                          else 'inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_here_string_cannot_hide_later_python_program(self):
+        command = 'grep x <<< \'<<"Z"\'\npython3 -c \'import subprocess; subprocess.run(("git", "pu" + "sh"))\''
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable heredoc rule', self.reason)
+
+    def test_python_brace_expansion_before_code_is_denied(self):
+        self.assertTrue(self.denied('python3 {-Ic,\'import subprocess; subprocess.run(("git", "pu" + "sh"))\'}'))
+        self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_ansi_escape_cannot_hide_following_interpreter(self):
+        command = r'''echo $'\''; bun --eval 'require("child_process").execSync("git "+"pu"+"sh")' #' '''.rstrip()
+        self.assertTrue(self.denied(command))
+        self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_python_pipe_flags_and_normalized_stdin_paths_are_denied(self):
+        for command in ("printf '%s' 'import subprocess' | python3 -I", "printf '%s\\n' 'x' | python3 -i -c 'print(1)'",
+                        "printf '%s' 'x' | node /dev/./stdin", "python3 =(printf '%s' 'x')"):
+            self.assertTrue(self.denied(command))
+            self.assertIn('process-capable python -c rule' if command.startswith('python3 =')
+                          else 'inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_shell_cluster_scans_every_following_program_word(self):
+        # Shell and process calls below are classifier fixtures only; the test never executes them.
+        for command in ('bash -c -- "python3 -c \'import os; os.system(chr(103))\'"',
+                        'rbash -c "python3 -c \'import os; os.system(chr(103))\'"'):
+            self.assertTrue(self.denied(command))
+            self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_nonbreaking_space_keeps_inline_python_denied(self):
+        command = "python3 -c '#'" + chr(0xa0) + "'\nimport subprocess; subprocess.run((\"git\", \"pu\" + \"sh\"))'"
+        def expired(signum, frame):
+            raise AssertionError('classifier exceeds the 10 second hang guard')
+        previous = signal.signal(signal.SIGALRM, expired)
+        signal.alarm(10)
+        try:
+            self.assertTrue(self.denied(command))
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous)
+        self.assertIn('line separator rule', self.reason)
+
+    def test_literal_quoted_arguments_keep_base_admissions(self):
+        for command in ("grep 'foo' -r src", "git log --format='%h %s' -c -n 3", "find src -name '*.py' -type f"):
+            self.assertFalse(self.denied(command))
+        for command in ('P=python3; "$P" -c \'import os\'', "node $'-e' x", 'pyth?n3 -c x'):
+            self.assertTrue(self.denied(command))
+
+    def test_data_reader_body_extent_keeps_data_and_checks_remainder(self):
+        for body in ('x = 1 << 3', "Run python3 - <<'PY' first."):
+            self.assertFalse(self.denied("cat > notes.md <<'EOF'\n" + body + '\nEOF\n'))
+        self.assertTrue(self.denied("cat > f.py <<'EOF'\nx = 1 << 3\n"))
+        self.assertTrue(self.denied("cat > f <<'EOF'\nx\nEOF\nnode <<'JS'\nconsole.log(1)\nJS\n"))
+
+    def test_tab_stripped_delimiters_agree_on_body_extent(self):
+        self.assertFalse(self.denied('cat <<-EOF\n\tx\n\tEOF\necho $HOME'))
+        self.assertTrue(self.denied('cat <<-EOF\n\tx\n  EOF\n'))
+
+    def test_unquoted_data_body_keeps_literal_apostrophe(self):
+        self.assertFalse(self.denied("cat > notes.md <<EOF\nit's fine\nEOF\n"))
+        self.assertTrue(self.denied('cat <<EOF\n$(node -e x)\nEOF\n'))
+
+    def test_nonisolated_string_replace_is_read_only(self):
+        self.assertFalse(self.denied("python3 - <<'PY'\nprint(open('a.txt').read().replace('x', 'y'))\nPY\nmake test"))
+        self.assertFalse(self.denied('python3 -c \'print("a".replace("a", "b"))\' && make test'))
+        self.assertTrue(self.denied("python3 - <<'PY'\nfrom pathlib import Path\nPath('a.txt').replace('b.sh')\nPY\nbash b.sh"))
+
+    def test_reader_pass_keeps_python_and_commit_bodies_as_data(self):
+        self.assertFalse(self.denied("python3 - <<'PY'\nprint('<<<<<<< HEAD')\nPY\n"))
+        self.assertFalse(self.denied("git commit -F - <<'EOF'\nfix: refuse <<< readers\nEOF\n"))
+        self.assertTrue(self.denied("python3 - <<'PY'\nprint(1)\nPY\nnode <<< 'x'"))
+
+    def test_quoted_less_than_arguments_keep_base_admissions(self):
+        self.assertFalse(self.denied("python3 -c 'print(1 < 2)'"))
+        self.assertFalse(self.denied("node build.js --banner '<b>'"))
+        self.assertTrue(self.denied('node < x.js'))
+        self.assertTrue(self.denied("node -e 'print(1 < 2)'"))
+
+    def test_bare_interpreter_words_require_no_stdin_input(self):
+        for command in ('which python3', 'cd sdk/python && uv run pytest', 'brew install node'):
+            self.assertFalse(self.denied(command))
+        for command in ('printf x | node', 'node < x.js', "node <<< 'x'"):
+            self.assertTrue(self.denied(command))
 
     def test_python_helper_without_import_is_denied(self):
         body = "def git(*args):\n    return subprocess.check_output(['git', *args])\n"

@@ -67,6 +67,9 @@ Dispatch briefs keep mutation-check, anchor-check, and selector execution comman
 - Every review runs at a frozen SHA, and every result gets a ledger row.
 - Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch.
 - Writers follow the brief's verification rule. When the brief bans tests, writers run no test runner and never bypass Git hooks.
+- Writer Python `-c` code needs a literal interpreter and a whole quoted code word. Inert code qualifies, including resolved file edits with `-I`; literal Git reads require `-I`. A file write requires read-only or syntax-only surrounding commands. Python script paths and `-m` modules retain their command scan.
+- Writer heredocs and here-strings require literal data readers (`cat`, `tee`, `grep`, `head`, `tail`, `wc`). Whole-command commit-message heredocs retain their data exemption. Python heredocs retain their separate body check. Named interpreters accept `--version`, literal script paths, or bare words without stdin input. Interpreter input redirects, process substitutions (including zsh `=(`), and stdin program paths require refusal.
+- Literal one-line `cd`, `find`, `grep`, and `ls` chains joined by ` && ` admit read-only searches containing publication words. Only `ls` paths may contain unquoted globs.
 - Agents keep their pinned model. A hook denies per-call overrides.
 - Researchers get 40 discovery calls per assignment.
 - Nobody relaxes a limit, validator, fixture, or golden on main to make a check pass. An owner-requested product-limit change is a feature, including limits on main. The writer implements that exact limit and tests acceptance at the limit and refusal one unit above it (one byte for byte limits).
