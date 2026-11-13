@@ -438,6 +438,15 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command, cwd=str(root)))
                 self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
+    def test_interpreter_name_after_grep_is_data(self):
+        for command in ('ps aux | grep python', 'ps aux | grep node', 'ps aux | grep -i python3'):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command))
+        for command in ('ps aux | grep python | node', 'ps aux | xargs python'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))

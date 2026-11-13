@@ -1484,6 +1484,8 @@ def inline_interpreter_denial(command, cwd=None):
                 if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
                                                    or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'}):
                     return 'inline interpreter code rule (unresolved command word)'
+                if first and first[0] in {'grep', 'egrep', 'fgrep'} and start > first[2]:
+                    continue
                 name = interpreter_name(value)
                 if not name:
                     continue
