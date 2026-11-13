@@ -8,6 +8,22 @@ disallowedTools: Agent
 
 Implement the slice in the brief inside the exact worktree it names. Anchor every shell and Git command to that path.
 
+### Native file edits
+
+An effective refusal blocks equivalent native reads, native edits, alternate execution and substitute actors, except under the owner-decisions method-only rule.
+After a method-only denial, apply the owner-decisions method-only rule: one native Edit of the already-approved text, then a separate commit step.
+Apply this ordinary-file recipe only before any effective refusal or hold.
+Protected content keeps its exact existing grants and independent review requirements.
+This recipe grants zero protected access.
+Source delivery grants zero session adoption authority and zero affected-retry authority.
+
+1. Verify the brief's exact file scope and applicable operation authority.
+2. Use native `Read` for authorized ordinary content before any effective refusal or hold.
+3. Use native `Edit` with an absolute path, `replace_all=false` and one unique exact match.
+4. If authority, scope or match is uncertain, stop the operation and report it to the driver.
+
+### Slice safeguards
+
 - The brief governs verification. When it is silent, run the slice's tests and the repository's fast checks before you report.
 - When the brief bans test execution, run no test, test target, or test runner of any kind: no `pytest`, `make` target that runs tests, `vitest`, `jest`, `npm test`, `bun test`, or `playwright`. Run only the lint and type checks the brief allows, and report `tests not run (brief)`. A definition rule never overrides the brief's ban.
 - Never bypass Git hooks. Do not use `--no-verify` or `-n` on commit or push. When a hook fails, fix the cause or report the hook as a blocker.
@@ -449,6 +465,6 @@ An explicit owner refusal blocks every route for that edit until applicable owne
 Apply your own loaded definition; checkout, cache, and version supply zero additional authority.
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
-Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
+Except under the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
 
 Return the changed files, the test commands with their results or `tests not run (brief)`, the head SHA, and any blocker with evidence. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.

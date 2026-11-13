@@ -89,6 +89,20 @@ class CoordinationRemedyContractTests(unittest.TestCase):
         self.assertIn('Preserve a direct authoritative mismatch as blocked; '
                       'the fallback supplies verified provenance, never a substitute owner approval.', self.owner)
 
+    def test_contract_scopes_the_owner_approved_method_only_retry(self):
+        for requirement in (
+            'Method-only denial (owner Input e6ba1705-42f2-491c-ac0b-43ae191596b6, choice B): '
+            'a refusal naming only the method, never the content, permits one native Edit retry.',
+            'The method-only rule applies only to ordinary files and never to a protected-row operation.',
+            'A fresh writer applies the already-approved edit text exactly once with native Edit; '
+            'the commit stays a separate step.',
+            'The method ban and every content, scope, protected-access and publication denial stay final.',
+            'Consume that single attempt on the canonical durable record before the edit; '
+            'a failed attempt stays consumed.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.refusals)
+
     def test_contract_keeps_the_refusal_rule_line_budget(self):
         self.assertLessEqual(len([line for line in self.refusals.splitlines() if line.strip()]), 8)
 
@@ -98,8 +112,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'an authenticated lint refusal with an exact formatting remedy.',
             'Require trusted native tool evidence attributing the complete refusal to the '
             'formatting producer and identifying the original refused tool call.',
-            'For `SendMessage`, require authenticated `plugins/ship/hooks/text_lint.py` '
-            'producer attribution.',
+            'For `SendMessage`, require authenticated `plugins/ship/hooks/text_lint.py` or '
+            'chief-of-chiefs `skills/run/scripts/text_lint.py` producer attribution.',
             'The `Output contract:` prefix alone supplies zero producer authentication.',
             'An authenticated formatting-only refusal qualifies despite that prefix; '
             'generic or unclassified denials remain blocked.',
@@ -114,6 +128,22 @@ class CoordinationRemedyContractTests(unittest.TestCase):
                 driver = (ROOT / 'plugins/ship/agents' / name).read_text()
                 self.assertIn('Apply its once-only authenticated formatting-only resend contract '
                               'to `Agent` and `SendMessage`.', driver)
+
+    def test_contract_requires_known_formatting_findings_and_blocks_unknown_evidence(self):
+        self.assertIn(
+            'Attribute a pathless hook refusal by elimination only when every enabled PreToolUse '
+            'hook that matches the tool and can emit each returned finding is a named formatting producer.',
+            self.refusals,
+        )
+        self.assertIn(
+            'Require every returned finding to match a known `text_lint.py` formatting message.',
+            self.refusals,
+            'Every returned finding must match a known text_lint formatting message',
+        )
+        block = self.refusals.partition('For formatting-only resends, block ')[2].partition('.')[0]
+        for case in ('unknown producers', 'unmatched findings'):
+            with self.subTest(case=case):
+                self.assertIn(case, block, f'The formatting exception must block {case}')
 
     def test_contract_limits_formatting_remedies_to_supported_prose(self):
         for requirement in (
