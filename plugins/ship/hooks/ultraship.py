@@ -935,6 +935,31 @@ def data_reader_header(line):
                         + rf')(?:[ \t]+{argument})*[ \t]*{operator}(?:[ \t]+{argument})*[ \t]*\n?', line) is not None
 
 
+def literal_quotes_removed(line):
+    """Drop quoted text the shell never expands; an unterminated quote or ANSI-C $'' keeps the whole line."""
+    if "$'" in line:
+        return line
+    kept, index = [], 0
+    while index < len(line):
+        char = line[index]
+        if char == '\\':
+            kept.append(line[index:index + 2])
+            index += 2
+        elif char in '\'"':
+            end = index + 1
+            while end < len(line) and line[end] != char:
+                end += 2 if char == '"' and line[end] == '\\' else 1
+            if end >= len(line):
+                return line
+            if char == '"' and ('$' in line[index:end] or '`' in line[index:end]):
+                kept.append(line[index:end + 1])
+            index = end + 1
+        else:
+            kept.append(char)
+            index += 1
+    return ''.join(kept)
+
+
 def process_heredoc_denial(command, readers=False):
     """Check Python stdin bodies and keep quoted commit messages as data."""
     lines = (command if readers else cat_heredoc_data(command)).splitlines(keepends=True)
@@ -943,7 +968,7 @@ def process_heredoc_denial(command, readers=False):
         operators = list(re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
                                     r"(?P<delimiter>'[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", lines[index]))
         if not operators:
-            if readers and '<<' in lines[index] and not data_reader_header(lines[index]):
+            if readers and '<<' in literal_quotes_removed(lines[index]) and not data_reader_header(lines[index]):
                 return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
             index += 1
             continue

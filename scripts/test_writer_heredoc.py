@@ -109,6 +109,22 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(reader + " <<< 'abc'"))
                 self.assertIn('heredoc reader not on the allowlist', self.reason)
 
+    def test_quoted_conflict_marker_search_is_data(self):
+        loop = 'git diff --name-only | while IFS= read -r f; do grep -n {} "$f" && exit 1; done'
+        for marker in ("'^<<<<<<<'", '"^<<<<<<<"', "'<<<<<<< HEAD'"):
+            with self.subTest(marker=marker):
+                self.assertFalse(self.denied(loop.format(marker)), self.reason)
+        for command in (
+            "grep -n '^<<<<<<<' a.py; python3 <<< 'import os'",
+            "grep \\' x && python3 <<< 'import os'",
+            "grep -n '^<<<<<<< a.py",
+            "grep -n $'\\'' a.py; python3 <<< x # '",
+            'grep -n "$(python3 <<< \'import os\')" a.py',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('heredoc reader not on the allowlist', self.reason)
+
     def test_program_from_pipe_is_denied(self):
         for command in ("printf '%s' x | python3", 'echo x | node', 'cat f | perl'):
             with self.subTest(command=command):
