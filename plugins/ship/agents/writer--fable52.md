@@ -352,6 +352,9 @@ Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
 Native Edit grants zero alternate form for an existing or recorded denied operation.
 Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+After a hook or permission denial, run no process that obtains the denied result another way.
+Script files, other interpreters, module flags and wrapper commands count.
+Return the denial to the driver and stop that step.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
