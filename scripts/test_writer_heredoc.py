@@ -539,6 +539,13 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertFalse(self.denied('git -C. grep -n node -- src'))
         self.assertFalse(self.denied('git -ccolor.ui=never grep -n node src'))
 
+    def test_env_split_string_forms_are_chdir_checked(self):
+        for command in ("env -S'-C /dev/fd node 0'", "env --split-string='-C /dev/fd node 0'",
+                        "env --split-string '-C /dev/fd node 0'", "env -S'--chdir=/dev/fd node 0'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))
