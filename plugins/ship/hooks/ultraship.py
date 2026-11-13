@@ -1104,8 +1104,21 @@ def grep_data_token(tokens, index):
         while end < len(tokens) and tokens[end][0] not in {';', '&', '|', '(', ')', '`', '\n'}:
             end += 1
         return index > start and not any(word[1].startswith('--pre') for word in tokens[start:end])
-    return (tokens[start][0] == 'git' and start + 1 < index
-            and tokens[start + 1][0] == 'grep')
+    if tokens[start][0] != 'git':
+        return False
+    cursor = start + 1
+    values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path'}
+    while cursor < index:
+        option = tokens[cursor][1]
+        if option in values:
+            cursor += 2
+        elif option.partition('=')[0] in values and '=' in option:
+            cursor += 1
+        elif option in {'--no-pager', '--paginate', '-p'}:
+            cursor += 1
+        else:
+            break
+    return cursor < index and tokens[cursor][0] == 'grep'
 
 
 def nested_shell_strings(tokens):
@@ -1321,6 +1334,8 @@ def python_inline_denial(command):
         segments.append(current)
         for words in segments:
             for index, (raw, value, start, end) in enumerate(words):
+                if grep_data_token(words, index):
+                    continue
                 if not re.fullmatch(r'python(?:3(?:\.\d+)?)?', os.path.basename(value)):
                     continue
                 arguments = words[index + 1:]
@@ -1392,6 +1407,11 @@ def stdin_program_path(value):
             or resolved.startswith(('/dev/', '/proc/')))
 
 
+def unsafe_script_path(value, base):
+    path = os.path.realpath(os.path.join(base, value))
+    return path in {'/proc', '/dev'} or path.startswith(('/proc/', '/dev/'))
+
+
 def chdir_wrapper_present(command):
     pending, seen = [shell_without_heredoc_bodies(command)], set()
     while pending:
@@ -1403,9 +1423,43 @@ def chdir_wrapper_present(command):
             tokens = shell_raw_words(text)
             if nested_work_exceeded(tokens, seen):
                 return True
-            if (any(os.path.basename(token[1]) in {'env', 'sudo'} for token in tokens)
-                    and any(token[1].startswith('--ch') or re.match(r'^-[A-Za-z]*[CD]', token[1]) for token in tokens)):
-                return True
+            for index, token in enumerate(tokens):
+                name = os.path.basename(token[1])
+                if name in {'chroot', 'nsenter', 'unshare', 'setpriv', 'runuser', 'su', 'systemd-run', 'doas'}:
+                    if index + 1 < len(tokens):
+                        return True
+                if name not in {'env', 'sudo'}:
+                    continue
+                for following in tokens[index + 1:]:
+                    if following[1] == '--':
+                        break
+                    if following[1].startswith('--ch') or re.match(r'^-[A-Za-z]*[CD]', following[1]):
+                        return True
+                flags = {'env': {'-i', '--ignore-environment', '-0', '--null', '-v', '--debug'},
+                         'sudo': {'-n', '--non-interactive', '-E', '--preserve-env', '-H', '--set-home',
+                                  '-k', '-K', '-S', '-b', '--background'}}[name]
+                values = {'env': {'-u', '--unset', '-S', '--split-string'},
+                          'sudo': {'-u', '--user', '-g', '--group', '-p', '--prompt', '-h', '--host'}}[name]
+                cursor = index + 1
+                while cursor < len(tokens):
+                    option = tokens[cursor][1]
+                    if not option.startswith('-'):
+                        if re.match(r'[A-Za-z_]\w*=', option):
+                            cursor += 1
+                            continue
+                        break
+                    if option == '--':
+                        break
+                    if option in flags:
+                        cursor += 1
+                    elif option in values:
+                        cursor += 2
+                    elif '=' in option and option.partition('=')[0] in values:
+                        cursor += 1
+                    elif name == 'env' and option.startswith('-S') and len(option) > 2:
+                        cursor += 1
+                    else:
+                        return True
             pending.extend(token[1] for token in nested_shell_strings(tokens))
         except ValueError:
             return True
@@ -1478,7 +1532,6 @@ def inline_interpreter_denial(command, cwd=None):
         input_tokens = shell_raw_words(shell_line_continuations(shell))
         state = shell_input_state(tokens, text, shell_input_state(input_tokens, shell_line_continuations(shell), inherited))
         piped_input, directory, redirected = state
-        relative_program_denied = redirected or not safe_base or chdir_wrapper or directory and not safe_directory
         if re.search(r'(?:\$\([^\n]*\)|`[^`\n]*`)[ \t]+(?:-[ceEpr]\b|--(?:eval|print)\b|-[a-zA-Z]*[ce]\b)', text):
             return 'inline interpreter code rule (unresolved command word)'
         segments, words, piped = [], [], False
@@ -1512,6 +1565,9 @@ def inline_interpreter_denial(command, cwd=None):
                     continue
                 break
         for words, piped in segments:
+            reads_pipe = inherited[0] or piped or any(word[0] == '<' for word in words)
+            segment_relative_denied = (redirected or not safe_base or chdir_wrapper
+                                       or directory and not safe_directory or reads_pipe)
             first = next((word for word in words if not re.match(r'[A-Za-z_]\w*=', word[1])), None)
             if (piped_input and first and first[0] != '[' and first[1] != '$?'
                     and unresolved_shell_word(first[0])):
@@ -1548,18 +1604,19 @@ def inline_interpreter_denial(command, cwd=None):
                     if arguments == ['--version']:
                         continue
                     script = arguments[0] if arguments else ''
-                    if (not script or script.startswith('-') or stdin_program_path(script)
-                            or (relative_program_denied or piped) and not os.path.isabs(script)
+                    if (not script or script.startswith('-') or stdin_program_path(script) or unsafe_script_path(script, base)
+                            or (segment_relative_denied or piped) and not os.path.isabs(script)
                             or not re.fullmatch(r'[\w./:@%+,-]+', words[index + 1][0])):
-                        return ('inline interpreter code rule (program from a pipe)' if piped_input or stdin_program_path(script)
-                                or (relative_program_denied or piped) and script and not os.path.isabs(script)
+                        return ('inline interpreter code rule (program from a pipe)' if piped_input or stdin_program_path(script) or unsafe_script_path(script, base)
+                                or (segment_relative_denied or piped) and script and not os.path.isabs(script)
                                 else f'inline interpreter code rule ({name})')
                 elif not arguments or any(stdin_program_path(argument) for argument in arguments):
                     return 'inline interpreter code rule (program from a pipe)'
                 else:
                     kind, flags, operand, offset = python_program(arguments)
-                    if (kind == 'script' and operand < len(arguments) and (relative_program_denied or piped)
-                            and not os.path.isabs(arguments[operand])):
+                    if (kind == 'script' and operand < len(arguments) and (
+                            (segment_relative_denied or piped) and not os.path.isabs(arguments[operand])
+                            or unsafe_script_path(arguments[operand], base))):
                         return 'inline interpreter code rule (program from a pipe)'
                     if (piped_input or piped) and (kind not in {'c', 'm', 'script'} or operand >= len(arguments)
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):

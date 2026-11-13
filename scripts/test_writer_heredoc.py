@@ -495,6 +495,38 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied('rg --pre node -e x src'))
         self.assertIn('inline interpreter code rule (node)', self.reason)
 
+    def test_relative_script_pipe_exemption_keeps_input_and_symlinks_denied(self):
+        for command in ('bun test 2>&1 | tail -20', 'bun run lint | head -50',
+                        'python3 scripts/check.py | head', 'node ./x.js | cat'):
+            self.assertFalse(self.denied(command))
+        for command in ("sh -c 'node ./rel.js' | cat", "printf x | sh -c 'node ./0'", 'cat code.py | python3 ./0'):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / 'script').symlink_to('/proc/self/fd', target_is_directory=True)
+        self.assertTrue(self.denied('node ./script', cwd=str(root)))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_namespace_and_unknown_wrappers_make_relative_programs_unsafe(self):
+        for command in ('chroot /dev/fd node 0', 'nsenter --wd=/dev/fd node 0', 'sudo --unknownopt node ./x.js'):
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        self.assertFalse(self.denied('sudo -n node ./x.js'))
+        self.assertFalse(self.denied('env FOO=1 node scripts/x.js'))
+
+    def test_python_inline_check_keeps_grep_words_as_data(self):
+        self.assertFalse(self.denied('grep -n python3 -c src'))
+        self.assertFalse(self.denied('grep -c python -r src'))
+        self.assertTrue(self.denied("cat x | python3 -c 'import os'"))
+        self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_git_global_options_preserve_grep_data_words(self):
+        self.assertFalse(self.denied('git -C . grep -n node -- src'))
+        self.assertFalse(self.denied('git --no-pager grep -n python src'))
+        self.assertFalse(self.denied('git grep -n script -c'))
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))
