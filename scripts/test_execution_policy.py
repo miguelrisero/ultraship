@@ -120,6 +120,12 @@ class ExecutionPolicyTests(unittest.TestCase):
                 section = re.split(r'\n#{1,3} ', text.partition(heading)[2], maxsplit=1)[0]
                 sections.append(section)
                 self.assertIn(heading, text, f'{name}: requires the Native file edits section')
+                self.assertIn(
+                    'After a method-only denial, apply the owner-decisions method-only rule: '
+                    'one native Edit of the already-approved text, then a separate commit step.',
+                    section,
+                    f'{name}: requires the complete method-only denial rule in the recipe',
+                )
                 normalized = ' '.join(section.lower().replace('`', '').split())
                 for message, phrases in requirements:
                     for phrase in phrases:

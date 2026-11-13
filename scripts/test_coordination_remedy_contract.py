@@ -89,6 +89,19 @@ class CoordinationRemedyContractTests(unittest.TestCase):
         self.assertIn('Preserve a direct authoritative mismatch as blocked; '
                       'the fallback supplies verified provenance, never a substitute owner approval.', self.owner)
 
+    def test_contract_scopes_the_owner_approved_method_only_retry(self):
+        for requirement in (
+            'Method-only denial (owner Input e6ba1705-42f2-491c-ac0b-43ae191596b6, choice B): '
+            'a refusal naming only the method, never the content, permits one native Edit retry.',
+            'A fresh writer applies the already-approved edit text exactly once with native Edit; '
+            'the commit stays a separate step.',
+            'The method ban and every content, scope, protected-access and publication denial stay final.',
+            'Consume that single attempt on the canonical durable record before the edit; '
+            'a failed attempt stays consumed.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.refusals)
+
     def test_contract_keeps_the_refusal_rule_line_budget(self):
         self.assertLessEqual(len([line for line in self.refusals.splitlines() if line.strip()]), 8)
 

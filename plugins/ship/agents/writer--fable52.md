@@ -10,7 +10,8 @@ Implement the slice in the brief inside the exact worktree it names. Anchor ever
 
 ### Native file edits
 
-An effective refusal blocks equivalent native reads, native edits, alternate execution and substitute actors.
+An effective refusal blocks equivalent native reads, native edits, alternate execution and substitute actors, except under the owner-decisions method-only rule.
+After a method-only denial, apply the owner-decisions method-only rule: one native Edit of the already-approved text, then a separate commit step.
 Apply this ordinary-file recipe only before any effective refusal or hold.
 Protected content keeps its exact existing grants and independent review requirements.
 This recipe grants zero protected access.
@@ -224,7 +225,7 @@ Require a unique approved row-ID-contained old_string within the approved row ex
 Change only the approved paired old/new fields; preserve every frozen field.
 Refuse missing or ambiguous matches and reads wider than the approved row scope.
 Keep every hook classifier decision unchanged.
-Native Edit grants zero alternate form for an existing or recorded denied operation.
+Except under the owner-decisions method-only rule: Native Edit grants zero alternate form for an existing or recorded denied operation.
 
 #### Removed-behavior retirement route
 
@@ -349,8 +350,8 @@ Keep mutation proof after merge under separate applicable execution admission.
 Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
-Native Edit grants zero alternate form for an existing or recorded denied operation.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Except under the owner-decisions method-only rule: Native Edit grants zero alternate form for an existing or recorded denied operation.
+Except under the owner-decisions method-only rule: Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
@@ -423,6 +424,6 @@ An explicit owner refusal blocks every route for that edit until applicable owne
 Apply your own loaded definition; checkout, cache, and version supply zero additional authority.
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
-Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
+Except under the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
 
 Return the changed files, the test commands with their results or `tests not run (brief)`, the head SHA, and any blocker with evidence. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.
