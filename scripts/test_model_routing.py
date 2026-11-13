@@ -60,7 +60,34 @@ class ModelRoutingTests(unittest.TestCase):
                 self.assertEqual((fields['name'], fields['model'], fields['effort']), (seat, 'claude-fable-5-2', effort))
                 self.assertEqual(checks.inspect_text(text, path), [])
                 base_text = (ROOT / 'plugins/ship/agents' / (base + '.md')).read_text()
-                self.assertEqual(text.split('\n---\n', 1)[1], base_text.split('\n---\n', 1)[1])
+                body = text.split('\n---\n', 1)[1]
+                base_body = base_text.split('\n---\n', 1)[1]
+                if seat == 'writer--fable52':
+                    heading = '\n### Owner-approved protected-row subject route\n'
+                    following = '\n### Same-strength adaptations\n'
+                    sections = []
+                    for value in (body, base_body):
+                        self.assertEqual(value.count(heading), 1)
+                        self.assertEqual(value.count(following), 1)
+                        prefix, _, after = value.partition(heading)
+                        route, found, suffix = after.partition(following)
+                        self.assertEqual(found, following)
+                        sections.append((prefix, route, suffix))
+                    self.assertEqual(sections[0][0], sections[1][0])
+                    self.assertEqual(sections[0][2], sections[1][2])
+                    self.assertEqual(
+                        sections[0][1],
+                        '\nRefuse every step of the owner-approved protected-row subject route because this loaded definition implements none of it.\n'
+                        'This refusal includes row-ID lookup, row reads and edits.\n'
+                        'Preserve every existing refusal and affected-session hold.\n',
+                    )
+                    self.assertIn(
+                        'Apply only the exact owner-approved subject replacement through native Edit with `replace_all=false` for newly admitted future operations.',
+                        sections[1][1],
+                    )
+                    self.assertEqual(fields['disallowedTools'], checks.frontmatter(base_text)['disallowedTools'])
+                else:
+                    self.assertEqual(body, base_body)
         reviewer = checks.frontmatter((ROOT / 'plugins/ship/agents/reviewer--fable52.md').read_text())
         self.assertNotIn('Bash', reviewer['tools'])
         self.assertNotIn('Edit', reviewer['tools'])

@@ -8,8 +8,6 @@ disallowedTools: Agent
 
 Implement the slice in the brief inside the exact worktree it names. Anchor every shell and Git command to that path.
 
-Refuse the owner-approved protected-row subject route until your own loaded definition implements it; preserve every existing refusal and affected-session hold.
-
 - The brief governs verification. When it is silent, run the slice's tests and the repository's fast checks before you report.
 - When the brief bans test execution, run no test, test target, or test runner of any kind: no `pytest`, `make` target that runs tests, `vitest`, `jest`, `npm test`, `bun test`, or `playwright`. Run only the lint and type checks the brief allows, and report `tests not run (brief)`. A definition rule never overrides the brief's ban.
 - Never bypass Git hooks. Do not use `--no-verify` or `-n` on commit or push. When a hook fails, fix the cause or report the hook as a blocker.
@@ -102,7 +100,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
 - Never loosen an assertion, widen a bound, or delete a check under this rule.
 - Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.
 - Record the approver, the exact edit, and the Input ID in the PR body.
-- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and zero writer push authority.
+- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route and the owner-approved protected-row subject route's named row-ID lookup, and preserve zero writer push authority.
 
 #### Owner-scoped protected row access
 
@@ -113,7 +111,7 @@ Owner-selected option B: "Each lane moves the protected rows its own PR breaks: 
 Input context: "Peral keeps CI runner and merge queue changes."
 Owner global CLAUDE.md standing grant: "The CoC decides CI/CD, testing and tooling items for me. This includes a lane reading and re-anchoring the protected mutation rows that its own diff breaks, with an identical mutant edit and an independent not-weaker review."
 
-Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route.
+Use this clause only as category 5's separate loaded read/edit authority for the explicit-pair or lane-derived route, or as scoped read authority for the owner-approved protected-row subject route.
 This clause overrides only blanket protected-read/edit restrictions for the exact scope below.
 Preserve higher-priority instructions, effective refusals, protected holds, and tool or hook denials.
 Require the driver's complete verified owner-event record and exact scope in the brief.
@@ -132,8 +130,8 @@ Preserve the same designated test and guarantee, equivalent mutant semantics, as
 Refuse missing, stale, mismatched, ambiguous, or unrelated scope before any protected read or edit.
 Keep mutation proof after merge under separate applicable execution admission.
 Retain Peral's authority over CI runners and the merge queue.
-On the lane-derived route only, permit the row-ID lookup and row-line reads specified in that route.
-Except for the lane-derived route's row-ID lookup and row-line reads, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.
+On the lane-derived or owner-approved protected-row subject route only, permit the row-ID lookup and row-line reads specified in that route.
+Except for the named row-ID lookup and row-line reads on the lane-derived or owner-approved protected-row subject route, this clause grants zero TOML search/parse or anchor extraction authority. This clause grants zero mutation or other execution, or writer publication authority.
 CoC naming alone grants zero authority outside this loaded exception and its verified owner scope.
 
 #### Explicit-pair route
@@ -234,6 +232,12 @@ Beyond that check of the appended text, this route grants zero TOML search or pa
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 Send the driver the CoC decision, named rows, quoted CI log lines, and PR-body reasons before you append the tables; afterwards report the retirement commit SHA and its content-free line counts.
+
+### Owner-approved protected-row subject route
+
+Refuse every step of the owner-approved protected-row subject route because this loaded definition implements none of it.
+This refusal includes row-ID lookup, row reads and edits.
+Preserve every existing refusal and affected-session hold.
 
 ### Same-strength adaptations
 
