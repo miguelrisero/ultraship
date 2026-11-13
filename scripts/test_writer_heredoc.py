@@ -455,6 +455,46 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
         self.assertFalse(self.denied('echo x > >(python3 -m json.tool)'))
 
+    def test_chdir_wrapper_makes_relative_programs_unsafe(self):
+        for command in ('env -C /dev/fd python3 0', 'env --chdir=/dev/fd node 0',
+                        "env -C /dev/fd sh -c 'cd . && python3 0'", "env -S '-C /dev/fd node 0'"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_wrapper_words_in_grep_segments_are_data(self):
+        self.assertFalse(self.denied('grep -n script -rc src'))
+        self.assertFalse(self.denied('git grep -n script -c'))
+        self.assertTrue(self.denied("grep x src; script -qc 'node -e x' /dev/null"))
+        self.assertIn('inline interpreter code rule (node)', self.reason)
+
+    def test_output_substitution_state_reaches_nested_texts(self):
+        for command in ("echo x > >(sh -c 'python3 -I')", "echo x > >(sh -c 'true; python3 -I')"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_program_before_pipe_is_admitted(self):
+        for command in ('bun test 2>&1 | tail -20', 'bun run lint | head -50', 'python3 scripts/check.py | head'):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command))
+        self.assertTrue(self.denied('cat x | bun run build'))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_absolute_literal_cd_target_is_admitted(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / 'frontend').mkdir()
+        self.assertFalse(self.denied(f'cd {root}/frontend && bun test', cwd=str(root)))
+        self.assertTrue(self.denied('cd /proc/self/fd && node 0', cwd=str(root)))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_rg_patterns_are_data(self):
+        self.assertFalse(self.denied('rg -n node -t ts'))
+        self.assertTrue(self.denied('rg --pre node -e x src'))
+        self.assertIn('inline interpreter code rule (node)', self.reason)
+
     def test_joined_named_interpreter_code_is_denied(self):
         for command in ("bun${IFS}--eval${IFS}'console.log(1)'", "deno${IFS}eval${IFS}'console.log(1)'"):
             self.assertTrue(self.denied(command))

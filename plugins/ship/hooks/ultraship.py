@@ -1091,11 +1091,28 @@ SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh',
 STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su'}
 
 
+def grep_data_token(tokens, index):
+    start = index
+    while start and tokens[start - 1][0] not in {';', '&', '|', '(', ')', '`', '\n'}:
+        start -= 1
+    while start < index and re.match(r'[A-Za-z_]\w*=', tokens[start][1]):
+        start += 1
+    if tokens[start][0] in {'grep', 'egrep', 'fgrep'}:
+        return index > start
+    if tokens[start][0] == 'rg':
+        end = start + 1
+        while end < len(tokens) and tokens[end][0] not in {';', '&', '|', '(', ')', '`', '\n'}:
+            end += 1
+        return index > start and not any(word[1].startswith('--pre') for word in tokens[start:end])
+    return (tokens[start][0] == 'git' and start + 1 < index
+            and tokens[start + 1][0] == 'grep')
+
+
 def nested_shell_strings(tokens):
     """Keep the identity of each argument that a shell or string wrapper can execute."""
     for index, token in enumerate(tokens):
         name = os.path.basename(token[1])
-        if name not in STRING_WRAPPERS:
+        if name not in STRING_WRAPPERS or grep_data_token(tokens, index):
             continue
         arguments = []
         for argument in tokens[index + 1:]:
@@ -1229,9 +1246,10 @@ def nested_work_exceeded(tokens, seen):
         os.path.basename(token[1]) in STRING_WRAPPERS for token in tokens) > 50000
 
 
-def shell_input_state(tokens, inherited=(False, False, False)):
+def shell_input_state(tokens, text, inherited=(False, False, False)):
     redirected = inherited[2] or any(token[0] == '<' for token in tokens)
-    piped = inherited[0] or redirected or any(token[1] == 'coproc' for token in tokens) or any(
+    output_input = any(token[0] == '(' and token[2] > 0 and text[token[2] - 1] == '>' for token in tokens)
+    piped = inherited[0] or redirected or output_input or any(token[1] == 'coproc' for token in tokens) or any(
         token[0] == '|'
         and not (index and tokens[index - 1][0] == '|' and tokens[index - 1][3] == token[2])
         and not (index + 1 < len(tokens) and tokens[index + 1][0] == '|' and tokens[index + 1][2] == token[3])
@@ -1331,7 +1349,7 @@ def python_inline_denial(command):
                     if python_writes(code, isolated=isolated) and (not check_only_shell(rest) or text != shell):
                         return 'python -c then run rule'
                     break
-        state = shell_input_state(tokens, inherited)
+        state = shell_input_state(tokens, text, inherited)
         pending.extend((token[1], state) for token in nested_shell_strings(tokens))
     return None
 
@@ -1374,6 +1392,26 @@ def stdin_program_path(value):
             or resolved.startswith(('/dev/', '/proc/')))
 
 
+def chdir_wrapper_present(command):
+    pending, seen = [shell_without_heredoc_bodies(command)], set()
+    while pending:
+        text = shell_line_continuations(pending.pop())
+        if text in seen:
+            continue
+        seen.add(text)
+        try:
+            tokens = shell_raw_words(text)
+            if nested_work_exceeded(tokens, seen):
+                return True
+            if (any(os.path.basename(token[1]) in {'env', 'sudo'} for token in tokens)
+                    and any(token[1].startswith('--ch') or re.match(r'^-[A-Za-z]*[CD]', token[1]) for token in tokens)):
+                return True
+            pending.extend(token[1] for token in nested_shell_strings(tokens))
+        except ValueError:
+            return True
+    return False
+
+
 def safe_directory_state(command, cwd=None):
     """Prove one literal directory step stays outside device and process filesystems."""
     pending, seen, targets = [shell_without_heredoc_bodies(command)], set(), []
@@ -1397,7 +1435,7 @@ def safe_directory_state(command, cwd=None):
                 if cursor >= len(tokens):
                     return False
                 raw, target = tokens[cursor][:2]
-                if (unresolved_shell_word(raw) or not target or target.startswith(('-', '~', '/'))
+                if (unresolved_shell_word(raw) or not target or target.startswith(('-', '~'))
                         or '..' in target.split('/') or not re.fullmatch(r'[\w./-]+', target)):
                     return False
                 targets.append(target)
@@ -1413,7 +1451,10 @@ def safe_directory_state(command, cwd=None):
 
 
 def inline_interpreter_denial(command, cwd=None):
-    safe_directory = safe_directory_state(command, cwd)
+    chdir_wrapper = chdir_wrapper_present(command)
+    safe_directory = not chdir_wrapper and safe_directory_state(command, cwd)
+    base = os.path.realpath(cwd or os.getcwd())
+    safe_base = base not in {'/proc', '/dev'} and not base.startswith(('/proc/', '/dev/'))
     shell = literal_variables(shell_without_heredoc_bodies(command))
     lines = command.splitlines(keepends=True)
     if lines and ANY_PYTHON_HEREDOC.fullmatch(lines[0]) and not process_heredoc_denial(command):
@@ -1435,9 +1476,9 @@ def inline_interpreter_denial(command, cwd=None):
             return 'inline interpreter code rule (nesting limit)'
         nested = list(nested_shell_strings(tokens))
         input_tokens = shell_raw_words(shell_line_continuations(shell))
-        state = shell_input_state(tokens, shell_input_state(input_tokens, inherited))
+        state = shell_input_state(tokens, text, shell_input_state(input_tokens, shell_line_continuations(shell), inherited))
         piped_input, directory, redirected = state
-        relative_program_denied = piped_input or directory and not safe_directory
+        relative_program_denied = redirected or not safe_base or chdir_wrapper or directory and not safe_directory
         if re.search(r'(?:\$\([^\n]*\)|`[^`\n]*`)[ \t]+(?:-[ceEpr]\b|--(?:eval|print)\b|-[a-zA-Z]*[ce]\b)', text):
             return 'inline interpreter code rule (unresolved command word)'
         segments, words, piped = [], [], False
@@ -1484,7 +1525,7 @@ def inline_interpreter_denial(command, cwd=None):
                 if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
                                                    or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'}):
                     return 'inline interpreter code rule (unresolved command word)'
-                if first and first[0] in {'grep', 'egrep', 'fgrep'} and start > first[2]:
+                if grep_data_token(words, index):
                     continue
                 name = interpreter_name(value)
                 if not name:
