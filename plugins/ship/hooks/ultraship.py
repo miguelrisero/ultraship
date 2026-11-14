@@ -57,6 +57,11 @@ def alias_runs_writer(setting):
 GH_METHOD = re.compile(r'^(?:--method(?:=(.*))?|-[ip]*X(.*))$')
 GH_FIELD = re.compile(r'^(?:--(?:field|raw-field|input)(?:=.*)?|-[ip]*[fF].*)$')
 HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
+# The shape names only plain git calls, so it never runs a file a denied script wrote.
+GIT_COMMIT_STEP = re.compile(r'(^|[;&|\s])git\s+(add|commit)\b')
+GIT_COMMIT_SHAPE = (' Resend with this shape: check state with separate plain `git rev-parse HEAD` and '
+                    '`git status --porcelain` calls, then run the plain `git add -- <paths> && git commit -m <message>` '
+                    'call alone, with no interpreter heredoc in it.')
 LEDGER_ROLES = re.compile(r'^(ship:)?(reviewer|triage|verifier)--')
 
 
@@ -2235,7 +2240,8 @@ def pre(data):
                     deny(classifier_reason + ' Rule: line separator rule.')
                 reason = process_heredoc_denial(command)
                 if reason:
-                    deny(classifier_reason + ' Rule: ' + reason + '.')
+                    deny(classifier_reason + ' Rule: ' + reason + '.'
+                         + (GIT_COMMIT_SHAPE if GIT_COMMIT_STEP.search(command) else ''))
                 # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
                 file_text_removed = python_heredoc_shell(cat_heredoc_data(command), inert_only=True)
                 reason = git_push(command)
@@ -2250,7 +2256,8 @@ def pre(data):
                     deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + reason)
                 reason = process_heredoc_denial(command, readers=True)
                 if reason:
-                    deny(classifier_reason + ' Rule: ' + reason + '.')
+                    deny(classifier_reason + ' Rule: ' + reason + '.'
+                         + (GIT_COMMIT_SHAPE if GIT_COMMIT_STEP.search(command) else ''))
                 reason = python_inline_denial(command)
                 if reason:
                     deny(classifier_reason + ' Rule: ' + reason + '.')

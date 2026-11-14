@@ -218,6 +218,20 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied("python3 -I - <<'EOF'\n" + code + '\nEOF\nbash r.sh'))
         self.assertIn('heredoc-then-run rule', self.reason)
 
+    def test_heredoc_denial_before_a_git_commit_prints_the_plain_git_shape(self):
+        check = "import subprocess\ndef git(*args):\n    return subprocess.check_output(['git', *args])\nPY\n"
+        commit = "git add -- a.py && git commit -m 'x'"
+        for lead in ("cd -- /tmp/lane && /usr/bin/python3 -I - <<'PY'\n", "python3 - <<'PY'\n"):
+            with self.subTest(lead=lead):
+                self.assertTrue(self.denied(lead + check + commit))
+                self.assertIn('process-capable heredoc rule', self.reason)
+                self.assertIn('Resend with this shape:', self.reason)
+                self.assertIn('`git status --porcelain`', self.reason)
+        self.assertFalse(self.denied(commit))
+        self.assertFalse(self.denied('git status --porcelain'))
+        self.assertTrue(self.denied("python3 - <<'PY'\nopen('r.sh', 'w').write('x')\nPY\nbash r.sh\n"))
+        self.assertNotIn('Resend with this shape:', self.reason)
+
     def test_plain_quoted_arguments_do_not_reparse_as_programs(self):
         self.assertFalse(self.denied('echo "it\'s fine"'))
 
