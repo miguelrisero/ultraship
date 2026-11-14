@@ -107,6 +107,25 @@ Never replay a denied command, equivalent operation or substitute actor while it
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 
+## Reviewer admission record for protected row reads
+
+The pre hook denies every reviewer read under a `tests/mutation` path unless the driver admits it first.
+Every route that needs row reads uses this flow: lane-derived, lane-owned, retirement, and owner-approved subject.
+
+1. Dispatch the reviewer. Make the first message ask it to return `ready` and read nothing.
+2. Take the agent ID from the Agent tool result.
+3. Write `${XDG_STATE_HOME:-~/.local/state}/ultraship/row-review/<agent ID>.json` with native Write, with the full record as its content. In the file name, replace each character outside letters, digits, `_`, `.` and `-` with `_`.
+4. The record has four fields: `pr` (the PR URL), `agent_id` (the agent ID), `row_files` (the exact canonical absolute row-file paths) and `expires_at` (`YYYY-MM-DDTHH:MM:SSZ`, UTC, at most 4 hours ahead).
+5. Run `chmod 600` on the file. The hook refuses a file that the group or others can write.
+6. Record the `ready` result with `ledger.py append row-review-ready <agent-type>@<agent-id> <sha> ready` before you send the brief.
+7. Send the review brief to the reviewer with SendMessage.
+8. Delete the file when the review returns.
+
+The hook admits Read of one listed file, and Grep with one listed file as `path` and no `glob` or `type`.
+Glob, LSP, and every other read under `tests/mutation` stay denied.
+The reviewer reads only the named row lines.
+The hook denies Write, Edit, and NotebookEdit to the record folder for every agent except the driver and the main session. For Bash it only checks the command text.
+
 ## Lane-owned disposition route
 
 Apply this route only to future briefs after verified runtime adoption.

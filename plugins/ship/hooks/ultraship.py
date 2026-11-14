@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Ultraship hooks. Usage: ultraship.py pre|subagent-stop|stop|compact < hook-input.json"""
 import ast
+import calendar
 import fcntl
 import fnmatch
 import hashlib
@@ -10,13 +11,19 @@ import os
 import posixpath
 import re
 import shlex
+import stat
 import sys
 import time
+import traceback
+import unicodedata
+import urllib.parse
 import uuid
 from pathlib import Path, PurePosixPath
 
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
 RESEARCH_BUDGET = 40
+ROW_REVIEW_PR = re.compile(r'https://github\.com/[\w.-]+/[\w.-]+/pull/\d+', re.ASCII)
+ROW_REVIEW_MAX_AHEAD = 4 * 3600
 DISCOVERY = re.compile(r'^(Read|Grep|Glob|LSP|WebFetch|WebSearch|mcp__fff__\w+)$')
 # ponytail: a command-string match, so a writer can still reach these through a script it writes,
 # an alias or function, `eval`, or encoded text such as `$'\x70ush'` or base64.
@@ -2157,6 +2164,22 @@ def pre(data):
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
         deny('ship agents pin their own model. Remove the `model` field and call the scoped agent '
              'or the next agent in its fallback chain.')
+    agent_type = data.get('agent_type') or ''
+    if agent_type and not re.match(r'^(ship:)?driver(--|$)', agent_type):
+        if tool in ('Edit', 'Write', 'NotebookEdit'):
+            written = tin.get('file_path') or tin.get('notebook_path')
+            if isinstance(written, str) and written:
+                records = os.path.realpath(STATE / 'row-review').casefold()
+                written = os.path.realpath(os.path.join(data.get('cwd') or os.getcwd(),
+                                                        os.path.expanduser(written))).casefold()
+                if written == records or written.startswith(records + '/'):
+                    deny('Only the driver and the main session write row-review admission records. '
+                         'Report the blocked scope to the driver.')
+        # shortcut: Bash gets a text match only, so a path built from pieces slips past it.
+        # Upgrade path: a state folder that non-driver agents cannot reach.
+        if tool == 'Bash' and 'ultraship/row-review' in str(tin.get('command', '')).casefold():
+            deny('Only the driver and the main session touch row-review admission records (custody rule). '
+                 'Report the blocked scope to the driver.')
     if role(data, 'writer'):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
                     'mcp__bettercoding__set_input_status'):
@@ -2223,96 +2246,210 @@ def pre(data):
             deny(f'Research budget of {RESEARCH_BUDGET} discovery calls is spent. Return your answer '
                  'with the evidence you have and list what stays unconfirmed.')
         counter.write_text(str(used + 1))
-    if role(data, 'reviewer') and (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')):
+    if role(data, 'reviewer') and (tool in ('Read', 'Grep', 'Glob', 'LSP', 'WebFetch') or tool.startswith('mcp__')):
+        if tool.startswith('mcp__'):
+            deny('Reviewers cannot use mcp__ tools. Use Grep or Glob with an explicit path.')
         try:
-            fields = ('file_path', 'filePath', 'path', 'glob')
-            if tool == 'Glob':
-                fields += ('pattern',)
-            if tool.startswith('mcp__fff__'):
-                fields += ('query', 'constraints', 'patterns')
-            values = []
-            for field in fields:
-                if field not in tin:
-                    continue
-                value = tin[field]
-                if field == 'patterns':
-                    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-                        deny('Reviewers require a list of strings for search patterns.')
-                    values.extend(value)
-                else:
-                    if not isinstance(value, str):
-                        deny('Reviewers require string paths, queries, and constraints.')
-                    values.append(value)
+            protected = r'(?<![\w.-])tests/mutation(/|$)'
+            blocked = 'Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.'
+            if tool == 'WebFetch':
+                url = tin.get('url')
+                if not isinstance(url, str):
+                    deny('Reviewers require a string url.')
+                while urllib.parse.unquote(url) != url:
+                    url = urllib.parse.unquote(url)
+                # A `.` segment decoded from `%2e` is removed by the URL parser, and servers read `\` as `/`.
+                url = url.replace('\\', '/')
+                if any(re.search(protected, text, re.IGNORECASE)
+                       for text in (url, posixpath.normpath(urllib.parse.urlsplit(url).path))):
+                    deny(blocked)
+                return
+            unscoped = ('Reviewers must scope searches to an explicit path. '
+                        'Report failed or empty searches; never widen the scope.')
+            private = ('Reviewers cannot read Claude Code data under the Claude config folder (~/.claude), such as '
+                       'session transcripts and file history. Only CLAUDE.md, plugins/cache and plugins/marketplaces stay readable. '
+                       'Report the blocked scope to the coordinator.')
 
             def normalize(value):
-                return posixpath.normpath(value.replace('\\', '/')).replace('//', '/')
+                return os.path.realpath(value)
+
+            def canonical(value):
+                # Claude Code and this hook must read one path: no trim, expansion, normalization or link step may differ.
+                if (re.search(r'\A[\s\N{ZERO WIDTH NO-BREAK SPACE}]|[\s\N{ZERO WIDTH NO-BREAK SPACE}]\Z', value)
+                        or not value.startswith('/')
+                        or unicodedata.normalize('NFC', value) != value):
+                    return False
+                parts = value[1:].split('/') if value != '/' else []
+                return not {'', '.', '..'} & set(parts) and os.path.realpath(value) == value
 
             home = normalize(str(Path.home()))
             cwd = normalize(data.get('cwd') or str(Path.cwd()))
+            claude_dirs = {normalize(str(Path.home() / '.claude'))}
+            if os.environ.get('CLAUDE_CONFIG_DIR'):
+                claude_dirs.add(normalize(os.environ['CLAUDE_CONFIG_DIR']))
 
-            def absolute(value, base=cwd):
-                value = value.replace('\\', '/')
-                if value == '~' or value.startswith('~/'):
-                    value = home + value[1:]
-                return normalize(posixpath.join(base, value))
+            def claude_data(path):
+                # Checkpoints, transcripts and saved results hold copies of protected rows under other names.
+                for claude in claude_dirs:
+                    lowered = claude.casefold()
+                    if path.casefold() != lowered and not path.casefold().startswith(lowered + '/'):
+                        continue
+                    readable = path == claude + '/CLAUDE.md' or any(
+                        path == f'{claude}/plugins/{kind}' or path.startswith(f'{claude}/plugins/{kind}/')
+                        for kind in ('cache', 'marketplaces'))
+                    if not readable:
+                        return True
+                return False
 
-            if any(re.search(r'(?<![\w.-])tests/mutation(/|$)', absolute(token.lstrip('!')))
-                   for value in values for token in [value, *value.split()]):
-                deny('Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.')
-            if tool in ('Grep', 'Glob', 'mcp__fff__grep', 'mcp__fff__multi_grep', 'mcp__fff__find_files'):
-                def bounded(directory):
-                    if not directory.strip() or directory.startswith('!'):
-                        return False
-                    resolved = absolute(directory)
+            paths, globs = [], []
+            fields = {'file_path': paths, 'filePath': paths, 'path': paths, 'glob': globs}
+            if tool == 'Glob':
+                fields['pattern'] = globs
+            for field, values in fields.items():
+                if field in tin:
+                    if not isinstance(tin[field], str):
+                        deny('Reviewers require string paths and globs.')
+                    values.append(tin[field])
+            for path in paths:
+                if not canonical(path):
+                    message = ('Reviewers must pass an exact absolute path: no `~`, `.` or `..` segment, repeated or '
+                               'trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form.')
+                    real = os.path.realpath(path) if path.startswith('/') else ''
+                    if (real and real != path and canonical(real) and not claude_data(real)
+                            and not re.search(protected, real, re.IGNORECASE)
+                            and '.git' not in real.casefold().split('/')):
+                        message += f' The real path is {real}.'
+                    deny(message)
+            if any('.git' in path.casefold().split('/') for path in paths):
+                deny('Reviewers cannot access `.git` paths. Report the blocked scope to the coordinator.')
+            if any(claude_data(path) for path in paths):
+                deny(private)
+
+            def row_admission():
+                """Return the unmet condition, or None when the driver admitted this exact row-file read."""
+                agent_id = data.get('agent_id')
+                if not isinstance(agent_id, str) or not agent_id:
+                    return 'No admission record can match because the hook payload has no agent_id.'
+                record = STATE / 'row-review' / (re.sub(r'[^\w.-]', '_', agent_id) + '.json')
+                unmet = f'Admission record {record} must exist and meet this condition: '
+                target = tin.get('file_path') if tool == 'Read' else tin.get('path') if tool == 'Grep' else None
+                if paths != [target] or 'glob' in tin or 'type' in tin:
+                    return unmet + ('only Read of a listed row file, or Grep with a listed row file as `path` '
+                                    'and no `glob` or `type`, can be admitted.')
+                try:
+                    # O_NONBLOCK: opening a named pipe must not hang the hook.
+                    descriptor = os.open(record, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                except OSError:
+                    return unmet + 'the record is missing or is a link.'
+                with os.fdopen(descriptor, 'rb') as handle:
+                    status = os.fstat(descriptor)
+                    if (not stat.S_ISREG(status.st_mode) or status.st_uid != os.getuid()
+                            or status.st_mode & 0o022 or status.st_size > 65536):
+                        return unmet + ('it is a regular file that you own, not group or world writable, '
+                                        'at most 64 KiB.')
+                    try:
+                        fields = json.loads(handle.read(65537))
+                    except Exception:
+                        fields = None
+                if not isinstance(fields, dict):
+                    return unmet + 'it is a JSON object.'
+                if not isinstance(fields.get('pr'), str) or not ROW_REVIEW_PR.fullmatch(fields['pr']):
+                    return unmet + '`pr` is a GitHub pull request URL.'
+                if fields.get('agent_id') != agent_id:
+                    return unmet + '`agent_id` equals your agent ID.'
+                files = fields.get('row_files')
+                if (not isinstance(files, list) or not files
+                        or any(not isinstance(item, str) or not canonical(item)
+                               or not re.search(protected, item, re.IGNORECASE) for item in files)):
+                    return unmet + '`row_files` lists canonical absolute paths that contain tests/mutation.'
+                expires = fields.get('expires_at')
+                try:
+                    if not isinstance(expires, str) or not re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', expires, re.ASCII):
+                        raise ValueError(expires)
+                    deadline = calendar.timegm(time.strptime(expires, '%Y-%m-%dT%H:%M:%SZ'))
+                except ValueError:
+                    return unmet + '`expires_at` is a UTC time `YYYY-MM-DDTHH:MM:SSZ`.'
+                now = time.time()
+                if not now < deadline <= now + ROW_REVIEW_MAX_AHEAD:
+                    return unmet + '`expires_at` is later than now and at most 4 hours ahead.'
+                if target not in files:
+                    return unmet + 'the path equals one `row_files` entry.'
+                try:
+                    regular = stat.S_ISREG(os.lstat(target).st_mode)
+                except OSError:
+                    regular = False
+                if not regular:
+                    return unmet + 'the listed row file is a regular file.'
+                return None
+
+            admitted = False
+            # The typed name counts: a case-insensitive file system can hide the protected directory.
+            if any(re.search(protected, path, re.IGNORECASE) for path in paths):
+                unmet = row_admission()
+                if unmet:
+                    deny(blocked + ' ' + unmet)
+                admitted = True
+            base = tin['path'] if tool in ('Grep', 'Glob') and 'path' in tin else cwd
+            for glob in globs:
+                for token in glob.split():
+                    if re.search(r'(?:^|[{,!])[/~]|(?:^|[/{,!])\.\.(?:$|[/},])', token):
+                        deny('Reviewers must pass globs relative to the search path: '
+                             'no absolute or `~` glob and no `..` segment.')
+                    if re.search(protected, posixpath.normpath(posixpath.join(base, token.lstrip('!'))), re.IGNORECASE):
+                        deny(blocked)
+            if tool == 'LSP' and (tin.get('operation') not in ('hover', 'documentSymbol') or 'filePath' not in tin):
+                deny('Reviewers may use LSP hover and documentSymbol on one explicit file only. '
+                     'Use Grep or Glob with an explicit path for other lookups.')
+            if tool in ('Grep', 'Glob'):
+                def bounded(resolved):
                     return not any(posixpath.commonpath((resolved, target)) == resolved
                                    for target in ('/', home, cwd))
 
-                def directory_constraint(token):
-                    if token.startswith('!'):
-                        return False
-                    token = token.replace('\\', '/')
-                    prefix = re.split(r'[*?\[{]', token, maxsplit=1)[0]
-                    directory = prefix.rpartition('/')[0] if '/' in prefix else ''
-                    if prefix.startswith('/') and not directory:
-                        directory = '/'
-                    return bounded(directory)
+                if 'path' not in tin or not bounded(tin['path']):
+                    deny(unscoped)
+                roots = [tin['path']]
 
-                def reaches_protected(pattern, base=cwd):
-                    parts = absolute(pattern, base).split('/')
-                    # shortcut: only a named tests segment is checked; broader globs require brief exclusions.
-                    for index, part in enumerate(parts):
-                        if part != 'tests':
+                deadline = time.monotonic() + 5
+                seen = set()
+                while roots:
+                    if time.monotonic() > deadline:
+                        deny('Reviewers must narrow the search scope: directory walk exceeds 5 seconds.')
+                    directory = roots.pop()
+                    if not admitted and re.search(protected, directory, re.IGNORECASE):
+                        deny(blocked)
+                    if claude_data(directory):
+                        deny(private)
+                    try:
+                        status = os.stat(directory)
+                    except (FileNotFoundError, NotADirectoryError):
+                        continue
+                    identity = (status.st_dev, status.st_ino)
+                    if not stat.S_ISDIR(status.st_mode) or identity in seen:
+                        continue
+                    seen.add(identity)
+                    if len(seen) > 20000:
+                        deny('Reviewers must narrow the search scope: directory walk exceeds 20000 directories.')
+                    entries = []
+                    try:
+                        for entry in os.scandir(directory):
+                            entries.append(entry)
+                            if len(entries) % 256 == 0 and time.monotonic() > deadline:
+                                deny('Reviewers must narrow the search scope: directory walk exceeds 5 seconds.')
+                    except FileNotFoundError:
+                        continue
+                    if posixpath.basename(directory).casefold() == 'tests' and any(
+                            entry.name.casefold() == 'mutation' for entry in entries):
+                        deny(blocked)
+                    for entry in entries:
+                        if entry.name == '.git':
                             continue
-                        following = parts[index + 1:]
-                        if not following or following[0] == '**':
-                            return True
-                        choices = re.split(r'[{},]', following[0])
-                        if any(fnmatch.fnmatchcase('mutation', choice) for choice in choices):
-                            return True
-                    return False
-
-                scoped = bounded(tin.get('path', ''))
-                if tool in ('Grep', 'Glob'):
-                    pattern = tin.get('glob' if tool == 'Grep' else 'pattern', '')
-                    if reaches_protected(pattern, absolute(tin.get('path', ''))):
-                        deny('Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.')
-                    scoped |= directory_constraint(pattern)
-                else:
-                    constraints = tin.get('constraints', '').split()
-                    query = tin.get('query', '').split()
-                    if tool == 'mcp__fff__grep':
-                        for token in query:
-                            if '/' not in token and '.' not in token and not token.startswith(('!', '*')):
-                                break
-                            constraints.append(token)
-                    elif tool == 'mcp__fff__find_files':
-                        constraints.extend(query)
-                    if any(not token.startswith('!') and reaches_protected(token) for token in constraints):
-                        deny('Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.')
-                    scoped |= any(directory_constraint(token) for token in constraints)
-                if not scoped:
-                    deny('Reviewers must scope searches to an explicit path or positive directory constraint. '
-                         'Report failed or empty searches; never widen the scope.')
+                        if entry.is_symlink():
+                            target = os.path.realpath(entry.path)
+                            if not bounded(target):
+                                deny(unscoped)
+                            roots.append(target)
+                        elif entry.is_dir(follow_symlinks=False):
+                            roots.append(entry.path)
         except Exception:
             deny('Reviewers cannot proceed when search scope validation fails. Report the blocked scope to the coordinator.')
 
@@ -2509,9 +2646,19 @@ def compact(data):
     print('\n'.join(lines))
 
 
+def guarded_pre(data):
+    """A bug in `pre` must not block every role's tools; a reviewer still fails closed."""
+    try:
+        pre(data)
+    except Exception:
+        traceback.print_exc()
+        if isinstance(data, dict) and role(data, 'reviewer'):
+            deny('Reviewers cannot proceed when the ship hook fails. Report the blocked scope to the coordinator.')
+
+
 if __name__ == '__main__':
     mode = sys.argv[1] if len(sys.argv) > 1 else ''
-    handler = {'pre': pre, 'subagent-stop': subagent_stop, 'stop': stop, 'compact': compact}.get(mode)
+    handler = {'pre': guarded_pre, 'subagent-stop': subagent_stop, 'stop': stop, 'compact': compact}.get(mode)
     if not handler:
         sys.exit(__doc__)
     try:

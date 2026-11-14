@@ -21,6 +21,10 @@ Return one verdict from independent model seats that review the same frozen subj
 Every initial, verification, and replacement brief lists permitted paths and exclusions.
 Scope every search call to the permitted paths.
 Exclude `tests/mutation/`, generated and vendored content, and any other brief exclusions.
+Reviewers use Grep, Glob, and Read with exact absolute paths.
+Reviewers use LSP hover and documentSymbol on one file only.
+Reviewers use no MCP (`mcp__`) tools.
+Reviewers search only directories that contain no `tests/mutation/` directory.
 Report a failed or empty scoped search to the coordinator; never widen the search scope.
 An explicit repository-root path does not authorize broader discovery.
 

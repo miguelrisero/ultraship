@@ -264,6 +264,7 @@ Keep row ID, claim, subject, designated test, pins, operator, assertions, bounds
 Before publication, require an independent reviewer to read the same named rows before and after the edit under the same scoped access authority.
 The reviewer may instead use authority A of its own definition, the owner global CLAUDE.md grant; that route needs no owner-event relay.
 Require that reviewer to differ from the PR author and the applying writer.
+Admit each reviewer row read with the [reviewer admission record](references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
 Require the reviewer to confirm the same test, same claim, identical mutant edit, and nothing weaker for every row.
 Bind the review receipt to reviewer identity, approving verdict, commit SHA, row-file paths, row IDs, and CI evidence.
 Require CoC approval of that review receipt before publication; changed source or evidence invalidates the receipt and approval.
