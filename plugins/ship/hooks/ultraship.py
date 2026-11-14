@@ -2419,6 +2419,11 @@ def pre(data):
                 if not isinstance(agent_id, str) or not agent_id:
                     return 'No admission record can match because the hook payload has no agent_id.'
                 record = STATE / 'row-review' / (re.sub(r'[^\w.-]', '_', agent_id) + '.json')
+                if not os.path.lexists(record):
+                    for workspace in (Path(cwd), *Path(cwd).parents):
+                        if (workspace / '.scratch').is_dir():
+                            record = workspace / '.scratch/ultraship/row-review' / record.name
+                            break
                 unmet = f'Admission record {record} must exist and meet this condition: '
                 target = tin.get('file_path') if tool == 'Read' else tin.get('path') if tool == 'Grep' else None
                 if paths != [target] or 'glob' in tin or 'type' in tin:
