@@ -460,7 +460,8 @@ An explicit owner refusal blocks every route for that edit until applicable owne
 Apply your own loaded definition; checkout, cache, and version supply zero additional authority.
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
-Except under the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
+Apply the [once-only message-format contract](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) when every returned finding matches a known `text_lint.py` formatting message.
+Except under that contract or the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
 Except under the owner-decisions method-only rule: use no other process to do a step that a hook or permission denied.
 Script files, other interpreters, module flags and wrapper commands are other processes.
 Tell the driver about the denial and stop that step.

@@ -105,9 +105,9 @@ class CoordinationRemedyContractTests(unittest.TestCase):
 
     def test_contract_scopes_message_format_refusals_and_fresh_instructions(self):
         for requirement in (
-            "An output-contract refusal naming only a message's wording is method-only.",
+            'Examples include glued words, sentence or word limits, and a missing `Facts` heading.',
             'The sender rewrites the same content once in short plain sentences.',
-            'Put long identifiers in a file and send its path.',
+            'Put long identifiers in backticks or in a file and send its path.',
             'After a message-format refusal, a coordinator may give a fresh writer a new brief '
             'for the same approved scope.',
             'This fresh brief is a new instruction, not a resend.',
@@ -118,8 +118,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'and scope; record the new writer and dispatch separately.',
             'Preserve approved scope, authority, provenance, choice identifiers, exclusive custody, '
             'and all unrelated non-prose fields.',
-            'Both the wording rewrite and fresh brief require the authenticated formatting producer, '
-            'exact remedy, original-call evidence, and canonical exclusive custody below.',
+            'Both the wording rewrite and fresh brief require matching formatting findings, '
+            'exact remedies, original-call evidence, and canonical exclusive custody below.',
             "Share that original call's single attempt between the rewrite and fresh brief; "
             'durably consume it before either action.',
             'Deny both actions when that attempt is consumed; a fresh instruction creates zero additional attempt.',
@@ -132,42 +132,32 @@ class CoordinationRemedyContractTests(unittest.TestCase):
     def test_contract_keeps_the_refusal_rule_line_budget(self):
         self.assertLessEqual(len([line for line in self.refusals.splitlines() if line.strip()]), 8)
 
-    def test_contract_binds_formatting_resends_to_authenticated_original_calls(self):
+    def test_contract_binds_formatting_resends_to_known_findings(self):
         for requirement in (
-            'For `Agent` and `SendMessage`, allow one formatting-only resend only after '
-            'an authenticated lint refusal with an exact formatting remedy.',
-            'Require trusted native tool evidence attributing the complete refusal to the '
-            'formatting producer and identifying the original refused tool call.',
-            'For `SendMessage`, require authenticated `plugins/ship/hooks/text_lint.py` or '
-            'chief-of-chiefs `skills/run/scripts/text_lint.py` producer attribution.',
-            'The `Output contract:` prefix alone supplies zero producer authentication.',
-            'An authenticated formatting-only refusal qualifies despite that prefix; '
-            'generic or unclassified denials remain blocked.',
-            'Require every returned finding to be formatting-only and the applicable loaded contract.',
-            "The formatting exception covers only the identified formatting producer's refusal "
-            "of that handoff's text; other binding tool denials remain final.",
+            'For `Agent` and `SendMessage`, every returned finding matching a known `text_lint.py` '
+            'formatting message suffices to establish a formatting-only refusal.',
+            'Require every returned finding to match a known `text_lint.py` formatting message.',
+            'Require the applicable loaded contract.',
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, self.refusals)
         for name in ('driver.md', 'driver--sol.md'):
             with self.subTest(driver=name):
                 driver = (ROOT / 'plugins/ship/agents' / name).read_text()
-                self.assertIn('Apply its once-only authenticated formatting-only resend contract '
-                              'to `Agent` and `SendMessage`.', driver)
+                self.assertIn('Apply its once-only formatting contract to `Agent` and `SendMessage` '
+                              'when every returned finding matches a known `text_lint.py` formatting message.', driver)
 
     def test_contract_requires_known_formatting_findings_and_blocks_unknown_evidence(self):
-        self.assertIn(
-            'Attribute a pathless hook refusal by elimination only when every enabled PreToolUse '
-            'hook that matches the tool and can emit each returned finding is a named formatting producer.',
-            self.refusals,
-        )
+        for removed in ('authenticated', 'producer attribution', 'producer authentication', 'by elimination'):
+            with self.subTest(removed=removed):
+                self.assertNotIn(removed, self.refusals)
         self.assertIn(
             'Require every returned finding to match a known `text_lint.py` formatting message.',
             self.refusals,
             'Every returned finding must match a known text_lint formatting message',
         )
         block = self.refusals.partition('For formatting-only resends, block ')[2].partition('.')[0]
-        for case in ('unknown producers', 'unmatched findings'):
+        for case in ('unmatched findings',):
             with self.subTest(case=case):
                 self.assertIn(case, block, f'The formatting exception must block {case}')
 
@@ -185,9 +175,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
     def test_contract_keeps_formatting_route_fail_closed(self):
         block = self.refusals.partition('For formatting-only resends, block ')[2].partition('.')[0]
         for case in (
-            'generic prefixes without exact provenance',
-            'unknown producers',
-            'incomplete refusal evidence',
+            'incomplete original-call evidence',
             'missing or ambiguous formatting remedies',
             'unknown or mixed reasons',
             'safety refusals',
