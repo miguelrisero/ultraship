@@ -83,6 +83,22 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(f'{interpreter} {option} x'))
                 self.assertIn('inline interpreter code rule (', self.reason)
 
+    def test_inline_interpreter_expansions_and_pager_commands_must_refuse(self):
+        for command in (
+            r'''echo $((true); node -e 'console.log(1)')''',
+            r'''grep -n "$(node -e 'console.log(1)')" a.py''',
+            r'''IFS=/; P=deno/run/x.ts; ${P%/run/}''',
+            r'''IFS=/; P='deno/eval/console.log(1)'; nice ${P%/eval/}''',
+            r'''N=node; X='a[$(printf 42 | $N)]'; printf x | echo $(( $X ))''',
+            r'''grep -n "\"'$(node -e 42)'\"" a.py''',
+            r'''printf 'process.exit(42)' | echo $(( $(printf no%s de) ) )''',
+            r'''env "$(printf node)" "$(printf %s '--eval=process.exit(42)')"''',
+            r'''git grep '--open-files-in-pager=node${IFS}--eval="process.exit(42)"' needle''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule', self.reason)
+
     def test_unresolved_inline_command_words_are_denied(self):
         for command in ('"python3" -c x', "pyth''on3 -c x", r'p\ython3 -c x',
                         '$P -c x', '$(which node) -e x'):
