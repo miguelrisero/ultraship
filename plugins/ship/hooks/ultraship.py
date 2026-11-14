@@ -2297,6 +2297,10 @@ def pre(data):
                     url = urllib.parse.unquote(url)
                 # A `.` segment decoded from `%2e` is removed by the URL parser, and servers read `\` as `/`.
                 url = url.replace('\\', '/')
+                # GitHub addresses blobs, commits and diffs by ID with no path, so no path rule can see a protected row.
+                host = (urllib.parse.urlsplit(url).hostname or '').rstrip('.')
+                if re.search(r'(^|\.)(github\.com|githubusercontent\.com)$', host):
+                    deny('Reviewers cannot fetch GitHub URLs. Read the local worktree at the frozen SHA.')
                 if any(re.search(protected, text, re.IGNORECASE)
                        for text in (url, posixpath.normpath(urllib.parse.urlsplit(url).path))):
                     deny(blocked)

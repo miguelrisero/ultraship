@@ -53,7 +53,7 @@ Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-s
 
 The ship hooks need Claude Code 2.1.295 or later.
 
-The reviewer boundary checks names and paths. It cannot see a copy of a protected row kept under another name, such as a scratch file. A `WebFetch` URL that addresses content by ID, such as a blob or a `.diff`, carries no path, so the hook cannot check it.
+The reviewer boundary checks names and paths. It cannot see a copy of a protected row kept under another name, such as a scratch file. GitHub addresses content by ID, such as a blob or a `.diff`, with no path, so the hook denies reviewer `WebFetch` to `github.com`, `githubusercontent.com` and their subdomains. A URL on another code host that addresses content by ID carries no path, so the hook cannot check it.
 
 An admission record is the file `row-review/<agent ID>.json` in the hook state folder. It holds `pr`, `agent_id`, `row_files`, and `expires_at` (UTC, at most 4 hours ahead). The file must belong to the hook user and must not allow group or world writes. The hook reads no other record. The hook denies Write, Edit, and NotebookEdit to that folder for every agent except the driver and the main session. For Bash it only checks the command text for `ultraship/row-review`, so a path built from pieces passes.
 

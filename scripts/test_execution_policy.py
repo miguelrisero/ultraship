@@ -609,6 +609,21 @@ class ReviewerSearchTests(unittest.TestCase):
                 self.assertEqual(self.decision('WebFetch', {'url': url, 'prompt': 'summarize'}), {})
         self.assert_denied('WebFetch', {'url': 42, 'prompt': 'summarize'})
 
+    def test_web_fetch_to_github_hosts_is_denied_because_ids_carry_no_path(self):
+        for url in ('https://github.com/o/r/blob/0123abc/x.toml',
+                    'https://api.github.com/repos/o/r/git/blobs/0123abc',
+                    'https://raw.githubusercontent.com/o/r/0123abc/x.toml',
+                    'https://codeload.github.com/o/r/tar.gz/main',
+                    'https://gist.github.com/u/0123abc',
+                    'https://GitHub.com./o/r/pull/7.diff',
+                    'https://user@github.com/o/r/commit/0123abc.patch',
+                    'https://github.com%2Fo/r'):
+            with self.subTest(url=url):
+                self.assert_rule('WebFetch', {'url': url, 'prompt': 'summarize'}, 'GitHub')
+        for url in ('https://docs.python.org/3/library/re.html', 'https://notgithub.com/o/r'):
+            with self.subTest(url=url):
+                self.assertEqual(self.decision('WebFetch', {'url': url, 'prompt': 'summarize'}), {})
+
     def admit(self, agent_id='agent-1', ahead=3600, body_agent=None, **record):
         folder = Path(self.root, 'state/row-review')
         folder.mkdir(parents=True, exist_ok=True)
