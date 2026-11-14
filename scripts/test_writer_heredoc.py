@@ -132,8 +132,43 @@ class WriterHeredocTests(unittest.TestCase):
                      'a "$[1]" \'<<\'', "a '<<"):
             with self.subTest(line=line):
                 self.assertEqual(ultraship.literal_quotes_removed(line), line)
-        self.assertEqual(ultraship.literal_quotes_removed("a \\' <<< \\' '<<'"), "a \\' <<< \\' ")
-        self.assertEqual(ultraship.literal_quotes_removed('a "x\\"y" \'<<\''), 'a "x\\"y" ')
+        self.assertEqual(ultraship.literal_quotes_removed("a \\' <<< \\' '<<'"), "a \\' <<< \\' " + ' ' * 4)
+        self.assertEqual(ultraship.literal_quotes_removed('a "x\\"y" \'<<\''), 'a ' + ' ' * 6 + ' ' + ' ' * 4)
+        for separator in ('\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85', ' ', ' '):
+            command = "grep 'first" + separator + "<<EOF' a.py\nnode <<'JS'\nx\nJS\n"
+            self.assertEqual(len(ultraship.literal_quotes_removed(command)), len(command))
+            self.assertIsNotNone(ultraship.process_heredoc_denial(command, readers=True))
+
+    def test_quoted_heredoc_operators_are_literal_arguments(self):
+        for quote in ("'", '"'):
+            for literal in ('<<EOF', '<<< data', '^(<<<<<<<|=======|>>>>>>>)', 'first\n<<EOF\nlast'):
+                for suffix in ('', '\n', ' && git status --short\n'):
+                    command = f'rg -n {quote}{literal}{quote} a.py' + suffix
+                    with self.subTest(command=command):
+                        self.assertFalse(self.denied(command), self.reason)
+        command = ('cd /workspace && git diff --name-only --diff-filter=U'
+                   " && rg -n '^(<<<<<<<|=======|>>>>>>>)' a.py"
+                   ' && git diff --name-only HEAD origin/main -- migrations > /workspace/paths.txt')
+        self.assertFalse(self.denied(command), self.reason)
+
+    def test_google_conflict_lookup_is_literal_search_data(self):
+        command = ('cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/b8fe-chief-coc-27-oct/'
+                   'wt-google-confirm-evidence && git status --short'
+                   " && rg -n '^(<<<<<<<|=======|>>>>>>>)' backend/api/tests/test_browser_sign_in_inputs.py"
+                   ' && git diff --name-only --diff-filter=U && date -u')
+        self.assertFalse(self.denied(command), self.reason)
+
+    def test_quoted_operators_keep_later_interpreter_heredocs_denied(self):
+        for literal in ("'<<EOF'", '"<<EOF"', "'first\n<<EOF\nlast'"):
+            for tail in ("node <<'JS'\nx\nJS\n", "python3 <<< 'import os'",
+                         "python3 -c 'import os'"):
+                command = f'grep {literal} a.py\n' + tail
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command))
+        command = "cat <<'EOF'\n'\nEOF\nnode <<'JS'\n'\nJS\n"
+        self.assertTrue(self.denied(command))
+        self.assertIsNotNone(ultraship.process_heredoc_denial(command, readers=True))
+        self.assertTrue(self.denied("python3 - <<'PY'\nprint(\"'\")\nPY\nnode <<'JS'\n'\nJS\n"))
 
     def test_program_from_pipe_is_denied(self):
         for command in ("printf '%s' x | python3", 'echo x | node', 'cat f | perl'):

@@ -948,7 +948,7 @@ def data_reader_header(line):
 
 
 def literal_quotes_removed(line):
-    """Drop single-quoted text; keep the whole line when bash could read its quotes differently."""
+    """Mask literal quotes at their offsets; keep ambiguous shell text on the strict check."""
     if re.search(r"\$['(\[{]|[#`]", line):
         return line
     kept, index = [], 0
@@ -963,8 +963,7 @@ def literal_quotes_removed(line):
                 end += 2 if char == '"' and line[end] == '\\' else 1
             if end >= len(line):
                 return line
-            if char == '"':
-                kept.append(line[index:end + 1])
+            kept.append(re.sub(r'[^\n\r\v\f\x1c-\x1e\x85  ]', ' ', line[index:end + 1]))
             index = end + 1
         else:
             kept.append(char)
@@ -975,13 +974,14 @@ def literal_quotes_removed(line):
 def process_heredoc_denial(command, readers=False):
     """Check Python stdin bodies and keep quoted commit messages as data."""
     lines = (command if readers else cat_heredoc_data(command)).splitlines(keepends=True)
+    quoted_lines = literal_quotes_removed(''.join(lines)).splitlines(keepends=True)
     index = 0
     while index < len(lines):
-        operators = list(re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
-                                    r"(?P<delimiter>'[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", lines[index]))
+        text = quoted_lines[index]
+        operators = [match for match in re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
+                                                   r"(?P<delimiter>'[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)",
+                                                   lines[index]) if text[match.start():match.start() + 2] == '<<']
         if not operators:
-            # A quote opened on an earlier line changes how bash reads this one, so only a one-line command drops quotes.
-            text = literal_quotes_removed(lines[index]) if len(lines) == 1 else lines[index]
             if readers and '<<' in text and not data_reader_header(lines[index]):
                 return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
             index += 1
@@ -1023,8 +1023,11 @@ def process_heredoc_denial(command, readers=False):
                 if end == len(lines):
                     return 'process-capable heredoc rule (unterminated body)'
                 index = end + 1
+                quoted_lines[index:] = literal_quotes_removed(''.join(lines[index:])).splitlines(keepends=True)
             else:
                 index += 1
+                # The legacy pass scans data bodies strictly; their quotes supply no shell-state evidence.
+                quoted_lines = lines
             continue
         delimiter = shlex.split(match['delimiter'])[0]
         end = index + 1
@@ -1052,6 +1055,7 @@ def process_heredoc_denial(command, readers=False):
         if match['delimiter'][0] not in '\'"\\':
             return 'process-capable heredoc rule (Python heredoc needs a quoted delimiter)'
         index = end + 1
+        quoted_lines[index:] = literal_quotes_removed(''.join(lines[index:])).splitlines(keepends=True)
     if readers and '\\\n' in command:
         return process_heredoc_denial(command.replace('\\\n', ''), readers=True)
     return None
@@ -1124,15 +1128,19 @@ def shell_without_heredoc_bodies(command):
                               r'(?:-m +"\$\(cat[ \t]*|-F +- +)<<-?[ \t]*(?:\'[A-Za-z0-9_]+\'|"[A-Za-z0-9_]+")\n', lines[0])
             and not process_heredoc_denial(command)):
         return ''
-    for line in lines:
+    quoted_lines = literal_quotes_removed(command).splitlines(keepends=True)
+    for index, line in enumerate(lines):
         if pending:
             delimiter, tabs, quoted = pending[0]
             if (line.lstrip('\t') if tabs else line).removesuffix('\n') == delimiter:
                 pending.pop(0)
+                if not pending:
+                    quoted_lines[index + 1:] = literal_quotes_removed(''.join(lines[index + 1:])).splitlines(keepends=True)
             continue
         kept.append(line)
         for match in re.finditer(r"(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", line):
-            pending.append((shlex.split(match[2])[0], bool(match[1]), match[2][0] in '\'"\\'))
+            if quoted_lines[index][match.start():match.start() + 2] == '<<':
+                pending.append((shlex.split(match[2])[0], bool(match[1]), match[2][0] in '\'"\\'))
     return ''.join(kept)
 
 
