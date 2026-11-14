@@ -625,7 +625,9 @@ class ReviewerSearchTests(unittest.TestCase):
                     'https://user%40x@github.com/o/r/commit/0123abc.patch',
                     'https://github.com:443/o/r/commit/0123abc.diff',
                     'https://evil\\@github.com/o/r/commit/0123abc.diff',
-                    'https://%67ithub.com/o/r/commit/0123abc.diff'):
+                    'https://%67ithub.com/o/r/commit/0123abc.diff',
+                    'https://github.com ', 'https://github.com\x00', ' \x01https://github.com/o/r/commit/0123abc.diff\x1f ',
+                    'https://git\thub.com/o/r', 'https://github.com\n/o/r'):
             with self.subTest(url=url):
                 self.assert_rule('WebFetch', {'url': url, 'prompt': 'summarize'}, 'GitHub')
         blob = 'api.github.com/repos/o/r/git/blobs/0123abc'

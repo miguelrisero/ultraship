@@ -2293,6 +2293,8 @@ def pre(data):
                 url = tin.get('url')
                 if not isinstance(url, str):
                     deny('Reviewers require a string url.')
+                # A WHATWG parser trims C0 controls and spaces at both ends and drops tabs and newlines anywhere.
+                url = re.sub(r'[\t\n\r]', '', url).strip(''.join(map(chr, range(33))))
                 raw = url
                 # A WHATWG parser finds a host after `https:`, `https:/` or `https:///`; urlsplit finds none.
                 if not re.match(r'(?i)https?://[^/\\?#]', raw):
