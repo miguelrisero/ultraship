@@ -2085,8 +2085,9 @@ def role(data, name):
 def git_commit_step(command):
     """Whether the whole shell text after the first heredoc is one line of plain `git add` and `git commit` steps."""
     lines = command.splitlines(keepends=True)
-    # A quoted delimiter keeps backslash-newline literal, so a physical line can end the body.
-    match = re.search(r"<<(-?)[ \t]*(['\"])([_a-zA-Z0-9]+)\2[ \t]*$", lines[0]) if lines and lines[0].count('<<') == 1 else None
+    # Only a whole known header counts; a quoted delimiter keeps backslash-newline literal, so a physical line ends the body.
+    match = re.fullmatch(r"(?:cd(?: --)? [\w./-]+ && )?(?:/usr/bin/)?python3?(?:\.[0-9]+)?(?: -[IB]+)* - "
+                         r"<<(-?)(['\"])([_a-zA-Z0-9]+)\2[ \t]*\n?", lines[0]) if lines else None
     if not match:
         return False
     for end in range(1, len(lines)):
