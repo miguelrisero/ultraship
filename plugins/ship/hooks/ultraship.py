@@ -2082,24 +2082,6 @@ def role(data, name):
     return re.match(rf'^(ship:)?{name}--', data.get('agent_type') or '') is not None
 
 
-# A numeric zero test on a status saved from `$?` reads as an unresolved word with an `-e` code flag.
-# Exit statuses are canonical decimals, so `= 0` and `!= 0` keep the meaning of `-eq 0` and `-ne 0`.
-NUMERIC_TEST = re.compile(r'(?:^|(?<=[;&|]) ?|(?<=\n))(test|\[) "\$([A-Za-z_]\w*)" -(eq|ne) 0( \])?(?=$|[ ;&|\n])')
-
-
-def numeric_test_shape(command, cwd):
-    """The string-compare shape when every numeric zero test reads a status saved from `$?` and the swap clears the rule."""
-    matches = list(NUMERIC_TEST.finditer(command))
-    if not matches or any((m[1] == '[') != bool(m[4]) for m in matches):
-        return ''
-    if any(not re.search(rf'(?:^|[;&|\n] ?){m[2]}=\$\?(?=$|[ ;&|\n])', command[:m.start()]) for m in matches):
-        return ''
-    swap = lambda m: m[0].replace(f' -{m[3]} 0', ' = 0' if m[3] == 'eq' else ' != 0')
-    if inline_interpreter_denial(NUMERIC_TEST.sub(swap, command), cwd):
-        return ''
-    return ' Resend with this shape: ' + ', '.join(f'`{swap(m).strip()}`' for m in matches) + '.'
-
-
 def git_commit_step(command):
     """Whether the whole shell text after the first heredoc is one line of plain `git add` and `git commit` steps."""
     lines = command.splitlines(keepends=True)
@@ -2300,9 +2282,7 @@ def pre(data):
                     deny(classifier_reason + ' Rule: ' + reason + '.')
                 reason = inline_interpreter_denial(command, data.get('cwd'))
                 if reason:
-                    deny(classifier_reason + ' Rule: ' + reason + '.'
-                         + (numeric_test_shape(command, data.get('cwd'))
-                            if reason.endswith('(unresolved command word)') else ''))
+                    deny(classifier_reason + ' Rule: ' + reason + '.')
             except Exception:
                 deny(classifier_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''
