@@ -2090,14 +2090,18 @@ def git_commit_step(command):
         return False
     for end in range(1, len(lines)):
         if lines[end].strip() == match[1]:
-            # shortcut: splits on separators inside quotes too; the result only adds advice text.
-            for step in re.split(r'&&|\|\||[;|\n]', ''.join(lines[end + 1:])):
+            # shortcut: reads each line on its own, so a continued or multi-line command prints no shape.
+            for line in lines[end + 1:]:
                 try:
-                    words = shlex.split(step)
+                    lexer = shlex.shlex(line, posix=True, punctuation_chars='();<>|&')
+                    lexer.whitespace_split = True
+                    tokens = list(lexer)
                 except ValueError:
                     return False
-                if words[:1] == ['git'] and words[1:2] in (['add'], ['commit']):
-                    return True
+                for at, token in enumerate(tokens[:-1]):
+                    starts = at == 0 or tokens[at - 1] in ('&&', '||', ';', '|', '&', '(')
+                    if starts and token == 'git' and tokens[at + 1] in ('add', 'commit'):
+                        return True
             return False
     return False
 

@@ -227,7 +227,8 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertIn('process-capable heredoc rule', self.reason)
                 self.assertIn('Resend with this shape:', self.reason)
                 self.assertIn('`git status --porcelain`', self.reason)
-        for tail in ('git commit-tree HEAD^{tree} -m x', 'git status', 'echo git commit', 'git\ncommit'):
+        for tail in ('git commit-tree HEAD^{tree} -m x', 'git status', 'echo git commit', 'git\ncommit',
+                     '# note; git commit', "echo 'a; git commit'", 'git # x\ncommit'):
             with self.subTest(tail=tail):
                 self.assertTrue(self.denied("python3 - <<'PY'\n# git commit\n" + check + tail))
                 self.assertNotIn('Resend with this shape:', self.reason)
