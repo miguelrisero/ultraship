@@ -949,19 +949,19 @@ def data_reader_header(line):
 
 def literal_quotes_removed(line):
     """Mask literal quotes at their offsets; keep ambiguous shell text on the strict check."""
-    if re.search(r"\$['(\[{]|[#`]", line):
-        return line
     kept, index = [], 0
     while index < len(line):
         char = line[index]
         if char == '\\':
             kept.append(line[index:index + 2])
             index += 2
+        elif char in '#`' or (char == '$' and line[index + 1:index + 2] in ("'", '(', '[', '{')):
+            return line
         elif char in '\'"':
             end = index + 1
             while end < len(line) and line[end] != char:
                 end += 2 if char == '"' and line[end] == '\\' else 1
-            if end >= len(line):
+            if end >= len(line) or char == '"' and re.search(r"\$['(\[{]|`", line[index + 1:end]):
                 return line
             kept.append(re.sub(r'[^\n\r\v\f\x1c-\x1e\x85  ]', ' ', line[index:end + 1]))
             index = end + 1

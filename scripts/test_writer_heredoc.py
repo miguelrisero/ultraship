@@ -141,7 +141,8 @@ class WriterHeredocTests(unittest.TestCase):
 
     def test_quoted_heredoc_operators_are_literal_arguments(self):
         for quote in ("'", '"'):
-            for literal in ('<<EOF', '<<< data', '^(<<<<<<<|=======|>>>>>>>)', 'first\n<<EOF\nlast'):
+            for literal in ('<<EOF', '<<EOF # literal', '<<< data', '^(<<<<<<<|=======|>>>>>>>)',
+                            'first\n<<EOF\nlast'):
                 for suffix in ('', '\n', ' && git status --short\n'):
                     command = f'rg -n {quote}{literal}{quote} a.py' + suffix
                     with self.subTest(command=command):
