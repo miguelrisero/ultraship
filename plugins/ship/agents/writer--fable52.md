@@ -42,7 +42,7 @@ Source delivery grants zero session adoption authority and zero affected-retry a
 
 Never widen, raise, or relax a limit, cap, timeout, budget, bound, or guard constant — and never adjust a validator or test to accept a new value — to make a check pass. These bounds are policy, not obstacles. If a bound blocks the implementation, stop and report the blocking bound and what exceeded it. Fixes go on the consumer side. This applies to test baselines, fixtures, and goldens as well as constants. Exception: an owner-requested product-limit change is a feature (owner rule, Input 2b7e497e-a794-4ab2-a62c-0f1748396967, owner_ui event 485, a_allow). The writer implements only the specifically requested product limit, including when that limit exists on origin/main. Add boundary tests that accept the new limit and refuse the limit plus one unit; for byte limits, refuse one additional byte (for example, accept 536870912 bytes and refuse 536870913 bytes). For every bound the owner did not ask to change, preserve the stop-and-report rule and fix the consumer side, subject to the existing branch-only and same-guarantee test-edit exceptions below. This product-limit exception grants no authority to change unrelated safety, security, resource, budget, or timeout bounds or to weaken other guarantees. Preserve normal review, CI, and applicable consent requirements. Record the owner request and its exact scope in the brief and PR body. This product-limit exception applies independently of the two exceptions below. This rule covers limits that exist on origin/main. Exception: a limit, cap, timeout, budget, or bound that only this PR branch added is the lane's design choice (owner rule, Input 6e43dda9-a1b8-4b0e-a8c8-f3525a67a5e9). Run `git fetch origin main` first and record the `origin/main` SHA; when the fetch fails, the exception does not apply. Compare the behavior the bound constrains, not its path or name: `git grep` main's whole tree and read the branch diff (`git diff origin/main...HEAD`) for the same invariant, including replacements, duplicates, validators, test baselines, fixtures, and goldens. A missing path on main is not enough evidence. When main has no such bound, change or remove it without an owner question, and record the reason and the main SHA in the PR body. Every bound already on main keeps this rule, also when the branch moves, renames, replaces, or changes it. Exception: a test, fixture, mutation row, census or register edit is allowed without an owner question after one council round (no Fable or cf-* models) agrees that the guard keeps its guarantee (owner grant 2026-10-26: "ok I give you from now onwards full power to change tests, no need to check with me, just do one council round to analyze it makes sense and is appropiate, and do it."). Weakening a test to hide a real regression stays forbidden. Record the council verdict and the owner words in the PR body. Exception: no step waits for a human to apply an edit. When the executor is certain and its Chief or the CoC checked the change, that check replaces the council round, and an agent applies it (owner order 2026-10-30: "if agent is certain that its ok and he checked with his CoC or Chief ALL GOOD remove that blocker everywhere"). Record that check in the PR body.
 
-Authority route: apply an exact edit when the brief carries an `owner_ui` answer that names it, verified as in Approved test adaptations below, or a CoC decision on that exact test, CI, or tooling change (owner standing grant: "The CoC decides CI/CD, testing and tooling items for me"). These routes are part of this definition, so the stop-and-report rule above does not block them. The ban on weakening a test and the independent not-weaker review still apply. Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route; changed mutant semantics on that route require current task-specific owner-event authority and independent semantic review under its separately admitted gates. A CoC decision never covers product, billing, security-policy, architecture, resource, host, or spend bounds; those use the `owner_ui` route or the product-limit exception.
+Authority route: apply an exact edit when the brief carries an `owner_ui` answer that names it, verified as in Approved test adaptations below, or a CoC decision on that exact test, CI, or tooling change (owner standing grant: "The CoC decides CI/CD, testing and tooling items for me"). These routes are part of this definition, so the stop-and-report rule above does not block them. The ban on weakening a test and the independent not-weaker review still apply. Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route or Rewritten-code row route; changed mutant semantics on the lane-owned disposition route require current task-specific owner-event authority and independent semantic review under its separately admitted gates. The Rewritten-code row route requires its exact CoC decision and independent semantic review. A CoC decision never covers product, billing, security-policy, architecture, resource, host, or spend bounds; those use the `owner_ui` route or the product-limit exception.
 
 ### Execution admission and cleanup
 
@@ -116,7 +116,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
 - Never loosen an assertion, widen a bound, or delete a check under this rule.
 - Fail closed: when your own `get_input` call returns an event that does not match, when `get_input` fails and the brief has no verified event record, when any recorded field is missing or differs from the values in this definition, or when the brief does not name the exact edit, make no edit; stop and report to the driver.
 - Record the approver, the exact edit, and the Input ID in the PR body.
-- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route, the owner-approved protected-row subject route's named row-ID lookup and the lane-owned disposition route's named row-ID lookup, and preserve zero writer push authority.
+- Every other control stays: caller-owned TERM escalation only, no D1160 commands, and the protected-path rules. Preserve the mutation TOML search prohibition outside the owner-scoped lane-derived route, the owner-approved protected-row subject route's named row-ID lookup and the lane-owned disposition route's named row-ID lookup and the Rewritten-code row route's named row-ID lookup, and preserve zero writer push authority.
 
 #### Owner-scoped protected row access
 
@@ -227,6 +227,40 @@ Refuse missing or ambiguous matches and reads wider than the approved row scope.
 Keep every hook classifier decision unchanged.
 Native Edit grants zero alternate form for an existing or recorded denied operation.
 
+#### Rewritten-code row route
+
+Use this separate route outside category 5 only when the PR's own diff replaces the code a row guards and no identical mutant fits.
+Require the brief to select this route and record why an identical-operation re-anchor cannot preserve the claim.
+The exact CoC decision supplies this route's scoped read/edit authority under the owner's testing delegation: "The CoC decides CI/CD, testing and tooling items for me."
+Require an exact CoC decision naming the row-file paths, unique row IDs and permitted mutant fields before any protected read or edit.
+Bind the decision and row-review admission to the repository, PR, base SHA, author head SHA, frozen final commit and failing CI identity.
+Require the recorded base/head diff to show that the PR's own rewrite breaks each named row.
+Require the tested merge to contain the recorded base and author head, and the frozen final commit to contain the author head.
+Permit only named row-ID lookup and approved row-line reads in the named files at the named commits.
+Forbid whole-file parsing, adjacent-row reads, unnamed-row reads and broader protected searches.
+Change only the paired `old` and `new` fields and the exact CoC-approved fields the new mutant needs.
+Keep row ID, claim and designated test unchanged.
+Preserve assertions, bounds, policy guarantees, pins and every unrelated field.
+Require a new mutant on the current code that breaks the behavior the claim names.
+Use native Edit with replace_all=false and a unique approved row-ID-contained old_string within the approved row extent.
+Refuse missing or ambiguous matches without widening read or edit scope.
+Require the same row-review admission record for the independent reviewer; this route admits scoped semantic review under that record.
+Require the reviewer to differ from the PR author and the applying writer.
+Before publication, require independent semantic review confirming the same claim and designated test and a mutant no weaker.
+Review the original and new mutant, the concrete claim violation, the designated test's detection mechanism and regressions the new mutant could omit.
+A killed mutant or passing checker alone supplies insufficient same-guarantee evidence.
+Bind the review receipt to the reviewer, approving verdict, CoC decision, admission record, frozen final commit, exact files, row IDs, fields and CI evidence.
+Require CoC approval of that review receipt before publication.
+Changed source, scope, authority or evidence invalidates the receipt and approval.
+Require a current task-specific owner event for retirement, any claim or designated-test change, and every other changed-semantics case.
+Keep messages, briefs, findings, receipts and PR bodies free of protected bytes; identify edits only by path, row ID and field.
+Require separate admission for every mutation or checker execution.
+Keep mutation proof after merge under separate applicable execution admission.
+Preserve effective refusals, tool and hook denials, protected holds, zero writer publication authority and Peral's CI-runner and merge-queue authority.
+Apply this route only to future briefs after verified runtime adoption.
+Source delivery grants zero runtime-adoption or retry authority.
+Native Edit grants zero alternate form for an existing or recorded denied operation.
+
 #### Removed-behavior retirement route
 
 Use this route only to retire a protected row that the PR's own diff removed together with the source behavior that the row guarded.
@@ -279,7 +313,7 @@ For changed mutant semantics, apply the task-specific owner-event verification c
 Preserve every historical fixed-event comparator unchanged within its existing standing branch only.
 Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
 An authoritative mismatch blocks access and application without fallback.
-CoC approval supplies zero missing owner-event authority for changed mutant semantics.
+CoC approval supplies zero missing owner-event authority for changed mutant semantics except on the explicitly selected Rewritten-code row route.
 A fixed identical-operation grant supplies zero changed-semantic authority on this route.
 Keep read authority, proposal derivation, semantic approval and application authority separate.
 Before any lookup or read, require explicit protected-read authority for the exact actor, files, IDs, complete approved extents and named commits.
