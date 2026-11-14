@@ -2293,14 +2293,20 @@ def pre(data):
                 url = tin.get('url')
                 if not isinstance(url, str):
                     deny('Reviewers require a string url.')
+                raw = url
                 while urllib.parse.unquote(url) != url:
                     url = urllib.parse.unquote(url)
                 # A `.` segment decoded from `%2e` is removed by the URL parser, and servers read `\` as `/`.
                 url = url.replace('\\', '/')
                 # GitHub addresses blobs, commits and diffs by ID with no path, so no path rule can see a protected row.
-                host = (urllib.parse.urlsplit(url).hostname or '').rstrip('.')
-                if re.search(r'(^|\.)(github\.com|githubusercontent\.com)$', host):
-                    deny('Reviewers cannot fetch GitHub URLs. Read the local worktree at the frozen SHA.')
+                # Check every reading of the host a fetcher might take; IDNA maps fullwidth forms and `。` to ASCII.
+                for text in (raw, raw.replace('\\', '/'), url):
+                    host = urllib.parse.unquote(urllib.parse.urlsplit(text).hostname or '')
+                    host = unicodedata.normalize('NFKC', host).replace('\u3002', '.').lower().rstrip('.')
+                    if not host.isascii():
+                        deny('Reviewers cannot fetch a URL whose host is not plain ASCII.')
+                    if re.search(r'(^|\.)(github\.com|githubusercontent\.com)$', host):
+                        deny('Reviewers cannot fetch GitHub URLs. Read the local worktree at the frozen SHA.')
                 if any(re.search(protected, text, re.IGNORECASE)
                        for text in (url, posixpath.normpath(urllib.parse.urlsplit(url).path))):
                     deny(blocked)

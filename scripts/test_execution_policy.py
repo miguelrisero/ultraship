@@ -617,9 +617,20 @@ class ReviewerSearchTests(unittest.TestCase):
                     'https://gist.github.com/u/0123abc',
                     'https://GitHub.com./o/r/pull/7.diff',
                     'https://user@github.com/o/r/commit/0123abc.patch',
-                    'https://github.com%2Fo/r'):
+                    'https://github.com%2Fo/r',
+                    'https://api.github\u3002com/repos/o/r/git/blobs/0123abc',
+                    'https://api.github\uff0ecom/repos/o/r/git/blobs/0123abc',
+                    'https://\uff47\uff49\uff54\uff48\uff55\uff42.com/o/r/blob/0123abc/x',
+                    'https://user%2F@github.com/o/r/commit/0123abc.patch',
+                    'https://user%40x@github.com/o/r/commit/0123abc.patch',
+                    'https://github.com:443/o/r/commit/0123abc.diff',
+                    'https://evil\\@github.com/o/r/commit/0123abc.diff',
+                    'https://%67ithub.com/o/r/commit/0123abc.diff'):
             with self.subTest(url=url):
                 self.assert_rule('WebFetch', {'url': url, 'prompt': 'summarize'}, 'GitHub')
+        for url in ('https://[github.com/o/r', 'https://bad\u00e9host.example/x', 'https://g\u0131thub.com/o/r'):
+            with self.subTest(url=url):
+                self.assert_denied('WebFetch', {'url': url, 'prompt': 'summarize'})
         for url in ('https://docs.python.org/3/library/re.html', 'https://notgithub.com/o/r'):
             with self.subTest(url=url):
                 self.assertEqual(self.decision('WebFetch', {'url': url, 'prompt': 'summarize'}), {})
