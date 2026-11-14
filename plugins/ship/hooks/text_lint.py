@@ -12,6 +12,15 @@ GLUE_EXEMPT = re.compile(r'[0-9a-f]+|b[a-z0-9]{8}|(sha|md)[0-9]*sum|python[0-9.]
 HOLD_WORDS = re.compile(r'\b(preserv\w*|holds?|custody|custodian|admission|admits?|admitted|provenance|refusals?)\b', re.I)
 # The harness addresses an in-session subagent by its agent ID and a background subagent's parent as `main`.
 SUBAGENT = re.compile(r'main|a[0-9a-f]{16}')
+PEER_TEMPLATE = """<Outcome in one sentence, and what it means for the recipient.>
+Facts
+- <Verified fact with its source: PR number, run ID or UTC time.>
+Decision
+- <The action you take or ask for, within existing authority.>
+Next
+- <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>."""
+SUBAGENT_TEMPLATE = '<The same message, one point per sentence, at most 25 words each, with a space between words.>'
+FORMAT_ERRORS = ('Separate glued words with spaces; remove compressed shorthand.', 'Write at most 25 words per sentence.')
 
 
 class VisibleText(HTMLParser):
@@ -155,10 +164,19 @@ if __name__ == '__main__':
     if sys.argv[1:] == ['--self-test']:
         self_test()
     elif sys.argv[1:] == ['hook']:
+        event = {}
         try:
-            outgoing(json.load(sys.stdin))
+            event = json.load(sys.stdin)
+            outgoing(event)
         except (ValueError, TypeError, AttributeError) as exc:
+            reason = 'Output contract: ' + str(exc)
+            if (isinstance(event, dict) and event.get('tool_name') == 'SendMessage'
+                    and isinstance(event.get('tool_input') or {}, dict)):
+                if not SUBAGENT.fullmatch(str((event.get('tool_input') or {}).get('to', '')).strip()):
+                    reason += ' Resend with this shape:\n' + PEER_TEMPLATE
+                elif str(exc) and not re.sub('|'.join(map(re.escape, FORMAT_ERRORS)), '', str(exc)).strip():
+                    reason += ' Resend with this shape:\n' + SUBAGENT_TEMPLATE
             print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
-                'permissionDecision': 'deny', 'permissionDecisionReason': 'Output contract: ' + str(exc)}}))
+                'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))
     else:
         check(sys.stdin.read(), sys.argv[1] if len(sys.argv) > 1 else 'result')
