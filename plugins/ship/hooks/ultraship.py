@@ -2294,6 +2294,9 @@ def pre(data):
                 if not isinstance(url, str):
                     deny('Reviewers require a string url.')
                 raw = url
+                # A WHATWG parser finds a host after `https:`, `https:/` or `https:///`; urlsplit finds none.
+                if not re.match(r'(?i)https?://[^/\\?#]', raw):
+                    deny('Reviewers require an http(s) URL with exactly two slashes before its host.')
                 while urllib.parse.unquote(url) != url:
                     url = urllib.parse.unquote(url)
                 # A `.` segment decoded from `%2e` is removed by the URL parser, and servers read `\` as `/`.
@@ -2302,6 +2305,8 @@ def pre(data):
                 # Check every reading of the host a fetcher might take; IDNA maps fullwidth forms and `。` to ASCII.
                 for text in (raw, raw.replace('\\', '/'), url):
                     host = urllib.parse.unquote(urllib.parse.urlsplit(text).hostname or '')
+                    if not host:
+                        deny('Reviewers require a URL with a host.')
                     host = unicodedata.normalize('NFKC', host).replace('\u3002', '.').lower().rstrip('.')
                     if not host.isascii():
                         deny('Reviewers cannot fetch a URL whose host is not plain ASCII.')

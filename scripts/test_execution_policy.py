@@ -628,7 +628,10 @@ class ReviewerSearchTests(unittest.TestCase):
                     'https://%67ithub.com/o/r/commit/0123abc.diff'):
             with self.subTest(url=url):
                 self.assert_rule('WebFetch', {'url': url, 'prompt': 'summarize'}, 'GitHub')
-        for url in ('https://[github.com/o/r', 'https://bad\u00e9host.example/x', 'https://g\u0131thub.com/o/r'):
+        blob = 'api.github.com/repos/o/r/git/blobs/0123abc'
+        for url in ('https://[github.com/o/r', 'https://bad\u00e9host.example/x', 'https://g\u0131thub.com/o/r',
+                    'https:' + blob, 'https:/' + blob, 'https:///' + blob, 'https:////' + blob,
+                    'https:\\\\' + blob, 'https:/\\' + blob, '//' + blob, 'ftp://' + blob, 'https://'):
             with self.subTest(url=url):
                 self.assert_denied('WebFetch', {'url': url, 'prompt': 'summarize'})
         for url in ('https://docs.python.org/3/library/re.html', 'https://notgithub.com/o/r'):
