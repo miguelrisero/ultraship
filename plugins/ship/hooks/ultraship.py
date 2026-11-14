@@ -2086,7 +2086,7 @@ def git_commit_step(command):
     """Whether the whole shell text after the first heredoc is one line of plain `git add` and `git commit` steps."""
     lines = command.splitlines(keepends=True)
     # A quoted delimiter keeps backslash-newline literal, so a physical line can end the body.
-    match = re.search(r"<<(-?)[ \t]*(['\"])([_a-zA-Z0-9]+)\2[ \t]*$", lines[0]) if lines else None
+    match = re.search(r"<<(-?)[ \t]*(['\"])([_a-zA-Z0-9]+)\2[ \t]*$", lines[0]) if lines and lines[0].count('<<') == 1 else None
     if not match:
         return False
     for end in range(1, len(lines)):
