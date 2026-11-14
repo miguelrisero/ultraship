@@ -2083,20 +2083,22 @@ def role(data, name):
 
 
 def git_commit_step(command):
-    """Whether the shell text after the first heredoc body runs `git add` or `git commit` as exact words."""
+    """Whether the shell text after the first heredoc body runs `git add` or `git commit` as the first words of a command."""
     lines = command.splitlines(keepends=True)
     match = re.search(r"<<-?[ \t]*['\"]?([_a-zA-Z0-9]+)['\"]?[ \t]*$", lines[0]) if lines else None
     if not match:
         return False
     for end in range(1, len(lines)):
         if lines[end].strip() == match[1]:
-            try:
-                lexer = shlex.shlex(''.join(lines[end + 1:]), posix=True, punctuation_chars='();<>|&`')
-                lexer.whitespace_split = True
-                tokens = list(lexer)
-            except ValueError:
-                return False
-            return any(a == 'git' and b in ('add', 'commit') for a, b in zip(tokens, tokens[1:]))
+            # shortcut: splits on separators inside quotes too; the result only adds advice text.
+            for step in re.split(r'&&|\|\||[;|\n]', ''.join(lines[end + 1:])):
+                try:
+                    words = shlex.split(step)
+                except ValueError:
+                    return False
+                if words[:1] == ['git'] and words[1:2] in (['add'], ['commit']):
+                    return True
+            return False
     return False
 
 
