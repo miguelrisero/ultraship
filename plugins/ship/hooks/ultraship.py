@@ -2085,12 +2085,13 @@ def role(data, name):
 def git_commit_step(command):
     """Whether the whole shell text after the first heredoc is one line of plain `git add` and `git commit` steps."""
     lines = command.splitlines(keepends=True)
-    match = re.search(r"<<(-?)[ \t]*['\"]?([_a-zA-Z0-9]+)['\"]?[ \t]*$", lines[0]) if lines else None
+    # A quoted delimiter keeps backslash-newline literal, so a physical line can end the body.
+    match = re.search(r"<<(-?)[ \t]*(['\"])([_a-zA-Z0-9]+)\2[ \t]*$", lines[0]) if lines else None
     if not match:
         return False
     for end in range(1, len(lines)):
         line = lines[end].removesuffix('\n')
-        if (line.lstrip('\t') if match[1] else line) == match[2]:
+        if (line.lstrip('\t') if match[1] else line) == match[3]:
             tail = ''.join(lines[end + 1:]).strip()
             # Single-quoted text is inert, so only the shell outside it must be plain words joined by `&&`.
             bare = re.sub(r"'[^']*'", "''", tail)

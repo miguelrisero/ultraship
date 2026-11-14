@@ -236,6 +236,8 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertNotIn('Resend with this shape:', self.reason)
         self.assertTrue(self.denied("python3 - <<'PY'\nimport subprocess\ntext = '''\n PY\ngit commit\n'''\nPY\n"))
         self.assertNotIn('Resend with this shape:', self.reason)
+        self.assertTrue(self.denied('python3 - <<PY\nimport subprocess\n# \\\nPY\ngit commit -m x'))
+        self.assertNotIn('Resend with this shape:', self.reason)
         self.assertFalse(self.denied(commit))
         self.assertFalse(self.denied('git status --porcelain'))
         self.assertTrue(self.denied("python3 - <<'PY'\nopen('r.sh', 'w').write('x')\nPY\nbash r.sh\n"))
