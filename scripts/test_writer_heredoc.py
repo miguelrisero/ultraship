@@ -247,16 +247,21 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied("python3 - <<'PY'\nopen('r.sh', 'w').write('x')\nPY\nbash r.sh\n"))
         self.assertNotIn('Resend with this shape:', self.reason)
 
-    def test_numeric_test_on_an_expansion_prints_the_string_compare_shape(self):
-        for check in ('test "$status" -eq 0', '[ "$status" -ne 0 ]'):
+    def test_numeric_test_on_a_saved_status_prints_the_string_compare_shape(self):
+        for check, shape in (('test "$lint_result" -eq 0', '`test "$lint_result" = 0`'),
+                             ('[ "$lint_result" -ne 0 ]', '`[ "$lint_result" != 0 ]`')):
             with self.subTest(check=check):
-                self.assertTrue(self.denied('make api-lint; status=$?; ' + check))
+                self.assertTrue(self.denied('make api-lint; lint_result=$?; ' + check))
                 self.assertIn('unresolved command word', self.reason)
-                self.assertIn('Resend with this shape:', self.reason)
-                self.assertIn('`test "$status" = 0`', self.reason)
-        self.assertFalse(self.denied('make api-lint; status=$?; test "$status" = 0'))
-        self.assertTrue(self.denied('"$tool" -e "print(1)"; test "$status" -eq 0'))
-        self.assertNotIn('Resend with this shape:', self.reason)
+                self.assertIn('Resend with this shape: ' + shape, self.reason)
+        self.assertFalse(self.denied('make api-lint; lint_result=$?; test "$lint_result" = 0'))
+        for command in ('false; status=$?; test "$status" -eq 01',
+                        "status=$?; printf '%s\\n' test \"$status\" -eq 0",
+                        'status=$(cat f); test "$status" -eq 0',
+                        '"$tool" -e "print(1)"; status=$?; test "$status" -eq 0'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertNotIn('Resend with this shape:', self.reason)
 
     def test_plain_quoted_arguments_do_not_reparse_as_programs(self):
         self.assertFalse(self.denied('echo "it\'s fine"'))

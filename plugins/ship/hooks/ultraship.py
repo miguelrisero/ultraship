@@ -2082,10 +2082,22 @@ def role(data, name):
     return re.match(rf'^(ship:)?{name}--', data.get('agent_type') or '') is not None
 
 
-# A numeric `test` on a quoted variable reads as an unresolved word with an `-e` code flag; the shape prints only when the string compare clears the deny.
-NUMERIC_TEST = re.compile(r'((?:^|[;&|(\s])(?:test|\[)\s+"\$[A-Za-z_]\w*"\s+)-(eq|ne)(?=\s)')
-NUMERIC_TEST_SHAPE = (' Resend with this shape: compare a saved status as a string, '
-                      'with `test "$status" = 0` or `[ "$status" != 0 ]`.')
+# A numeric zero test on a status saved from `$?` reads as an unresolved word with an `-e` code flag.
+# Exit statuses are canonical decimals, so `= 0` and `!= 0` keep the meaning of `-eq 0` and `-ne 0`.
+NUMERIC_TEST = re.compile(r'(?:^|(?<=[;&|]) ?|(?<=\n))(test|\[) "\$([A-Za-z_]\w*)" -(eq|ne) 0( \])?(?=$|[ ;&|\n])')
+
+
+def numeric_test_shape(command, cwd):
+    """The string-compare shape when every numeric zero test reads a status saved from `$?` and the swap clears the rule."""
+    matches = list(NUMERIC_TEST.finditer(command))
+    if not matches or any((m[1] == '[') != bool(m[4]) for m in matches):
+        return ''
+    if any(not re.search(rf'(?:^|[;&|\n] ?){m[2]}=\$\?(?=$|[ ;&|\n])', command[:m.start()]) for m in matches):
+        return ''
+    swap = lambda m: m[0].replace(f' -{m[3]} 0', ' = 0' if m[3] == 'eq' else ' != 0')
+    if inline_interpreter_denial(NUMERIC_TEST.sub(swap, command), cwd):
+        return ''
+    return ' Resend with this shape: ' + ', '.join(f'`{swap(m).strip()}`' for m in matches) + '.'
 
 
 def git_commit_step(command):
@@ -2289,10 +2301,8 @@ def pre(data):
                 reason = inline_interpreter_denial(command, data.get('cwd'))
                 if reason:
                     deny(classifier_reason + ' Rule: ' + reason + '.'
-                         + (NUMERIC_TEST_SHAPE if reason.endswith('(unresolved command word)')
-                            and NUMERIC_TEST.search(command) and not inline_interpreter_denial(
-                                NUMERIC_TEST.sub(lambda m: m[1] + {'eq': '=', 'ne': '!='}[m[2]], command),
-                                data.get('cwd')) else ''))
+                         + (numeric_test_shape(command, data.get('cwd'))
+                            if reason.endswith('(unresolved command word)') else ''))
             except Exception:
                 deny(classifier_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''
