@@ -133,7 +133,7 @@ For changed mutant semantics, apply the task-specific owner-event verification c
 Preserve every historical fixed-event comparator unchanged within its existing standing branch only.
 Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
 An authoritative mismatch blocks access and application without fallback.
-CoC approval supplies zero missing owner-event authority for changed mutant semantics.
+CoC approval supplies zero missing owner-event authority for changed mutant semantics except on the explicitly selected Rewritten-code row route.
 A fixed identical-operation grant supplies zero changed-semantic authority on this route.
 Keep read authority, proposal derivation, semantic approval and application authority separate.
 Before any lookup or read, require explicit protected-read authority for the exact actor, files, IDs, complete approved extents and named commits.
@@ -227,7 +227,7 @@ Admit the retirement of a protected row only when all four conditions hold:
 Refuse on any doubt about any condition.
 Refuse a retirement when the guarded behavior still exists anywhere in the tree at the frozen SHA after the edit.
 Refuse when an identical mutant of the row's operation, with the same claim, still applies at the frozen SHA after the edit; that row uses the lane-derived route.
-Review a retirement with a replacement row under Row retirement with replacement review below, and every other row change except the explicitly selected lane-owned disposition route or new lane-owned row review route under Lane-derived row review below.
+Review a retirement with a replacement row under Row retirement with replacement review below, and every other row change except the explicitly selected lane-owned disposition route, new lane-owned row review route or Rewritten-code row route under Lane-derived row review below.
 Require the CoC-approved exact allowlist: the row-file path and unique row ID of each retired row.
 Require the brief to quote the PR-body reason for each retired row.
 Require the recorded base SHA, author head SHA, and frozen SHA after the edit, and read-only trees at the base SHA and the frozen SHA after the edit.
@@ -277,8 +277,42 @@ Require CoC approval of the review receipt before publication; changed source or
 Identify rows in findings, verdicts, and receipts only by path, row ID, and field; include zero TOML text.
 Grant zero edit, execution, mutation, or checker authority.
 An admission grants zero writer or driver edit authority.
-Review every other row change except the explicitly selected lane-owned disposition route or new lane-owned row review route under Lane-derived row review below.
+Review every other row change except the explicitly selected lane-owned disposition route, new lane-owned row review route or Rewritten-code row route under Lane-derived row review below.
 Preserve higher-priority instructions, effective refusals, tool and hook denials, and protected holds.
+
+## Rewritten-code row route
+
+Use this separate route outside category 5 only when the PR's own diff replaces the code a row guards and no identical mutant fits.
+Require the brief to select this route and record why an identical-operation re-anchor cannot preserve the claim.
+The exact CoC decision supplies this route's scoped reviewer read authority under the owner's testing delegation.
+Require an exact CoC decision naming the row-file paths, unique row IDs and permitted mutant fields before any protected read or edit.
+Bind the decision and row-review admission to the repository, PR, base SHA, author head SHA, frozen final commit and failing CI identity.
+Require the recorded base/head diff to show that the PR's own rewrite breaks each named row.
+Require the tested merge to contain the recorded base and author head, and the frozen final commit to contain the author head.
+Require read-only trees at the base and frozen final commits; omit protected row-file hunks from supplied diffs.
+Permit only named row-ID lookup and approved row-line reads in the named files at the named commits.
+Forbid whole-file parsing, adjacent-row reads, unnamed-row reads and broader protected searches.
+Confirm changes only to the paired `old` and `new` fields and the exact CoC-approved fields the new mutant needs.
+Keep row ID, claim and designated test unchanged.
+Preserve assertions, bounds, policy guarantees, pins and every unrelated field.
+Require a new mutant on the current code that breaks the behavior the claim names.
+Require the same row-review admission record for the independent reviewer; this route admits scoped semantic review under that record.
+Require the reviewer to differ from the PR author and the applying writer.
+Before publication, require independent semantic review confirming the same claim and designated test and a mutant no weaker.
+Review the original and new mutant, the concrete claim violation, the designated test's detection mechanism and regressions the new mutant could omit.
+A killed mutant or passing checker alone supplies insufficient same-guarantee evidence.
+Bind the review receipt to the reviewer, approving verdict, CoC decision, admission record, frozen final commit, exact files, row IDs, fields and CI evidence.
+Require CoC approval of that review receipt before publication.
+Changed source, scope, authority or evidence invalidates the receipt and approval.
+Within this rewritten-code route only, require a current task-specific owner event for retirement.
+Preserve every existing retirement route and its authority unchanged.
+Require a current task-specific owner event for any claim or designated-test change and every changed-semantics case outside this route.
+Keep messages, briefs, findings, receipts and PR bodies free of protected bytes; identify edits only by path, row ID and field.
+Grant zero reviewer edit, execution or publication authority; drivers apply zero protected edits.
+Keep mutation proof after merge under separate applicable execution admission.
+Preserve effective refusals, tool and hook denials, protected holds, zero writer publication authority and Peral's CI-runner and merge-queue authority.
+Apply this route only to future briefs after verified runtime adoption.
+Source delivery grants zero runtime-adoption or retry authority.
 
 ## Lane-derived row review
 
