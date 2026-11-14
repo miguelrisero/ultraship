@@ -2241,11 +2241,12 @@ def pre(data):
                 records = os.path.realpath(STATE / 'row-review').casefold()
                 written = os.path.realpath(os.path.join(data.get('cwd') or os.getcwd(),
                                                         os.path.expanduser(written))).casefold()
-                if written == records or written.startswith(records + '/'):
+                if (written == records or written.startswith(records + '/')
+                        or re.search(r'/\.scratch/ultraship/row-review(?:/|$)', written)):
                     deny('Only the driver and the main session write row-review admission records. '
                          'Report the blocked scope to the driver.')
-        # shortcut: Bash gets a text match only, so a path built from pieces slips past it.
-        # Upgrade path: a state folder that non-driver agents cannot reach.
+        # shortcut: Bash matches state and workspace paths as text, so a path built from pieces slips past it.
+        # Upgrade path: record folders that non-driver agents cannot reach.
         if tool == 'Bash' and 'ultraship/row-review' in str(tin.get('command', '')).casefold():
             deny('Only the driver and the main session touch row-review admission records (custody rule). '
                  'Report the blocked scope to the driver.')
@@ -2422,7 +2423,9 @@ def pre(data):
                 if not os.path.lexists(record):
                     for workspace in (Path(cwd), *Path(cwd).parents):
                         if (workspace / '.scratch').is_dir():
-                            record = workspace / '.scratch/ultraship/row-review' / record.name
+                            candidate = workspace / '.scratch/ultraship/row-review' / record.name
+                            if os.path.lexists(candidate):
+                                record = candidate
                             break
                 unmet = f'Admission record {record} must exist and meet this condition: '
                 target = tin.get('file_path') if tool == 'Read' else tin.get('path') if tool == 'Grep' else None

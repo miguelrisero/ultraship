@@ -357,6 +357,37 @@ class WorkspaceRowAdmissionTests(unittest.TestCase):
         self.assertTrue(denied(result))
         self.assertIn('`agent_id` equals your agent ID', result['hookSpecificOutput']['permissionDecisionReason'])
 
+    def assert_workspace_record_write_denied(self, tool):
+        alias = self.root / 'record-folder'
+        alias.symlink_to(self.record.parent, target_is_directory=True)
+        targets = (self.record,) if tool == 'Bash' else (self.record, alias / self.record.name)
+        for target in targets:
+            inputs = ({'command': f'echo invalid > {target}'} if tool == 'Bash' else
+                      {'notebook_path' if tool == 'NotebookEdit' else 'file_path': str(target)})
+            for agent in ('ship:writer--sol', 'ship:reviewer--sol', 'Explore'):
+                with self.subTest(tool=tool, target=target, agent=agent):
+                    result = hook('pre', {**self.payload, 'agent_type': agent,
+                                          'tool_name': tool, 'tool_input': inputs}, self.env)
+                    self.assertTrue(denied(result))
+                    self.assertIn('Only the driver and the main session',
+                                  result['hookSpecificOutput']['permissionDecisionReason'])
+            for agent in ('ship:driver', ''):
+                with self.subTest(tool=tool, target=target, agent=agent):
+                    self.assertFalse(denied(hook('pre', {**self.payload, 'agent_type': agent,
+                                                        'tool_name': tool, 'tool_input': inputs}, self.env)))
+
+    def test_workspace_record_edit_is_denied(self):
+        self.assert_workspace_record_write_denied('Edit')
+
+    def test_workspace_record_write_is_denied(self):
+        self.assert_workspace_record_write_denied('Write')
+
+    def test_workspace_record_notebook_edit_is_denied(self):
+        self.assert_workspace_record_write_denied('NotebookEdit')
+
+    def test_workspace_record_bash_write_is_denied(self):
+        self.assert_workspace_record_write_denied('Bash')
+
 
 class PythonHeredocGuardTests(unittest.TestCase):
     def test_writer_named_process_heredoc_rule(self):
