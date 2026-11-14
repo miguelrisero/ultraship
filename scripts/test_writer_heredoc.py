@@ -247,6 +247,17 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied("python3 - <<'PY'\nopen('r.sh', 'w').write('x')\nPY\nbash r.sh\n"))
         self.assertNotIn('Resend with this shape:', self.reason)
 
+    def test_numeric_test_on_an_expansion_prints_the_string_compare_shape(self):
+        for check in ('test "$status" -eq 0', '[ "$status" -ne 0 ]'):
+            with self.subTest(check=check):
+                self.assertTrue(self.denied('make api-lint; status=$?; ' + check))
+                self.assertIn('unresolved command word', self.reason)
+                self.assertIn('Resend with this shape:', self.reason)
+                self.assertIn('`test "$status" = 0`', self.reason)
+        self.assertFalse(self.denied('make api-lint; status=$?; test "$status" = 0'))
+        self.assertTrue(self.denied('"$tool" -e "print(1)"; test "$status" -eq 0'))
+        self.assertNotIn('Resend with this shape:', self.reason)
+
     def test_plain_quoted_arguments_do_not_reparse_as_programs(self):
         self.assertFalse(self.denied('echo "it\'s fine"'))
 

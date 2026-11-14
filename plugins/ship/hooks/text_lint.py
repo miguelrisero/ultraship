@@ -176,6 +176,8 @@ if __name__ == '__main__':
                     reason += ' Resend with this shape:\n' + PEER_TEMPLATE
                 elif str(exc) and not re.sub('|'.join(map(re.escape, FORMAT_ERRORS)), '', str(exc)).strip():
                     reason += ' Resend with this shape:\n' + SUBAGENT_TEMPLATE
+                elif 'Missing section: ' in str(exc):
+                    reason += ' Resend with this shape:\n' + PEER_TEMPLATE
             print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
                 'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))
     else:

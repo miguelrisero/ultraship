@@ -2082,6 +2082,12 @@ def role(data, name):
     return re.match(rf'^(ship:)?{name}--', data.get('agent_type') or '') is not None
 
 
+# A numeric `test` on a quoted variable reads as an unresolved word with an `-e` code flag; the shape prints only when the string compare clears the deny.
+NUMERIC_TEST = re.compile(r'((?:^|[;&|(\s])(?:test|\[)\s+"\$[A-Za-z_]\w*"\s+)-(eq|ne)(?=\s)')
+NUMERIC_TEST_SHAPE = (' Resend with this shape: compare a saved status as a string, '
+                      'with `test "$status" = 0` or `[ "$status" != 0 ]`.')
+
+
 def git_commit_step(command):
     """Whether the whole shell text after the first heredoc is one line of plain `git add` and `git commit` steps."""
     lines = command.splitlines(keepends=True)
@@ -2282,7 +2288,11 @@ def pre(data):
                     deny(classifier_reason + ' Rule: ' + reason + '.')
                 reason = inline_interpreter_denial(command, data.get('cwd'))
                 if reason:
-                    deny(classifier_reason + ' Rule: ' + reason + '.')
+                    deny(classifier_reason + ' Rule: ' + reason + '.'
+                         + (NUMERIC_TEST_SHAPE if reason.endswith('(unresolved command word)')
+                            and NUMERIC_TEST.search(command) and not inline_interpreter_denial(
+                                NUMERIC_TEST.sub(lambda m: m[1] + {'eq': '=', 'ne': '!='}[m[2]], command),
+                                data.get('cwd')) else ''))
             except Exception:
                 deny(classifier_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''

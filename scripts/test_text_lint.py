@@ -57,14 +57,15 @@ class TextLintTests(unittest.TestCase):
                                      'Output contract: ' + error + ' Resend with this shape:\n'
                                      + text_lint.SUBAGENT_TEMPLATE)
 
-    def test_subagent_missing_section_refusal_has_no_resend_template(self):
+    def test_subagent_missing_section_refusal_has_peer_template(self):
         for prose in ('The review passes.', ' '.join(['word'] * 26) + '.'):
             with self.subTest(prose=prose):
                 message = prose + '\nDecision: Continue.\nNext: Resume.'
                 prefix = ('Write at most 25 words per sentence. '
                           if prose.startswith('word') else '')
                 self.assertEqual(self.hook_refusal('main', message),
-                                 'Output contract: ' + prefix + 'Missing section: Facts')
+                                 'Output contract: ' + prefix + 'Missing section: Facts'
+                                 + ' Resend with this shape:\n' + text_lint.PEER_TEMPLATE)
 
     def test_peer_refusal_has_resend_template(self):
         self.assertEqual(self.hook_refusal('chief', 'The review passes.'),
