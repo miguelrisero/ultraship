@@ -338,6 +338,22 @@ class WorkspaceRowAdmissionTests(unittest.TestCase):
         self.assertTrue(denied(result))
         self.assertIn('the record is missing or is a link', result['hookSpecificOutput']['permissionDecisionReason'])
 
+    def test_workspace_record_symlinked_parent_is_denied(self):
+        self.write_record()
+        for parent in (self.workspace / '.scratch', self.record.parent.parent, self.record.parent):
+            with self.subTest(parent=parent):
+                target = self.root / 'unprotected-records'
+                parent.rename(target)
+                parent.symlink_to(target, target_is_directory=True)
+                try:
+                    result = hook('pre', self.payload, self.env)
+                    self.assertTrue(denied(result))
+                    self.assertIn('the record parent has no symlink components',
+                                  result['hookSpecificOutput']['permissionDecisionReason'])
+                finally:
+                    parent.unlink()
+                    target.rename(parent)
+
     def test_workspace_record_world_writable_is_denied(self):
         self.write_record()
         self.record.chmod(0o606)
@@ -375,6 +391,19 @@ class WorkspaceRowAdmissionTests(unittest.TestCase):
                 with self.subTest(tool=tool, target=target, agent=agent):
                     self.assertFalse(denied(hook('pre', {**self.payload, 'agent_type': agent,
                                                         'tool_name': tool, 'tool_input': inputs}, self.env)))
+
+    def test_workspace_record_write_through_symlinked_parent_is_denied(self):
+        target = self.root / 'unprotected-records'
+        self.record.parent.rename(target)
+        self.record.parent.symlink_to(target, target_is_directory=True)
+        for tool in ('Edit', 'Write', 'NotebookEdit'):
+            with self.subTest(tool=tool):
+                inputs = {'notebook_path' if tool == 'NotebookEdit' else 'file_path': str(self.record)}
+                result = hook('pre', {**self.payload, 'agent_type': 'ship:writer--sol',
+                                      'tool_name': tool, 'tool_input': inputs}, self.env)
+                self.assertTrue(denied(result))
+                self.assertIn('Only the driver and the main session',
+                              result['hookSpecificOutput']['permissionDecisionReason'])
 
     def test_workspace_record_edit_is_denied(self):
         self.assert_workspace_record_write_denied('Edit')
