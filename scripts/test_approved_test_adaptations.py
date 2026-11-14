@@ -33,7 +33,7 @@ EXPECTED_LANE_REVIEW = [
     'Under authority B, block every protected read on a missing record, missing field, or mismatch.',
     "Require the CoC-approved exact allowlist of row-file paths and unique row IDs from the PR's own failing anchor CI evidence.",
     'Require the recorded base SHA, author head SHA, and frozen SHA after the edit before any protected read.',
-    'Require the brief to name two read-only trees: one at the base SHA and one at the frozen SHA after the edit.',
+    "Require the brief to name two read-only trees: one at the base SHA and one at the frozen SHA after the edit. On the ordinary lane-derived route only, if the PR creates the row file absent at the CI base, use the last PR commit before the re-anchor as the before tree and this section's row comparison base. Keep the original CI base for causality and evidence; preserve every other route condition.",
     'Read rows only inside those two trees.',
     'Require every supplied diff to leave out the row-file hunks.',
     "Require the recorded diff between the base SHA and frozen SHA after the edit to show that the PR's own subject change breaks each named row.",
@@ -430,6 +430,25 @@ EXPECTED_NEW_ROW_BOUNDARY = [
 
 
 class ApprovedTestAdaptationsTests(unittest.TestCase):
+    def test_pr_created_row_file_uses_pre_reanchor_comparison_without_changing_ci_base(self):
+        carriers = (
+            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/writer--fable52.md', 'plugins/ship/agents/driver.md',
+            'plugins/ship/agents/driver--sol.md', 'plugins/ship/agents/reviewer--sol.md',
+            'plugins/ship/agents/reviewer--opus.md', 'plugins/ship/skills/ship/SKILL.md',
+            'plugins/ship/skills/ship/references/owner-decisions.md',
+        )
+        for name in carriers:
+            text = (ROOT / name).read_text()
+            with self.subTest(path=name):
+                self.assertIn('row file', text)
+                self.assertIn('absent at the CI base', text)
+                self.assertIn('use the last PR commit before the re-anchor as the before tree', text)
+                self.assertIn('row comparison base', text)
+                self.assertIn('Keep the original CI base for causality and evidence; '
+                              'preserve every other route condition.', text)
+                self.assertEqual(text.count('last PR commit before the re-anchor'), 1)
+
     def test_owner_approved_subject_route_keeps_authority_application_and_review_scoped(self):
         carriers = (
             'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',

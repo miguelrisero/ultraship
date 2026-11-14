@@ -305,7 +305,7 @@ Under authority B, check the relayed record's internal consistency, answer, and 
 Under authority B, block every protected read on a missing record, missing field, or mismatch.
 Require the CoC-approved exact allowlist of row-file paths and unique row IDs from the PR's own failing anchor CI evidence.
 Require the recorded base SHA, author head SHA, and frozen SHA after the edit before any protected read.
-Require the brief to name two read-only trees: one at the base SHA and one at the frozen SHA after the edit.
+Require the brief to name two read-only trees: one at the base SHA and one at the frozen SHA after the edit. On the ordinary lane-derived route only, if the PR creates the row file absent at the CI base, use the last PR commit before the re-anchor as the before tree and this section's row comparison base. Keep the original CI base for causality and evidence; preserve every other route condition.
 Read rows only inside those two trees.
 Require every supplied diff to leave out the row-file hunks.
 Require the recorded diff between the base SHA and frozen SHA after the edit to show that the PR's own subject change breaks each named row.

@@ -426,6 +426,11 @@ def isolated_writes(tree, bound):
             return False
         if isinstance(node, ast.Name) and node.id == 'open' and id(node) not in calls:
             return False
+        # A method read off the class (`Path.open('t', 'w')`, `c.replace(src, dst)`) takes the path as its first
+        # argument, so the class is usable only as the callee that builds a path.
+        if ((isinstance(node, ast.Name) and node.id == 'Path' or isinstance(node, ast.Attribute) and node.attr == 'Path')
+                and id(node) not in calls or isinstance(node, ast.Name) and node.id == 'type'):
+            return False
         if isinstance(node, ast.Attribute) and node.attr in {
                 'write_text', 'chmod', 'mkdir', 'unlink', 'open', 'replace'} and id(node) not in calls:
             return False
@@ -436,6 +441,9 @@ def isolated_writes(tree, bound):
         if builtin_open or method == 'open':
             if (any(isinstance(argument, ast.Starred) for argument in node.args)
                     or any(keyword.arg not in {'mode', 'encoding', 'newline', 'errors'} for keyword in node.keywords)):
+                return False
+            # Called on the class (`Path.open`, an alias, `type(...)`), the first argument is the path, not the mode.
+            if not builtin_open and len(node.args) > 1:
                 return False
             offset = 1 if builtin_open else 0
             modes = [*node.args[offset:offset + 1],
@@ -772,10 +780,12 @@ def runs_heredoc_output(command):
             # The written files exist only after the script, so only a later or a background command can run them.
             if check_only_shell(''.join(lines[end + 1:])) and not re.search(r'(?<!&)&(?![&>])', match['lead']):
                 return False
-            if not inert_python(body):
+            literal = inert_python(body)
+            # `-I` keeps the working folder off `sys.path`, so computed paths are inert there.
+            if not literal and not ('I' in match['flags'] and inert_python(body, isolated=True)):
                 return True
             # An inert script writes only through `open` with a write mode or a `Path` write method.
-            return python_writes(body, isolated='I' in match['flags'] and not inert_python(body))
+            return python_writes(body, isolated='I' in match['flags'] and not literal)
     return False
 
 
@@ -933,6 +943,31 @@ def data_reader_header(line):
                         + rf')(?:[ \t]+{argument})*[ \t]*{operator}(?:[ \t]+{argument})*[ \t]*\n?', line) is not None
 
 
+def literal_quotes_removed(line):
+    """Drop single-quoted text; keep the whole line when bash could read its quotes differently."""
+    if re.search(r"\$['(\[{]|[#`]", line):
+        return line
+    kept, index = [], 0
+    while index < len(line):
+        char = line[index]
+        if char == '\\':
+            kept.append(line[index:index + 2])
+            index += 2
+        elif char in '\'"':
+            end = index + 1
+            while end < len(line) and line[end] != char:
+                end += 2 if char == '"' and line[end] == '\\' else 1
+            if end >= len(line):
+                return line
+            if char == '"':
+                kept.append(line[index:end + 1])
+            index = end + 1
+        else:
+            kept.append(char)
+            index += 1
+    return ''.join(kept)
+
+
 def process_heredoc_denial(command, readers=False):
     """Check Python stdin bodies and keep quoted commit messages as data."""
     lines = (command if readers else cat_heredoc_data(command)).splitlines(keepends=True)
@@ -941,7 +976,9 @@ def process_heredoc_denial(command, readers=False):
         operators = list(re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
                                     r"(?P<delimiter>'[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", lines[index]))
         if not operators:
-            if readers and '<<' in lines[index] and not data_reader_header(lines[index]):
+            # A quote opened on an earlier line changes how bash reads this one, so only a one-line command drops quotes.
+            text = literal_quotes_removed(lines[index]) if len(lines) == 1 else lines[index]
+            if readers and '<<' in text and not data_reader_header(lines[index]):
                 return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
             index += 1
             continue

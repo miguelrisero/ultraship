@@ -203,7 +203,7 @@ Verify lawful non-content approval evidence; inspect and apply private pairs onl
 Require the owner-scoped protected row access authority above and name this route in the brief.
 Require CoC approval of the exact row allowlist before any protected read or edit.
 Limit scope to CoC-named exact row-file paths and unique row IDs from the PR's own failing anchor CI evidence.
-Require the recorded base/head diff to show that the PR's own subject change breaks each named row.
+Require the recorded base/head diff to show that the PR's own subject change breaks each named row. On the ordinary lane-derived route only, if the PR creates the row file absent at the CI base, use the last PR commit before the re-anchor as the before tree and row comparison base. Keep the original CI base for causality and evidence; preserve every other route condition.
 Permit the applying writer to locate each named row by its row ID inside its named file.
 Read only that row's lines; permit no whole-file parse, unnamed-row read, or search outside the named files.
 Replace only the paired `old` and `new` fields to match the subject's new source text.
@@ -466,5 +466,9 @@ Apply your own loaded definition; checkout, cache, and version supply zero addit
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
 Except under the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
+Except under the owner-decisions method-only rule: use no other process to do a step that a hook or permission denied.
+Script files, other interpreters, module flags and wrapper commands are other processes.
+Tell the driver about the denial and stop that step.
+Checks that the brief names stay permitted when the hook admits them.
 
 Return the changed files, the test commands with their results or `tests not run (brief)`, the head SHA, and any blocker with evidence. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.

@@ -103,6 +103,32 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, self.refusals)
 
+    def test_contract_scopes_message_format_refusals_and_fresh_instructions(self):
+        for requirement in (
+            "An output-contract refusal naming only a message's wording is method-only.",
+            'The sender rewrites the same content once in short plain sentences.',
+            'Put long identifiers in a file and send its path.',
+            'After a message-format refusal, a coordinator may give a fresh writer a new brief '
+            'for the same approved scope.',
+            'This fresh brief is a new instruction, not a resend.',
+            'Preserve the consumed-attempt record across fresh briefs.',
+            'Only for the fresh-brief route, permit a new writer recipient and dispatch action '
+            'despite the unchanged-identity requirements below.',
+            'Bind the shared attempt to the original refused call and its original action, recipient, '
+            'and scope; record the new writer and dispatch separately.',
+            'Preserve approved scope, authority, provenance, choice identifiers, exclusive custody, '
+            'and all unrelated non-prose fields.',
+            'Both the wording rewrite and fresh brief require the authenticated formatting producer, '
+            'exact remedy, original-call evidence, and canonical exclusive custody below.',
+            "Share that original call's single attempt between the rewrite and fresh brief; "
+            'durably consume it before either action.',
+            'Deny both actions when that attempt is consumed; a fresh instruction creates zero additional attempt.',
+            'Every content denial, protected-row rule, and hook refusal on a file edit or command stays final.',
+            'Except under the ordinary-file method-only rule or the fresh message-format instruction:',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.refusals)
+
     def test_contract_keeps_the_refusal_rule_line_budget(self):
         self.assertLessEqual(len([line for line in self.refusals.splitlines() if line.strip()]), 8)
 
