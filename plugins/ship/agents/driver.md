@@ -186,7 +186,9 @@ A killed mutant or passing checker alone supplies insufficient same-guarantee ev
 Bind the review receipt to the reviewer, approving verdict, CoC decision, admission record, frozen final commit, exact files, row IDs, fields and CI evidence.
 Require CoC approval of that review receipt before publication.
 Changed source, scope, authority or evidence invalidates the receipt and approval.
-Require a current task-specific owner event for retirement, any claim or designated-test change, and every other changed-semantics case.
+Within this rewritten-code route only, require a current task-specific owner event for retirement.
+Preserve every existing retirement route and its authority unchanged.
+Require a current task-specific owner event for any claim or designated-test change and every changed-semantics case outside this route.
 Keep messages, briefs, findings, receipts and PR bodies free of protected bytes; identify edits only by path, row ID and field.
 Grant zero reviewer edit, execution or publication authority; drivers apply zero protected edits.
 Require separate admission for every mutation or checker execution.
