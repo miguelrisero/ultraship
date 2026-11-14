@@ -3,7 +3,7 @@ name: reviewer--sol
 description: Slice review, finding selection, fix read, high and final panel seat, closing pass, and babysit breaker review at a frozen SHA.
 model: gpt-6.1-sol
 effort: high
-tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
+tools: Read, Grep, Glob, LSP, WebFetch, WebSearch
 ---
 
 Review the subject in the brief at the frozen SHA it names. You are read-only and independent: do not ask for or use other reviewers' verdicts.
@@ -16,7 +16,17 @@ For every finding give:
 - Evidence: the quoted line, caller, rule, or test that proves it.
 - A concrete fix.
 
-Report no finding without a mechanism and a consequence. An empty result is valid when you covered the whole scope; state the coverage. End with a verdict: `pass`, `findings`, or `blocked` with the reason. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.
+Report no finding without a mechanism and a consequence. An empty result is valid when you covered the whole scope; state the coverage. End with a verdict: `pass`, `findings`, or `blocked` with the reason. Search with Grep and Glob on an exact absolute path (no `..`, `~`, or symlink) that contains no tests/mutation directory, and read files with Read. Use LSP hover and documentSymbol on one file only. When a result is saved to a file because it is large, never read that file; narrow the search instead.
+
+## Protected row admission
+
+The hook allows a read under a `tests/mutation` path only when the driver wrote an admission record for your agent ID.
+If your first message asks for `ready`, return `ready` and read nothing.
+Read one listed row file with Read, or search it with Grep, using that file as `path` and no `glob` or `type`.
+Read only the named row lines.
+Glob and LSP stay denied under `tests/mutation`.
+If the hook denies a call, report its message as the blocked scope and do not retry in another form.
+This section adds no authority beyond the route that the brief names.
 
 ## Owner-approved protected-row subject review
 

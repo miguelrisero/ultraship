@@ -1118,7 +1118,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             tools = [line for line in frontmatter.splitlines() if line.startswith('tools:')]
             with self.subTest(path=name):
                 self.assertEqual(tools, [
-                    'tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch',
+                    'tools: Read, Grep, Glob, LSP, WebFetch, WebSearch',
                 ])
 
     def test_lane_derived_future_native_edit_preserves_existing_scope(self):

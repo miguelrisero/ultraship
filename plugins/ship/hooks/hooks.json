@@ -2,8 +2,12 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Agent|Task|Bash|Edit|Write|NotebookEdit|Read|Grep|Glob|LSP|WebFetch|WebSearch|mcp__fff__.*|mcp__bettercoding__(create_input|update_input|set_input_status)",
+        "matcher": "Agent|Task|Bash|Edit|Write|NotebookEdit|WebSearch|mcp__bettercoding__(create_input|update_input|set_input_status)",
         "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py\" pre" }]
+      },
+      {
+        "matcher": "^(Read|Grep|Glob|LSP|WebFetch|mcp__fff__.*)$",
+        "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py\" pre", "timeout": 15, "onFailure": "block" }]
       },
       {
         "matcher": "SendMessage|mcp__bettercoding__(create_input|update_input)",
