@@ -114,6 +114,9 @@ class WriterHeredocTests(unittest.TestCase):
         for marker in ("'^<<<<<<<'", "'<<<<<<< HEAD'"):
             with self.subTest(marker=marker):
                 self.assertFalse(self.denied(loop.format(marker)), self.reason)
+        alternation = ("git status --short && rg -n '^(<<<<<<<|=======|>>>>>>>)' a.py"
+                       " && git diff --name-only --diff-filter=U && date -u")
+        self.assertFalse(self.denied(alternation), self.reason)
         for command in (
             "grep -n '^<<<<<<<' a.py; python3 <<< 'import os'",
             "grep \\' x && python3 <<< 'import os'",
