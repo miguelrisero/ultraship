@@ -2083,27 +2083,20 @@ def role(data, name):
 
 
 def git_commit_step(command):
-    """Whether the shell text after the first heredoc body runs `git add` or `git commit` as the first words of a command."""
+    """Whether the whole shell text after the first heredoc is one line of plain `git add` and `git commit` steps."""
     lines = command.splitlines(keepends=True)
-    match = re.search(r"<<-?[ \t]*['\"]?([_a-zA-Z0-9]+)['\"]?[ \t]*$", lines[0]) if lines else None
+    match = re.search(r"<<(-?)[ \t]*['\"]?([_a-zA-Z0-9]+)['\"]?[ \t]*$", lines[0]) if lines else None
     if not match:
         return False
     for end in range(1, len(lines)):
-        if lines[end].strip() == match[1]:
-            # shortcut: reads each line on its own, so a continued or multi-line command prints no shape.
-            for line in lines[end + 1:]:
-                try:
-                    # Non-POSIX mode keeps quotes on a token, so a quoted `;` never reads as an operator.
-                    lexer = shlex.shlex(line, posix=False, punctuation_chars='();<>|&')
-                    lexer.whitespace_split = True
-                    tokens = list(lexer)
-                except ValueError:
-                    return False
-                for at, token in enumerate(tokens[:-1]):
-                    starts = at == 0 or tokens[at - 1] in ('&&', '||', ';', '|', '&', '(')
-                    if starts and token == 'git' and tokens[at + 1] in ('add', 'commit'):
-                        return True
-            return False
+        line = lines[end].removesuffix('\n')
+        if (line.lstrip('\t') if match[1] else line) == match[2]:
+            tail = ''.join(lines[end + 1:]).strip()
+            # Single-quoted text is inert, so only the shell outside it must be plain words joined by `&&`.
+            bare = re.sub(r"'[^']*'", "''", tail)
+            steps = bare.split('&&')
+            return ('\n' not in tail and not re.search(r"""[;|&()<>$`\\"'#=]""", ''.join(steps).replace("''", ''))
+                    and all(re.fullmatch(r'\s*git\s+(add|commit)(\s+\S+)*\s*', step) for step in steps))
     return False
 
 

@@ -220,7 +220,7 @@ class WriterHeredocTests(unittest.TestCase):
 
     def test_heredoc_denial_before_a_git_commit_prints_the_plain_git_shape(self):
         check = "import subprocess\ndef git(*args):\n    return subprocess.check_output(['git', *args])\nPY\n"
-        commit = "git add -- a.py && git commit -m 'x'"
+        commit = "git add -- a.py b.py && git commit -m 'test(scope): pin a; b'"
         for lead in ("cd -- /tmp/lane && /usr/bin/python3 -I - <<'PY'\n", "python3 - <<'PY'\n"):
             with self.subTest(lead=lead):
                 self.assertTrue(self.denied(lead + check + commit))
@@ -228,10 +228,14 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertIn('Resend with this shape:', self.reason)
                 self.assertIn('`git status --porcelain`', self.reason)
         for tail in ('git commit-tree HEAD^{tree} -m x', 'git status', 'echo git commit', 'git\ncommit',
-                     '# note; git commit', "echo 'a; git commit'", 'git # x\ncommit', "echo ';' git commit"):
+                     '# note; git commit', "echo 'a; git commit'", 'git # x\ncommit', "echo ';' git commit",
+                     'X="x; git commit -m x"', 'echo \\; git commit', "printf '%s\\n' \\\ngit commit",
+                     "cat <<'TEXT'\ngit commit\nTEXT", 'items=(git commit)', commit + ' && echo done', "git commit -m 'x"):
             with self.subTest(tail=tail):
                 self.assertTrue(self.denied("python3 - <<'PY'\n# git commit\n" + check + tail))
                 self.assertNotIn('Resend with this shape:', self.reason)
+        self.assertTrue(self.denied("python3 - <<'PY'\nimport subprocess\ntext = '''\n PY\ngit commit\n'''\nPY\n"))
+        self.assertNotIn('Resend with this shape:', self.reason)
         self.assertFalse(self.denied(commit))
         self.assertFalse(self.denied('git status --porcelain'))
         self.assertTrue(self.denied("python3 - <<'PY'\nopen('r.sh', 'w').write('x')\nPY\nbash r.sh\n"))
