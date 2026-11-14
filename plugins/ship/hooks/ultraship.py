@@ -2239,13 +2239,14 @@ def pre(data):
             written = tin.get('file_path') or tin.get('notebook_path')
             if isinstance(written, str) and written:
                 records = os.path.realpath(STATE / 'row-review').casefold()
-                written = os.path.realpath(os.path.join(data.get('cwd') or os.getcwd(),
-                                                        os.path.expanduser(written))).casefold()
-                if written == records or written.startswith(records + '/'):
-                    deny('Only the driver and the main session write row-review admission records. '
-                         'Report the blocked scope to the driver.')
-        # shortcut: Bash gets a text match only, so a path built from pieces slips past it.
-        # Upgrade path: a state folder that non-driver agents cannot reach.
+                written = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(written))
+                for path in (os.path.abspath(written).casefold(), os.path.realpath(written).casefold()):
+                    if (path == records or path.startswith(records + '/')
+                            or re.search(r'/\.scratch/ultraship/row-review(?:/|$)', path)):
+                        deny('Only the driver and the main session write row-review admission records. '
+                             'Report the blocked scope to the driver.')
+        # shortcut: Bash matches state and workspace paths as text, so a path built from pieces slips past it.
+        # Upgrade path: record folders that non-driver agents cannot reach.
         if tool == 'Bash' and 'ultraship/row-review' in str(tin.get('command', '')).casefold():
             deny('Only the driver and the main session touch row-review admission records (custody rule). '
                  'Report the blocked scope to the driver.')
@@ -2419,11 +2420,27 @@ def pre(data):
                 if not isinstance(agent_id, str) or not agent_id:
                     return 'No admission record can match because the hook payload has no agent_id.'
                 record = STATE / 'row-review' / (re.sub(r'[^\w.-]', '_', agent_id) + '.json')
+                workspace_record = False
+                if not os.path.lexists(record):
+                    for workspace in (Path(cwd), *Path(cwd).parents):
+                        if (workspace / '.scratch').is_dir():
+                            candidate = workspace / '.scratch/ultraship/row-review' / record.name
+                            if os.path.lexists(candidate):
+                                record = candidate
+                                workspace_record = True
+                            break
                 unmet = f'Admission record {record} must exist and meet this condition: '
                 target = tin.get('file_path') if tool == 'Read' else tin.get('path') if tool == 'Grep' else None
                 if paths != [target] or 'glob' in tin or 'type' in tin:
                     return unmet + ('only Read of a listed row file, or Grep with a listed row file as `path` '
                                     'and no `glob` or `type`, can be admitted.')
+                if workspace_record:
+                    try:
+                        if (os.path.realpath(record.parent) != os.path.abspath(record.parent)
+                                or os.stat(record.parent).st_uid != os.getuid()):
+                            return unmet + 'the record parent has no symlink components and belongs to your UID.'
+                    except OSError:
+                        return unmet + 'the record parent must exist and belong to your UID.'
                 try:
                     # O_NONBLOCK: opening a named pipe must not hang the hook.
                     descriptor = os.open(record, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)

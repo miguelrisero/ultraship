@@ -290,6 +290,134 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
 print('ultraship hooks: ok')
 
 
+class WorkspaceRowAdmissionTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.workspace = self.root / 'workspace'
+        self.cwd = self.workspace / 'repo/nested'
+        self.cwd.mkdir(parents=True)
+        self.row = self.workspace / 'repo/tests/mutation/example.toml'
+        self.row.parent.mkdir(parents=True)
+        self.row.write_text('')
+        self.record = self.workspace / '.scratch/ultraship/row-review/r1.json'
+        self.record.parent.mkdir(parents=True)
+        self.env = {**os.environ, 'HOME': str(self.root), 'XDG_STATE_HOME': str(self.root / 'state')}
+        self.payload = {'agent_type': 'ship:reviewer--sol', 'agent_id': 'r1', 'cwd': str(self.cwd),
+                        'tool_name': 'Read', 'tool_input': {'file_path': str(self.row)}}
+        self.fields = {'pr': 'https://github.com/example/repo/pull/1', 'agent_id': 'r1',
+                       'row_files': [str(self.row)],
+                       'expires_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 3600))}
+
+    def write_record(self, path=None, **fields):
+        path = path or self.record
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**self.fields, **fields}))
+        path.chmod(0o600)
+
+    def test_valid_workspace_record_uses_nearest_workspace(self):
+        self.write_record(self.root / '.scratch/ultraship/row-review/r1.json')
+        self.assertTrue(denied(hook('pre', self.payload, self.env)))
+        self.write_record()
+        for cwd in (self.workspace, self.cwd):
+            for tool, inputs in (('Read', {'file_path': str(self.row)}),
+                                 ('Grep', {'path': str(self.row), 'pattern': 'id'})):
+                with self.subTest(cwd=cwd, tool=tool):
+                    self.assertFalse(denied(hook('pre', {**self.payload, 'cwd': str(cwd),
+                                                        'tool_name': tool, 'tool_input': inputs}, self.env)))
+        self.record.unlink()
+        self.write_record(self.root / 'state/ultraship/row-review/r1.json')
+        self.assertFalse(denied(hook('pre', self.payload, self.env)))
+
+    def test_workspace_record_symlink_is_denied(self):
+        target = self.root / 'record.json'
+        self.write_record(target)
+        self.record.symlink_to(target)
+        result = hook('pre', self.payload, self.env)
+        self.assertTrue(denied(result))
+        self.assertIn('the record is missing or is a link', result['hookSpecificOutput']['permissionDecisionReason'])
+
+    def test_workspace_record_symlinked_parent_is_denied(self):
+        self.write_record()
+        for parent in (self.workspace / '.scratch', self.record.parent.parent, self.record.parent):
+            with self.subTest(parent=parent):
+                target = self.root / 'unprotected-records'
+                parent.rename(target)
+                parent.symlink_to(target, target_is_directory=True)
+                try:
+                    result = hook('pre', self.payload, self.env)
+                    self.assertTrue(denied(result))
+                    self.assertIn('the record parent has no symlink components',
+                                  result['hookSpecificOutput']['permissionDecisionReason'])
+                finally:
+                    parent.unlink()
+                    target.rename(parent)
+
+    def test_workspace_record_world_writable_is_denied(self):
+        self.write_record()
+        self.record.chmod(0o606)
+        result = hook('pre', self.payload, self.env)
+        self.assertTrue(denied(result))
+        self.assertIn('not group or world writable', result['hookSpecificOutput']['permissionDecisionReason'])
+
+    def test_workspace_record_expiry_is_denied(self):
+        self.write_record(expires_at=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 60)))
+        result = hook('pre', self.payload, self.env)
+        self.assertTrue(denied(result))
+        self.assertIn('later than now and at most 4 hours ahead', result['hookSpecificOutput']['permissionDecisionReason'])
+
+    def test_workspace_record_for_another_agent_is_denied(self):
+        self.write_record(agent_id='r2')
+        result = hook('pre', self.payload, self.env)
+        self.assertTrue(denied(result))
+        self.assertIn('`agent_id` equals your agent ID', result['hookSpecificOutput']['permissionDecisionReason'])
+
+    def assert_workspace_record_write_denied(self, tool):
+        alias = self.root / 'record-folder'
+        alias.symlink_to(self.record.parent, target_is_directory=True)
+        targets = (self.record,) if tool == 'Bash' else (self.record, alias / self.record.name)
+        for target in targets:
+            inputs = ({'command': f'echo invalid > {target}'} if tool == 'Bash' else
+                      {'notebook_path' if tool == 'NotebookEdit' else 'file_path': str(target)})
+            for agent in ('ship:writer--sol', 'ship:reviewer--sol', 'Explore'):
+                with self.subTest(tool=tool, target=target, agent=agent):
+                    result = hook('pre', {**self.payload, 'agent_type': agent,
+                                          'tool_name': tool, 'tool_input': inputs}, self.env)
+                    self.assertTrue(denied(result))
+                    self.assertIn('Only the driver and the main session',
+                                  result['hookSpecificOutput']['permissionDecisionReason'])
+            for agent in ('ship:driver', ''):
+                with self.subTest(tool=tool, target=target, agent=agent):
+                    self.assertFalse(denied(hook('pre', {**self.payload, 'agent_type': agent,
+                                                        'tool_name': tool, 'tool_input': inputs}, self.env)))
+
+    def test_workspace_record_write_through_symlinked_parent_is_denied(self):
+        target = self.root / 'unprotected-records'
+        self.record.parent.rename(target)
+        self.record.parent.symlink_to(target, target_is_directory=True)
+        for tool in ('Edit', 'Write', 'NotebookEdit'):
+            with self.subTest(tool=tool):
+                inputs = {'notebook_path' if tool == 'NotebookEdit' else 'file_path': str(self.record)}
+                result = hook('pre', {**self.payload, 'agent_type': 'ship:writer--sol',
+                                      'tool_name': tool, 'tool_input': inputs}, self.env)
+                self.assertTrue(denied(result))
+                self.assertIn('Only the driver and the main session',
+                              result['hookSpecificOutput']['permissionDecisionReason'])
+
+    def test_workspace_record_edit_is_denied(self):
+        self.assert_workspace_record_write_denied('Edit')
+
+    def test_workspace_record_write_is_denied(self):
+        self.assert_workspace_record_write_denied('Write')
+
+    def test_workspace_record_notebook_edit_is_denied(self):
+        self.assert_workspace_record_write_denied('NotebookEdit')
+
+    def test_workspace_record_bash_write_is_denied(self):
+        self.assert_workspace_record_write_denied('Bash')
+
+
 class PythonHeredocGuardTests(unittest.TestCase):
     def test_writer_named_process_heredoc_rule(self):
         with tempfile.TemporaryDirectory() as tmp:
