@@ -58,7 +58,6 @@ GH_METHOD = re.compile(r'^(?:--method(?:=(.*))?|-[ip]*X(.*))$')
 GH_FIELD = re.compile(r'^(?:--(?:field|raw-field|input)(?:=.*)?|-[ip]*[fF].*)$')
 HARNESS_PATH = re.compile(r'(^|/)\.claude/settings[^/]*\.json$')
 # The shape names only plain git calls, so it never runs a file a denied script wrote.
-GIT_COMMIT_STEP = re.compile(r'(^|[;&|\s])git\s+(add|commit)\b')
 GIT_COMMIT_SHAPE = (' Resend with this shape: check state with separate plain `git rev-parse HEAD` and '
                     '`git status --porcelain` calls, then run the plain `git add -- <paths> && git commit -m <message>` '
                     'call alone, with no interpreter heredoc in it.')
@@ -2083,6 +2082,24 @@ def role(data, name):
     return re.match(rf'^(ship:)?{name}--', data.get('agent_type') or '') is not None
 
 
+def git_commit_step(command):
+    """Whether the shell text after the first heredoc body runs `git add` or `git commit` as exact words."""
+    lines = command.splitlines(keepends=True)
+    match = re.search(r"<<-?[ \t]*['\"]?([_a-zA-Z0-9]+)['\"]?[ \t]*$", lines[0]) if lines else None
+    if not match:
+        return False
+    for end in range(1, len(lines)):
+        if lines[end].strip() == match[1]:
+            try:
+                lexer = shlex.shlex(''.join(lines[end + 1:]), posix=True, punctuation_chars='();<>|&`')
+                lexer.whitespace_split = True
+                tokens = list(lexer)
+            except ValueError:
+                return False
+            return any(a == 'git' and b in ('add', 'commit') for a, b in zip(tokens, tokens[1:]))
+    return False
+
+
 def deny(reason):
     print(json.dumps({'hookSpecificOutput': {
         'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))
@@ -2241,7 +2258,7 @@ def pre(data):
                 reason = process_heredoc_denial(command)
                 if reason:
                     deny(classifier_reason + ' Rule: ' + reason + '.'
-                         + (GIT_COMMIT_SHAPE if GIT_COMMIT_STEP.search(command) else ''))
+                         + (GIT_COMMIT_SHAPE if git_commit_step(command) else ''))
                 # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
                 file_text_removed = python_heredoc_shell(cat_heredoc_data(command), inert_only=True)
                 reason = git_push(command)
@@ -2257,7 +2274,7 @@ def pre(data):
                 reason = process_heredoc_denial(command, readers=True)
                 if reason:
                     deny(classifier_reason + ' Rule: ' + reason + '.'
-                         + (GIT_COMMIT_SHAPE if GIT_COMMIT_STEP.search(command) else ''))
+                         + (GIT_COMMIT_SHAPE if git_commit_step(command) else ''))
                 reason = python_inline_denial(command)
                 if reason:
                     deny(classifier_reason + ' Rule: ' + reason + '.')
