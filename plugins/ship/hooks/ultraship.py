@@ -935,6 +935,31 @@ def data_reader_header(line):
                         + rf')(?:[ \t]+{argument})*[ \t]*{operator}(?:[ \t]+{argument})*[ \t]*\n?', line) is not None
 
 
+def literal_quotes_removed(line):
+    """Drop single-quoted text; keep the whole line when bash could read its quotes differently."""
+    if re.search(r"\$['(\[{]|[#`]", line):
+        return line
+    kept, index = [], 0
+    while index < len(line):
+        char = line[index]
+        if char == '\\':
+            kept.append(line[index:index + 2])
+            index += 2
+        elif char in '\'"':
+            end = index + 1
+            while end < len(line) and line[end] != char:
+                end += 2 if char == '"' and line[end] == '\\' else 1
+            if end >= len(line):
+                return line
+            if char == '"':
+                kept.append(line[index:end + 1])
+            index = end + 1
+        else:
+            kept.append(char)
+            index += 1
+    return ''.join(kept)
+
+
 def process_heredoc_denial(command, readers=False):
     """Check Python stdin bodies and keep quoted commit messages as data."""
     lines = (command if readers else cat_heredoc_data(command)).splitlines(keepends=True)
@@ -943,7 +968,9 @@ def process_heredoc_denial(command, readers=False):
         operators = list(re.finditer(r"(?<!<)<<(?P<tabs>-?)(?!<)[ \t]*"
                                     r"(?P<delimiter>'[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", lines[index]))
         if not operators:
-            if readers and '<<' in lines[index] and not data_reader_header(lines[index]):
+            # A quote opened on an earlier line changes how bash reads this one, so only a one-line command drops quotes.
+            text = literal_quotes_removed(lines[index]) if len(lines) == 1 else lines[index]
+            if readers and '<<' in text and not data_reader_header(lines[index]):
                 return 'process-capable heredoc rule (heredoc reader not on the allowlist)'
             index += 1
             continue
