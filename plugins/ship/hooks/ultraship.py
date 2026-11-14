@@ -2093,7 +2093,8 @@ def git_commit_step(command):
             # shortcut: reads each line on its own, so a continued or multi-line command prints no shape.
             for line in lines[end + 1:]:
                 try:
-                    lexer = shlex.shlex(line, posix=True, punctuation_chars='();<>|&')
+                    # Non-POSIX mode keeps quotes on a token, so a quoted `;` never reads as an operator.
+                    lexer = shlex.shlex(line, posix=False, punctuation_chars='();<>|&')
                     lexer.whitespace_split = True
                     tokens = list(lexer)
                 except ValueError:
