@@ -2515,6 +2515,8 @@ RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (cu
                    'Report the blocked scope to the driver.')
 RECEIPT_CUSTODY_FAILED = ('The ship hook could not check refusal-receipt custody, so it denies this call. '
                           'Report the blocked scope to the driver.')
+PRE_FAILED = ('The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
+              'Report the blocked scope to the driver.')
 
 
 def receipt_custody(data, read_search=False):
@@ -2788,14 +2790,9 @@ def pre(data):
                     values.append(tin[field])
             for path in paths:
                 if not canonical(path):
-                    message = ('Reviewers must pass an exact absolute path: no `~`, `.` or `..` segment, repeated or '
-                               'trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form.')
-                    real = os.path.realpath(path) if path.startswith('/') else ''
-                    if (real and real != path and canonical(real) and not claude_data(real)
-                            and not re.search(protected, real, re.IGNORECASE)
-                            and '.git' not in real.casefold().split('/')):
-                        message += f' The real path is {real}.'
-                    deny(message)
+                    deny('Reviewers must pass an exact absolute path: no `~`, `.` or `..` segment, repeated or '
+                         'trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form. '
+                         'Report the blocked scope to the coordinator.')
             if any('.git' in path.casefold().split('/') for path in paths):
                 deny('Reviewers cannot access `.git` paths. Report the blocked scope to the coordinator.')
             if any(claude_data(path) for path in paths):
@@ -3140,7 +3137,7 @@ def compact(data):
 
 
 def guarded_pre(data):
-    """Keep receipt custody and reviewer access closed when `pre` fails."""
+    """Deny every tool for every caller when `pre` raises an exception."""
     try:
         pre(data)
     except Exception:
@@ -3148,11 +3145,10 @@ def guarded_pre(data):
         try:
             receipt_custody(data, read_search=True)
         except Exception:
-            tool = data.get('tool_name', '') if isinstance(data, dict) else ''
-            if tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__'):
+            tool = data.get('tool_name') if isinstance(data, dict) else ''
+            if isinstance(tool, str) and (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')):
                 deny(RECEIPT_CUSTODY)
-        if isinstance(data, dict) and role(data, 'reviewer'):
-            deny('Reviewers cannot proceed when the ship hook fails. Report the blocked scope to the coordinator.')
+        deny(PRE_FAILED)
 
 
 if __name__ == '__main__':

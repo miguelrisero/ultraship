@@ -875,27 +875,24 @@ class ReviewerSearchTests(unittest.TestCase):
                 self.assert_rule(tool, arguments, '`.git` paths')
         self.assertEqual(self.decision('Grep', {'path': self.root + '/src', 'pattern': 'row'}), {})
 
-    def test_a_failure_inside_pre_blocks_only_reviewers(self):
+    def test_a_failure_inside_pre_blocks_every_caller(self):
+        """Catch read calls escaping a hook failure for any caller role."""
         self.assertIn("'pre': guarded_pre", read('plugins/ship/hooks/ultraship.py'))
-        for agent, blocked in (('ship:reviewer--sol', True), ('reviewer--opus', True), ('ship:researcher--luna', False),
-                               ('ship:writer--sol', False), (None, False)):
+        for agent in ('ship:reviewer--sol', 'reviewer--opus', 'ship:researcher--luna', 'ship:writer--sol', None):
             output = io.StringIO()
             with self.subTest(agent=agent), patch.object(ultraship, 'pre', side_effect=RuntimeError('synthetic')), \
                     patch.object(ultraship.traceback, 'print_exc') as printed:
-                with redirect_stdout(output):
-                    try:
-                        ultraship.guarded_pre({'agent_type': agent, 'tool_name': 'Read', 'tool_input': {'file_path': '/x'}})
-                    except SystemExit as exc:
-                        self.assertEqual(exc.code, 0)
+                with redirect_stdout(output), self.assertRaises(SystemExit) as exit:
+                    ultraship.guarded_pre({'agent_type': agent, 'tool_name': 'Read', 'tool_input': {'file_path': '/x'}})
+                self.assertEqual(exit.exception.code, 0)
                 printed.assert_called_once()
-                if blocked:
-                    decision = json.loads(output.getvalue())['hookSpecificOutput']
-                    self.assertEqual(decision['permissionDecision'], 'deny')
-                    self.assertIn('hook fails', decision['permissionDecisionReason'])
-                else:
-                    self.assertEqual(output.getvalue(), '')
+                decision = json.loads(output.getvalue())['hookSpecificOutput']
+                self.assertEqual(decision['permissionDecision'], 'deny')
+                self.assertEqual(decision['permissionDecisionReason'],
+                                 'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
+                                 'Report the blocked scope to the driver.')
 
-    def test_a_link_path_without_dotdot_is_not_canonical_and_names_a_safe_real_path(self):
+    def test_a_link_path_without_dotdot_is_not_canonical(self):
         Path(self.root, 'src-link').symlink_to(Path(self.root, 'src'), target_is_directory=True)
         Path(self.root, 'mutation-link').symlink_to(Path(self.root, 'tests/mutation'), target_is_directory=True)
         for path in (self.root + '/src-link', self.root + '/src-link/x.py'):
@@ -907,11 +904,27 @@ class ReviewerSearchTests(unittest.TestCase):
             ):
                 with self.subTest(tool=tool, arguments=arguments):
                     self.assert_not_canonical(tool, arguments)
-        self.assert_rule('Read', {'file_path': self.root + '/src-link/x.py'}, 'The real path is ' + self.root + '/src/x.py')
+        self.assert_rule('Read', {'file_path': self.root + '/src-link/x.py'}, 'Report the blocked scope to the coordinator.')
         decision = self.decision('Read', {'file_path': self.root + '/mutation-link/x.py'})
         self.assertEqual(decision.get('permissionDecision'), 'deny')
         self.assertNotIn('real path', decision['permissionDecisionReason'])
         self.assert_rule('Read', {'file_path': self.root + '/src/cafe\N{COMBINING ACUTE ACCENT}/x.py'}, 'NFC')
+
+    def test_a_trailing_slash_refusal_ends_with_the_report_line_and_matches_reviewer_guidance(self):
+        decision = self.decision('Grep', {'path': self.root + '/src/', 'pattern': 'identifier'})
+        self.assertEqual(decision.get('permissionDecision'), 'deny')
+        reason = decision['permissionDecisionReason']
+        self.assertTrue(reason.endswith('NFC form. Report the blocked scope to the coordinator.'), reason)
+        rule = reason[reason.index('no `~`'):reason.index(' Report the blocked scope')]
+        agents = sorted((ROOT / 'plugins/ship/agents').glob('reviewer--*.md'))
+        self.assertTrue(agents)
+        for path in agents + [ROOT / 'plugins/ship/skills/review/SKILL.md',
+                              ROOT / 'plugins/ship/skills/panel/SKILL.md',
+                              ROOT / 'plugins/ship/skills/ship/references/pipeline.md']:
+            with self.subTest(path=str(path)):
+                text = path.read_text()
+                self.assertIn(rule, text)
+                self.assertIn('A directory path has no trailing `/`', text)
 
     def test_escaped_and_brace_globs_pass_in_a_folder_without_tests_mutation(self):
         for glob in (r'tests/mut\ation/**', 'tests/m{utation,odels}/**'):
