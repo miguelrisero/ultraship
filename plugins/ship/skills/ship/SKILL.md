@@ -287,6 +287,8 @@ Keep messages, briefs, and PR bodies free of pair bytes and TOML text; identify 
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 
+After a hook denies only the method of this route's row edit, apply the owner-decisions granted protected-row re-anchor; it is the one exception to the alternate-form sentence below.
+
 For newly admitted future operations, use native Edit with replace_all=false.
 Require a unique approved row-ID-contained old_string within the approved row extent.
 Change only the approved paired old/new fields; preserve every frozen field.
