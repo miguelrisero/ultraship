@@ -1619,12 +1619,13 @@ def safe_directory_state(command, cwd=None):
     return not forbidden(base) and not forbidden(target) and os.path.isdir(target)
 
 
-def array_subscript_denial(words, arithmetic, tokens):
-    spans = [single_quoted_spans(word[0]) for word in words]
+def array_subscript_denial(words, arithmetic, tokens, names_only=False):
+    checked_words = [] if names_only else words
+    spans = [single_quoted_spans(word[0]) for word in checked_words]
     legacy = any(parts is None or any('$[' in span for span, single in parts if not single) for parts in spans)
     expanded = lambda value: '$' in value or '`' in value
     unsafe_name = lambda value: '[' in value or expanded(value)
-    for index, (raw, value, start, _) in enumerate(words):
+    for index, (raw, value, start, _) in enumerate(checked_words):
         parts = spans[index]
         if (grep_data_token(words, index) and parts is not None
                 and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
@@ -1639,9 +1640,14 @@ def array_subscript_denial(words, arithmetic, tokens):
             if not single:
                 for parameter in re.finditer(r'\$\{', span):
                     tail = raw[offset + parameter.end():]
-                    if re.search(r':(?![-=?+])', tail.partition('}')[0]) and expanded(tail):
+                    braced = tail.partition('}')[0]
+                    if any(char in braced for char in "\\'\"") or braced.count('[') > braced.count(']'):
+                        braced = tail
+                    if re.search(r':(?![-=?+])', braced) and expanded(tail):
                         return 'array subscript evaluation rule (arithmetic)'
             offset += len(span)
+    if not names_only:
+        return None
 
     operands, cursor, wrapper, timing = [], 0, False, False
     while cursor < len(words):
@@ -1776,6 +1782,40 @@ def inline_interpreter_denial(command, cwd=None):
                     stack.pop()
             elif stack and stack[-1]:
                 arithmetic.add(start)
+        commands, command_words, cursor = [], [], 0
+        while cursor < len(tokens):
+            token = tokens[cursor]
+            raw = token[0]
+            process_substitution = (raw in {'<', '>'} and cursor + 1 < len(tokens)
+                                    and tokens[cursor + 1][0] == '(' and token[3] == tokens[cursor + 1][2])
+            redirect = raw in {'<', '>'} or (raw == '&' and cursor + 1 < len(tokens)
+                        and tokens[cursor + 1][0] == '>' and token[3] == tokens[cursor + 1][2])
+            if process_substitution:
+                commands.append(command_words)
+                command_words = []
+                cursor += 2
+                continue
+            if redirect:
+                if (command_words and command_words[-1][3] == token[2]
+                        and re.fullmatch(r'\d+|\{[A-Za-z_][A-Za-z0-9_]*}', command_words[-1][0])):
+                    command_words.pop()
+                cursor += 1
+                while (cursor < len(tokens) and tokens[cursor][0] in {'<', '>', '&', '|'}
+                       and tokens[cursor - 1][3] == tokens[cursor][2]):
+                    cursor += 1
+                if cursor < len(tokens):
+                    cursor += 1
+                continue
+            if raw in {';', '|', '&', '(', ')', '`', '\n'}:
+                commands.append(command_words)
+                command_words = []
+            else:
+                command_words.append(token)
+            cursor += 1
+        commands.append(command_words)
+        for command_words in commands:
+            if subscript_reason is None:
+                subscript_reason = array_subscript_denial(command_words, arithmetic, tokens, names_only=True)
         segments, words, piped = [], [], False
         for token in tokens:
             raw = token[0]

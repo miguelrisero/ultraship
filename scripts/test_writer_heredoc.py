@@ -276,6 +276,36 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
 
+    def test_redirections_preserve_evaluated_name_refusals(self):
+        """Catch descriptor redirections that hide command words or split name operands."""
+        for command in (
+            '2>/dev/null printf -v "$x" %s 1', 'printf 2>/dev/null -v "$x" %s 1',
+            'printf 2>&1 -v "$x" %s 1', '{fd}>f unset "$x"', '3>&- test -v "$x"',
+            '2>&1 read -a "$x"', '&>/dev/null declare "$x"=1', 'x=1 2>>e wait -n -p "$x"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_quoted_or_escaped_braces_preserve_offset_refusals(self):
+        """Catch arithmetic offsets after a literal closing brace inside an array subscript."""
+        for command in (
+            r'''a=(1 2); echo "${a[\}]:$n}"''',
+            '''a=(1 2); echo "${a['}']:$n}"''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_literal_descriptor_redirections_remain_admitted(self):
+        """Catch false name refusals for ordinary descriptor redirects and descriptor closure."""
+        for command in (
+            r'''printf '%s\n' x 2>/dev/null''', 'echo hi >&2', 'make test 2>&1 | tee log',
+            'read -r line 0</dev/null', 'unset FOO 2>/dev/null', 'exec 3>&-',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_literal_variable_operations_and_quoted_data_remain_admitted(self):
         """Catch refusals of literal names, inert arithmetic and ordinary quoted data."""
         for command in (
