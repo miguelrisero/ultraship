@@ -895,7 +895,7 @@ class ReviewerSearchTests(unittest.TestCase):
                 else:
                     self.assertEqual(output.getvalue(), '')
 
-    def test_a_link_path_without_dotdot_is_not_canonical_and_names_a_safe_real_path(self):
+    def test_a_link_path_without_dotdot_is_not_canonical(self):
         Path(self.root, 'src-link').symlink_to(Path(self.root, 'src'), target_is_directory=True)
         Path(self.root, 'mutation-link').symlink_to(Path(self.root, 'tests/mutation'), target_is_directory=True)
         for path in (self.root + '/src-link', self.root + '/src-link/x.py'):
@@ -907,11 +907,20 @@ class ReviewerSearchTests(unittest.TestCase):
             ):
                 with self.subTest(tool=tool, arguments=arguments):
                     self.assert_not_canonical(tool, arguments)
-        self.assert_rule('Read', {'file_path': self.root + '/src-link/x.py'}, 'The real path is ' + self.root + '/src/x.py')
+        self.assert_rule('Read', {'file_path': self.root + '/src-link/x.py'}, 'Report the blocked scope to the coordinator.')
+        decision = self.decision('Read', {'file_path': self.root + '/src-link/x.py'})
+        self.assertNotIn('real path', decision['permissionDecisionReason'])
         decision = self.decision('Read', {'file_path': self.root + '/mutation-link/x.py'})
         self.assertEqual(decision.get('permissionDecision'), 'deny')
         self.assertNotIn('real path', decision['permissionDecisionReason'])
         self.assert_rule('Read', {'file_path': self.root + '/src/cafe\N{COMBINING ACUTE ACCENT}/x.py'}, 'NFC')
+
+    def test_a_grep_directory_path_with_a_trailing_slash_is_not_canonical(self):
+        arguments = {'path': self.root + '/src/', 'pattern': 'identifier'}
+        self.assert_rule('Grep', arguments, 'exact absolute path')
+        self.assert_rule('Grep', arguments, 'Report the blocked scope to the coordinator.')
+        decision = self.decision('Grep', arguments)
+        self.assertNotIn('real path', decision['permissionDecisionReason'])
 
     def test_escaped_and_brace_globs_pass_in_a_folder_without_tests_mutation(self):
         for glob in (r'tests/mut\ation/**', 'tests/m{utation,odels}/**'):

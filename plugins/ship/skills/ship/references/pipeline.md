@@ -12,6 +12,10 @@ Apply this rule to every review dispatch, including slice, selection, fix-read, 
 Scope every search call to the permitted paths.
 Exclude `tests/mutation/`, generated and vendored content, and any other brief exclusions.
 Reviewers use Grep, Glob, and Read with exact absolute paths.
+An exact absolute path has no `~`, `.` or `..` segment, repeated or trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form.
+A directory path has no trailing `/`: `/abs/repo/backend/api/services`, not `/abs/repo/backend/api/services/`.
+Reviewers report a refused Grep, Glob, or Read call as blocked scope in the verdict.
+Reviewers never resend a refused call in another form, including the path the refusal names; the coordinator decides a new brief.
 Reviewers use LSP hover and documentSymbol on one file only.
 Reviewers use no MCP (`mcp__`) tools.
 Reviewers search only directories that contain no `tests/mutation/` directory.

@@ -2782,14 +2782,9 @@ def pre(data):
                     values.append(tin[field])
             for path in paths:
                 if not canonical(path):
-                    message = ('Reviewers must pass an exact absolute path: no `~`, `.` or `..` segment, repeated or '
-                               'trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form.')
-                    real = os.path.realpath(path) if path.startswith('/') else ''
-                    if (real and real != path and canonical(real) and not claude_data(real)
-                            and not re.search(protected, real, re.IGNORECASE)
-                            and '.git' not in real.casefold().split('/')):
-                        message += f' The real path is {real}.'
-                    deny(message)
+                    deny('Reviewers must pass an exact absolute path: no `~`, `.` or `..` segment, repeated or '
+                         'trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form. '
+                         'Report the blocked scope to the coordinator.')
             if any('.git' in path.casefold().split('/') for path in paths):
                 deny('Reviewers cannot access `.git` paths. Report the blocked scope to the coordinator.')
             if any(claude_data(path) for path in paths):
