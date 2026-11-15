@@ -161,6 +161,9 @@ Never replay a denied command, equivalent operation or substitute actor while it
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 The driver applies zero protected edits; the writer publishes nothing.
 A product-limit or cost approval alone grants zero protected read, subject, paired-field, retirement or pin-edit authority.
+Require a separate exact written CoC decision for each subject edit under the supported writer's loaded subject route.
+That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.
+Keep Owner-scoped protected row access independent, with its full owner-event verification requirements.
 Apply the exact access and edit provenance requirements in the supported writer's loaded subject route.
 Keep all other routes' subject and field freezes binding outside that exact approved route scope.
 
