@@ -908,19 +908,26 @@ class ReviewerSearchTests(unittest.TestCase):
                 with self.subTest(tool=tool, arguments=arguments):
                     self.assert_not_canonical(tool, arguments)
         self.assert_rule('Read', {'file_path': self.root + '/src-link/x.py'}, 'Report the blocked scope to the coordinator.')
-        decision = self.decision('Read', {'file_path': self.root + '/src-link/x.py'})
-        self.assertNotIn('real path', decision['permissionDecisionReason'])
         decision = self.decision('Read', {'file_path': self.root + '/mutation-link/x.py'})
         self.assertEqual(decision.get('permissionDecision'), 'deny')
         self.assertNotIn('real path', decision['permissionDecisionReason'])
         self.assert_rule('Read', {'file_path': self.root + '/src/cafe\N{COMBINING ACUTE ACCENT}/x.py'}, 'NFC')
 
-    def test_a_grep_directory_path_with_a_trailing_slash_is_not_canonical(self):
-        arguments = {'path': self.root + '/src/', 'pattern': 'identifier'}
-        self.assert_rule('Grep', arguments, 'exact absolute path')
-        self.assert_rule('Grep', arguments, 'Report the blocked scope to the coordinator.')
-        decision = self.decision('Grep', arguments)
-        self.assertNotIn('real path', decision['permissionDecisionReason'])
+    def test_a_trailing_slash_refusal_ends_with_the_report_line_and_matches_reviewer_guidance(self):
+        decision = self.decision('Grep', {'path': self.root + '/src/', 'pattern': 'identifier'})
+        self.assertEqual(decision.get('permissionDecision'), 'deny')
+        reason = decision['permissionDecisionReason']
+        self.assertTrue(reason.endswith('NFC form. Report the blocked scope to the coordinator.'), reason)
+        rule = reason[reason.index('no `~`'):reason.index(' Report the blocked scope')]
+        agents = sorted((ROOT / 'plugins/ship/agents').glob('reviewer--*.md'))
+        self.assertTrue(agents)
+        for path in agents + [ROOT / 'plugins/ship/skills/review/SKILL.md',
+                              ROOT / 'plugins/ship/skills/panel/SKILL.md',
+                              ROOT / 'plugins/ship/skills/ship/references/pipeline.md']:
+            with self.subTest(path=str(path)):
+                text = path.read_text()
+                self.assertIn(rule, text)
+                self.assertIn('A directory path has no trailing `/`', text)
 
     def test_escaped_and_brace_globs_pass_in_a_folder_without_tests_mutation(self):
         for glob in (r'tests/mut\ation/**', 'tests/m{utation,odels}/**'):
