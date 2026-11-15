@@ -1803,7 +1803,7 @@ def inline_interpreter_denial(command, cwd=None):
                 while (cursor < len(tokens) and tokens[cursor][0] in {'<', '>', '&', '|'}
                        and tokens[cursor - 1][3] == tokens[cursor][2]):
                     cursor += 1
-                if cursor < len(tokens):
+                if cursor < len(tokens) and tokens[cursor][0] not in {';', '|', '&', '(', ')', '`', '\n'}:
                     cursor += 1
                 continue
             if raw in {';', '|', '&', '(', ')', '`', '\n'}:
@@ -1848,7 +1848,8 @@ def inline_interpreter_denial(command, cwd=None):
                 break
         for words, piped in segments:
             if subscript_reason is None:
-                subscript_reason = array_subscript_denial(words, arithmetic, tokens)
+                subscript_reason = (array_subscript_denial(words, arithmetic, tokens)
+                                    or array_subscript_denial(words, arithmetic, tokens, names_only=True))
             reads_pipe = inherited[0] or piped or any(word[0] == '<' for word in words)
             segment_relative_denied = (redirected or not safe_base or chdir_wrapper
                                        or directory and not safe_directory or reads_pipe)

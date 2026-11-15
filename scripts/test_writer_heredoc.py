@@ -306,6 +306,21 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
 
+    def test_redirect_target_substitutions_preserve_name_refusals(self):
+        """Catch redirect targets that conceal evaluated names inside backtick substitutions."""
+        for command in ('echo hi >`unset "$x"; echo /dev/null`',
+                        'echo hi 2>`test -v "$x"; echo /dev/null`'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_stored_process_substitutions_refuse_subscript_payloads(self):
+        """Catch stored subscript payloads that invoke input or output process substitution."""
+        for command in ('''x='a[<(no""de -""e 1)]' ''', '''x='a[>(no""de -""e 1)]' '''):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command.rstrip()))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
     def test_literal_variable_operations_and_quoted_data_remain_admitted(self):
         """Catch refusals of literal names, inert arithmetic and ordinary quoted data."""
         for command in (
