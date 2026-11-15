@@ -150,6 +150,17 @@ REFUSE = (
     'runuser -u miguel -- sh -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
     'env -S \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
     'gh "$SUB" repos/o/r/pulls/7/comments',
+    r'sudo -s g\"h\" api repos/o/r/pulls/7/comments -f body=x',
+    'env --split \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'env --split-str=\'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'tmux new-session -d \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'timeout 60 flock /tmp/x -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'echo api repos/o/r/pulls/7/comments -f body=x | xargs gh',
+    r'gh api repos/o/r/pulls/7; sudo -s g\"h\" api repos/o/r/pulls/7/comments -f body=x',
+    'gh pr create --title "fix(ship): refuse gh api writes" --body-file body.md',
+    "env --split-string='gh api repos/o/r/pulls/7/comments --input reply.json'",
+    "env -S'gh api repos/o/r/pulls/7/comments --input reply.json'",
+    "env -iS'gh api repos/o/r/pulls/7/comments --input reply.json'",
 )
 
 ADMIT = (
@@ -189,11 +200,15 @@ ADMIT = (
     'gh api -X GET search/issues -f q=x',
     'bash -n plugins/ship/skills/babysit/scripts/threads.sh',
     'eval "echo hi"',
-    'gh pr create --title "fix(ship): refuse gh api writes" --body-file body.md',
+    'sudo -n true && gh pr view 7',
+    'timeout 60 gh pr checks 7 --watch',
+    'env --unset=X gh api repos/o/r/pulls/7',
+    'gh run watch 123 --exit-status',
     'gh "pr" view 7',
     'watch -n 60 date',
     "env -S 'echo hi'",
     'ssh host uptime',
+    "curl -s https://api.linear.app/graphql -d 'route through api'",
 )
 
 

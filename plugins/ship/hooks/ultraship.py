@@ -3006,7 +3006,15 @@ def review_thread_denial(command):
     names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word)) == 'gh'
                    for word in re.split(r'[\s;&|()<>]+', normalized))
     if names_gh:
+        seen_gh = False
         for index, token in enumerate(tokens):
+            if token and all(char in ';&|\n()' for char in token):
+                seen_gh = False
+                continue
+            if os.path.basename(token) == 'gh':
+                seen_gh = True
+            if seen_gh:
+                continue
             shell = os.path.basename(token) in ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'busybox')
             shell = shell or token in ('eval', 'source', '.')
             if os.path.basename(token) in ('watch', 'ssh', 'su', 'script', 'runuser'):
@@ -3015,7 +3023,9 @@ def review_thread_denial(command):
                 for later in tokens[index + 1:]:
                     if later and all(char in ';&|\n()' for char in later):
                         break
+                    split_option = later.split('=', 1)[0]
                     if (later.startswith(('-S', '--split-string'))
+                            or len(split_option) >= 3 and '--split-string'.startswith(split_option)
                             or later.startswith('-') and not later.startswith('--') and 'S' in later):
                         return 'shell runner names gh'
             if shell and not (index + 1 < len(tokens) and tokens[index + 1].endswith('.sh')
@@ -3054,6 +3064,17 @@ def review_thread_denial(command):
         calls = [index for index, (value, _) in enumerate(words)
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
         text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words)).casefold()
+        hidden_words = [word for word in re.split(r'[\s;&|()<>]+', text) if word]
+        hidden_calls = sum(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', word)[-1]) == 'gh'
+                           and hidden_words[index + 1] == 'api'
+                           for index, word in enumerate(hidden_words[:-1]))
+        if hidden_calls > len(calls):
+            return 'review-thread guard parse failure'
+        for index, (value, raw) in enumerate(words):
+            if (os.path.basename(value) == 'gh' or os.path.basename(re.sub(r'''['"\\]''', '', raw)) == 'gh') and any(
+                    os.path.basename(previous) in ('xargs', 'parallel')
+                    or previous in ('-exec', '-execdir', '-ok', '-okdir') for previous, _ in words[:index]):
+                return 'review-thread guard parse failure'
         if ('api.github.com' in normalized and any(marker in normalized for marker in ('graphql', 'pulls', '%'))
                 and any(marker in text for marker in ('api.github.com', 'graphql', 'pulls', '%'))):
             first = 0
