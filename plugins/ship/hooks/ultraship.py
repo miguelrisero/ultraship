@@ -1205,7 +1205,7 @@ def read_only_argument_word(command, tokens, words, index):
             if any(word[1].startswith('-') and not re.fullmatch(options[part[0][0]], word[1]) for word in part):
                 return False
     for raw, value, start, end in original:
-        if raw == '|' or not unresolved_shell_word(raw):
+        if raw == '|':
             continue
         quote, cursor, prefix_end = '', 0, len(raw)
         while cursor < len(raw):
@@ -1223,6 +1223,8 @@ def read_only_argument_word(command, tokens, words, index):
                 elif char in '*?[{' and prefix_end == len(raw):
                     prefix_end = cursor
             cursor += 1
+        if prefix_end == len(raw) and not unresolved_shell_word(raw):
+            continue
         try:
             prefix = ''.join(shlex.split(raw[:prefix_end]))
         except ValueError:

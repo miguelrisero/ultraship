@@ -230,6 +230,9 @@ class WriterHeredocTests(unittest.TestCase):
                 r'''rg foo a* /x/python*/a''',
                 r'''rg foo [-]* /x/python*/a''',
                 r'''grep -n python* x/a.py''',
+                r'''rg needle ^a /x/python*/a''',
+                r'''rg needle a#--pre=python3 /x/python*/a''',
+                r'''rg -n ^def /x/python*/a''',
             )),
         ):
             for command in commands:
