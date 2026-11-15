@@ -1652,7 +1652,8 @@ def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
                 and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
             continue
         # Bash can evaluate a stored subscript payload long after shell quote removal.
-        if re.search(r'\[[^]]*(?:\$[({\[A-Za-z_]|\x60|[<>]\()', value):
+        if (re.search(r'\[[^]]*(?:\$[({\[A-Za-z_]|\x60|[<>]\()', value)
+                or re.search(r'\[[\s\S]*(?:\$[({\[]|\x60|[<>]\()', value)):
             return 'array subscript evaluation rule (subscript payload)'
         raw_brackets, offset = [], 0
         for span, single in parts or [(raw, False)]:
