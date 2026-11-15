@@ -2883,8 +2883,13 @@ def writer_gh_denial(command, depth=0):
 def review_thread_denial(command):
     if read_only_shell(command) or literal_search_shell(command):
         return None
+    if '$' not in command and re.fullmatch(
+            r"git commit(?: +-[A-Za-z]+| +--[a-z-]+)*(?: +-m +'[^']*'(?: +-[A-Za-z]+| +--[a-z-]+)*)+ *", command):
+        return None
     command = command.replace('\\\n', '')
     normalized = re.sub(r'''['"\\]''', '', command).casefold()
+    if re.search(r'\bgh\b', normalized) and '`' in outside_single_quotes(command):
+        return 'review-thread guard parse failure'
     if (any(name in normalized for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
                                             'resolvereviewthread'))
             or re.search(r'comments/\S*/replies', normalized)):
@@ -2917,9 +2922,8 @@ def review_thread_denial(command):
     for words in segments:
         calls = [index for index, (value, _) in enumerate(words)
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
-        text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words)).casefold()
-        if not calls and 'api.github.com' in text and (
-                'graphql' in text or re.search(r'pulls/[^/]+/comments', text)):
+        if not calls and 'api.github.com' in normalized and any(
+                marker in normalized for marker in ('graphql', 'pulls', '%')):
             return 'GitHub API outside gh'
         for index in calls:
             endpoint, fields, methods, query, inputs = None, False, [], None, False
@@ -2955,15 +2959,26 @@ def review_thread_denial(command):
                 elif not value.startswith('-') and endpoint is None:
                     endpoint = value
                 cursor += 1
-            route = (endpoint or '').removeprefix('https://api.github.com/').strip('/')
-            if route == 'graphql' and (inputs or query is not True):
+            raw_endpoint = endpoint or ''
+            full_url = '://' in raw_endpoint
+            host = None
+            if full_url:
+                parsed = urllib.parse.urlsplit(raw_endpoint)
+                path, host = parsed.path, parsed.netloc.lower().removesuffix('.')
+            else:
+                path = re.split(r'[?#]', raw_endpoint, maxsplit=1)[0]
+            while True:
+                decoded = urllib.parse.unquote(path)
+                if decoded == path:
+                    break
+                path = decoded
+            route = posixpath.normpath('/' + path).strip('/').casefold()
+            if (route == 'graphql' or route.endswith('/graphql')) and (inputs or query is not True):
                 return 'opaque GraphQL query'
             write = any(method not in ('GET', 'HEAD') for method in methods) or fields and 'GET' not in methods
-            visible = endpoint is not None and not endpoint.startswith('$') and '$(' not in endpoint and '`' not in endpoint
-            for segment in route.split('/'):
-                if '$' in segment and not re.fullmatch(r'\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\}', segment):
-                    visible = False
-            if write and (not visible or re.search(r'(?:^|/)pulls/[^/]+/comments(?:/|$)', route)):
+            visible = endpoint is not None and not any(char in raw_endpoint for char in '$`%')
+            if write and (not visible or full_url and host != 'api.github.com'
+                          or re.search(r'(?:^|/)pulls/[^/]+/comments(?:/|$)', route)):
                 return 'REST review-comment write or opaque endpoint'
     return None
 

@@ -53,6 +53,23 @@ REFUSE = (
     'gh api "repos/o/r/pulls/${NUMBER}suffix/comments" -X POST -f body=x',
     'gh api -X POST -f body=x',
     'gh api graphql -f query=\'query{viewer{login}}',
+    "gh api 'graphql?x=1' --input body.json",
+    "gh api 'repos/o/r/pulls/7/comments?x=1' -F in_reply_to=123 -f body=done",
+    "gh api 'graphql#x' -F query=@q.graphql",
+    'gh api GRAPHQL -F query=@q.graphql',
+    'gh api https://api.github.com:443/graphql -F query=@q.graphql',
+    'gh api https://API.GITHUB.COM/graphql -F query=@q.graphql',
+    'gh api repos/o/r/pul%6cs/7/comments -f body=x -F in_reply_to=1',
+    'gh api REPOS/O/R/PULLS/7/COMMENTS -f body=x -F in_reply_to=1',
+    'gh api repos/o/r//pulls//7//comments -f body=x',
+    'gh api repos/o/r/issues/../pulls/7/comments -f body=x',
+    'gh api https://example.com/repos/o/r/issues/1/comments -f body=x',
+    'RESOURCE=pulls; gh api "repos/o/r/${RESOURCE}/7/comments" -f body=done -F in_reply_to=123',
+    'gh api repos/$OWNER/${REPO}/issues/7/comments -f body=hello',
+    'echo `gh api graphql -F query=@q.graphql`',
+    '`gh api repos/o/r/pulls/7/comments -f body=x`',
+    'curl -X POST https://api.github.com/repos/o/r/pul%6cs/7/comments -d @b.json',
+    "git commit -m 'fix: x' && gh api graphql -F query=@q.graphql",
 )
 
 ADMIT = (
@@ -75,10 +92,15 @@ ADMIT = (
     'gh api graphql -f "query=query{viewer{login}}"',
     'gh api graphql -f query=query{viewer{login}}',
     "gh api graphql -f 'query=query($id:ID!){node(id:$id){id}}' -F id=PRRT_x",
-    'gh api repos/$OWNER/${REPO}/issues/7/comments -f body=hello',
     'gh api repos/o/r/pulls/7/comments -X GET -f per_page=100',
     'gh api repos/o/r/pulls/7/comments -X HEAD',
     'bash -c \'gh api graphql -f "query=query{viewer{login}}"\'',
+    "git commit -m 'fix(ship): guard resolveReviewThread calls'",
+    "git commit -q -m 'subject' -m 'body names addPullRequestReviewThreadReply'",
+    "gh api 'repos/o/r/pulls/7/comments?per_page=100'",
+    'gh api https://api.github.com/repos/o/r/pulls/7/comments',
+    'gh api repos/{owner}/{repo}/issues/7/comments -f body=hello',
+    'gh pr view 7 --json body --jq \'.body | test("`")\'',
 )
 
 
