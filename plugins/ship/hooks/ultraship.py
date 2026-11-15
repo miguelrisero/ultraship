@@ -1345,8 +1345,9 @@ def unresolved_shell_word(raw):
             index += 2
             continue
         if char == quote:
+            if quote == "'":
+                start = index + 1
             quote = ''
-            start = index + 1
         elif not quote:
             if char in "'\"":
                 quote = char
