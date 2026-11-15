@@ -34,8 +34,17 @@ class WriterHeredocTests(unittest.TestCase):
     def test_double_quoted_substitutions_scan_interpreter_bodies(self):
         """Catch split interpreter names inside double-quoted substitution bodies."""
         for command in (
+            '''echo "$(py""thon3 -""c 'print(1)')"''',
+            '''echo "`py""thon3 -""c 'print(1)'`"''',
+            '''echo "$(py""thon3 -""c '__import__("os").system("id")')"''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+        for command in (
             'echo "$(no""de -""e 1)"', 'echo "`no""de -""e 1`"',
             'x="$(no""de -""e 1)"', 'echo "a $(no""de -""e 1) b"',
+            '# \'\necho "$(no""de -""e 1)$(echo RAN)"', 'echo "a#$(no""de -""e 1)"',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
@@ -51,6 +60,13 @@ class WriterHeredocTests(unittest.TestCase):
             'a[y]=1', 'for ((;y;)); do :; done', 'function f (( y )); f',
             'coproc C (( y )); wait', 'declare -i x=y',
             'i=0; read i < f; (( i ))', 'i=0; i=$p; (( i ))',
+            *('false && i=0; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
+            *('true || i=0; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
+            *('if false; then i=0; fi; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
+            *('i=0 true; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
+            *('i=0 | cat; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
+            '(( i )); i=0', 'echo ${a[i]}; i=0', 'echo ${s:i}; i=0',
+            '(( i )); i=0; : x', 'i=$p$q; b=([i]=1)', 'b=([i]=1)',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
@@ -69,6 +85,12 @@ class WriterHeredocTests(unittest.TestCase):
     def test_nested_indirect_expansions_refuse_runtime_names(self):
         """Catch indirect name evaluation inside parameter operands."""
         for command in (
+            "echo \"${x:-\"'\"}${!name}\"", "echo \"${x:-'\"'}${!name}\"",
+            "echo \"${x:-\"'\"}$(( y ))\"",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+        for command in (
             'echo "${x:-${!name}}"', 'echo "${x:+${!name}}"', 'echo "${s:${!name}}"',
         ):
             with self.subTest(command=command):
@@ -82,6 +104,7 @@ class WriterHeredocTests(unittest.TestCase):
             'typeset -i x; x=`cat f`', 'declare -i x; x+=$y',
             'declare -i x; read x < f', 'declare -i x; for x in "$p"; do :; done',
             'declare -i x; printf -v x %s "$p"',
+            'o=i; declare -"$o" x; x=$y',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
@@ -98,6 +121,10 @@ class WriterHeredocTests(unittest.TestCase):
             'set -- -v "$x"; printf "$@" %s 1', 'o=-v; printf "$o" "$x" %s 1',
             'p=printf; $p -v "$x" %s 1', '"$p" -v "$x" %s 1',
             '$(echo printf) -v "$x" %s 1', 'wait "$o" "$x"', '[ "$o" "$x" ]',
+            'printf "$fmt" "$x"', 'printf "${fmt}" "$x"',
+            'c=printf; command "$c" -v "$x" %s 1',
+            'c=printf; builtin "$c" -v "$x" %s 1',
+            'c=printf; {"$c",-v,"$x",%s,1}',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
@@ -132,6 +159,7 @@ class WriterHeredocTests(unittest.TestCase):
         for command, arithmetic in (
             ('[[ $(echo RAN) -gt 0 ]]', True), ('[[ $(echo RAN) -lt 1 ]]', True),
             ('[[ $(echo RAN) -eq 1 ]]', True), ('[[ $(echo RAN) -ne 1 ]]', False),
+            ('[[ $(echo ]]) && y -gt 0 ]]', True), ('[[ `echo ]]` && y -gt 0 ]]', True),
             ('[[ $(echo RAN) -le 1 ]]', False), ('[[ $(echo RAN) -ge 1 ]]', False),
         ):
             with self.subTest(command=command):
@@ -152,6 +180,16 @@ class WriterHeredocTests(unittest.TestCase):
             'n=3; (( n > 1 ))', '(( i = 0, i < 3 ))',
             'i=0; while [ "$i" -lt 3 ]; do i=$((i+1)); done',
             'total=0; for f in a b; do total=$((total + 1)); done',
+            'total=0; for f in a b; do total=$((total + 1)); done; echo "$total"',
+            'x=5; s=abcdef; echo ${s:x}',
+            'a=(x y z); for ((i=0; i<3; i++)); do echo "${a[i]}"; done',
+            'i=0; echo "${arr[i]}"', 'declare -i n=5; echo "$n"',
+            'declare -i n; n=5; echo "$n"',
+            r'''printf "%s: $x\n" "$y"''', r'''printf "Value: %s\n" "$x"''',
+            'printf -- "$fmt" "$x"', r'''printf "%s\n" "$@"''',
+            '[ -f "$f" ]', 'wait "$pid"', 'test -n "$x"',
+            ': # $(echo RAN) $(let y)', 'echo hi # $(no""de -""e 1)',
+            'b=([0]=x [1]=y)',
             'echo "${!BASH*}"', 'echo "${!a[@]}"', 'echo "${!a[*]}"',
             'declare -i n; n=5', 'declare -a a', 'local x=1',
             'cp file{,.orig}', 'mkdir -p src/{local,remote}', 'mv "$f"{,.bak}',
