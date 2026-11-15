@@ -159,7 +159,8 @@ An exact written CoC decision naming the repository, PR, row-file paths and uniq
 That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.
 For changed mutant semantics, require that decision to name the exact protected reads, semantic adaptation and permitted gates.
 Require that decision and the admitted gates to cover independent applied review at the final commit.
-Apply the task-specific owner-event verification contract to the cited owner event.
+Verify the cited owner event's Input, workspace, current version, event id and hash, `event_type=answer_submitted`, `actor_kind=owner_ui` and answer text.
+That event delegates authority to the CoC; the exact CoC decision supplies the exact rows, fields and adaptation scope.
 Preserve every historical fixed-event comparator unchanged within its existing standing branch only.
 Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
 An authoritative mismatch blocks access and application without fallback.
