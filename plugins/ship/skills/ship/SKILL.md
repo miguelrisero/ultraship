@@ -385,6 +385,18 @@ Never replay a denied command, equivalent operation or substitute actor while it
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 
+### Draft PR for new lane-owned row review
+
+Apply this section only with the new lane-owned row review route and its runtime-adoption boundary.
+Permit the driver to open the PR that carries the new rows as a draft before protected review.
+The draft supplies the repository and PR number that the read admission and receipt name.
+In this route, publication means marking the draft ready for review, pushing to a ready PR, posting `/merge` or any other merge.
+Opening the draft and pushing to it while it stays a draft publish nothing.
+Bind the receipt to the draft PR number and frozen final commit.
+A push that moves the draft head away from the frozen final commit invalidates the receipt and its approval.
+Before each publication step, confirm that the PR head equals the frozen final commit.
+Return a ready PR to draft before any further push, then repeat the review and approval.
+
 ### Lane-owned disposition route
 
 Use only the lane-owned disposition route explicitly named in the brief, outside category 5.
