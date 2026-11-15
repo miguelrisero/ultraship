@@ -24,6 +24,8 @@ Source delivery grants zero session adoption authority and zero affected-retry a
 
 ### Slice safeguards
 
+Write Bash commands in plain shell, and put arithmetic, hash pipelines and dollar-bearing patterns in a reviewed script file.
+
 - The brief governs verification. When it is silent, run the slice's tests and the repository's fast checks before you report.
 - When the brief bans test execution, run no test, test target, or test runner of any kind: no `pytest`, `make` target that runs tests, `vitest`, `jest`, `npm test`, `bun test`, or `playwright`. Run only the lint and type checks the brief allows, and report `tests not run (brief)`. A definition rule never overrides the brief's ban.
 - Never bypass Git hooks. Do not use `--no-verify` or `-n` on commit or push. When a hook fails, fix the cause or report the hook as a blocker.
