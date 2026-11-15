@@ -477,7 +477,11 @@ class ReviewerSearchTests(unittest.TestCase):
         first, entry = json.loads(read('plugins/ship/hooks/hooks.json'))['hooks']['PreToolUse'][:2]
         self.assertEqual(first['matcher'], 'Agent|Task|Bash|Edit|Write|NotebookEdit|WebSearch|mcp__bettercoding__(create_input|update_input|set_input_status)')
         self.assertEqual(entry['matcher'], '^(Read|Grep|Glob|LSP|WebFetch|mcp__fff__.*)$')
-        self.assertNotIn('onFailure', first['hooks'][0])
+        self.assertEqual(first['hooks'][0]['onFailure'], 'block')
+        for pre_entry in json.loads(read('plugins/ship/hooks/hooks.json'))['hooks']['PreToolUse']:
+            for pre_hook in pre_entry['hooks']:
+                with self.subTest(matcher=pre_entry['matcher'], command=pre_hook['command']):
+                    self.assertEqual(pre_hook['onFailure'], 'block')
         self.assertIn('ultraship.py" pre', first['hooks'][0]['command'])
         for tool in ('Read', 'Grep', 'Glob', 'LSP', 'WebFetch', 'mcp__fff__grep', 'mcp__linear-server__list_issues'):
             with self.subTest(first_entry=tool):

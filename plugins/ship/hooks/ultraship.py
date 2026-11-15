@@ -2974,6 +2974,8 @@ RECEIPT_CUSTODY_FAILED = ('The ship hook could not check refusal-receipt custody
                           'Report the blocked scope to the driver.')
 PRE_FAILED = ('The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
               'Report the blocked scope to the driver.')
+PRE_INPUT_INVALID = ('The ship hook could not read its input as a JSON object, so it denies this call. '
+                     'Report the blocked scope to the driver.')
 
 
 def receipt_custody(data, read_search=False):
@@ -3630,5 +3632,9 @@ if __name__ == '__main__':
     try:
         payload = json.load(sys.stdin)
     except ValueError:
+        if mode == 'pre':
+            deny(PRE_INPUT_INVALID)
         payload = {}
+    if mode == 'pre' and not isinstance(payload, dict):
+        deny(PRE_INPUT_INVALID)
     handler(payload)

@@ -360,6 +360,22 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
 print('ultraship hooks: ok')
 
 
+class PreInputTests(unittest.TestCase):
+    def test_pre_denies_input_that_is_not_a_json_object(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            env = {**os.environ, 'HOME': temporary, 'XDG_STATE_HOME': temporary}
+            for raw in ('', 'not json', '{', '[]', 'null', '"Bash"', '1'):
+                with self.subTest(raw=raw):
+                    result = subprocess.run([sys.executable, str(HOOK), 'pre'], input=raw,
+                                            capture_output=True, text=True, env=env)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    output = json.loads(result.stdout or '{}').get('hookSpecificOutput', {})
+                    self.assertEqual(output.get('permissionDecision'), 'deny')
+                    self.assertEqual(output.get('permissionDecisionReason'), (
+                        'The ship hook could not read its input as a JSON object, so it denies this call. '
+                        'Report the blocked scope to the driver.'))
+
+
 class ReceiptCustodyTests(unittest.TestCase):
     def setUp(self):
         temporary = self.enterContext(tempfile.TemporaryDirectory())
