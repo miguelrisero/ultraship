@@ -2467,6 +2467,42 @@ def inline_interpreter_denial(command, cwd=None):
                     if (piped_input or piped) and (kind not in {'c', 'm', 'script'} or operand >= len(arguments)
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
+            for index, (raw, value, start, end) in enumerate(words):
+                if value.startswith('RIPGREP_CONFIG_PATH='):
+                    return 'inline interpreter code rule (rg preprocessor)'
+                if grep_data_token(words, index):
+                    continue
+                name = os.path.basename(value)
+                arguments = [word[1] for word in words[index + 1:]]
+                if name == 'rg' and any(argument == '--pre' or argument.startswith('--pre=')
+                                        for argument in arguments):
+                    return 'inline interpreter code rule (rg preprocessor)'
+                if name == 'hash' and any(re.fullmatch(r'-[a-zA-Z]*p[a-zA-Z]*', argument)
+                                          or re.match(r'[A-Za-z_][A-Za-z0-9_]*=', argument)
+                                          for argument in arguments):
+                    return 'inline interpreter code rule (hash binding)'
+                if name not in SHELL_INTERPRETERS:
+                    continue
+                cursor, stdin, inline = 0, False, False
+                while cursor < len(arguments):
+                    option = arguments[cursor]
+                    if option in {'-o', '+o', '-O', '+O'}:
+                        cursor += 2
+                        continue
+                    if option == '--':
+                        cursor += 1
+                        break
+                    if option == '-' or not option.startswith(('-', '+')):
+                        break
+                    if re.fullmatch(r'-[a-zA-Z]*c[a-zA-Z]*', option):
+                        inline = True
+                        break
+                    if re.fullmatch(r'-[a-zA-Z]*[si][a-zA-Z]*', option):
+                        stdin = True
+                    cursor += 1
+                if not inline and (reads_pipe or stdin or cursor >= len(arguments)
+                                   or stdin_program_path(arguments[cursor])):
+                    return 'inline interpreter code rule (program from a pipe)'
         pending.extend((token[1], state) for token in nested)
         substitutions.extend((body, state) for body in shell_substitution_bodies(text))
     return subscript_reason or runtime_reason
