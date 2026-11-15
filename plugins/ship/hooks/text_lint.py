@@ -20,7 +20,21 @@ Decision
 Next
 - <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>."""
 SUBAGENT_TEMPLATE = '<The same message, one point per sentence, at most 25 words each, with a space between words.>'
-FORMAT_ERRORS = ('Separate glued words with spaces; remove compressed shorthand.', 'Write at most 25 words per sentence.')
+INPUT_TEMPLATE = '''Use exactly one output-kind meta tag: decision or result.
+Decision:
+<meta name="output-kind" content="decision">
+<h2>What is wrong</h2><p>...</p>
+<h2>Why now</h2><p>...</p>
+<h2>Options A to C with effects</h2><p>A: ... B: ... C: ...</p>
+<h2>Recommendation</h2><p>...</p>
+<h2>If no answer</h2><p>...</p>
+Result alternative:
+<meta name="output-kind" content="result"><p>...</p>
+Write at most 25 words per sentence.'''
+
+
+class FormatError(ValueError):
+    pass
 
 
 class VisibleText(HTMLParser):
@@ -97,7 +111,7 @@ def check(text, kind='result'):
         if not re.search(r'^\s*(?:#{1,6}\s*)?' + re.escape(section) + r'\b', plain, re.M | re.I):
             errors.append('Missing section: ' + section)
     if errors:
-        raise ValueError(' '.join(errors))
+        raise FormatError(' '.join(errors))
 
 
 def outgoing(event):
@@ -117,7 +131,7 @@ def outgoing(event):
         body = content.get('html', '')
         kinds = VisibleText(body).kinds
         if len(kinds) != 1 or kinds[0] not in ('decision', 'result'):
-            raise ValueError('Input HTML requires one explicit output-kind classification: decision or result.')
+            raise FormatError('Input HTML requires one explicit output-kind classification: decision or result.')
         check(content.get('title', ''))
         check(body, kinds[0])
 
@@ -168,16 +182,20 @@ if __name__ == '__main__':
         try:
             event = json.load(sys.stdin)
             outgoing(event)
+        except FormatError as exc:
+            template = INPUT_TEMPLATE
+            if event.get('tool_name') == 'SendMessage':
+                recipient = str((event.get('tool_input') or {}).get('to', '')).strip()
+                template = (SUBAGENT_TEMPLATE if SUBAGENT.fullmatch(recipient)
+                            and 'Missing section: ' not in str(exc) else PEER_TEMPLATE)
+            reason = ('Output contract: ' + str(exc)
+                      + ' You may resend once with the same action, recipient, scope and content, changed only in format.'
+                      + ' Resend with this shape:\n' + template)
+            print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
+                'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))
         except (ValueError, TypeError, AttributeError) as exc:
-            reason = 'Output contract: ' + str(exc)
-            if (isinstance(event, dict) and event.get('tool_name') == 'SendMessage'
-                    and isinstance(event.get('tool_input') or {}, dict)):
-                if not SUBAGENT.fullmatch(str((event.get('tool_input') or {}).get('to', '')).strip()):
-                    reason += ' Resend with this shape:\n' + PEER_TEMPLATE
-                elif str(exc) and not re.sub('|'.join(map(re.escape, FORMAT_ERRORS)), '', str(exc)).strip():
-                    reason += ' Resend with this shape:\n' + SUBAGENT_TEMPLATE
-                elif 'Missing section: ' in str(exc):
-                    reason += ' Resend with this shape:\n' + PEER_TEMPLATE
+            reason = ('Output contract: ' + str(exc)
+                      + ' This refusal is not formatting-only, so no resend of this message is allowed in any form.')
             print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
                 'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))
     else:
