@@ -1798,47 +1798,73 @@ def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
 
 def shell_substitution_bodies(text):
     """Keep substitution quote state separate from the surrounding shell word."""
-    frames, quote, cursor = [], '', 0
+    frames, quote, cursor, word_start = [], '', 0, True
     while cursor < len(text):
         char = text[cursor]
-        if not quote and char == '#' and (not cursor or text[cursor - 1].isspace() or text[cursor - 1] in ';&|(<>' ):
+        context = frames[-1][0] if frames else ''
+        if not quote and context not in {'}', '))', ']'} and char == '#' and word_start:
             end = text.find('\n', cursor)
+            comment = text[cursor:len(text) if end < 0 else end]
+            if context == '`':
+                comment = comment.partition('`')[0]
+            if any(marker in comment for marker in ('$(', '`', '${')):
+                raise ValueError('shell comment substitution')
             cursor = len(text) if end < 0 else end + 1
+            word_start = True
             continue
         if char == '\\' and quote != "'":
             cursor += 2
+            word_start = False
             continue
         if quote == "'":
             if char == quote:
                 quote = ''
-        elif char == '`' and frames and frames[-1][0] == '`':
+        elif char == '`' and context == '`':
             _, start, quote, _ = frames.pop()
             yield text[start:cursor]
-        elif text.startswith('$(', cursor) and not text.startswith('$((', cursor):
+        elif text.startswith(('$((', '${', '$['), cursor):
+            opening = 3 if text.startswith('$((', cursor) else 2
+            closing = '))' if opening == 3 else '}' if text.startswith('${', cursor) else ']'
+            frames.append((closing, cursor + opening, quote, 1))
+            quote = ''
+            cursor += opening
+            word_start = False
+            continue
+        elif text.startswith('$(', cursor):
             frames.append((')', cursor + 2, quote, 1))
             quote = ''
-            cursor += 1
+            cursor += 2
+            word_start = True
+            continue
         elif char == '`':
             frames.append(('`', cursor + 1, quote, 1))
             quote = ''
+            cursor += 1
+            word_start = True
+            continue
         elif char == quote:
             quote = ''
         elif char in "'\"" and not quote:
             quote = char
-        elif not quote and frames and frames[-1][0] == ')':
+        elif not quote and frames:
             closing, start, outer_quote, depth = frames[-1]
-            if char == '(':
+            if char == '(' and closing in {')', '))'}:
                 frames[-1] = (closing, start, outer_quote, depth + 1)
-            elif char == ')':
+            elif text.startswith(closing, cursor):
                 if depth == 1:
                     frames.pop()
-                    yield text[start:cursor]
+                    if closing == ')':
+                        yield text[start:cursor]
                     quote = outer_quote
-                else:
-                    frames[-1] = (closing, start, outer_quote, depth - 1)
+                    cursor += len(closing)
+                    word_start = closing == ')'
+                    continue
+                frames[-1] = (closing, start, outer_quote, depth - 1)
+        word_start = not quote and char in ' \t\n;&|()'
         cursor += 1
-    for _, start, _, _ in frames:
-        yield text[start:]
+    for closing, start, _, _ in frames:
+        if closing in {')', '`'}:
+            yield text[start:]
 
 
 def runtime_name_denial(text, tokens, arithmetic, groups, commands):
@@ -1977,10 +2003,12 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                    and any(char in word[1] for char in '-$`') for word in arguments):
                 return reason + 'name)'
             if value in {'printf', 'test', '[', 'wait'}:
-                candidates = arguments
+                candidates, first = arguments, 0
                 if value == 'printf':
                     first, ended_options = 0, False
                     while first < len(arguments) and arguments[first][1].startswith('-'):
+                        if any(char in arguments[first][1] for char in '$`'):
+                            return reason + 'name)'
                         if arguments[first][1] == '--':
                             ended_options = True
                             first += 1
@@ -1989,8 +2017,7 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                             first += 1
                         first += 1
                     candidates = [] if ended_options else arguments[first:first + 1]
-                for argument in candidates:
-                    position = arguments.index(argument)
+                for position, argument in enumerate(candidates, first):
                     arg_raw, arg_value, _, _ = argument
                     outside_quotes = re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', arg_raw)
                     if value == 'printf':
@@ -2979,6 +3006,12 @@ def pre(data):
                 if reason:
                     deny(classifier_reason + ' Rule: ' + reason + '.'
                          + (GIT_COMMIT_SHAPE if git_commit_step(command) else ''))
+                try:
+                    list(shell_substitution_bodies(shell_without_heredoc_bodies(command)))
+                except ValueError as error:
+                    if str(error) == 'shell comment substitution':
+                        deny(classifier_reason + ' Rule: inline interpreter code rule (comment).')
+                    raise
                 reason = python_inline_denial(command)
                 if reason:
                     deny(classifier_reason + ' Rule: ' + reason + '.')

@@ -34,6 +34,14 @@ class WriterHeredocTests(unittest.TestCase):
     def test_double_quoted_substitutions_scan_interpreter_bodies(self):
         """Catch split interpreter names inside double-quoted substitution bodies."""
         for command in (
+            'echo hi # $(no""de -""e 1)', 'echo $x # $(no""de -""e 1)',
+            'echo hi #`id`', ': # $(echo RAN) $(let y)',
+            'echo $(echo a) #$(no""de -""e 1)',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (comment)', self.reason)
+        for command in (
             '''echo "$(py""thon3 -""c 'print(1)')"''',
             '''echo "`py""thon3 -""c 'print(1)'`"''',
             '''echo "$(py""thon3 -""c '__import__("os").system("id")')"''',
@@ -45,6 +53,9 @@ class WriterHeredocTests(unittest.TestCase):
             'echo "$(no""de -""e 1)"', 'echo "`no""de -""e 1`"',
             'x="$(no""de -""e 1)"', 'echo "a $(no""de -""e 1) b"',
             '# \'\necho "$(no""de -""e 1)$(echo RAN)"', 'echo "a#$(no""de -""e 1)"',
+            'echo ${x:- #$(no""de -""e 1)}', 'echo ${x[ #]}$(no""de -""e 1)',
+            'echo ${x/ #/$(no""de -""e 1)}', 'echo ${x:- #`no""de -""e 1`}',
+            r'echo a\ #$(no""de -""e 1)',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
@@ -125,6 +136,10 @@ class WriterHeredocTests(unittest.TestCase):
             'c=printf; command "$c" -v "$x" %s 1',
             'c=printf; builtin "$c" -v "$x" %s 1',
             'c=printf; {"$c",-v,"$x",%s,1}',
+            'printf -"$v" "$x" %s 1', 'printf -$v "$x" %s 1',
+            r'printf \-"$v" "$x" %s 1', 'printf -${v} "$x" %s 1',
+            'printf -v x -"$v" "$n" %s 1', 'command printf -"$v" "$x" %s 1',
+            'builtin printf -"$v" "$x" %s 1',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
@@ -188,7 +203,12 @@ class WriterHeredocTests(unittest.TestCase):
             r'''printf "%s: $x\n" "$y"''', r'''printf "Value: %s\n" "$x"''',
             'printf -- "$fmt" "$x"', r'''printf "%s\n" "$@"''',
             '[ -f "$f" ]', 'wait "$pid"', 'test -n "$x"',
-            ': # $(echo RAN) $(let y)', 'echo hi # $(no""de -""e 1)',
+            "cat > f.py <<'EOF'\n# run `make test` and $(x) ${y}\nEOF\n",
+            'git commit -m "fix: # `x` $(y)"', "echo '# $(x) `y`'",
+            'echo ${#arr[@]} ${x##*/} ${x%%#*}', 'x=a#b; echo "$x"',
+            'echo hi # plain comment', 'ls # list files', '# comment line\nls -la',
+            'printf -v out %s "$x"', r'''printf "%-10s %s\n" "$a" "$b"''',
+            r'''printf -- "%s\n" "$x"''',
             'b=([0]=x [1]=y)',
             'echo "${!BASH*}"', 'echo "${!a[@]}"', 'echo "${!a[*]}"',
             'declare -i n; n=5', 'declare -a a', 'local x=1',
