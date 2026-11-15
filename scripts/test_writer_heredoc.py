@@ -123,6 +123,7 @@ class WriterHeredocTests(unittest.TestCase):
         for command in (
             'PATH="/home/miguel/.local/share/uv-0.12/bin:$PATH" make openapi api-types preview-mask-sql',
             'PATH="$HOME/.bun/bin:$PATH" make -e api-types',
+            'PATH="$HOME/café/bin:$PATH" make -e x',
             'PATH="${HOME}/.local/bin:${PATH}" make -r test',
             'PATH=/x:$PATH make -e x',
             'PATH="/run/python3/bin:$PATH" make api-types',

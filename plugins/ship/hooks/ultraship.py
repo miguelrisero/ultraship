@@ -1694,7 +1694,7 @@ def inline_interpreter_denial(command, cwd=None):
             for index, (raw, value, start, end) in enumerate(words):
                 arguments = [word[1] for word in words[index + 1:]]
                 neutral = neutral_prefix and index < prefix_end and bool(re.fullmatch(
-                    rf'[A-Za-z_][A-Za-z0-9_]*=("?){path_part}(?::{path_part})*\1', raw, re.ASCII))
+                    rf'[A-Za-z_][A-Za-z0-9_]*=("?){path_part}(?::{path_part})*\1', raw))
                 unresolved = (not neutral and raw != '[' and value != '$?' and start not in shell_programs
                               and unresolved_shell_word(raw))
                 names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
