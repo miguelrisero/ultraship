@@ -3150,8 +3150,8 @@ def guarded_pre(data):
         try:
             receipt_custody(data, read_search=True)
         except Exception:
-            tool = data.get('tool_name', '') if isinstance(data, dict) else ''
-            if tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__'):
+            tool = data.get('tool_name') if isinstance(data, dict) else ''
+            if isinstance(tool, str) and (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')):
                 deny(RECEIPT_CUSTODY)
         deny(PRE_FAILED)
 
