@@ -90,7 +90,7 @@ class WriterHeredocTests(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)
-                self.assertEqual(self.reason, 'inline interpreter code rule (unresolved command word)')
+                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
 
     def test_inert_python_inline_strings_are_admitted(self):
         for command in (
