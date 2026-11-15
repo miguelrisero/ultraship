@@ -73,14 +73,10 @@ class WriterHeredocTests(unittest.TestCase):
                     self.assertEqual(denied, twin_denied)
                     self.assertEqual(reason, twin_reason)
 
-    def test_run_path_inside_fixed_sha256sum_substitution_is_not_the_run_keyword(self):
+    def test_run_path_inside_command_substitution_keeps_the_refusal(self):
         for command in (
             'cat "$(sha256sum /run/user/1000/x)"',
             'echo "$(sha256sum /home/x/skills/run/scripts/watchers.py)"',
-        ):
-            with self.subTest(command=command):
-                self.assertFalse(self.denied(command), self.reason)
-        for command in (
             'cat "$(printf /run/)"',
             'cat "$(echo /run/x | cut -d/ -f2)"',
             'cat "$(ls /run/user)"',
@@ -90,13 +86,6 @@ class WriterHeredocTests(unittest.TestCase):
             'cat "$(sha256sum /run/x) run"',
             '"$(sha256sum /run/x)" -c x',
             'cat "$(python3 /run/x)"',
-        ):
-            with self.subTest(command=command):
-                self.assertTrue(self.denied(command), self.reason)
-                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
-
-    def test_run_path_exemption_needs_a_data_command_argument(self):
-        for command in (
             'sh "$(sha256sum /run/user/1000/empty)"',
             'bash "$(sha256sum /run/x)"',
             '"$(sha256sum /run/x)"',
@@ -110,12 +99,6 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)
                 self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
-        for command in (
-            'grep -F "$(sha256sum /run/x)" SHA256SUMS',
-            'test "$(sha256sum /run/x)" = x',
-        ):
-            with self.subTest(command=command):
-                self.assertFalse(self.denied(command), self.reason)
 
     def test_free_threaded_suffix_needs_a_python3_version(self):
         command = "{python} - <<'PY'\npass\nPY\ngit commit -m x\n"
