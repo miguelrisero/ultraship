@@ -59,9 +59,9 @@ class CoordinationRemedyContractTests(unittest.TestCase):
         self.assertIn('Record the denial and consumed resend on the durable run board before sending, '
                       'keyed by the unchanged action, recipient, and scope.', self.refusals)
         self.assertIn('Recovery, replacement, and new sessions use the same record '
-                      'and retain its consumed state; absent records, a failed second attempt, '
-                      'a recorded final corrected brief, and every other action on a consumed attempt '
-                      'stay blocked across recovery.', self.refusals)
+                      'and retain its consumed state; absent records, consumed attempts, '
+                      'a failed second attempt, and a recorded final corrected brief stay blocked across recovery, '
+                      'except one eligible final corrected brief not yet recorded.', self.refusals)
         self.assertIn('A failed corrected send stays consumed.', self.refusals)
         block = self.refusals.partition('For resend consumption, block ')[2].partition('.')[0]
         for case in ('absent or uncertain records', 'consumed attempts'):
@@ -141,8 +141,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
 
     def test_contract_allows_one_final_corrected_brief_after_a_consumed_format_refusal(self):
         allowance = (
-            'After the consumed rewrite draws another formatting-only refusal, the coordinator may dispatch '
-            'one final corrected brief to one fresh writer for the same slice.'
+            'After the consumed rewrite or fresh brief draws another formatting-only refusal, '
+            'the coordinator may dispatch one final corrected brief to one fresh writer for the same slice.'
         )
         self.assertIn(allowance, self.refusals)
         self.assertIn(
