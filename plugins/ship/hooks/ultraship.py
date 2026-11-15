@@ -793,7 +793,8 @@ def runs_heredoc_output(command):
     return False
 
 
-PYTHON_STDIN = (r"(?:python|python3(?:\.\d+)?)(?P<flags>(?: +-[IB]+)*) +- +<<(?P<tabs>-?)[ \t]*"
+PYTHON_NAME = r'python(?:3(?:\.\d+)?t?)?'
+PYTHON_STDIN = (PYTHON_NAME + r"(?P<flags>(?: +-[IB]+)*) +- +<<(?P<tabs>-?)[ \t]*"
                 r"(?P<delimiter>'[_a-zA-Z0-9]+'|\"[_a-zA-Z0-9]+\"|\\[_a-zA-Z0-9]+|[_a-zA-Z0-9]+)[ \t]*\n$")
 # Only literal `cd` and `date` steps and literal `PYTHON*` assignments (`PYTHONDONTWRITEBYTECODE=1`) may lead the
 # interpreter; a `GIT_CONFIG_*` lead could alias a git read to a push.
@@ -995,7 +996,7 @@ def process_heredoc_denial(command, readers=False):
                              or lines[index][match.end():].strip()
                              or not re.fullmatch(r"'[A-Za-z0-9_]+'|\"[A-Za-z0-9_]+\"", match['delimiter'])):
             return 'process-capable heredoc rule (commit message heredoc must be the whole command)'
-        interpreter = re.search(r'(?<![\w.-])(?:[\w./-]*/)?python(?:3(?:\.\d+)?)?(?=[ \t<]|$)', lines[index])
+        interpreter = re.search(rf'(?<![\w.-])(?:[\w./-]*/)?{PYTHON_NAME}(?=[ \t<]|$)', lines[index])
         if message_data:
             pass
         elif interpreter or '$' in prefix or '`' in prefix:
@@ -1439,7 +1440,7 @@ def python_inline_denial(command):
             for index, (raw, value, start, end) in enumerate(words):
                 if grep_data_token(words, index):
                     continue
-                if not re.fullmatch(r'python(?:3(?:\.\d+)?)?', os.path.basename(value)):
+                if not re.fullmatch(PYTHON_NAME, os.path.basename(value)):
                     continue
                 arguments = words[index + 1:]
                 kind, flags, operand, offset = python_program([word[1] for word in arguments])
@@ -1495,7 +1496,7 @@ def interpreter_name(value):
     for name in INLINE_INTERPRETERS:
         if re.fullmatch(re.escape(name) + r'(?:\d+(?:\.\d+)*|(?:\.\d+)+)?', base):
             return name
-    return 'python' if re.fullmatch(r'python(?:3(?:\.\d+)?)?', base) else None
+    return 'python' if re.fullmatch(PYTHON_NAME, base) else None
 
 
 def code_option(value):
@@ -2120,7 +2121,7 @@ def git_commit_step(command):
     """Whether the whole shell text after the first heredoc is one line of plain `git add` and `git commit` steps."""
     lines = command.splitlines(keepends=True)
     # Only a whole known header counts; a quoted delimiter keeps backslash-newline literal, so a physical line ends the body.
-    match = re.fullmatch(r"(?:cd(?: --)? [\w./-]+ && )?(?:/usr/bin/)?python3?(?:\.[0-9]+)?(?: -[IB]+)* - "
+    match = re.fullmatch(rf"(?:cd(?: --)? [\w./-]+ && )?(?:/usr/bin/)?{PYTHON_NAME}(?: -[IB]+)* - "
                          r"<<(-?)(['\"])([_a-zA-Z0-9]+)\2[ \t]*\n?", lines[0]) if lines else None
     if not match:
         return False

@@ -47,6 +47,66 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('process-capable python -c rule', self.reason)
 
+    def test_free_threaded_python_names_get_the_python3_13_verdict(self):
+        code = 'import subprocess; subprocess.run(["git", "pu" + "sh"])'
+        shapes = (
+            ('process_inline', "{python} -c '" + code + "'"),
+            ('inert_inline', "{python} -c 'print(1)'"),
+            ('path_prefix', 'PATH="/x:$PATH" {python} -c \'print(1)\''),
+            ('piped_stdin', 'echo hi | {python}'),
+            ('inert_heredoc', "{python} -I - <<'EOF'\nprint(1)\nEOF\n"),
+            ('process_heredoc', '{python} - <<EOF\n' + code + '\nEOF\n'),
+        )
+        for python, twin in (
+            ('python3.13t', 'python3.13'), ('python3t', 'python3.13'),
+            ('/usr/bin/python3.13t', '/usr/bin/python3.13'),
+        ):
+            for shape, template in shapes:
+                with self.subTest(python=python, shape=shape):
+                    twin_denied = self.denied(template.format(python=twin))
+                    twin_reason = self.reason
+                    denied = self.denied(template.format(python=python))
+                    reason = self.reason
+                    if shape == 'process_inline':
+                        self.assertTrue(twin_denied, twin_reason)
+                        self.assertTrue(denied, reason)
+                    self.assertEqual(denied, twin_denied)
+                    self.assertEqual(reason, twin_reason)
+
+    def test_run_path_inside_command_substitution_keeps_the_refusal(self):
+        for command in (
+            'cat "$(sha256sum /run/user/1000/x)"',
+            'echo "$(sha256sum /home/x/skills/run/scripts/watchers.py)"',
+            'cat "$(printf /run/)"',
+            'cat "$(echo /run/x | cut -d/ -f2)"',
+            'cat "$(ls /run/user)"',
+            'cat "$(sha256sum /run/x | tr -d /)"',
+            'cat "$(pwd)/run/x"',
+            'cat "$(x run y)"',
+            'cat "$(sha256sum /run/x) run"',
+            '"$(sha256sum /run/x)" -c x',
+            'cat "$(python3 /run/x)"',
+            'sh "$(sha256sum /run/user/1000/empty)"',
+            'bash "$(sha256sum /run/x)"',
+            '"$(sha256sum /run/x)"',
+            'xargs "$(sha256sum /run/x)"',
+            'X="$(sha256sum /run/x)" cat y',
+            'source "$(sha256sum /run/x)"',
+            '. "$(sha256sum /run/x)"',
+            'eval "$(sha256sum /run/x)"',
+            'env "$(sha256sum /run/x)"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command), self.reason)
+                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_free_threaded_suffix_needs_a_python3_version(self):
+        command = "{python} - <<'PY'\npass\nPY\ngit commit -m x\n"
+        twin_denied = self.denied(command.format(python='python.13x'))
+        twin_reason = self.reason
+        self.assertEqual(self.denied(command.format(python='python.13t')), twin_denied)
+        self.assertEqual(self.reason, twin_reason)
+
     def test_inert_python_inline_strings_are_admitted(self):
         for command in (
             "python3 -c 'print(1)'", 'python3 -c "print(1)"',
