@@ -31,6 +31,122 @@ class WriterHeredocTests(unittest.TestCase):
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
+    SUBSCRIPT_NAMES = (
+        "'a[$(no\"\"de -\"\"e \"process.exit(42)\")]'",
+        r'''"a[\$(no""de -""e 'process.exit(42)')]"''',
+        r'''a\[\$\(no\"\"de\ -\"\"e\ \"process.exit\(42\)\"\)\]''',
+    )
+
+    def test_printf_variable_names_refuse_subscript_evaluation(self):
+        """Catch evaluated names hidden in printf options, wrappers and shell strings."""
+        commands = [prefix + name + ' %s x' for name in self.SUBSCRIPT_NAMES for prefix in (
+            'printf -v ', 'printf -v', 'builtin printf -v ', 'command printf -v ', 'command -p printf -v ',
+            'X=1 printf -v ')]
+        commands += [
+            r'''bash -c "printf -v 'a[\$(no\"\"de -\"\"e 1)]' %s x"''',
+            '''x='a[$(no""de -""e "process.exit(42)")]'; printf -v "$x" %s 1''',
+            '''Q='$(no""de -""e "process.exit(42)")'; printf -v "a[$Q]" %s 1''',
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_variable_presence_checks_refuse_subscript_evaluation(self):
+        """Catch evaluated names in all three variable-presence syntaxes."""
+        for name in self.SUBSCRIPT_NAMES:
+            for command in ('test -v ' + name, '[ -v ' + name + ' ]', '[[ -v ' + name + ' ]]'):
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_declarations_refuse_evaluated_names_and_indirect_values(self):
+        """Catch subscripted declarations and integer or nameref values."""
+        for name in self.SUBSCRIPT_NAMES:
+            for declaration in ('declare', 'typeset', 'local', 'export', 'readonly'):
+                commands = [declaration + ' ' + name.rstrip() + '=1']
+                if declaration in {'declare', 'typeset', 'local'}:
+                    commands += [declaration + option + name for option in (' -i x=', ' -n r=')]
+                if declaration == 'declare' and name == self.SUBSCRIPT_NAMES[0]:
+                    commands.append('declare -n r=' + name.rstrip() + '; echo $r')
+                for command in commands:
+                    with self.subTest(command=command):
+                        self.assertTrue(self.denied(command))
+                        self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_read_variable_names_refuse_subscript_evaluation(self):
+        """Catch evaluated read names after options and in array destinations."""
+        for name in self.SUBSCRIPT_NAMES:
+            for options in ('', '-a ', '-ra', '-p prompt -d : -i text -n 1 -N 1 -t 1 -u 0 '):
+                command = 'read ' + options + name + ' < /dev/null'
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_unset_variable_names_refuse_subscript_evaluation(self):
+        """Catch evaluated unset operands despite shell quoting."""
+        for name in self.SUBSCRIPT_NAMES:
+            command = 'unset ' + name.rstrip()
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_let_expressions_refuse_subscript_evaluation(self):
+        """Catch command substitutions evaluated through let operands."""
+        for name in self.SUBSCRIPT_NAMES:
+            command = 'let ' + name.rstrip() + '=1'
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_arithmetic_regions_refuse_quoted_command_evaluation(self):
+        """Catch evaluated arithmetic in commands, expansions and for initializers."""
+        commands = [template.format(name=name.rstrip()) for name in self.SUBSCRIPT_NAMES for template in (
+            '(( {name} ))', 'echo $(( {name} ))', 'echo $[ {name} ]',
+            'for (( i={name}; 0; )); do :; done')]
+        commands += [
+            '''(( '$(no""de -""e "process.exit(42)")' ))''',
+            '''(( "$(no""de -""e 'process.exit(42)')" ))''',
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_parameter_subscripts_and_offsets_refuse_command_evaluation(self):
+        """Catch evaluated arithmetic hidden inside parameter subscripts and offsets."""
+        commands = [
+            '''x=(1); echo ${x['$(no""de -""e "process.exit(42)")']}''',
+            r'''x=(1); echo ${x["\$(no""de -""e 'process.exit(42)')"]}''',
+            r'''x=(1); echo ${x[\$\(no\"\"de\ -\"\"e\ \"process.exit\(42\)\"\)]}''',
+            *('s=abc; echo ${s:' + name.rstrip() + '}' for name in self.SUBSCRIPT_NAMES),
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_arithmetic_comparisons_refuse_subscript_evaluation(self):
+        """Catch evaluated operands on either side of conditional arithmetic comparisons."""
+        for name in self.SUBSCRIPT_NAMES:
+            for operator in ('-eq', '-ne', '-lt', '-le', '-gt', '-ge'):
+                for left, right in (('1', name.rstrip()), (name.rstrip(), '1')):
+                    command = '[[ ' + left + ' ' + operator + ' ' + right + ' ]]'
+                    with self.subTest(command=command):
+                        self.assertTrue(self.denied(command))
+                        self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_literal_variable_operations_and_quoted_data_remain_admitted(self):
+        """Catch refusals of literal names, inert arithmetic and ordinary quoted data."""
+        for command in (
+            'printf -v X %s .', "printf '%s' -v x", 'test -v HOME', '[ -v HOME ]', '[[ -v HOME ]]',
+            'declare -a a', 'local x=1', 'export PATH="$HOME/bin:$PATH"', 'let x=1', '(( x = 1 ))',
+            'echo $(( 1 + 2 ))', 'unset X', 'read -r line < f', 'echo "${HOME}/x"',
+            'echo "${HOME}/$(date)"', "grep -n 'a[$(x)]' f",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_process_capable_python_inline_strings_are_denied(self):
         code = "import subprocess; subprocess.run([\"git\", \"pu\" + \"sh\"])"
         for command in (
