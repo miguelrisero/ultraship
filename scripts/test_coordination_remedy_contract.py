@@ -70,7 +70,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'applicable owner authority resolves it.',
             'Apply your own loaded definition; a checkout, cache entry, or version '
             'supplies zero additional authority.',
-            'Keep prospective source changes separate from runtime adoption and action authority.',
+            'Prospective source changes and their delivery supply zero runtime-adoption, '
+            'affected-retry, or action authority.',
             'Repairing missing verification evidence resolves only that evidence gap; '
             'it cannot override a binding prohibition or tool denial.',
             'Recheck current version, status, and answer provenance before the resend.',
@@ -123,7 +124,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             "Share that original call's single attempt between the rewrite and fresh brief; "
             'durably consume it before either action.',
             'Deny both actions when that attempt is consumed; a fresh instruction creates zero additional attempt.',
-            'Every content denial, protected-row rule, and hook refusal on a file edit or command stays final.',
+            'Keep actors outside that lane refused, hook-denied commands refused in every form, '
+            'and every content, protected-path, and publication denial final.',
             'Except under the ordinary-file method-only rule or the fresh message-format instruction:',
         ):
             with self.subTest(requirement=requirement):
@@ -215,8 +217,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
                 self.assertIn(case, block)
 
     def test_contract_keeps_formatting_source_delivery_prospective(self):
-        self.assertIn('Prospective source delivery supplies zero runtime-adoption '
-                      'or affected-retry authority.', self.refusals)
+        self.assertIn('Prospective source changes and their delivery supply zero runtime-adoption, '
+                      'affected-retry, or action authority.', self.refusals)
         self.assertIn('Preserve existing loaded-session restrictions and affected-session holds.',
                       self.refusals)
         self.assertIn('Recheck current version, status, and answer provenance before the resend.',
