@@ -261,6 +261,21 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule', self.reason)
 
+    def test_parameter_offsets_refuse_expansions_inside_braces(self):
+        """Catch expanded arithmetic offsets in quoted and nested parameter expressions."""
+        for command in (
+            's=abc; echo "${s:$n}"', 'echo "${s:${n}}"', 'a=(x y); echo "${a[1]:$n}"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_colons_after_closed_parameters_remain_literal(self):
+        """Catch false offset refusals for colons after a closed parameter expression."""
+        for command in ('echo "${HOME}/x:$(pwd)"', 'PATH="${HOME}/bin:${PATH}" make -e x'):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_literal_variable_operations_and_quoted_data_remain_admitted(self):
         """Catch refusals of literal names, inert arithmetic and ordinary quoted data."""
         for command in (

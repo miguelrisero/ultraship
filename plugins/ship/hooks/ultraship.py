@@ -1639,7 +1639,7 @@ def array_subscript_denial(words, arithmetic, tokens):
             if not single:
                 for parameter in re.finditer(r'\$\{', span):
                     tail = raw[offset + parameter.end():]
-                    if re.search(r':(?![-=?+])', tail) and expanded(tail):
+                    if re.search(r':(?![-=?+])', tail.partition('}')[0]) and expanded(tail):
                         return 'array subscript evaluation rule (arithmetic)'
             offset += len(span)
 
