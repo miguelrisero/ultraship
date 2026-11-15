@@ -112,6 +112,50 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
+    def test_debug_trap_assignment_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied('trap "i=$x" DEBUG; cd /tmp && for ((i=0; i<3; i++)); do echo "${a[i]}"; done'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_debug_trap_read_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied("trap 'read -r i < g' DEBUG; cd /tmp && for ((i=0; i<3; i++)); do echo \"${a[i]}\"; done"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_expanded_eval_argument_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; eval 'echo $i' \"$c\"; (( i++ ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_literal_eval_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied("cd /tmp && for ((i=0; i<3; i++)); do eval 'echo $i'; echo \"${a[i]}\"; done"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_source_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied('cd /tmp && for ((i=0; i<3; i++)); do source ./s; echo "${a[i]}"; done'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_dot_source_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied('cd /tmp && for ((i=0; i<3; i++)); do . ./s; echo "${a[i]}"; done'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_quoted_runtime_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; eval "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_unquoted_runtime_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; eval $c; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_runtime_trap_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; trap "$c" DEBUG; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_source_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; source ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_dot_source_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; . ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
     def test_numeric_loop_headers_prove_names_within_their_bodies(self):
         """Keep local numeric proof inside loops on conditional and nested paths."""
         for command in (

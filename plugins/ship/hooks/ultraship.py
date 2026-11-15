@@ -2221,17 +2221,48 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                                    for previous in words[:index])}
     code_operands = {word[2] for words in commands for index, word in enumerate(words)
                      if any(previous[1] in {'eval', 'trap'} for previous in words[:index])}
+    command_positions = {word[2] for word in control_words}
+    function_definition = any(word[0] == 'function' for word in control_words) or any(
+        raw == value and re.fullmatch(identifier, raw) and start in command_positions
+        and re.match(r'\s*\(\s*\)', text[end:]) for raw, value, start, end in tokens)
+    if function_definition or any(word[0] in {'source', '.'} for word in control_words):
+        numeric.clear()
+        numeric_scopes.clear()
+    for words in commands:
+        for index, word in enumerate(words):
+            if word[2] not in command_positions or word[1] not in {'eval', 'trap'}:
+                continue
+            numeric_scopes.clear()
+            arguments = words[index + 1:]
+            if word[1] == 'trap':
+                if arguments and arguments[0][1] == '--':
+                    arguments = arguments[1:]
+                arguments = arguments[:1]
+            if any(not (raw.startswith("'") and raw.endswith("'") and "'" not in raw[1:-1])
+                   for raw, _, _, _ in arguments):
+                numeric.clear()
+            else:
+                for _, code, _, _ in arguments:
+                    code_tokens = shell_raw_words(code)
+                    command_start = True
+                    for code_raw, code_value, _, _ in code_tokens:
+                        if code_raw in {';', '&', '|', '(', ')', '\n'}:
+                            command_start = True
+                            continue
+                        if command_start and (code_value in {'source', '.', 'function', 'eval', 'trap'}
+                                              or re.search(r'\(\s*\)', code)):
+                            numeric.clear()
+                        if not re.fullmatch(rf'{identifier}=.*', code_value, re.S):
+                            command_start = code_raw in {'then', 'do', 'else', '{', '!', 'if', 'elif'}
     for name in numeric | numeric_scopes.keys():
         for raw, value, start, end in tokens:
-            if name not in numeric and not any(
-                    left <= start < right for left, right in numeric_scopes[name]):
-                continue
-            if assignments.get(start) == name:
+            if assignments.get(start) == name and name in numeric:
                 continue
             chars = list(raw)
             for left, right in regions:
                 for position in range(max(left, start), min(right, end)):
-                    chars[position - start] = ' '
+                    if name in numeric or any(a <= position < b for a, b in numeric_scopes[name]):
+                        chars[position - start] = ' '
             remaining = re.sub(rf'\$(?:{name}(?![A-Za-z0-9_])|\{{{name}\}})', '', ''.join(chars))
             name_operand = (value == name or start in code_operands or start in destination_operands
                             or start in declaration_operands and value.startswith((name + '=', name + '+=', name + '[')))
