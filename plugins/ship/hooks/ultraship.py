@@ -2264,6 +2264,7 @@ def inline_interpreter_denial(command, cwd=None):
     seen = set()
     subscript_reason = None
     runtime_reason = None
+    hole_reason = None
     substitutions = []
     while pending or substitutions:
         if not pending:
@@ -2468,19 +2469,19 @@ def inline_interpreter_denial(command, cwd=None):
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
             for index, (raw, value, start, end) in enumerate(words):
-                if value.startswith('RIPGREP_CONFIG_PATH='):
-                    return 'inline interpreter code rule (rg preprocessor)'
                 if grep_data_token(words, index):
                     continue
+                if re.fullmatch(r'RIPGREP_CONFIG_PATH(?:(?:\+)?=.*)?', value):
+                    hole_reason = hole_reason or 'inline interpreter code rule (rg preprocessor)'
                 name = os.path.basename(value)
                 arguments = [word[1] for word in words[index + 1:]]
                 if name == 'rg' and any(argument == '--pre' or argument.startswith('--pre=')
                                         for argument in arguments):
-                    return 'inline interpreter code rule (rg preprocessor)'
+                    hole_reason = hole_reason or 'inline interpreter code rule (rg preprocessor)'
                 if name == 'hash' and any(re.fullmatch(r'-[a-zA-Z]*p[a-zA-Z]*', argument)
                                           or re.match(r'[A-Za-z_][A-Za-z0-9_]*=', argument)
                                           for argument in arguments):
-                    return 'inline interpreter code rule (hash binding)'
+                    hole_reason = hole_reason or 'inline interpreter code rule (hash binding)'
                 if name not in SHELL_INTERPRETERS:
                     continue
                 cursor, stdin, inline = 0, False, False
@@ -2500,12 +2501,14 @@ def inline_interpreter_denial(command, cwd=None):
                     if re.fullmatch(r'-[a-zA-Z]*[si][a-zA-Z]*', option):
                         stdin = True
                     cursor += 1
-                if not inline and (reads_pipe or stdin or cursor >= len(arguments)
-                                   or stdin_program_path(arguments[cursor])):
-                    return 'inline interpreter code rule (program from a pipe)'
+                shell_reads_pipe = reads_pipe or bool(re.search(r'\|[ \t]*\([ \t]*$', text[:start]))
+                if not inline and shell_reads_pipe and (stdin or cursor >= len(arguments)
+                                                        or arguments[cursor] == '<'
+                                                        or stdin_program_path(arguments[cursor])):
+                    hole_reason = hole_reason or 'inline interpreter code rule (program from a pipe)'
         pending.extend((token[1], state) for token in nested)
         substitutions.extend((body, state) for body in shell_substitution_bodies(text))
-    return subscript_reason or runtime_reason
+    return subscript_reason or runtime_reason or hole_reason
 
 
 def git_push(command):

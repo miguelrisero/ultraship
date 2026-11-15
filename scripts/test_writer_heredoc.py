@@ -1196,7 +1196,7 @@ class WriterHeredocTests(unittest.TestCase):
             'echo x | env bash', 'echo x | env -i bash', 'echo x | command bash',
             'echo x | exec bash', 'echo x | sudo sh', 'echo x | nice bash',
             'echo x | timeout 5 bash', 'echo x | stdbuf -o0 bash', 'echo x | xargs bash',
-            'echo x | busybox sh', 'echo x | (bash)',
+            'echo x | busybox sh', 'echo x | (bash)', 'echo x | tee sh',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)
@@ -1211,6 +1211,9 @@ class WriterHeredocTests(unittest.TestCase):
             'RIPGREP_CONFIG_PATH=/tmp/x rg foo .',
             'export RIPGREP_CONFIG_PATH=/tmp/x; rg foo .',
             'env RIPGREP_CONFIG_PATH=/tmp/x rg foo .',
+            'RIPGREP_CONFIG_PATH+=x rg foo .',
+            'printf -v RIPGREP_CONFIG_PATH %s /x; export RIPGREP_CONFIG_PATH; rg a .',
+            'rg -- --pre foo .',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)
@@ -1222,7 +1225,7 @@ class WriterHeredocTests(unittest.TestCase):
             'hash -p /usr/bin/env rg; rg perl -e 1', 'hash -p /bin/sh rg && rg x',
             'hash -p /usr/bin/python3 ls', 'hash -rp /bin/sh rg', 'hash -dp /bin/sh rg',
             'hash rg=/usr/bin/python3', 'builtin hash -p /bin/sh rg',
-            'command hash -p /bin/sh rg', "zsh -c 'hash -p /bin/sh rg'",
+            'command hash -p /bin/sh rg', "zsh -c 'hash -p /bin/sh rg'", 'hash -d foo=/tmp',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)
@@ -1237,6 +1240,11 @@ class WriterHeredocTests(unittest.TestCase):
             'echo x | grep -c bash', 'ls | grep -c python3',
             'rg --no-pre foo .', "rg --pre-glob '*.gz' foo .",
             'hash', 'hash -r', 'hash -t rg', 'hash -d rg', 'hash -l',
+            'ls /bin/sh', 'ls -la /bin/bash', 'which bash', 'command -v sh',
+            'type zsh', 'echo bash', 'file /bin/dash', 'git log -- bash', 'make -e bash',
+            'bash', 'sh -n -i', 'bash -n -i run.sh',
+            'echo x | bash scripts/x.sh', 'cat x | bash ./run.sh arg',
+            'rg -n RIPGREP_CONFIG_PATH docs/',
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
