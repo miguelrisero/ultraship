@@ -82,7 +82,7 @@ class ModelRoutingTests(unittest.TestCase):
                         'Preserve every existing refusal and affected-session hold.\n',
                     )
                     self.assertIn(
-                        'Apply only the exact owner-approved subject replacement through native Edit with `replace_all=false` for newly admitted future operations.',
+                        'Apply only the exact CoC-approved subject replacement through native Edit with `replace_all=false` for newly admitted future operations.',
                         sections[1][1],
                     )
                     self.assertEqual(fields['disallowedTools'], checks.frontmatter(base_text)['disallowedTools'])
