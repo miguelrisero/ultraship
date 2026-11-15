@@ -105,7 +105,7 @@ class WriterHeredocTests(unittest.TestCase):
 
     def test_command_wrapped_eval_invalidates_scoped_loop_proof(self):
         self.assertTrue(self.denied('c=$x; cd /tmp && for ((i=0; i<3; i++)); do command eval "$c"; echo "${a[i]}"; done'))
-        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
 
     def test_printf_alias_invalidates_literal_data_exemption(self):
         self.assertTrue(self.denied("shopt -s expand_aliases; alias printf=eval; printf '%s\\n' 'a[$(echo RAN)]'"))
@@ -137,6 +137,22 @@ class WriterHeredocTests(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
+
+    def test_literal_eval_wrapped_source_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; eval 'echo $i; command source ./s'; (( i ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_parallel_loop_cannot_prove_numeric_name_in_parent(self):
+        for command in (
+            'for ((i=0; i<1; i++)); do :; done | cat; (( i ))',
+            'for ((i=0; i<1; i++)); do :; done & (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_closed_conditional_preserves_later_numeric_initializer(self):
+        self.assertFalse(self.denied('if true; then :; fi; ((i=0)); (( i++ ))'), self.reason)
 
     def test_nested_arithmetic_closes_keep_unresolved_names(self):
         """Protect the writer boundary when nested parentheses precede a runtime value."""

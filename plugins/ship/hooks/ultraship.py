@@ -1963,6 +1963,8 @@ def parameter_quote_mode(text, start):
         return 'word'
     if tail.startswith(('#', '%')):
         return 'pattern'
+    if not tail or tail.startswith('}') or re.match(r':(?![-+=?])', tail):
+        return 'arithmetic'
     return 'other'
 
 
@@ -2311,8 +2313,24 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
     loop_headers = []
 
     def conditional_before(position):
-        return any(raw == value and (value in {'if', 'while', 'until', 'case'} or raw in {'&', '|'})
-                   for raw, value, start, _ in tokens if start < position)
+        stack = []
+        for raw, _, start, _ in sorted(control_words, key=lambda word: word[2]):
+            if start >= position:
+                break
+            if raw in {'if', 'while', 'until', 'case', 'for', 'select'}:
+                stack.append(raw)
+            elif stack and raw == {'if': 'fi', 'case': 'esac'}.get(stack[-1], 'done'):
+                stack.pop()
+        if any(kind in {'if', 'while', 'until', 'case'} for kind in stack):
+            return True
+        before = [token for token in tokens if token[2] < position]
+        boundary = max((index for index, token in enumerate(before) if token[0] in {';', '\n'}), default=-1)
+        return any(left[0] == right[0] and left[0] in {'&', '|'} and left[3] == right[2]
+                   for left, right in zip(before[boundary + 1:], before[boundary + 2:]))
+
+    def parallel_after(position):
+        following = next((token for token in tokens if token[2] >= position), None)
+        return following is not None and following[0] in {'|', '&'}
 
     for loop in re.finditer(r'\bfor\s*\(\(([^;]*);', text):
         if loop.start() not in loop_starts:
@@ -2330,6 +2348,7 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                 numeric_scopes.setdefault(term[1], []).append((loop.start(1), scope_end))
                 before = text[:loop.start(1) + term.start()]
                 if (scope_end > header_end and not conditional_before(loop.start())
+                        and not parallel_after(scope_end)
                         and not re.search(r'\b(?:for|select|function)\b|[({]', text[:loop.start()])
                         and not re.search(rf'(?<![A-Za-z0-9_]){term[1]}(?![A-Za-z0-9_])', before)):
                     numeric.add(term[1])
@@ -2338,7 +2357,10 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
         if match:
             position = start + match.start(1)
             before = text[:position]
-            if conditional_before(position) or any(left <= position < right for left, right in loop_headers):
+            region_close = max((tokens[closing][3] for opening, closing in groups.items()
+                                if tokens[opening][2] < start < tokens[closing][3]), default=end)
+            if (conditional_before(position) or parallel_after(region_close)
+                    or any(left <= position < right for left, right in loop_headers)):
                 continue
             if not re.search(rf'(?<![A-Za-z0-9_]){match[1]}(?![A-Za-z0-9_])', before):
                 if re.search(r'(?:^|[;\n])\s*(?:for\s*)?\(\(\s*$', before):
@@ -2349,7 +2371,8 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
         before = text[:start]
         if (not re.search(rf'(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])', before)
                 and re.search(r'(?:^|[;\n])\s*$', before)
-                and not re.search(r'&&|\|\||[|({]|\b(?:if|while|until|case|for|select|function)\b', before)):
+                and not conditional_before(start) and not parallel_after(end)
+                and not re.search(r'[({]|\b(?:for|select|function)\b', before)):
             numeric.add(name)
     destination_operands = set()
     for words in commands:
@@ -2397,16 +2420,12 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
             else:
                 for _, code, _, _ in arguments:
                     code_tokens = shell_raw_words(code)
-                    command_start = True
-                    for code_raw, code_value, _, _ in code_tokens:
-                        if code_raw in {';', '&', '|', '(', ')', '\n'}:
-                            command_start = True
-                            continue
-                        if command_start and (code_value in {'source', '.', 'function', 'eval', 'trap'}
-                                              or re.search(r'\(\s*\)', code)):
-                            numeric.clear()
-                        if not re.fullmatch(rf'{identifier}=.*', code_value, re.S):
-                            command_start = code_raw in {'then', 'do', 'else', '{', '!', 'if', 'elif'}
+                    code_positions = shell_command_positions(code_tokens)
+                    if (shell_defines_function(code_tokens, code_positions)
+                            or any(code_value in {'source', 'eval', 'trap'}
+                                   or code_value == '.' and code_start in code_positions
+                                   for _, code_value, code_start, _ in code_tokens)):
+                        numeric.clear()
     for name in numeric | numeric_scopes.keys():
         for raw, value, start, end in tokens:
             if assignments.get(start) == name and name in numeric:
