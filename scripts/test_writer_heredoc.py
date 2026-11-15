@@ -31,6 +31,113 @@ class WriterHeredocTests(unittest.TestCase):
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
+    def test_hash_pattern_quote_keeps_arithmetic_refused(self):
+        self.assertTrue(self.denied('''echo "${x#'}'"'$((y))'"}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_hash_pattern_quote_keeps_indirect_refused(self):
+        self.assertTrue(self.denied('''echo "${x#'}'"'${!n}'"}"'''))
+        self.assertIn('array subscript evaluation rule (indirect)', self.reason)
+
+    def test_hash_pattern_quote_keeps_subscript_refused(self):
+        self.assertTrue(self.denied('''echo "${x#'}'"'${a[y]}'"}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_hash_pattern_quote_keeps_interpreter_refused(self):
+        self.assertTrue(self.denied('''echo "${x#'}'"'$(no""de -""e 1)'"}"'''))
+        self.assertIn('inline interpreter code rule (node)', self.reason)
+
+    def test_percent_pattern_quote_keeps_arithmetic_refused(self):
+        self.assertTrue(self.denied('''echo "${x%'}'"'$((y))'"}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_hash_pattern_quote_keeps_arithmetic_refused(self):
+        self.assertTrue(self.denied('''echo "${x##'}'"'$((y))'"}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_replacement_operand_quote_refuses_uncertain_boundary(self):
+        self.assertTrue(self.denied('''echo "${x/'}'/z}"'$((y))'"}"'''))
+        self.assertIn('inline interpreter code rule (substitution boundary)', self.reason)
+
+    def test_command_wrapped_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; command eval "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_builtin_wrapped_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; builtin eval "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_time_wrapped_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; time eval "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; "eval" "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_single_quoted_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('''c=$x; i=0; 'eval' "$c"; (( i ))'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_escaped_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied(r'c=$x; i=0; e\val "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_command_wrapped_source_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; command source ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_builtin_wrapped_dot_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; builtin . ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_single_quoted_source_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; 'source' ./s; (( i ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_dot_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; "." ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_command_wrapped_trap_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; command trap "$c" DEBUG; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_command_wrapped_eval_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied('c=$x; cd /tmp && for ((i=0; i<3; i++)); do command eval "$c"; echo "${a[i]}"; done'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_printf_alias_invalidates_literal_data_exemption(self):
+        self.assertTrue(self.denied("shopt -s expand_aliases; alias printf=eval; printf '%s\\n' 'a[$(echo RAN)]'"))
+        self.assertIn('array subscript evaluation rule (subscript payload)', self.reason)
+
+    def test_disabled_printf_invalidates_literal_data_exemption(self):
+        self.assertTrue(self.denied("enable -n printf; printf '%s\\n' 'a[$(echo RAN)]'"))
+        self.assertIn('array subscript evaluation rule (subscript payload)', self.reason)
+
+    def test_hashed_printf_invalidates_literal_data_exemption(self):
+        self.assertTrue(self.denied("hash -p ./x printf; printf '%s\\n' 'a[$(echo RAN)]'"))
+        self.assertIn('array subscript evaluation rule (subscript payload)', self.reason)
+
+    def test_literal_eval_attached_destination_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('''i=0; eval 'echo $i; printf -vi %s "$x"'; (( i ))'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_literal_trap_attached_destination_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('''i=0; trap 'echo $i; printf -vi %s "$x"' EXIT; (( i ))'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pattern_and_runtime_writer_literal_controls_stay_admitted(self):
+        for command in (
+            '''echo "${x:-'quoted text'}"''', '''echo "${x#'prefix'}"''',
+            'echo "${x%.txt}"', 'echo "${x/a/b}"',
+            "i=0; eval 'echo $i'; (( i++ ))", "i=0; trap 'echo $i' EXIT; (( i++ ))",
+            'find . -name x; for ((i=0; i<3; i++)); do echo "$i"; done',
+            "printf '%s\\n' 'a[$(echo RAN)]'",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_nested_arithmetic_closes_keep_unresolved_names(self):
         """Protect the writer boundary when nested parentheses precede a runtime value."""
         for command in (
