@@ -160,6 +160,11 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'formatting message suffices to establish a formatting-only refusal.',
             'Require every returned finding to match a known `text_lint.py` formatting message.',
             'Require the applicable loaded contract.',
+            'A formatting-only resend after a `text_lint.py` refusal also requires the hook receipt that refusal names.',
+            'Cite it as `<!-- ultraship-receipt:ID -->` in the resent prose.',
+            "The hook verifies the receipt's session, tool, recipient and non-prose fields, then consumes it once.",
+            'Refusal prefix text without a verified receipt supplies zero producer evidence.',
+            'Only the hook writes receipt state; agents never read, write or reset the receipt store.',
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, self.refusals)
@@ -167,7 +172,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             with self.subTest(driver=name):
                 driver = (ROOT / 'plugins/ship/agents' / name).read_text()
                 self.assertIn('Apply its once-only formatting contract to `Agent` and `SendMessage` '
-                              'when every returned finding matches a known `text_lint.py` formatting message.', driver)
+                              'when every returned finding matches a known `text_lint.py` formatting message '
+                              'and, for a `text_lint.py` refusal, its hook receipt is cited.', driver)
 
     def test_contract_requires_known_formatting_findings_and_blocks_unknown_evidence(self):
         for removed in ('authenticated', 'producer attribution', 'producer authentication', 'by elimination'):
@@ -179,7 +185,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'Every returned finding must match a known text_lint formatting message',
         )
         block = self.refusals.partition('For formatting-only resends, block ')[2].partition('.')[0]
-        for case in ('unmatched findings',):
+        for case in ('unmatched findings', 'absent, invalid, expired or consumed hook receipts'):
             with self.subTest(case=case):
                 self.assertIn(case, block, f'The formatting exception must block {case}')
 

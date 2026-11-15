@@ -62,6 +62,34 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     ruff_remainder = ('uv run --frozen --directory backend/api ruff check --fix tests/integration/test_approval_expiry.py'
                       ' && uv run --frozen --directory backend/api ruff format tests/integration/test_approval_expiry.py')
 
+    receipt_store = Path(tmp) / 'ultraship' / 'text-lint'
+    custody = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
+               'Report the blocked scope to the driver.')
+    for caller in ({'agent_type': 'ship:writer--sol'}, {'agent_type': 'ship:driver'}, {}):
+        for tool, inputs in (
+                ('Edit', {'file_path': str(receipt_store / 'key')}),
+                ('Write', {'file_path': str(receipt_store / 'receipts/a.json')}),
+                ('NotebookEdit', {'notebook_path': str(receipt_store / 'book.ipynb')}),
+                ('Read', {'file_path': str(receipt_store / 'key')}),
+                ('Grep', {'path': str(receipt_store), 'pattern': 'key'}),
+                ('Glob', {'pattern': str(receipt_store / '*')}),
+                ('LSP', {'file_path': str(receipt_store / 'key')}),
+                ('mcp__fff__grep', {'pattern': str(receipt_store)}),
+                ('Bash', {'command': 'echo forged > ' + str(receipt_store / 'key')}),
+                ('Bash', {'command': 'python3 plugins/ship/hooks/text_lint.py' + ' hook'}),
+                ('Bash', {'command': 'python3 "plugins/ship/hooks/text_lint.py"' + ' hook'})):
+            result = hook('pre', {**caller, 'tool_name': tool, 'tool_input': inputs}, env)
+            assert denied(result), (caller, tool, inputs)
+            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+        for tool, inputs in (('Bash', {'command': 'git status --short'}),
+                             ('Read', {'file_path': str(Path(tmp) / 'ordinary.txt')})):
+            assert not denied(hook('pre', {**caller, 'tool_name': tool, 'tool_input': inputs}, env))
+    receipt_alias = Path(tmp) / 'receipt-alias'
+    receipt_store.mkdir(parents=True)
+    receipt_alias.symlink_to(receipt_store, target_is_directory=True)
+    assert denied(hook('pre', {'tool_name': 'Edit', 'tool_input': {'file_path': str(receipt_alias / 'key')}}, env))
+    assert denied(hook('pre', {'tool_name': 'Write', 'tool_input': {'file_path': str(receipt_store).upper()}}, env))
+
     assert denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol', 'model': 'opus'}}, env))
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol'}}, env))
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'Explore', 'model': 'haiku'}}, env))

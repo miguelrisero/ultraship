@@ -2257,6 +2257,33 @@ def writer_gh_denial(command, depth=0):
 
 def pre(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
+    receipt_store = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'ultraship' / 'text-lint'
+    receipt_paths = {os.path.abspath(receipt_store).casefold(), os.path.realpath(receipt_store).casefold()}
+    custody = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
+               'Report the blocked scope to the driver.')
+
+    def receipt_path(value, contains=False):
+        if not isinstance(value, str) or not value:
+            return False
+        if contains and (any(path in value.casefold() for path in receipt_paths)
+                         or 'ultraship' + '/text-lint' in value.casefold()):
+            return True
+        path = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(value))
+        return any(candidate == store or candidate.startswith(store + '/')
+                   for candidate in (os.path.abspath(path).casefold(), os.path.realpath(path).casefold())
+                   for store in receipt_paths)
+
+    if tool in ('Edit', 'Write', 'NotebookEdit') and receipt_path(tin.get('file_path') or tin.get('notebook_path')):
+        deny(custody)
+    if (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')) and any(
+            receipt_path(tin.get(field), contains=True) for field in ('file_path', 'path', 'pattern', 'glob')):
+        deny(custody)
+    # shortcut: Bash matches text, so a path built from pieces slips past it; upgrade to isolated state access.
+    if tool == 'Bash':
+        command = str(tin.get('command', '')).casefold()
+        if ('ultraship' + '/text-lint' in command
+                or re.search(r'''text_lint\.py["']?\s+["']?hook\b''', command)):
+            deny(custody)
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
         deny('ship agents pin their own model. Remove the `model` field and call the scoped agent '
              'or the next agent in its fallback chain.')
