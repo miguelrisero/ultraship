@@ -321,6 +321,37 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command.rstrip()))
                 self.assertIn('array subscript evaluation rule', self.reason)
 
+    def test_substitution_groups_preserve_outer_name_refusals(self):
+        """Catch name operands after substitutions, brace expansion and named shell constructs."""
+        for command in (
+            'printf > >(cat) -v "$x" %s 1', 'printf 2> >(cat) -v "$x" %s 1',
+            'printf < <(true) -v "$x" %s 1', 'printf $(true) -v "$x" %s 1',
+            'printf `true` -v "$x" %s 1', '{printf,-v,"$x",%s,1}',
+            'function f { printf -v "$x" %s 1; }; f',
+            'coproc C { printf -v "$x" %s 1; }; wait',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_literal_substitution_groups_and_name_words_remain_admitted(self):
+        """Catch false name refusals for substitutions, brace paths and literal program arguments."""
+        for command in (
+            'diff <(sort a) <(sort b)', 'x=$(git rev-parse HEAD)',
+            'while read -r l; do echo "$l"; done < <(ls)', 'tee >(wc -l) < f',
+            'mkdir -p src/{local,remote}', 'go test -v ./...', r'''printf '%s\n' "$a"''',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_subscript_parser_exceptions_refuse_writer_commands(self):
+        """Catch fail-open writer decisions when the subscript helper raises an exception."""
+        from unittest.mock import patch
+
+        with patch.object(ultraship, 'array_subscript_denial', side_effect=ValueError('synthetic')):
+            self.assertTrue(self.denied('echo synthetic'))
+        self.assertIn('array subscript evaluation rule (parse error)', self.reason)
+
     def test_literal_variable_operations_and_quoted_data_remain_admitted(self):
         """Catch refusals of literal names, inert arithmetic and ordinary quoted data."""
         for command in (
