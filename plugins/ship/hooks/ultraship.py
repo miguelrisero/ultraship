@@ -1165,7 +1165,7 @@ def read_only_argument_word(command, tokens, words, index):
                 or original[2][3] != original[3][2]):
             return False
         path = original[1][0]
-        if path.startswith('-') or any(char in path for char in "'\"\\$*?[{~"):
+        if path.startswith('-') or any(char in path for char in "'\"\\$*?[{~^#"):
             return False
         cursor = 4
     pipelines = [[[]]]
@@ -1207,7 +1207,7 @@ def read_only_argument_word(command, tokens, words, index):
     for raw, value, start, end in original:
         if raw == '|' or not unresolved_shell_word(raw):
             continue
-        quote, cursor = '', 0
+        quote, cursor, prefix_end = '', 0, len(raw)
         while cursor < len(raw):
             char = raw[cursor]
             if char == '\\' and quote != "'":
@@ -1218,14 +1218,16 @@ def read_only_argument_word(command, tokens, words, index):
             elif not quote:
                 if char in "'\"":
                     quote = char
-                elif char in '*?[{':
-                    break
+                elif char in '^#':
+                    return False
+                elif char in '*?[{' and prefix_end == len(raw):
+                    prefix_end = cursor
             cursor += 1
         try:
-            prefix = ''.join(shlex.split(raw[:cursor]))
+            prefix = ''.join(shlex.split(raw[:prefix_end]))
         except ValueError:
             return False
-        if not prefix or prefix.startswith('-'):
+        if not prefix or prefix.startswith('-') or prefix_end < len(raw) and '/' not in prefix:
             return False
     return True
 

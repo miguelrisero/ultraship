@@ -58,6 +58,8 @@ class WriterHeredocTests(unittest.TestCase):
             r'''rg --glob='*.py' foo /x/python*/a''',
             r'''grep -rn -C 3 foo /x/python*/a | tail -n 5''',
             r'''find /x -maxdepth 2 -type f -path /x/python*''',
+            r'''ls ./x/python*''',
+            r'''rg foo ./x/* /x/python*/a''',
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
@@ -215,6 +217,19 @@ class WriterHeredocTests(unittest.TestCase):
                 r'''find /x -L -path /x/python*''',
                 r'''rg foo /x/python*/a | head -c 5''',
                 r'''rg foo /x/python*/a | wc --files0-from=/x/f''',
+                r'''rg needle ^python*''',
+                r'''rg needle a#*python*''',
+                r'''rg needle /x/^python*''',
+                r'''cat ^python*/a''',
+                r'''ls ^python*''',
+                r'''find ^python*''',
+                r'''grep foo ^python*''',
+                r'''cd ^x && rg foo /x/python*/a''',
+                r'''cd a#b && rg foo /x/python*/a''',
+                r'''rg foo *python*''',
+                r'''rg foo a* /x/python*/a''',
+                r'''rg foo [-]* /x/python*/a''',
+                r'''grep -n python* x/a.py''',
             )),
         ):
             for command in commands:
