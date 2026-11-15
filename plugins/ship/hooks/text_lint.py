@@ -197,8 +197,12 @@ def receipt_key():
         except FileExistsError:
             pass
         else:
-            with os.fdopen(fd, 'wb') as output:
-                output.write(os.urandom(32))
+            try:
+                with os.fdopen(fd, 'wb') as output:
+                    output.write(os.urandom(32))
+            except BaseException:
+                (store / 'key').unlink()
+                raise
         fd = os.open(store / 'key', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, 'rb') as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
@@ -337,14 +341,15 @@ def write_receipt(event, findings, formatting_only, parent, resend_refused=False
     if prune_receipts(directory) >= 2000:
         raise OSError('Receipt store contains 2000 receipts younger than 24 hours.')
     session = event.get('session_id')
-    entry = None if resend_refused else pending_entry({'session_id': session, **input_identity(event)})
+    identity = input_identity(event)
+    entry = None if resend_refused else pending_entry({'session_id': session, **identity})
     spent = entry is not None and entry['state'] == 'spent'
     receipt = {
         'id': uuid.uuid4().hex,
         'session_id': event.get('session_id'),
         'tool_use_id': event.get('tool_use_id'),
         'agent_id': event.get('agent_id'),
-        **input_identity(event),
+        **identity,
         'findings': [finding[:500] for finding in findings],
         'formatting_only': formatting_only,
         'resend_allowed': formatting_only and parent is None and not spent and isinstance(session, str) and bool(session),
@@ -423,10 +428,9 @@ def consume_receipt(receipt_id, event):
             raise ValueError('Receipt does not permit a resend.')
         if not event.get('session_id') or receipt.get('session_id') != event['session_id']:
             raise ValueError('Receipt session differs or is absent.')
-        if event.get('tool_name') not in ('Agent', 'Task'):
-            identity = input_identity(event)
-            if any(receipt.get(field) != identity[field] for field in ('tool_name', 'recipient', 'fields_sha256')):
-                raise ValueError('Receipt tool, recipient or non-prose fields differ.')
+        identity = input_identity(event)
+        if any(receipt.get(field) != identity[field] for field in ('tool_name', 'recipient', 'fields_sha256')):
+            raise ValueError('Receipt tool, recipient or non-prose fields differ.')
         created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
         if created.tzinfo is None or now() - created > timedelta(hours=24):
             raise ValueError('Receipt expires after 24 hours.')

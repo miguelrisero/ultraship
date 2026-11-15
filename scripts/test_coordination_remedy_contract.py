@@ -119,7 +119,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'After a message-format refusal, a coordinator may give a fresh writer a new brief '
             'for the same approved scope.',
             'This fresh brief is a new instruction, not a resend.',
-            'It cites the same receipt marker in its prompt, and the hook consumes the receipt there.',
+            'It records the receipt id on the run board; the hook refuses a receipt marker in an `Agent` or `Task` prompt.',
             'Preserve the consumed-attempt record across fresh briefs.',
             'Only for the fresh-brief route, permit a new writer recipient and dispatch action '
             'despite the unchanged-identity requirements below.',

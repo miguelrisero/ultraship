@@ -490,7 +490,12 @@ class TextLintTests(unittest.TestCase):
                     self.assertIsNone(self.hook_output(self.event(valid)))
                 self.assertEqual(pending.exists(), stale == 'consumed')
 
-    def test_agent_dispatch_consumes_receipt_without_linting_prompt(self):
+    def test_agent_citation_never_consumes_a_send_receipt(self):
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        self.assertTrue(self.last_receipt['formatting_only'])
+        self.assertTrue(self.last_receipt['resend_allowed'])
+        pending = next((self.state / 'pending').iterdir())
         for tool in ('Agent', 'Task'):
             with self.subTest(tool=tool):
                 event = {'session_id': 'session-one', 'tool_name': tool,
@@ -498,17 +503,23 @@ class TextLintTests(unittest.TestCase):
                 before = list((self.state / 'receipts').glob('*.json'))
                 self.assertIsNone(self.hook_output(event))
                 self.assertEqual(list((self.state / 'receipts').glob('*.json')), before)
-                self.hook_refusal(self.event())
-                receipt_id = self.last_receipt['id']
                 event['tool_input']['prompt'] += '<!-- ultraship-receipt:' + receipt_id + ' -->'
                 event['session_id'] = 'another-session'
                 self.assertIn('Receipt session differs', self.hook_refusal(event))
                 self.assertFalse(self.last_receipt['resend_allowed'])
                 event['session_id'] = 'session-one'
-                self.assertIsNone(self.hook_output(event))
-                self.assertEqual(list((self.state / 'pending').glob('*')), [])
-                self.assertIn('Receipt is consumed', self.hook_refusal(event))
+                self.assertIn('Receipt tool, recipient or non-prose fields differ.', self.hook_refusal(event))
                 self.assertFalse(self.last_receipt['resend_allowed'])
+                self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+                self.assertEqual(json.loads(pending.read_text()), {'id': receipt_id, 'state': 'open'})
+        valid = self.resend(receipt_id)['tool_input']['message'].split('\n<!--')[0]
+        self.assertIn('A formatting-only refusal to this recipient is pending.',
+                      self.hook_refusal(self.event(valid)))
+        self.assertIsNone(self.hook_output(self.resend(receipt_id)))
+        self.assertEqual(list((self.state / 'pending').glob('*')), [])
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        self.assertIn('Receipt is consumed', self.hook_refusal(self.resend(receipt_id)))
+        self.assertFalse(self.last_receipt['resend_allowed'])
 
     def test_unexpected_hook_and_receipt_exceptions_deny_once(self):
         for stage in ('outgoing', 'write_receipt'):
@@ -552,6 +563,18 @@ class TextLintTests(unittest.TestCase):
         non_format_id = self.last_receipt['id']
         self.assertIn('Receipt does not permit a resend', self.hook_refusal(self.resend(non_format_id)))
         self.assertFalse(self.last_receipt['resend_allowed'])
+
+    def test_failed_first_key_write_allows_next_refusal_receipt(self):
+        with patch.object(text_lint.os, 'urandom', side_effect=OSError('random source unavailable')):
+            result = self.hook_output(self.event())
+        self.assertEqual(result['permissionDecision'], 'deny')
+        self.assertIn('No receipt was written, so no resend', result['permissionDecisionReason'])
+        self.assertFalse((self.state / 'key').exists())
+        self.hook_refusal(self.event())
+        self.assertTrue(self.last_receipt['formatting_only'])
+        self.assertTrue(self.last_receipt['resend_allowed'])
+        self.assertEqual(len((self.state / 'key').read_bytes()), 32)
+        self.assertIsNone(self.hook_output(self.resend(self.last_receipt['id'])))
 
     def test_key_symlink_is_refused(self):
         self.state.mkdir(parents=True)
