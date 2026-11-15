@@ -2979,7 +2979,7 @@ def writer_gh_denial(command, depth=0):
     return None
 
 
-# shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, and files written by Write/Edit then run escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
+# shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
 def review_thread_denial(command):
     if read_only_shell(command) or literal_search_shell(command):
         return None
@@ -3000,9 +3000,23 @@ def review_thread_denial(command):
         lexer.whitespace = ' \t\r'
         lexer.whitespace_split = True
         lexer.commenters = ''
-        list(lexer)
+        tokens = list(lexer)
     except ValueError:
         return 'review-thread guard parse failure' if re.search(r'\bgh\b', normalized) else None
+    names_gh = any(os.path.basename(word) == 'gh' for word in re.split(r'[\s;&|()<>]+', normalized))
+    if names_gh:
+        for index, token in enumerate(tokens):
+            if token == 'eval':
+                return 'shell runner names gh'
+            if os.path.basename(token) not in ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'busybox'):
+                continue
+            cursor = index + 1
+            while cursor < len(tokens) and tokens[cursor].startswith('-'):
+                if tokens[cursor].startswith('-') and not tokens[cursor].startswith('--') and 'c' in tokens[cursor]:
+                    return 'shell runner names gh'
+                cursor += 1
+            if cursor == len(tokens) or all(char in ';&|\n()' for char in tokens[cursor]):
+                return 'shell runner names gh'
     # Keep quote boundaries: GraphQL variables are literal only inside a single-quoted query value.
     pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s'"\\;&|()])+|[;&|\n()]+'''
     segments, words = [], []
@@ -3143,6 +3157,9 @@ def review_thread_denial(command):
             if write and (not visible or full_url and host != 'api.github.com'
                           or re.search(r'(?:^|/)pulls/[^/]+/comments(?:/|$)', route)):
                 return 'REST review-comment write or opaque endpoint'
+            method = methods[-1] if methods else ('POST' if fields else 'GET')
+            if method not in ('GET', 'HEAD'):
+                return 'gh api write outside the helper'
     return None
 
 
