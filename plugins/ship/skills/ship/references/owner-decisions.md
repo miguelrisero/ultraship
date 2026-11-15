@@ -97,13 +97,6 @@ Record the accepted evidence and exact scope in the brief and PR body.
 
 ## New lane-owned row review route
 
-Permit the driver to open the follow-up rows PR as a draft before protected review.
-The draft supplies the repository and PR number that the read admission and receipt name.
-In this route, publication means marking the draft ready for review or posting `/merge`.
-Opening the draft and pushing its branch publish nothing.
-Bind the receipt to the draft PR number and frozen final commit.
-A new push to the draft invalidates the receipt and its approval.
-
 Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
@@ -113,6 +106,17 @@ Preserve every existing refusal, tool and hook denial, and affected-session hold
 Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
+
+## Draft PR for new lane-owned row review
+
+Apply this section only with the new lane-owned row review route and its runtime-adoption boundary.
+Permit the driver to open the follow-up rows PR as a draft before protected review.
+The draft supplies the repository and PR number that the read admission and receipt name.
+In this route, publication means marking the draft ready for review, pushing to a ready PR, posting `/merge` or any other merge.
+Opening the draft and pushing to it while it stays a draft publish nothing.
+Bind the receipt to the draft PR number and frozen final commit.
+A new push to the draft invalidates the receipt and its approval.
+Return a ready PR to draft before any further push, then repeat the review and approval.
 
 ## Reviewer admission record for protected row reads
 
