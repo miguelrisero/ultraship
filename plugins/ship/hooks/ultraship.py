@@ -3009,6 +3009,15 @@ def review_thread_denial(command):
         for index, token in enumerate(tokens):
             shell = os.path.basename(token) in ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'busybox')
             shell = shell or token in ('eval', 'source', '.')
+            if os.path.basename(token) in ('watch', 'ssh', 'su', 'script', 'runuser'):
+                return 'shell runner names gh'
+            if os.path.basename(token) == 'env':
+                for later in tokens[index + 1:]:
+                    if later and all(char in ';&|\n()' for char in later):
+                        break
+                    if (later.startswith(('-S', '--split-string'))
+                            or later.startswith('-') and not later.startswith('--') and 'S' in later):
+                        return 'shell runner names gh'
             if shell and not (index + 1 < len(tokens) and tokens[index + 1].endswith('.sh')
                               and not tokens[index + 1].startswith(('/dev/', '/proc/'))):
                 return 'shell runner names gh'
@@ -3024,12 +3033,18 @@ def review_thread_denial(command):
         value = shlex.split(raw)[0]
         words.append((value, raw))
         if (re.search(r'\bgh\s+api\b', re.sub(r'''['"\\]''', '', value))
-                and value != raw and not value.startswith('query=')):
+                and value != raw):
             reason = review_thread_denial(value)
             if reason:
                 return reason
     segments.append(words)
     for words in segments:
+        for index, (value, _) in enumerate(words[:-1]):
+            if os.path.basename(value) == 'gh':
+                subcommand, raw_subcommand = words[index + 1]
+                if (any(char.isspace() for char in subcommand)
+                        or re.search(r'[$`~*?\[{]', outside_single_quotes(raw_subcommand))):
+                    return 'review-thread guard parse failure'
         if any(os.path.basename(value) == 'gh' for value, _ in words) and any(
                 re.search(r'[*?\[]|\{[^}]*?(?:,|\.\.)[^}]*\}',
                           re.sub(r'''('([^']*)'|"(?:\\.|[^"\\])*")''', '', raw))

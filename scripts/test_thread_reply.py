@@ -141,6 +141,15 @@ REFUSE = (
     r'time eval g\"h\" api repos/o/r/pulls/7/comments -f body=x',
     'exec . /dev/stdin <<<\'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
     'find . -name x && gh pr view 7',
+    "watch -n 60 'query= gh api repos/o/r/pulls/7/comments --input reply.json'",
+    "su -c 'query=1 gh api repos/o/r/pulls/7/comments -f body=x' miguel",
+    'gh "api -X POST repos/o/r/pulls/7/comments -f body=x"',
+    r'watch -n 60 g\"h\" api repos/o/r/pulls/7/comments -f body=x',
+    r'ssh host g\"h\" api repos/o/r/pulls/7/comments -f body=x',
+    'script -qc \'g"h" api repos/o/r/pulls/7/comments -f body=x\' /dev/null',
+    'runuser -u miguel -- sh -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'env -S \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'gh "$SUB" repos/o/r/pulls/7/comments',
 )
 
 ADMIT = (
@@ -181,6 +190,10 @@ ADMIT = (
     'bash -n plugins/ship/skills/babysit/scripts/threads.sh',
     'eval "echo hi"',
     'gh pr create --title "fix(ship): refuse gh api writes" --body-file body.md',
+    'gh "pr" view 7',
+    'watch -n 60 date',
+    "env -S 'echo hi'",
+    'ssh host uptime',
 )
 
 
