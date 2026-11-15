@@ -1149,6 +1149,54 @@ SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh',
 STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su'}
 
 
+def read_only_argument_word(tokens, words, index):
+    # These commands never run an argument word when their execution options and output consumers are excluded.
+    if (not index or words[0][0] not in {'rg', 'grep', 'ls', 'cat', 'find'}
+            or any(word[0] in {'<', '>'} for word in words)
+            or any(token[0] in {'(', ')', '`'} for token in tokens)):
+        return False
+    raw = words[index][0]
+    if '$' in raw or '`' in raw:
+        return False
+    quote, cursor = '', 0
+    while cursor < len(raw):
+        char = raw[cursor]
+        if char == '\\' and quote != "'":
+            cursor += 2
+            continue
+        if char == quote:
+            quote = ''
+        elif not quote:
+            if char in "'\"":
+                quote = char
+            elif char in '*?[{':
+                break
+        cursor += 1
+    try:
+        prefix = ''.join(shlex.split(raw[:cursor]))
+    except ValueError:
+        return False
+    if not prefix or prefix.startswith('-'):
+        return False
+    name = words[0][0]
+    if name in {'rg', 'find'} and any(
+            word[1].startswith('-') and unresolved_shell_word(word[0]) for word in words):
+        return False
+    if name == 'rg' and any(word[1].startswith(('--pre', '--hostname-bin')) for word in words):
+        return False
+    if name == 'find' and any(word[1] in {
+            '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'} for word in words):
+        return False
+    cursor = next(position + 1 for position, token in enumerate(tokens) if token[2] == words[-1][2])
+    while cursor < len(tokens) and tokens[cursor][0] == '|':
+        cursor += 1
+        if cursor >= len(tokens) or tokens[cursor][0] not in {'head', 'tail', 'wc'}:
+            return False
+        while cursor < len(tokens) and tokens[cursor][0] not in {';', '&', '|', '\n'}:
+            cursor += 1
+    return True
+
+
 def grep_data_token(tokens, index):
     start = index
     while start and tokens[start - 1][0] not in {';', '&', '|', '(', ')', '`', '\n'}:
@@ -1955,8 +2003,9 @@ def inline_interpreter_denial(command, cwd=None):
                 unresolved = (not neutral and raw != '[' and value != '$?' and start not in shell_programs
                               and unresolved_shell_word(raw))
                 names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
-                joined_code = not neutral and unresolved_shell_word(raw) and bool(re.search(
-                    rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw))
+                joined_code = (not neutral and unresolved_shell_word(raw)
+                               and not read_only_argument_word(tokens, words, index) and bool(re.search(
+                    rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw)))
                 if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
                                                    or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'}):
                     return 'inline interpreter code rule (unresolved command word)'
