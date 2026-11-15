@@ -1184,6 +1184,63 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertIsNotNone(ultraship.process_heredoc_denial(command, readers=True))
         self.assertTrue(self.denied("python3 - <<'PY'\nprint(\"'\")\nPY\nnode <<'JS'\n'\nJS\n"))
 
+    def test_shell_stdin_programs_are_denied(self):
+        """Catch shells executing unchecked programs from stdin or process substitution."""
+        for command in (
+            'echo code | bash', 'ls /x | head -1 | sh', 'cat a | sh -s',
+            'echo x | bash -s arg', 'echo x | bash -', 'echo x | bash /dev/stdin',
+            'echo x | zsh', 'echo x | dash', 'echo x | /bin/sh',
+            'echo x | bash -e', 'echo x | bash -o errexit', 'echo x | bash -O extglob',
+            'echo x | bash --norc', 'echo x | bash -i', 'echo x | bash -l', 'echo x | bash --',
+            'bash < /tmp/x.sh', 'bash -s < /tmp/x.sh', 'bash <(cat x)',
+            'echo x | env bash', 'echo x | env -i bash', 'echo x | command bash',
+            'echo x | exec bash', 'echo x | sudo sh', 'echo x | nice bash',
+            'echo x | timeout 5 bash', 'echo x | stdbuf -o0 bash', 'echo x | xargs bash',
+            'echo x | busybox sh', 'echo x | (bash)',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command), self.reason)
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_ripgrep_preprocessors_and_config_assignments_are_denied(self):
+        """Catch unchecked programs supplied through ripgrep preprocessors or configuration."""
+        for command in (
+            'rg --pre python3 foo /x/a', 'rg --pre=python3 foo /x/a',
+            'rg --pre /bin/cat foo /x/a', 'rg -n --pre=./x.sh foo .',
+            "rg --pre-glob '*.gz' --pre gunzip foo .", 'env rg --pre=python3 foo .',
+            'RIPGREP_CONFIG_PATH=/tmp/x rg foo .',
+            'export RIPGREP_CONFIG_PATH=/tmp/x; rg foo .',
+            'env RIPGREP_CONFIG_PATH=/tmp/x rg foo .',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command), self.reason)
+                self.assertIn('inline interpreter code rule (rg preprocessor)', self.reason)
+
+    def test_hash_command_bindings_are_denied(self):
+        """Catch hash bindings that replace a checked command with an unchecked program."""
+        for command in (
+            'hash -p /usr/bin/env rg; rg perl -e 1', 'hash -p /bin/sh rg && rg x',
+            'hash -p /usr/bin/python3 ls', 'hash -rp /bin/sh rg', 'hash -dp /bin/sh rg',
+            'hash rg=/usr/bin/python3', 'builtin hash -p /bin/sh rg',
+            'command hash -p /bin/sh rg', "zsh -c 'hash -p /bin/sh rg'",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command), self.reason)
+                self.assertIn('inline interpreter code rule (hash binding)', self.reason)
+
+    def test_shell_scripts_data_pipelines_and_nonexecuting_options_are_admitted(self):
+        """Catch false refusals of script operands, checked shell strings and inert options."""
+        for command in (
+            'bash scripts/x.sh', 'bash -n scripts/x.sh', 'sh ./x.sh arg',
+            "cat x | bash -c 'cat'", "cat x | sh -c 'read a'", 'echo hi | cat',
+            'git log | head', 'echo x | tee a', r"printf '%s\n' a | grep b",
+            'echo x | grep -c bash', 'ls | grep -c python3',
+            'rg --no-pre foo .', "rg --pre-glob '*.gz' foo .",
+            'hash', 'hash -r', 'hash -t rg', 'hash -d rg', 'hash -l',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_program_from_pipe_is_denied(self):
         for command in ("printf '%s' x | python3", 'echo x | node', 'cat f | perl'):
             with self.subTest(command=command):
