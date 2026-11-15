@@ -1968,7 +1968,7 @@ def parameter_quote_mode(text, start):
     return 'other'
 
 
-def shell_substitution_bodies(text):
+def shell_substitution_bodies(text, arithmetic_quotes=False):
     """Keep substitution quote state separate from the surrounding shell word."""
     frames, quote, cursor, word_start = [], '', 0, True
     while cursor < len(text):
@@ -1977,6 +1977,12 @@ def shell_substitution_bodies(text):
         double_operand = context == '}' and frames[-1][2] == '"'
         operand_mode = parameter_quote_mode(text, frames[-1][1]) if double_operand else ''
         if double_operand and char == "'" and operand_mode == 'other':
+            raise ValueError('shell substitution boundary')
+        if arithmetic_quotes and char == "'" and (
+                context in {'))', ']'} and frames[-1][2] == '"'
+                or double_operand and (operand_mode == 'arithmetic' or re.fullmatch(
+                    r'[!#]?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*?#$!_-])\[[^]]*',
+                    text[frames[-1][1]:cursor]))):
             raise ValueError('shell substitution boundary')
         if (not quote and context == ')' and word_start
                 and re.match(r'case(?=$|[\s;&|()])', text[cursor:])):
@@ -2323,7 +2329,13 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                 stack.pop()
         if any(kind in {'if', 'while', 'until', 'case'} for kind in stack):
             return True
-        before = [token for token in tokens if token[2] < position]
+        before = []
+        for token in tokens:
+            if token[2] >= position:
+                break
+            if token[0] == '\n' and before and before[-1][0] in {'&', '|'}:
+                continue
+            before.append(token)
         boundary = max((index for index, token in enumerate(before) if token[0] in {';', '\n'}), default=-1)
         return any(left[0] == right[0] and left[0] in {'&', '|'} and left[3] == right[2]
                    for left, right in zip(before[boundary + 1:], before[boundary + 2:]))
@@ -2421,10 +2433,10 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                 for _, code, _, _ in arguments:
                     code_tokens = shell_raw_words(code)
                     code_positions = shell_command_positions(code_tokens)
-                    if (shell_defines_function(code_tokens, code_positions)
-                            or any(code_value in {'source', 'eval', 'trap'}
-                                   or code_value == '.' and code_start in code_positions
-                                   for _, code_value, code_start, _ in code_tokens)):
+                    if (re.search(r'\(\s*\)', code)
+                            or shell_defines_function(code_tokens, code_positions)
+                            or any(code_value in {'source', 'eval', 'trap', 'function', '.'}
+                                   for _, code_value, _, _ in code_tokens)):
                         numeric.clear()
     for name in numeric | numeric_scopes.keys():
         for raw, value, start, end in tokens:
@@ -3368,6 +3380,12 @@ def pre(data):
                 reason = inline_interpreter_denial(command, data.get('cwd'))
                 if reason:
                     deny(classifier_reason + ' Rule: ' + reason + '.')
+                try:
+                    list(shell_substitution_bodies(shell_without_heredoc_bodies(command), arithmetic_quotes=True))
+                except ValueError as error:
+                    if str(error) == 'shell substitution boundary':
+                        deny(classifier_reason + ' Rule: inline interpreter code rule (substitution boundary).')
+                    raise
             except Exception:
                 deny(classifier_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''

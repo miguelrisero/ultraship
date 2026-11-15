@@ -31,6 +31,84 @@ class WriterHeredocTests(unittest.TestCase):
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
+    def test_double_quoted_offset_quote_keeps_arithmetic_refused(self):
+        self.assertTrue(self.denied('''echo "${s:'$((y))'}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_length_quote_keeps_substitution_refused(self):
+        self.assertTrue(self.denied('''echo "${s:0:'$(no""de -""e 1)'}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_index_quote_keeps_substitution_refused(self):
+        self.assertTrue(self.denied('''echo "${a['$(no""de -""e 1)']}"'''))
+        self.assertIn('array subscript evaluation rule (subscript payload)', self.reason)
+
+    def test_double_quoted_arithmetic_quote_keeps_substitution_refused(self):
+        self.assertTrue(self.denied('''echo "$(( '$(no""de -""e 1)' ))"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_offset_quote_keeps_backtick_refused(self):
+        self.assertTrue(self.denied('''echo "${s:'`y`'}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_length_quote_keeps_backtick_refused(self):
+        self.assertTrue(self.denied('''echo "${s:0:'`no""de -""e 1`'}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_index_quote_keeps_backtick_refused(self):
+        self.assertTrue(self.denied('''echo "${a['`no""de -""e 1`']}"'''))
+        self.assertIn('array subscript evaluation rule (subscript payload)', self.reason)
+
+    def test_double_quoted_arithmetic_quote_keeps_backtick_refused(self):
+        self.assertTrue(self.denied('''echo "$(( '`no""de -""e 1`' ))"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_arithmetic_single_quotes_refuse_uncertain_boundary(self):
+        for command in (
+            '''echo "${s:'1'}"''', '''echo "${s:0:'1'}"''',
+            '''echo "${a['1']}"''', '''echo "$(( '1' ))"''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (substitution boundary)', self.reason)
+
+    def test_newline_after_and_keeps_loop_initializer_conditional(self):
+        self.assertTrue(self.denied('false &&\nfor ((i=0; i<1; i++)); do :; done; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_newline_after_or_keeps_assignment_conditional(self):
+        self.assertTrue(self.denied('false ||\ni=0; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_newline_after_and_keeps_arithmetic_initializer_conditional(self):
+        self.assertTrue(self.denied('false &&\n((i=0)); (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_newline_after_pipe_keeps_loop_proof_in_child(self):
+        self.assertTrue(self.denied('for ((i=0; i<1; i++)); do :; done |\ncat; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_literal_eval_parenthesis_function_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; eval 'f() { :; }'; f; (( i ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_literal_eval_keyword_function_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; eval 'function f { :; }'; f; (( i ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_literal_eval_dot_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; eval 'echo $i; . ./s'; (( i ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_arithmetic_quote_and_list_literal_controls_stay_admitted(self):
+        for command in (
+            "i=0; eval 'echo $i'; (( i++ ))",
+            'for ((i=0; i<3; i++)); do echo "$i"; done',
+            'echo "${s:1:2}"', 'echo "$(( 1 + 2 ))"', '''echo "${x#'prefix'}"''',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_hash_pattern_quote_keeps_arithmetic_refused(self):
         self.assertTrue(self.denied('''echo "${x#'}'"'$((y))'"}"'''))
         self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
