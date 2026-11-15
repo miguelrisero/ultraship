@@ -58,8 +58,15 @@ class CoordinationRemedyContractTests(unittest.TestCase):
     def test_contract_consumes_one_resend_durably_before_sending(self):
         self.assertIn('Record the denial and consumed resend on the durable run board before sending, '
                       'keyed by the unchanged action, recipient, and scope.', self.refusals)
-        self.assertIn('Absent records, consumed attempts, and a failed second attempt '
-                      'stay blocked across recovery.', self.refusals)
+        self.assertIn('Recovery, replacement, and new sessions use the same record '
+                      'and retain its consumed state; absent records, consumed attempts, '
+                      'a failed second attempt, and a recorded final corrected brief stay blocked across recovery, '
+                      'except one eligible final corrected brief not yet recorded.', self.refusals)
+        self.assertIn('A failed corrected send stays consumed.', self.refusals)
+        block = self.refusals.partition('For resend consumption, block ')[2].partition('.')[0]
+        for case in ('absent or uncertain records', 'consumed attempts'):
+            with self.subTest(case=case):
+                self.assertIn(case, block)
         self.assertIn('A version, restart, or new session alone lifts nothing; '
                       'never reset an attempt or substitute an executor '
                       'to bypass a still-effective refusal.', self.refusals)
@@ -121,15 +128,28 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'and all unrelated non-prose fields.',
             'Both the wording rewrite and fresh brief require matching formatting findings, '
             'exact remedies, original-call evidence, and canonical exclusive custody below.',
-            "Share that original call's single attempt between the rewrite and fresh brief; "
+            "Share that original call's single attempt across both routes, the rewrite, and the fresh brief; "
             'durably consume it before either action.',
-            'Deny both actions when that attempt is consumed; a fresh instruction creates zero additional attempt.',
+            "Deny every other action on a consumed attempt; that brief's refusal and every content, safety, "
+            'protected-path, non-formatting hook, mixed, or ambiguous denial stay final.',
             'Keep actors outside that lane refused, hook-denied commands refused in every form, '
             'and every content, protected-path, and publication denial final.',
             'Except under the ordinary-file method-only rule or the fresh message-format instruction:',
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, self.refusals)
+
+    def test_contract_allows_one_final_corrected_brief_after_a_consumed_format_refusal(self):
+        allowance = (
+            'After the consumed rewrite or fresh brief draws another formatting-only refusal, '
+            'the coordinator may dispatch one final corrected brief to one fresh writer for the same slice.'
+        )
+        self.assertIn(allowance, self.refusals)
+        self.assertIn(
+            "That brief keeps the same action, scope, authority, and content, passes the refused call's "
+            '`text_lint.py` check, and is recorded as consumed on the same canonical run-board record before sending.',
+            self.refusals,
+        )
 
     def test_contract_keeps_the_refusal_rule_line_budget(self):
         self.assertLessEqual(len([line for line in self.refusals.splitlines() if line.strip()]), 8)
@@ -198,7 +218,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'An existing atomic claim qualifies only when its guarantees cover this same canonical record.',
             'A read followed by an append alone supplies zero exclusivity proof.',
             'Durably consume the single attempt and confirm persistence before sending.',
-            'Recovery, replacement, and new sessions use the same record and retain its consumed state.',
+            'Recovery, replacement, and new sessions use the same record and retain its consumed state;',
             'A failed corrected send stays consumed.',
             'Never use alternate delivery or substitute execution for a still-effective refusal.',
         ):
