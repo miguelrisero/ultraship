@@ -251,7 +251,7 @@ def signature(receipt, key):
 
 def pending_path(identity):
     key = hashlib.sha256(canonical([identity.get(field) for field in
-                                   ('session_id', 'tool_name', 'recipient')])).hexdigest()
+                                   ('session_id', 'agent_id', 'tool_name', 'recipient')])).hexdigest()
     return store_dir() / 'pending' / key
 
 
@@ -327,7 +327,7 @@ def check_pending(event):
     session = event.get('session_id')
     if not prose or not isinstance(session, str) or not session:
         return
-    entry = pending_entry({'session_id': session, **input_identity(event)})
+    entry = pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **input_identity(event)})
     if entry and entry['state'] == 'open':
         receipt_id = entry['id']
         raise ValueError('A formatting-only refusal to this recipient is pending. Cite its receipt `'
@@ -342,7 +342,7 @@ def write_receipt(event, findings, formatting_only, parent, resend_refused=False
         raise OSError('Receipt store contains 2000 receipts younger than 24 hours.')
     session = event.get('session_id')
     identity = input_identity(event)
-    entry = None if resend_refused else pending_entry({'session_id': session, **identity})
+    entry = None if resend_refused else pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **identity})
     spent = entry is not None and entry['state'] == 'spent'
     receipt = {
         'id': uuid.uuid4().hex,
@@ -428,6 +428,8 @@ def consume_receipt(receipt_id, event):
             raise ValueError('Receipt does not permit a resend.')
         if not event.get('session_id') or receipt.get('session_id') != event['session_id']:
             raise ValueError('Receipt session differs or is absent.')
+        if receipt.get('agent_id') != event.get('agent_id'):
+            raise ValueError('Receipt sender differs.')
         identity = input_identity(event)
         if any(receipt.get(field) != identity[field] for field in ('tool_name', 'recipient', 'fields_sha256')):
             raise ValueError('Receipt tool, recipient or non-prose fields differ.')

@@ -174,7 +174,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
                 driver = (ROOT / 'plugins/ship/agents' / name).read_text()
                 self.assertIn('Apply its once-only formatting contract to `Agent` and `SendMessage` '
                               'when every returned finding matches a known `text_lint.py` formatting message '
-                              'and, for a `text_lint.py` refusal, its hook receipt is cited.', driver)
+                              'and, for a `text_lint.py` refusal, a resend cites its hook receipt '
+                              'and a fresh brief records it on the run board.', driver)
 
     def test_contract_requires_known_formatting_findings_and_blocks_unknown_evidence(self):
         for removed in ('authenticated', 'producer attribution', 'producer authentication', 'by elimination'):

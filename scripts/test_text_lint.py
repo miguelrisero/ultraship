@@ -241,6 +241,25 @@ class TextLintTests(unittest.TestCase):
         self.assertIn('Receipt is consumed.', self.hook_refusal(event))
         self.assertFalse(self.last_receipt['resend_allowed'])
 
+    def test_receipt_binds_the_sending_agent(self):
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        self.assertTrue(self.last_receipt['formatting_only'])
+        self.assertTrue(self.last_receipt['resend_allowed'])
+        sibling = self.resend(receipt_id)
+        sibling['agent_id'] = 'agent-two'
+        self.assertIn('Receipt sender differs.', self.hook_refusal(sibling))
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        valid = 'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.'
+        sibling = self.event(valid)
+        sibling['agent_id'] = 'agent-two'
+        self.assertIsNone(self.hook_output(sibling))
+        self.assertIsNone(self.hook_output(self.resend(receipt_id)))
+        self.assertEqual(list((self.state / 'pending').glob('*')), [])
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        self.assertIn('Receipt is consumed.', self.hook_refusal(self.resend(receipt_id)))
+
     def test_session_recipient_tool_and_fields_are_bound(self):
         for field in ('session_id', 'recipient', 'tool_name', 'fields', 'null_session'):
             with self.subTest(field=field):
@@ -447,7 +466,7 @@ class TextLintTests(unittest.TestCase):
         self.hook_refusal(self.event())
         receipt_id = self.last_receipt['id']
         pending = next((self.state / 'pending').iterdir())
-        expected_key = hashlib.sha256(json.dumps(['session-one', 'SendMessage', 'chief'],
+        expected_key = hashlib.sha256(json.dumps(['session-one', 'agent-one', 'SendMessage', 'chief'],
                                                separators=(',', ':'), ensure_ascii=True).encode()).hexdigest()
         self.assertEqual(pending.name, expected_key)
         self.assertEqual(json.loads(pending.read_text()), {'id': receipt_id, 'state': 'open'})
@@ -498,7 +517,7 @@ class TextLintTests(unittest.TestCase):
         pending = next((self.state / 'pending').iterdir())
         for tool in ('Agent', 'Task'):
             with self.subTest(tool=tool):
-                event = {'session_id': 'session-one', 'tool_name': tool,
+                event = {'session_id': 'session-one', 'agent_id': 'agent-one', 'tool_name': tool,
                          'tool_input': {'subagent_type': 'ship:writer--sol', 'prompt': 'word ' * 26}}
                 before = list((self.state / 'receipts').glob('*.json'))
                 self.assertIsNone(self.hook_output(event))
