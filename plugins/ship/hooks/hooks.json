@@ -3,7 +3,7 @@
     "PreToolUse": [
       {
         "matcher": "Agent|Task|Bash|Edit|Write|NotebookEdit|WebSearch|mcp__bettercoding__(create_input|update_input|set_input_status)",
-        "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py\" pre" }]
+        "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py\" pre", "onFailure": "block" }]
       },
       {
         "matcher": "^(Read|Grep|Glob|LSP|WebFetch|mcp__fff__.*)$",
@@ -11,7 +11,7 @@
       },
       {
         "matcher": "Agent|Task|SendMessage|mcp__bettercoding__(create_input|update_input)",
-        "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/text_lint.py\" hook" }]
+        "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/text_lint.py\" hook", "onFailure": "block" }]
       }
     ],
     "SubagentStop": [
