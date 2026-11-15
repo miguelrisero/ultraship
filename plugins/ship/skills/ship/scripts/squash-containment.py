@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify a PR-linked squash with exact per-file modes and normalized diff bytes."""
+"""Verify a PR-linked squash with exact file diffs and a clean-merge tree."""
 import json
 import os
 import re
@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 DIFF = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames',
-        '--binary', '--full-index']
+        '--binary', '--full-index', '--ignore-submodules=none']
 
 
 def run(*args, input=None):
@@ -24,7 +24,7 @@ def paths(revisions):
 
 def file_diff(revisions, path):
     path = os.fsdecode(path)
-    raw = git('diff', '--no-ext-diff', '--no-renames', '--raw', '-z',
+    raw = git('diff', '--no-ext-diff', '--no-renames', '--ignore-submodules=none', '--raw', '-z',
               *revisions, '--', path).split(b'\0')
     fields = raw[0].split()
     if len(raw) != 3 or raw[1] != os.fsencode(path) or len(fields) != 5:
@@ -73,6 +73,9 @@ def main(args):
         for path in sorted(changed):
             if file_diff(left, path) != file_diff(right, path):
                 raise ValueError(f'file diffs differ for {os.fsdecode(path)!r}')
+        tree = git('merge-tree', '--write-tree', '--no-messages', parent, author).partition(b'\n')[0]
+        if tree != git('rev-parse', f'{squash}^{{tree}}').strip():
+            raise ValueError('squash tree differs from the clean merge of the author head')
     except subprocess.CalledProcessError as exc:
         print(f'REFUSE {exc.cmd[0]} command failed (exit {exc.returncode})')
         return 1

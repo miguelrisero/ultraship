@@ -19,14 +19,15 @@ CONTRACT_PATHS = (
     )),
 )
 BODY = '''Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
-A single-parent squash commit meets that requirement only when it contains the recorded base and both conditions below hold.
+A single-parent squash commit meets that requirement only when it contains the recorded base and all conditions below hold.
 1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
 2. Both diffs change the same files with the same file modes, and each file's diff is byte-equal.
-Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent.
+3. The squash commit's tree equals the clean merge of the author head into the squash commit's parent.
+Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent, with submodule changes included.
 Ignore only each diff's `index` line and the line numbers in its hunk headers; apply no whitespace normalization.
 The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
 Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
-Refuse the squash commit when either condition fails or the evidence is missing, stale or ambiguous.
+Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.
 Every other commit keeps the containment requirement unchanged.
 '''
 
@@ -142,6 +143,41 @@ class SquashContainmentTests(unittest.TestCase):
         result = self.check(base=base, author=author, squash=self.git('rev-parse', 'HEAD'))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(result.stdout.startswith('PASS '), result.stdout)
+
+    def test_identical_hunk_at_a_different_location_refuses(self):
+        self.git('checkout', '-b', 'repeated-main', self.base)
+        lines = ['same\n'] * 40
+        self.commit({'repeated.txt': ''.join(lines)})
+        base = self.git('rev-parse', 'HEAD')
+        self.git('checkout', '-b', 'repeated-feature')
+        lines[7] = 'changed\n'
+        self.commit({'repeated.txt': ''.join(lines)})
+        author = self.git('rev-parse', 'HEAD')
+        self.git('checkout', 'repeated-main')
+        lines[7], lines[27] = 'same\n', 'changed\n'
+        self.commit({'repeated.txt': ''.join(lines)})
+        squash = self.git('rev-parse', 'HEAD')
+        self.assert_refuse(self.check(base=base, author=author, squash=squash), 'clean merge')
+
+    def test_ignored_submodule_pointer_difference_refuses(self):
+        self.git('checkout', '-b', 'gitlink-main', self.base)
+        self.git('update-index', '--add', '--cacheinfo', f'160000,{self.base},dependency')
+        self.git('commit', '-m', 'Base gitlink')
+        base = self.git('rev-parse', 'HEAD')
+        self.git('checkout', '-b', 'gitlink-feature')
+        self.git('update-index', '--cacheinfo', f'160000,{self.author},dependency')
+        self.commit({'alpha.txt': 'alpha gitlink feature\n'})
+        author = self.git('rev-parse', 'HEAD')
+        self.git('checkout', 'gitlink-main')
+        self.git('config', 'diff.ignoreSubmodules', 'all')
+        self.git('merge', '--squash', 'gitlink-feature')
+        self.git('commit', '-m', 'Gitlink squash')
+        equal = self.check(base=base, author=author, squash=self.git('rev-parse', 'HEAD'))
+        self.assertEqual(equal.returncode, 0, equal.stdout + equal.stderr)
+        self.git('update-index', '--cacheinfo', f'160000,{self.base},dependency')
+        tree = self.git('write-tree')
+        squash = self.git('commit-tree', tree, '-p', base, '-m', 'Omitted gitlink')
+        self.assert_refuse(self.check(base=base, author=author, squash=squash), 'file sets')
 
     def test_extra_changed_file_refuses(self):
         self.commit({'extra.txt': 'extra\n'})

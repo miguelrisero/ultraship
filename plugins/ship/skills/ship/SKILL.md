@@ -148,14 +148,15 @@ Approved test adaptations follow the writer contract (owner rule, Input `32c223a
 ### Squash-merge containment
 
 Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
-A single-parent squash commit meets that requirement only when it contains the recorded base and both conditions below hold.
+A single-parent squash commit meets that requirement only when it contains the recorded base and all conditions below hold.
 1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
 2. Both diffs change the same files with the same file modes, and each file's diff is byte-equal.
-Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent.
+3. The squash commit's tree equals the clean merge of the author head into the squash commit's parent.
+Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent, with submodule changes included.
 Ignore only each diff's `index` line and the line numbers in its hunk headers; apply no whitespace normalization.
 The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
 Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
-Refuse the squash commit when either condition fails or the evidence is missing, stale or ambiguous.
+Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.
 Every other commit keeps the containment requirement unchanged.
 
 ### Fifth standing adaptation
