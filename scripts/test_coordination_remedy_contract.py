@@ -59,7 +59,9 @@ class CoordinationRemedyContractTests(unittest.TestCase):
         self.assertIn('Record the denial and consumed resend on the durable run board before sending, '
                       'keyed by the unchanged action, recipient, and scope.', self.refusals)
         self.assertIn('Recovery, replacement, and new sessions use the same record '
-                      'and retain its consumed state.', self.refusals)
+                      'and retain its consumed state; absent records, a failed second attempt, '
+                      'a recorded final corrected brief, and every other action on a consumed attempt '
+                      'stay blocked across recovery.', self.refusals)
         self.assertIn('A failed corrected send stays consumed.', self.refusals)
         block = self.refusals.partition('For resend consumption, block ')[2].partition('.')[0]
         for case in ('absent or uncertain records', 'consumed attempts'):
@@ -129,7 +131,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             "Share that original call's single attempt across both routes, the rewrite, and the fresh brief; "
             'durably consume it before either action.',
             "Deny every other action on a consumed attempt; that brief's refusal and every content, safety, "
-            'protected-path, hook, mixed, or ambiguous denial stay final.',
+            'protected-path, non-formatting hook, mixed, or ambiguous denial stay final.',
             'Keep actors outside that lane refused, hook-denied commands refused in every form, '
             'and every content, protected-path, and publication denial final.',
             'Except under the ordinary-file method-only rule or the fresh message-format instruction:',
@@ -148,13 +150,6 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             '`text_lint.py` check, and is recorded as consumed on the same canonical run-board record before sending.',
             self.refusals,
         )
-        denial = self.refusals.partition('Deny every other action on a consumed attempt;')[2].partition('.')[0]
-        for case in ("that brief's refusal", 'content', 'safety', 'protected-path',
-                     'hook', 'mixed', 'ambiguous', 'stay final'):
-            with self.subTest(case=case):
-                self.assertIn(case, denial)
-        self.assertGreater(self.refusals.index(allowance),
-                           self.refusals.index('durably consume it before either action.'))
 
     def test_contract_keeps_the_refusal_rule_line_budget(self):
         self.assertLessEqual(len([line for line in self.refusals.splitlines() if line.strip()]), 8)
@@ -223,7 +218,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'An existing atomic claim qualifies only when its guarantees cover this same canonical record.',
             'A read followed by an append alone supplies zero exclusivity proof.',
             'Durably consume the single attempt and confirm persistence before sending.',
-            'Recovery, replacement, and new sessions use the same record and retain its consumed state.',
+            'Recovery, replacement, and new sessions use the same record and retain its consumed state;',
             'A failed corrected send stays consumed.',
             'Never use alternate delivery or substitute execution for a still-effective refusal.',
         ):
