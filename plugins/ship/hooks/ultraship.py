@@ -1150,58 +1150,77 @@ STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock
 
 
 def read_only_argument_word(command, tokens, words, index):
-    # These commands never run an argument word when redefinitions, execution options and output consumers are excluded.
-    boundary = r'[\s;&|(){}<>`]'
-    if re.search(
-            rf'(?:^|{boundary})(?:'
-            rf'(?:function|alias|unalias|hash|enable|builtin|command|source|\.|eval|exec|trap|'
-            rf'export|declare|typeset|local|readonly|read|mapfile|readarray|getopts|let|printf|unset|for|select)'
-            rf'(?=$|{boundary})|[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)|'
-            rf'[A-Za-z_][A-Za-z0-9_]*(?:\[[^\n]*\])?\+?=)', command):
+    # These commands never run an argument word within read-only pipelines after a literal directory change.
+    if not index or any(char in command for char in '$`<>'):
         return False
-    if (not index or words[0][0] not in {'rg', 'grep', 'ls', 'cat', 'find'}
-            or any(word[0] in {'<', '>'} for word in words)
-            or any(token[0] in {'(', ')', '`'} for token in tokens)):
-        return False
-    raw = words[index][0]
-    if '$' in raw or '`' in raw:
-        return False
-    quote, cursor = '', 0
-    while cursor < len(raw):
-        char = raw[cursor]
-        if char == '\\' and quote != "'":
-            cursor += 2
-            continue
-        if char == quote:
-            quote = ''
-        elif not quote:
-            if char in "'\"":
-                quote = char
-            elif char in '*?[{':
-                break
-        cursor += 1
     try:
-        prefix = ''.join(shlex.split(raw[:cursor]))
+        original = shell_raw_words(command)
     except ValueError:
         return False
-    if not prefix or prefix.startswith('-'):
+    if original != tokens or not original or any(token[0] in {';', '(', ')', '\n'} for token in original):
         return False
-    name = words[0][0]
-    if name in {'rg', 'find'} and any(
-            word[1].startswith('-') and unresolved_shell_word(word[0]) for word in words):
-        return False
-    if name == 'rg' and any(word[1].startswith(('--pre', '--hostname-bin')) for word in words):
-        return False
-    if name == 'find' and any(word[1] in {
-            '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'} for word in words):
-        return False
-    cursor = next(position + 1 for position, token in enumerate(tokens) if token[2] == words[-1][2])
-    while cursor < len(tokens) and tokens[cursor][0] == '|':
-        cursor += 1
-        if cursor >= len(tokens) or tokens[cursor][0] not in {'head', 'tail', 'wc'}:
+    cursor = 0
+    if original[0][0] == 'cd':
+        if (len(original) < 5 or original[2][0] != '&' or original[3][0] != '&'
+                or original[2][3] != original[3][2]):
             return False
-        while cursor < len(tokens) and tokens[cursor][0] not in {';', '&', '|', '\n'}:
+        path = original[1][0]
+        if path.startswith('-') or any(char in path for char in "'\"\\$*?[{~"):
+            return False
+        cursor = 4
+    pipelines = [[[]]]
+    while cursor < len(original):
+        token = original[cursor]
+        if token[0] == '&':
+            if (not pipelines[-1][-1] or cursor + 1 >= len(original)
+                    or original[cursor + 1][0] != '&' or token[3] != original[cursor + 1][2]):
+                return False
+            pipelines.append([[]])
+            cursor += 2
+            continue
+        if token[0] == '|':
+            if not pipelines[-1][-1]:
+                return False
+            pipelines[-1].append([])
+        else:
+            pipelines[-1][-1].append(token)
+        cursor += 1
+    if not pipelines[-1][-1] or not any(pipeline[0] == words for pipeline in pipelines):
+        return False
+    for pipeline in pipelines:
+        first = pipeline[0]
+        name = first[0][0]
+        if (name not in {'rg', 'grep', 'ls', 'cat', 'find'}
+                or any(part[0][0] not in {'head', 'tail', 'wc'} for part in pipeline[1:])):
+            return False
+        if name == 'rg' and any(word[1].startswith(('--pre', '--hostname-bin')) for word in first):
+            return False
+        if name == 'find' and any(word[1] in {
+                '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'} for word in first):
+            return False
+    for raw, value, start, end in original:
+        if raw == '|' or not unresolved_shell_word(raw):
+            continue
+        quote, cursor = '', 0
+        while cursor < len(raw):
+            char = raw[cursor]
+            if char == '\\' and quote != "'":
+                cursor += 2
+                continue
+            if char == quote:
+                quote = ''
+            elif not quote:
+                if char in "'\"":
+                    quote = char
+                elif char in '*?[{':
+                    break
             cursor += 1
+        try:
+            prefix = ''.join(shlex.split(raw[:cursor]))
+        except ValueError:
+            return False
+        if not prefix or prefix.startswith('-'):
+            return False
     return True
 
 
