@@ -161,6 +161,15 @@ REFUSE = (
     "env --split-string='gh api repos/o/r/pulls/7/comments --input reply.json'",
     "env -S'gh api repos/o/r/pulls/7/comments --input reply.json'",
     "env -iS'gh api repos/o/r/pulls/7/comments --input reply.json'",
+    'gh 2>/dev/null api repos/o/r/pulls/7/comments --input reply.json',
+    'gh 2> /dev/null api repos/o/r/pulls/7/comments --input reply.json',
+    'gh >/dev/null api repos/o/r/pulls/7/comments -f body=x',
+    'gh </dev/null api repos/o/r/pulls/7/comments -f body=x',
+    'gh 2>&1 api repos/o/r/pulls/7/comments -f body=x',
+    'gh &>x api repos/o/r/pulls/7/comments -f body=x',
+    'gh api repos/o/r/pulls/7/comments 2>&1 -f body=x',
+    'gh api repos/o/r/pulls/7/comments >&2 -f body=x',
+    "tmux new 'gh 2>/dev/null api repos/o/r/pulls/7/comments -f body=x'",
 )
 
 ADMIT = (
@@ -209,6 +218,10 @@ ADMIT = (
     "env -S 'echo hi'",
     'ssh host uptime',
     "curl -s https://api.linear.app/graphql -d 'route through api'",
+    'gh api repos/o/r/pulls/7 2>/dev/null',
+    'gh pr view 7 2>&1 | head',
+    'gh api repos/o/r/pulls/7 > out.json',
+    'gh pr checks 7 &> checks.txt',
 )
 
 
