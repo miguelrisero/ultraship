@@ -101,8 +101,8 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
                              ('Bash', {'command': 'git add plugins/ship/hooks/text_lint.py'}),
                              ('Bash', {'command': 'python3 -m unittest scripts.test_text_lint'}),
                              ('Bash', {'command': 'python3 plugins/ship/hooks/text_lint.py --self-test'}),
-                             ('Grep', {'path': str(HOOK.parents[3]), 'pattern': 'key'}),
-                             ('Grep', {'path': str(HOOK.parents[3]), 'pattern': '/'}),
+                             ('Grep', {'path': str(HOOK.parent), 'pattern': 'key'}),
+                             ('Grep', {'path': str(HOOK.parent), 'pattern': '/'}),
                              ('Read', {'file_path': str(Path(tmp) / 'ordinary.txt')})):
             assert not denied(hook('pre', {**caller, 'tool_name': tool, 'tool_input': inputs}, env)), (caller, tool, inputs)
         for cwd in (tmp, str(receipt_store.parent), str(receipt_store)):
