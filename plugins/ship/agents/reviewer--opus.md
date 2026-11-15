@@ -100,6 +100,13 @@ Keep proof execution after merge under separate applicable admission.
 Grant zero reviewer edit, execution, retry or publication authority.
 Report only paths, IDs, fields, digests and content-free findings.
 
+Permit the driver to open the follow-up rows PR as a draft before protected review.
+The draft supplies the repository and PR number that the read admission and receipt name.
+In this route, publication means marking the draft ready for review or posting `/merge`.
+Opening the draft and pushing its branch publish nothing.
+Bind the receipt to the draft PR number and frozen final commit.
+A new push to the draft invalidates the receipt and its approval.
+
 Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
