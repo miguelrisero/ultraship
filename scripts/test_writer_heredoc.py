@@ -62,6 +62,8 @@ class WriterHeredocTests(unittest.TestCase):
             r'''rg foo ./x/* /x/python*/a''',
             r'''rg needle '=payload' /x/python*/a''',
             r'''rg needle a/b==c /x/python*/a''',
+            r'''rg needle '!!' /x/python*/a''',
+            r'''rg needle \!\! /x/python*/a''',
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
@@ -242,8 +244,6 @@ class WriterHeredocTests(unittest.TestCase):
                 r'''rg needle a#b /x/python*/a''',
                 r'''rg needle "/"* /x/python*/a''',
                 r'''rg needle "!!" /x/python*/a''',
-                r'''rg needle '!!' /x/python*/a''',
-                r'''rg needle \!\! /x/python*/a''',
             )),
         ):
             for command in commands:

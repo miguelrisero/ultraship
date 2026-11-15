@@ -1151,7 +1151,7 @@ STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock
 
 def read_only_argument_word(command, tokens, words, index):
     # These commands never run an argument word within read-only pipelines after a literal directory change.
-    if not index or any(char in command for char in '$`<>~!'):
+    if not index or any(char in command for char in '$`<>~'):
         return False
     try:
         original = shell_raw_words(command)
@@ -1212,6 +1212,8 @@ def read_only_argument_word(command, tokens, words, index):
         quote, cursor, prefix_end = '', 0, len(raw)
         while cursor < len(raw):
             char = raw[cursor]
+            if char == '!' and quote == '"':
+                return False
             if char == '\\' and quote != "'":
                 cursor += 2
                 continue
