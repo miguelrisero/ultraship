@@ -141,6 +141,8 @@ class WriterHeredocTests(unittest.TestCase):
             'echo "${PWD:0:10}"', 'echo "${a[@]}" "${#a[@]}"', 'echo "${a[1]} $HOME"',
             'declare -i n=5', 'for ((i=0; i<10; i++)); do echo "$i"; done',
             'n=3; (( n > 1 ))', '(( i = 0, i < 3 ))',
+            'i=0; while [ "$i" -lt 3 ]; do i=$((i+1)); done',
+            'total=0; for f in a b; do total=$((total + 1)); done',
             'echo "${!BASH*}"', 'echo "${!a[@]}"', 'echo "${!a[*]}"',
             'declare -i n; n=5', 'declare -a a', 'local x=1',
             'cp file{,.orig}', 'mkdir -p src/{local,remote}', 'mv "$f"{,.bak}',

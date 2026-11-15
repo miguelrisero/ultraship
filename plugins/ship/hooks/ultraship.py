@@ -1793,6 +1793,244 @@ def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
     return None
 
 
+def shell_substitution_bodies(text):
+    """Keep substitution quote state separate from the surrounding shell word."""
+    frames, quote, cursor = [], '', 0
+    while cursor < len(text):
+        char = text[cursor]
+        if char == '\\' and quote != "'":
+            cursor += 2
+            continue
+        if quote == "'":
+            if char == quote:
+                quote = ''
+        elif char == '`' and frames and frames[-1][0] == '`':
+            _, start, quote, _ = frames.pop()
+            yield text[start:cursor]
+        elif text.startswith('$(', cursor) and not text.startswith('$((', cursor):
+            frames.append((')', cursor + 2, quote, 1))
+            quote = ''
+            cursor += 1
+        elif char == '`':
+            frames.append(('`', cursor + 1, quote, 1))
+            quote = ''
+        elif char == quote:
+            quote = ''
+        elif char in "'\"" and not quote:
+            quote = char
+        elif not quote and frames and frames[-1][0] == ')':
+            closing, start, outer_quote, depth = frames[-1]
+            if char == '(':
+                frames[-1] = (closing, start, outer_quote, depth + 1)
+            elif char == ')':
+                if depth == 1:
+                    frames.pop()
+                    yield text[start:cursor]
+                    quote = outer_quote
+                else:
+                    frames[-1] = (closing, start, outer_quote, depth - 1)
+        cursor += 1
+    for _, start, _, _ in frames:
+        yield text[start:]
+
+
+def runtime_name_denial(text, tokens, arithmetic, groups, commands):
+    """Refuse unresolved values where Bash recursively evaluates names or arithmetic."""
+    reason = 'array subscript evaluation rule ('
+    identifier = r'[A-Za-z_][A-Za-z0-9_]*'
+    regions = []
+    for index, token in enumerate(tokens):
+        if token[2] in arithmetic:
+            regions.append((token[2], token[3]))
+    merged = []
+    for start, end in regions:
+        if merged and not text[merged[-1][1]:start].strip():
+            merged[-1] = (merged[-1][0], end)
+        else:
+            merged.append((start, end))
+    regions = merged
+    quote, cursor = '', 0
+    while cursor < len(text):
+        char = text[cursor]
+        if char == '\\' and quote != "'":
+            cursor += 2
+            continue
+        if char == quote:
+            quote = ''
+        elif char in "'\"" and not quote:
+            quote = char
+        elif quote != "'" and text.startswith(('$((', '$['), cursor):
+            opening = 3 if text.startswith('$((', cursor) else 2
+            closing = '))' if opening == 3 else ']'
+            end = text.find(closing, cursor + opening)
+            regions.append((cursor + opening, len(text) if end < 0 else end))
+        elif quote != "'" and text.startswith('${', cursor):
+            start, end, inner_quote, brackets = cursor + 2, cursor + 2, '', 0
+            while end < len(text):
+                current = text[end]
+                if current == '\\' and inner_quote != "'":
+                    end += 2
+                    continue
+                if current == inner_quote:
+                    inner_quote = ''
+                elif current in "'\"" and not inner_quote:
+                    inner_quote = current
+                elif not inner_quote:
+                    if current == '[':
+                        brackets += 1
+                    elif current == ']':
+                        brackets -= 1
+                    elif current == '}' and brackets == 0:
+                        break
+                end += 1
+            body = text[start:end]
+            if body.startswith('!') and not re.fullmatch(rf'!{identifier}(?:[*@]|\[[*@]\])', body):
+                return reason + 'indirect)'
+            parameter = re.match(rf'[!#]?{identifier}', body)
+            if parameter:
+                offset = parameter.end()
+                if body[offset:offset + 1] == '[':
+                    close = body.rfind(']')
+                    subscript = body[offset + 1:close if close >= 0 else len(body)]
+                    if re.search(r'\$|`|[<>]\(', subscript):
+                        return reason + 'subscript payload)'
+                    if subscript.strip() not in {'@', '*'}:
+                        regions.append((start + offset + 1, start + (close if close >= 0 else len(body))))
+                    offset = close + 1 if close >= 0 else len(body)
+                if body[offset:offset + 1] == ':' and body[offset + 1:offset + 2] not in {'-', '=', '?', '+'}:
+                    regions.append((start + offset + 1, end))
+            cursor = end
+        cursor += 1
+    for raw, _, start, _ in tokens:
+        match = re.match(rf'{identifier}\[(.*?)\](?:\+?=)', raw)
+        if match and match[1].strip() not in {'@', '*'}:
+            regions.append((start + match.start(1), start + match.end(1)))
+    name_commands = {'printf', 'test', '[', '[[', 'declare', 'typeset', 'local', 'export',
+                     'readonly', 'unset', 'read', 'wait', 'let', 'mapfile', 'readarray', 'getopts'}
+    attributes = {}
+    for words in commands:
+        if words and words[0][1].startswith('-') and any(
+                tokens[closing][3] <= words[0][2] and not text[tokens[closing][3]:words[0][2]].strip()
+                and opening > 0 and tokens[opening - 1][0] == '$'
+                for opening, closing in groups.items()):
+            return reason + 'name)'
+        for index, (raw, value, start, end) in enumerate(words):
+            for name, (attribute, declared_end) in attributes.items():
+                if start > declared_end and re.search(rf'(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])', value):
+                    literal = rf'{re.escape(name)}=' + (r'[0-9]+' if attribute == 'i' else identifier)
+                    if not re.fullmatch(literal, value):
+                        return reason + 'attribute)'
+            unquoted = re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', raw)
+            if (unquoted.startswith('{') and any(char in unquoted for char in '$`')
+                    and not re.match(rf'{identifier}=', value)):
+                return reason + 'name)'
+            arguments = words[index + 1:]
+            if start in arithmetic or any(left <= start < right for left, right in regions):
+                continue
+            if value not in name_commands:
+                prefix = all(re.fullmatch(rf'{identifier}=.*', word[1], re.S) for word in words[:index])
+                if (prefix and not re.match(rf'{identifier}=', value)
+                        and any(char in raw for char in '$`') and any(
+                        word[1].startswith('-') or any(char in word[1] for char in '$`[') for word in arguments)):
+                    return reason + 'name)'
+                continue
+            if any('{' in re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', word[0])
+                   and any(char in word[1] for char in '-$`') for word in arguments):
+                return reason + 'name)'
+            if value in {'printf', 'test', '[', 'wait'}:
+                candidates = arguments
+                if value == 'printf':
+                    first = 0
+                    while first < len(arguments) and arguments[first][1].startswith('-'):
+                        if arguments[first][1] == '-v':
+                            first += 1
+                        first += 1
+                    candidates = arguments[first:first + 1]
+                for argument in candidates:
+                    position = arguments.index(argument)
+                    arg_raw, arg_value, _, _ = argument
+                    outside_quotes = re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', arg_raw)
+                    if (re.search(r'\$[@*]|\[[@*]\]', arg_raw)
+                            or any(char in outside_quotes for char in '$`')
+                            or any(char in arg_value for char in '$`') and position + 1 < len(arguments)
+                            and (value == 'printf' or any(char in arguments[position + 1][1] for char in '$`['))):
+                        return reason + 'name)'
+            if value == 'let':
+                regions.extend((word[2], word[3]) for word in arguments)
+            elif value in {'declare', 'typeset', 'local'}:
+                attribute = ''
+                for arg_raw, argument, arg_start, arg_end in arguments:
+                    if argument.startswith('-'):
+                        attribute = 'i' if 'i' in argument else 'n' if 'n' in argument else attribute
+                    elif attribute:
+                        target = argument.partition('=')[0]
+                        if re.fullmatch(identifier, target):
+                            attributes[target] = (attribute, arg_end)
+                        if attribute == 'i' and '=' in argument:
+                            regions.append((arg_start + arg_raw.find('=') + 1, arg_end))
+            elif value in {'mapfile', 'readarray'}:
+                operand, options = 0, True
+                while operand < len(arguments):
+                    argument = arguments[operand][1]
+                    if options and argument == '--':
+                        options = False
+                    elif options and argument.startswith('-'):
+                        for offset, option in enumerate(argument[1:], 2):
+                            if option == 'C':
+                                return reason + 'name)'
+                            if option in 'dnOsuc':
+                                if offset == len(argument):
+                                    operand += 1
+                                break
+                    elif any(char in argument for char in '$`['):
+                        return reason + 'name)'
+                    operand += 1
+            elif value == 'getopts' and len(arguments) > 1 and any(char in arguments[1][1] for char in '$`['):
+                return reason + 'name)'
+            elif value == '[[':
+                token_index = next(i for i, word in enumerate(tokens) if word[2] == start)
+                end_index = next((i for i in range(token_index + 1, len(tokens)) if tokens[i][0] == ']]'), len(tokens))
+                for position in range(token_index + 1, end_index):
+                    if tokens[position][1] in {'-eq', '-ne', '-lt', '-le', '-gt', '-ge'}:
+                        for neighbor in (position - 1, position + 1):
+                            if neighbor < len(tokens):
+                                word = tokens[neighbor]
+                                if word[0] in {')', '`'} or neighbor in groups:
+                                    return reason + 'arithmetic)'
+                                regions.append((word[2], word[3]))
+    numeric = set()
+    for start, end in regions:
+        for match in re.finditer(rf'(?<![A-Za-z0-9_#])({identifier})\s*=\s*[0-9]+(?=\s*(?:[,;)]|$))', text[start:end]):
+            numeric.add(match[1])
+    for raw, _, _, _ in tokens:
+        match = re.fullmatch(rf'({identifier})=[0-9]+', raw)
+        if match:
+            numeric.add(match[1])
+    integer_assignments = {}
+    for match in re.finditer(rf'(?<![A-Za-z0-9_])({identifier})="?\$\(\(', text):
+        end = text.find('))', match.end())
+        if end >= 0 and re.match(r'"?(?=$|[\s;&|])', text[end + 2:]):
+            integer_assignments[match.start()] = match[1]
+            numeric.add(match[1])
+    for name in tuple(numeric):
+        for raw, _, start, end in tokens:
+            if any(left <= start and end <= right for left, right in regions):
+                continue
+            remaining = re.sub(rf'\$(?:{name}(?![A-Za-z0-9_])|\{{{name}\}})', '', raw)
+            if re.fullmatch(rf'{name}=[0-9]+', raw) or integer_assignments.get(start) == name:
+                continue
+            if re.search(rf'(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])', remaining):
+                numeric.discard(name)
+                break
+    for start, end in regions:
+        expression = text[start:end]
+        for match in re.finditer(rf'(?<![A-Za-z0-9_#]){identifier}', expression):
+            if match[0] in numeric or re.match(r'\s*=(?!=)', text[start + match.end():end]):
+                continue
+            return reason + 'arithmetic)'
+    return None
+
+
 def inline_interpreter_denial(command, cwd=None):
     chdir_wrapper = chdir_wrapper_present(command)
     safe_directory = not chdir_wrapper and safe_directory_state(command, cwd)
@@ -1805,7 +2043,13 @@ def inline_interpreter_denial(command, cwd=None):
     pending = [(shell, (False, False, False))]
     seen = set()
     subscript_reason = None
-    while pending:
+    runtime_reason = None
+    substitutions = []
+    while pending or substitutions:
+        if not pending:
+            if subscript_reason:
+                return subscript_reason
+            pending, substitutions = substitutions, []
         text, inherited = pending.pop()
         text = shell_line_continuations(text)
         identity = (text, inherited)
@@ -1896,6 +2140,8 @@ def inline_interpreter_denial(command, cwd=None):
             for command_words in commands:
                 if subscript_reason is None:
                     subscript_reason = array_subscript_denial(command_words, arithmetic, tokens, groups, names_only=True)
+            if runtime_reason is None:
+                runtime_reason = runtime_name_denial(text, tokens, arithmetic, groups, commands)
         except Exception:
             if subscript_reason is None:
                 subscript_reason = 'array subscript evaluation rule (parse error)'
@@ -2001,7 +2247,8 @@ def inline_interpreter_denial(command, cwd=None):
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
         pending.extend((token[1], state) for token in nested)
-    return subscript_reason
+        substitutions.extend((body, state) for body in shell_substitution_bodies(text))
+    return subscript_reason or runtime_reason
 
 
 def git_push(command):
