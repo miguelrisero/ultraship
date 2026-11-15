@@ -1149,8 +1149,16 @@ SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh',
 STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su'}
 
 
-def read_only_argument_word(tokens, words, index):
-    # These commands never run an argument word when their execution options and output consumers are excluded.
+def read_only_argument_word(command, tokens, words, index):
+    # These commands never run an argument word when redefinitions, execution options and output consumers are excluded.
+    boundary = r'[\s;&|(){}<>`]'
+    if re.search(
+            rf'(?:^|{boundary})(?:'
+            rf'(?:function|alias|unalias|hash|enable|builtin|command|source|\.|eval|exec|trap|'
+            rf'export|declare|typeset|local|readonly|read|mapfile|readarray|getopts|let|printf|unset|for|select)'
+            rf'(?=$|{boundary})|[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)|'
+            rf'[A-Za-z_][A-Za-z0-9_]*(?:\[[^\n]*\])?\+?=)', command):
+        return False
     if (not index or words[0][0] not in {'rg', 'grep', 'ls', 'cat', 'find'}
             or any(word[0] in {'<', '>'} for word in words)
             or any(token[0] in {'(', ')', '`'} for token in tokens)):
@@ -2004,7 +2012,7 @@ def inline_interpreter_denial(command, cwd=None):
                               and unresolved_shell_word(raw))
                 names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
                 joined_code = (not neutral and unresolved_shell_word(raw)
-                               and not read_only_argument_word(tokens, words, index) and bool(re.search(
+                               and not read_only_argument_word(command, tokens, words, index) and bool(re.search(
                     rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw)))
                 if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
                                                    or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'}):
