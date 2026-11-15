@@ -229,6 +229,38 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command.rstrip()))
                 self.assertIn('array subscript evaluation rule', self.reason)
 
+    def test_grep_expansions_refuse_evaluated_subscript_payloads(self):
+        """Catch shell expansions that execute before grep receives its arguments."""
+        for command in (
+            '''grep -n "${a['$(no""de -""e 1)']}" f''',
+            r'''grep -n x "a[\$(no""de -""e 1)]"''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_variable_name_positions_refuse_expanded_and_subscripted_names(self):
+        """Catch unresolved names that carry evaluated subscripts through variable values."""
+        for command in (
+            'x=a; printf -v "$x" %s 1', 'read -a "$x" < /dev/null', 'declare "$x"=1',
+            'unset "$x"', 'test -v "$x"', 'true & wait -n -p "$x"', 'let "$x"',
+            "printf -v 'a[1]' %s x", "unset 'arr[0]'", '[[ -v arr[0] ]]', 'declare -i n=$#',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_arithmetic_positions_refuse_unresolved_expansions(self):
+        """Catch arithmetic operands whose variable values can execute stored subscripts."""
+        for command in (
+            'echo $(( $n + 1 ))', '(( x = $n ))', 'echo $[ $n ]', 'let "x=$n"',
+            '[[ $n -lt 1 ]]', '[[ 1 -gt $n ]]', '[[ 1 && 1 -lt $n ]]', 's=abc; echo ${s:$n}',
+            '[[ "$(git rev-list --count HEAD)" -gt 0 ]]',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
     def test_literal_variable_operations_and_quoted_data_remain_admitted(self):
         """Catch refusals of literal names, inert arithmetic and ordinary quoted data."""
         for command in (
@@ -243,8 +275,9 @@ class WriterHeredocTests(unittest.TestCase):
             'a=(1 2); echo "${a[@]}"', 'declare -a a=(x y)', "R='[a-z]'; grep -n \"$R\" f",
             'read -r line < "$file"', 'declare -p arr > "$out"',
             "grep -n '${a[$i]}' f", "grep -n '${a[$(date)]}' f",
-            '[[ "$(git rev-list --count HEAD)" -gt 0 ]]', 'declare -i n=$#',
-            "unset 'arr[0]'", '[[ -v arr[0] ]]', "awk '/[0-9]+/ {print $NF}' f",
+            "awk '/[0-9]+/ {print $NF}' f",
+            'echo "${TMPDIR:-/tmp}/$(date +%s)"',
+            'f="${OUT:-out}-$(date +%F).log"; echo "$f"', '(( i = 1 + 2 ))',
             "grep -E '^[a-z]+$' f", "sed -n 's/[a-z]$/X/p' f",
         ):
             with self.subTest(command=command):
