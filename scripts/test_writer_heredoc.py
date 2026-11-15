@@ -60,6 +60,8 @@ class WriterHeredocTests(unittest.TestCase):
             r'''find /x -maxdepth 2 -type f -path /x/python*''',
             r'''ls ./x/python*''',
             r'''rg foo ./x/* /x/python*/a''',
+            r'''rg needle '=payload' /x/python*/a''',
+            r'''rg needle a/b==c /x/python*/a''',
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
@@ -233,6 +235,12 @@ class WriterHeredocTests(unittest.TestCase):
                 r'''rg needle ^a /x/python*/a''',
                 r'''rg needle a#--pre=python3 /x/python*/a''',
                 r'''rg -n ^def /x/python*/a''',
+                r'''rg needle =payload /x/python*/a''',
+                r'''cd =x && rg foo /x/python*/a''',
+                r'''rg needle "--pre=x"* /x/python*/a''',
+                r'''rg needle {-,}* /x/python*/a''',
+                r'''rg needle a#b /x/python*/a''',
+                r'''rg needle "/"* /x/python*/a''',
             )),
         ):
             for command in commands:

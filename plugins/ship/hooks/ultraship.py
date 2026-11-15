@@ -1205,8 +1205,10 @@ def read_only_argument_word(command, tokens, words, index):
             if any(word[1].startswith('-') and not re.fullmatch(options[part[0][0]], word[1]) for word in part):
                 return False
     for raw, value, start, end in original:
-        if raw == '|':
+        if raw in {'|', '&'}:
             continue
+        if raw.startswith('='):
+            return False
         quote, cursor, prefix_end = '', 0, len(raw)
         while cursor < len(raw):
             char = raw[cursor]
@@ -1218,9 +1220,9 @@ def read_only_argument_word(command, tokens, words, index):
             elif not quote:
                 if char in "'\"":
                     quote = char
-                elif char in '^#':
+                elif not (char.isascii() and char.isalnum() or char in '_./-*?,{}='):
                     return False
-                elif char in '*?[{' and prefix_end == len(raw):
+                elif char in '*?{' and prefix_end == len(raw):
                     prefix_end = cursor
             cursor += 1
         if prefix_end == len(raw) and not unresolved_shell_word(raw):
@@ -1229,7 +1231,10 @@ def read_only_argument_word(command, tokens, words, index):
             prefix = ''.join(shlex.split(raw[:prefix_end]))
         except ValueError:
             return False
-        if not prefix or prefix.startswith('-') or prefix_end < len(raw) and '/' not in prefix:
+        if not prefix or prefix.startswith('-'):
+            return False
+        if prefix_end < len(raw) and not (
+                (raw[0].isascii() and raw[0].isalnum() or raw[0] in '_./') and '/' in prefix):
             return False
     return True
 
