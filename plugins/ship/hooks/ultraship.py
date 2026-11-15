@@ -1652,8 +1652,7 @@ def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
                 and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
             continue
         # Bash can evaluate a stored subscript payload long after shell quote removal.
-        if (re.search(r'\[[^]]*(?:\$[({\[A-Za-z_]|\x60|[<>]\()', value)
-                or re.search(r'\[[\s\S]*(?:\$[({\[]|\x60|[<>]\()', value)):
+        if re.search(r'\[[^]]*(?:\$[({\[A-Za-z_]|\x60|[<>]\()', value):
             return 'array subscript evaluation rule (subscript payload)'
         raw_brackets, offset = [], 0
         for span, single in parts or [(raw, False)]:
@@ -1662,7 +1661,7 @@ def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
             offset += len(span)
         for text, brackets in ((raw, raw_brackets), (value, [match.start() for match in re.finditer(r'\[', value)])):
             for bracket in brackets:
-                cursor, quote = bracket + 1, ''
+                cursor, quote, depth = bracket + 1, '', 1
                 while cursor < len(text):
                     char = text[cursor]
                     if char == '\\' and quote != "'":
@@ -1672,8 +1671,12 @@ def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
                         quote = ''
                     elif not quote and char in "'\"":
                         quote = char
-                    elif char == ']' and not quote:
-                        break
+                    elif not quote and char == '[':
+                        depth += 1
+                    elif not quote and char == ']':
+                        depth -= 1
+                        if depth == 0:
+                            break
                     cursor += 1
                 if re.search(r'\$[({\[A-Za-z_]|\x60|[<>]\(', text[bracket + 1:cursor]):
                     return 'array subscript evaluation rule (subscript payload)'

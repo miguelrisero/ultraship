@@ -425,13 +425,15 @@ class WriterHeredocTests(unittest.TestCase):
 
     def test_literal_closed_brackets_remain_admitted(self):
         """Catch false payload refusals after literal closing brackets or pathname character classes."""
-        for command in ('ls [a-z]*.py',):
+        for command in ('ls [a-z]*.py', 'echo "[INFO] $(date)"', 'echo "${a[1]}$(date)"'):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
 
-    def test_expansions_after_nested_or_closed_brackets_refuse_evaluation(self):
-        """Catch expansions after bracket text that can conceal nested subscript evaluation."""
-        for command in ("x='a[[]$(id)]'", 'echo "[INFO] $(date)"'):
+    def test_expansions_inside_nested_brackets_refuse_evaluation(self):
+        """Catch expansions inside nested brackets in parameter subscripts and stored values."""
+        for command in (
+            "x='a[[]$(id)]'", '''echo ${a[[]'$(no""de -""e 1)']}''', r'''y="a[[]\$(id)]"''',
+        ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule', self.reason)
