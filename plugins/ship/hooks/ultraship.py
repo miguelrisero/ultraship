@@ -1651,22 +1651,31 @@ def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
         if (grep_data_token(words, index) and parts is not None
                 and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
             continue
-        payload, quote, cursor = [], '', 0
-        while cursor < len(raw):
-            char = raw[cursor]
-            if char == '\\' and quote != "'" and cursor + 1 < len(raw):
-                cursor += 1
-                payload.append('_' if raw[cursor] == ']' else raw[cursor])
-            elif char == quote:
-                quote = ''
-            elif not quote and char in "'\"":
-                quote = char
-            else:
-                payload.append('_' if char == ']' and quote else char)
-            cursor += 1
         # Bash can evaluate a stored subscript payload long after shell quote removal.
-        if any(re.search(r'\[[^]]*(?:\$[({\[A-Za-z_]|\x60|[<>]\()', text) for text in (value, ''.join(payload))):
+        if re.search(r'\[[^]]*(?:\$[({\[A-Za-z_]|\x60|[<>]\()', value):
             return 'array subscript evaluation rule (subscript payload)'
+        raw_brackets, offset = [], 0
+        for span, single in parts or [(raw, False)]:
+            if not single:
+                raw_brackets.extend(offset + match.start() for match in re.finditer(r'\[', span))
+            offset += len(span)
+        for text, brackets in ((raw, raw_brackets), (value, [match.start() for match in re.finditer(r'\[', value)])):
+            for bracket in brackets:
+                cursor, quote = bracket + 1, ''
+                while cursor < len(text):
+                    char = text[cursor]
+                    if char == '\\' and quote != "'":
+                        cursor += 2
+                        continue
+                    if char == quote:
+                        quote = ''
+                    elif not quote and char in "'\"":
+                        quote = char
+                    elif char == ']' and not quote:
+                        break
+                    cursor += 1
+                if re.search(r'\$[({\[A-Za-z_]|\x60|[<>]\(', text[bracket + 1:cursor]):
+                    return 'array subscript evaluation rule (subscript payload)'
         offset = 0
         for span, single in parts or []:
             if not single:
