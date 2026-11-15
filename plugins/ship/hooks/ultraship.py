@@ -1619,6 +1619,180 @@ def safe_directory_state(command, cwd=None):
     return not forbidden(base) and not forbidden(target) and os.path.isdir(target)
 
 
+def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
+    spans = []
+    for raw, _, _, _ in words:
+        parts, start, cursor, double = [], 0, 0, False
+        while cursor < len(raw):
+            char = raw[cursor]
+            if char == '\\':
+                cursor += 2
+                continue
+            if char == '"':
+                double = not double
+            elif char == "'" and not double:
+                end = raw.find("'", cursor + 1)
+                if end < 0:
+                    parts = None
+                    break
+                parts.extend(((raw[start:cursor], False), (raw[cursor:end + 1], True)))
+                start = cursor = end + 1
+                continue
+            cursor += 1
+        spans.append(None if parts is None or double else parts + [(raw[start:], False)])
+    checked_words = [] if names_only else words
+    legacy = any(parts is None or any('$[' in span for span, single in parts if not single) for parts in spans)
+    expanded = lambda value: '$' in value or '`' in value
+    unsafe_name = lambda value: '[' in value or expanded(value)
+    for index, (raw, value, start, _) in enumerate(checked_words):
+        parts = spans[index]
+        if (start in arithmetic or legacy) and expanded(value):
+            return 'array subscript evaluation rule (arithmetic)'
+        if (grep_data_token(words, index) and parts is not None
+                and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
+            continue
+        # Bash can evaluate a stored subscript payload long after shell quote removal.
+        if re.search(r'\[[^]]*(?:\$[({\[A-Za-z_]|\x60|[<>]\()', value):
+            return 'array subscript evaluation rule (subscript payload)'
+        raw_brackets, offset = [], 0
+        for span, single in parts or [(raw, False)]:
+            if not single:
+                raw_brackets.extend(offset + match.start() for match in re.finditer(r'\[', span))
+            offset += len(span)
+        for text, brackets in ((raw, raw_brackets), (value, [match.start() for match in re.finditer(r'\[', value)])):
+            for bracket in brackets:
+                cursor, quote, depth = bracket + 1, '', 1
+                while cursor < len(text):
+                    char = text[cursor]
+                    if char == '\\' and quote != "'":
+                        cursor += 2
+                        continue
+                    if char == quote:
+                        quote = ''
+                    elif not quote and char in "'\"":
+                        quote = char
+                    elif not quote and char == '[':
+                        depth += 1
+                    elif not quote and char == ']':
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    cursor += 1
+                if re.search(r'\$[({\[A-Za-z_]|\x60|[<>]\(', text[bracket + 1:cursor]):
+                    return 'array subscript evaluation rule (subscript payload)'
+        offset = 0
+        for span, single in parts or []:
+            if not single:
+                for arithmetic_text in re.finditer(r'\$\(\(|\$\[', span):
+                    if expanded(raw[offset + arithmetic_text.end():]):
+                        return 'array subscript evaluation rule (arithmetic)'
+                for parameter in re.finditer(r'\$\{', span):
+                    tail = raw[offset + parameter.end():]
+                    braced = tail.partition('}')[0]
+                    if any(char in braced for char in "\\'\"") or braced.count('[') > braced.count(']'):
+                        braced = tail
+                    if re.search(r':(?![-=?+])', braced) and expanded(tail):
+                        return 'array subscript evaluation rule (arithmetic)'
+            offset += len(span)
+    if not names_only:
+        return None
+
+    names = {'printf', 'test', '[', '[[', 'declare', 'typeset', 'local', 'export', 'readonly', 'unset', 'read', 'wait', 'let'}
+    for position, (raw, name, start, end) in enumerate(words):
+        parts = spans[position]
+        if (grep_data_token(words, position) and parts is not None
+                and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
+            continue
+        unquoted = re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', raw)
+        if (any(char in unquoted for char in '{,')
+                and (unsafe_name(name) or any(token[2] == end for token in tokens))
+                and any(piece in names for piece in re.split(r'[{,}]', name))):
+            return 'array subscript evaluation rule (name)'
+        if name not in names:
+            continue
+        operands = []
+        arguments = words[position + 1:]
+        if name == '[[':
+            start = next(index for index, token in enumerate(tokens) if token[2] == start)
+            end = start + 1
+            while end < len(tokens):
+                token = tokens[end]
+                substitution = (token[0] == '`' or token[0] == '(' and end > 0
+                                and tokens[end - 1][3] == token[2]
+                                and (tokens[end - 1][0].endswith('$') or tokens[end - 1][0] in {'<', '>'}))
+                if substitution and end in groups:
+                    end = groups[end] + 1
+                elif token[0] == ']]':
+                    break
+                else:
+                    end += 1
+            arguments = tokens[start + 1:end]
+            for index, word in enumerate(arguments):
+                if word[1] in {'-eq', '-ne', '-lt', '-le', '-gt', '-ge'}:
+                    if any(expanded(token[1]) for token in arguments[max(0, index - 1):index] + arguments[index + 1:index + 2]):
+                        return 'array subscript evaluation rule (arithmetic)'
+        filtered, index = [], 0
+        while index < len(arguments):
+            if re.fullmatch(r'\d*[<>]+', arguments[index][0]):
+                index += 2
+            else:
+                filtered.append(arguments[index][1])
+                index += 1
+        arguments = filtered
+        if name == 'printf':
+            index = 0
+            while index < len(arguments):
+                option = arguments[index]
+                if option == '--' or not option.startswith('-'):
+                    break
+                if option == '-v':
+                    index += 1
+                    operands.extend(arguments[index:index + 1])
+                elif option.startswith('-v'):
+                    operands.append(option[2:])
+                index += 1
+        elif name in {'test', '[', '[['}:
+            operands.extend(right for left, right in zip(arguments, arguments[1:]) if left == '-v')
+        elif name in {'declare', 'typeset', 'local', 'export', 'readonly', 'unset'}:
+            indirect, options = False, True
+            for value in arguments:
+                if options and value == '--':
+                    options = False
+                elif options and value.startswith(('-', '+')):
+                    indirect = indirect or name in {'declare', 'typeset', 'local'} and any(char in value for char in 'in')
+                else:
+                    target, separator, assigned = value.partition('=')
+                    operands.append(target.removesuffix('+'))
+                    if indirect and separator:
+                        operands.append(assigned)
+        elif name in {'read', 'wait'}:
+            index, options = 0, True
+            while index < len(arguments):
+                value = arguments[index]
+                if options and value == '--':
+                    options = False
+                elif options and value.startswith('-'):
+                    for offset, option in enumerate(value[1:], 2):
+                        if option in ('adinNptu' if name == 'read' else 'p'):
+                            operand = value[offset:]
+                            if not operand:
+                                index += 1
+                                operand = arguments[index] if index < len(arguments) else ''
+                            if option == ('a' if name == 'read' else 'p'):
+                                operands.append(operand)
+                            break
+                elif name == 'read':
+                    operands.append(value)
+                index += 1
+        elif name == 'let':
+            if any(expanded(value) for value in arguments):
+                return 'array subscript evaluation rule (arithmetic)'
+            operands.extend(arguments)
+        if any(unsafe_name(value) for value in operands):
+            return 'array subscript evaluation rule (name)'
+    return None
+
+
 def inline_interpreter_denial(command, cwd=None):
     chdir_wrapper = chdir_wrapper_present(command)
     safe_directory = not chdir_wrapper and safe_directory_state(command, cwd)
@@ -1630,6 +1804,7 @@ def inline_interpreter_denial(command, cwd=None):
         shell = shell[len(lines[0]):]
     pending = [(shell, (False, False, False))]
     seen = set()
+    subscript_reason = None
     while pending:
         text, inherited = pending.pop()
         text = shell_line_continuations(text)
@@ -1649,6 +1824,81 @@ def inline_interpreter_denial(command, cwd=None):
         piped_input, directory, redirected = state
         if re.search(r'(?:\$\([^\n]*\)|`[^`\n]*`)[ \t]+(?:-[ceEpr]\b|--(?:eval|print)\b|-[a-zA-Z]*[ce]\b)', text):
             return 'inline interpreter code rule (unresolved command word)'
+        arithmetic, stack = set(), []
+        for index, (raw, value, start, end) in enumerate(tokens):
+            if raw == '(':
+                adjacent = (index + 1 < len(tokens) and tokens[index + 1][0] == '('
+                            and end == tokens[index + 1][2])
+                substitution = (index > 0 and tokens[index - 1][0].endswith('$')
+                                and tokens[index - 1][3] == start)
+                stack.append(adjacent or bool(stack and stack[-1] and not substitution))
+            elif raw == ')':
+                if stack:
+                    stack.pop()
+            elif stack and stack[-1]:
+                arithmetic.add(start)
+        try:
+            groups, openings, backtick = {}, [], None
+            for index, token in enumerate(tokens):
+                if token[0] == '`':
+                    if backtick is None:
+                        backtick = index
+                    else:
+                        groups[backtick] = index
+                        backtick = None
+                elif token[0] == '(':
+                    openings.append(index)
+                elif token[0] == ')' and openings:
+                    groups[openings.pop()] = index
+            commands, ranges = [], [(0, len(tokens))]
+            while ranges:
+                cursor, end = ranges.pop()
+                command_words = []
+                while cursor < end:
+                    token = tokens[cursor]
+                    raw = token[0]
+                    substitution = (cursor + 1 < end and tokens[cursor + 1][0] == '('
+                                    and token[3] == tokens[cursor + 1][2]
+                                    and (raw.endswith('$') or raw in {'<', '>'}))
+                    opening = cursor + 1 if substitution else cursor if raw == '`' else None
+                    if opening is not None:
+                        closing = groups[opening]
+                        ranges.append((opening + 1, closing))
+                        if substitution and raw.endswith('$') and raw != '$':
+                            command_words.append(token)
+                        cursor = closing + 1
+                        continue
+                    redirect = raw in {'<', '>'} or (raw == '&' and cursor + 1 < end
+                                and tokens[cursor + 1][0] == '>' and token[3] == tokens[cursor + 1][2])
+                    if redirect:
+                        if (command_words and command_words[-1][3] == token[2]
+                                and re.fullmatch(r'\d+|\{[A-Za-z_][A-Za-z0-9_]*}', command_words[-1][0])):
+                            command_words.pop()
+                        cursor += 1
+                        while (cursor < end and tokens[cursor][0] in {'<', '>', '&', '|'}
+                               and tokens[cursor - 1][3] == tokens[cursor][2]):
+                            cursor += 1
+                        target_group = (cursor < end and (tokens[cursor][0] == '`' or
+                            cursor + 1 < end and tokens[cursor + 1][0] == '('
+                            and tokens[cursor][3] == tokens[cursor + 1][2]
+                            and (tokens[cursor][0].endswith('$') or tokens[cursor][0] in {'<', '>'})))
+                        if (cursor < end and not target_group
+                                and tokens[cursor][0] not in {';', '|', '&', '(', ')', '`', '\n'}):
+                            cursor += 1
+                        continue
+                    if raw in {';', '|', '&', '(', ')', '`', '\n'}:
+                        commands.append(command_words)
+                        command_words = []
+                    else:
+                        command_words.append(token)
+                    cursor += 1
+                commands.append(command_words)
+            for command_words in commands:
+                if subscript_reason is None:
+                    subscript_reason = array_subscript_denial(command_words, arithmetic, tokens, groups, names_only=True)
+        except Exception:
+            if subscript_reason is None:
+                subscript_reason = 'array subscript evaluation rule (parse error)'
         segments, words, piped = [], [], False
         for token in tokens:
             raw = token[0]
@@ -1680,6 +1930,12 @@ def inline_interpreter_denial(command, cwd=None):
                     continue
                 break
         for words, piped in segments:
+            if subscript_reason is None:
+                try:
+                    subscript_reason = (array_subscript_denial(words, arithmetic, tokens, groups)
+                                        or array_subscript_denial(words, arithmetic, tokens, groups, names_only=True))
+                except Exception:
+                    subscript_reason = 'array subscript evaluation rule (parse error)'
             reads_pipe = inherited[0] or piped or any(word[0] == '<' for word in words)
             segment_relative_denied = (redirected or not safe_base or chdir_wrapper
                                        or directory and not safe_directory or reads_pipe)
@@ -1745,7 +2001,7 @@ def inline_interpreter_denial(command, cwd=None):
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
         pending.extend((token[1], state) for token in nested)
-    return None
+    return subscript_reason
 
 
 def git_push(command):
