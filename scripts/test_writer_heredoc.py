@@ -31,6 +31,215 @@ class WriterHeredocTests(unittest.TestCase):
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
+    def test_double_quoted_substitutions_scan_interpreter_bodies(self):
+        """Catch split interpreter names inside double-quoted substitution bodies."""
+        for command in (
+            'echo hi # $(no""de -""e 1)', 'echo $x # $(no""de -""e 1)',
+            'echo hi #`id`', ': # $(echo RAN) $(let y)',
+            'echo $(echo a) #$(no""de -""e 1)',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (comment)', self.reason)
+        for command in (
+            '''echo "$(py""thon3 -""c 'print(1)')"''',
+            '''echo "`py""thon3 -""c 'print(1)'`"''',
+            '''echo "$(py""thon3 -""c '__import__("os").system("id")')"''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule', self.reason)
+        for command in (
+            'echo "$(no""de -""e 1)"', 'echo "`no""de -""e 1`"',
+            'x="$(no""de -""e 1)"', 'echo "a $(no""de -""e 1) b"',
+            '# \'\necho "$(no""de -""e 1)$(echo RAN)"', 'echo "a#$(no""de -""e 1)"',
+            'echo ${x:- #$(no""de -""e 1)}', 'echo ${x[ #]}$(no""de -""e 1)',
+            'echo ${x/ #/$(no""de -""e 1)}', 'echo ${x:- #`no""de -""e 1`}',
+            r'echo a\ #$(no""de -""e 1)',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (node)', self.reason)
+
+    def test_arithmetic_bare_names_refuse_runtime_payloads(self):
+        """Catch recursive arithmetic evaluation of unresolved variable values."""
+        self.assertTrue(self.denied('i=0; declare \'i[0]\'="$x"; (( i ))'))
+        for command in (
+            "p='a[$'; q='(echo RAN)]'; y=$p$q; (( y ))", '(( y ))',
+            'echo $(( y + 1 ))', 'echo "$(( y ))"', 'x=$(( n + 1 ))',
+            'let y', 'let 2>/dev/null y', '[[ y -gt 0 ]]',
+            's=abc; echo ${s:n}', 's=abc; echo ${s:0:n}', 'echo ${a[y]}',
+            'a[y]=1', 'for ((;y;)); do :; done', 'function f (( y )); f',
+            'coproc C (( y )); wait', 'declare -i x=y',
+            'i=0; read i < f; (( i ))', 'i=0; i=$p; (( i ))',
+            *('false && i=0; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
+            *('true || i=0; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
+            *('if false; then i=0; fi; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
+            *('i=0 true; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
+            *('i=0 | cat; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
+            '(( i )); i=0', 'echo ${a[i]}; i=0', 'echo ${s:i}; i=0',
+            '(( i )); i=0; : x', 'i=$p$q; b=([i]=1)', 'b=([i]=1)',
+            "for ((i=0; i<3; i++)); do read 'i' < f; (( i )); done",
+            'for ((i=0; i<3; i++)); do read "i" < f; (( i )); done',
+            'i=0; declare "i=$x"; (( i ))', 'i=0; export "i=$x"; (( i ))',
+            'i=0; local "i+=$x"; (( i ))', "i=0; printf -v 'i' %s \"$x\"; (( i ))",
+            'i=0; mapfile -t "i" < f; (( i ))',
+            'i=0; eval "i=$x"; (( i ))', "i=0; eval 'i=$x'; (( i ))",
+            'i=0; trap "i=$x" DEBUG; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_indirect_expansions_refuse_runtime_names(self):
+        """Catch indirect expansion of names that can evaluate stored subscripts."""
+        for command in (
+            'read -r x < f; echo "${!x}"', 'echo "${!name}"', 'echo ${!name}',
+            'echo "${!name[0]}"', 'echo "${!name[i]}"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (indirect)', self.reason)
+
+    def test_nested_indirect_expansions_refuse_runtime_names(self):
+        """Catch indirect name evaluation inside parameter operands."""
+        for command in (
+            "echo \"${x:-\"'\"}${!name}\"", "echo \"${x:-'\"'}${!name}\"",
+            "echo \"${x:-\"'\"}$(( y ))\"",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+        for command in (
+            'echo "${x:-${!name}}"', 'echo "${x:+${!name}}"', 'echo "${s:${!name}}"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_integer_and_nameref_attributes_guard_later_names(self):
+        """Catch later writes through integer and nameref attributes."""
+        for command in (
+            'declare -i x; x=$y', 'declare -n r; r=$y', 'local -i x; x="$y"',
+            'typeset -i x; x=`cat f`', 'declare -i x; x+=$y',
+            'declare -i x; read x < f', 'declare -i x; for x in "$p"; do :; done',
+            'declare -i x; printf -v x %s "$p"',
+            'o=i; declare -"$o" x; x=$y',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (attribute)', self.reason)
+
+    def test_runtime_commands_and_options_guard_name_operands(self):
+        """Catch runtime options and commands that conceal evaluated name operands."""
+        for command in (
+            'printf {-v,"$x"} %s 1', 'printf -{v,} "$x" %s 1',
+            'test {-v,"$x"}', 'coproc printf {-v,"$x"} %s 1',
+            '{$(echo printf),-v,"$x",%s,1}', '{printf$(true),-v,"$x",%s,1}',
+            'function f { printf "$@"; }; f -v "$x" %s 1',
+            'function f { test "$@"; }; f -v "$x"', 'coproc C { printf "$@"; }',
+            'set -- -v "$x"; printf "$@" %s 1', 'o=-v; printf "$o" "$x" %s 1',
+            'p=printf; $p -v "$x" %s 1', '"$p" -v "$x" %s 1',
+            '$(echo printf) -v "$x" %s 1', 'wait "$o" "$x"', '[ "$o" "$x" ]',
+            'printf "$fmt" "$x"', 'printf "${fmt}" "$x"',
+            'c=printf; command "$c" -v "$x" %s 1',
+            'c=printf; builtin "$c" -v "$x" %s 1',
+            'c=printf; {"$c",-v,"$x",%s,1}',
+            'printf -"$v" "$x" %s 1', 'printf -$v "$x" %s 1',
+            r'printf \-"$v" "$x" %s 1', 'printf -${v} "$x" %s 1',
+            'printf -v x -"$v" "$n" %s 1', 'command printf -"$v" "$x" %s 1',
+            'builtin printf -"$v" "$x" %s 1',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (name)', self.reason)
+
+    def test_array_readers_and_getopts_guard_destination_names(self):
+        """Catch expanded destinations and executable mapfile callbacks."""
+        for command in (
+            'mapfile -t "$x" < f', 'readarray -t "$x" < f',
+            'mapfile -C cb -c 1 arr < f', 'readarray -C"$cb" arr < f', 'getopts ab "$x"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (name)', self.reason)
+
+    def test_split_parameter_expansions_guard_evaluated_spans(self):
+        """Catch evaluated parameter text split across parser words or substitution groups."""
+        for command, kind in (
+            ("echo ${a[ '$(echo RAN)' ]}", 'subscript payload'),
+            ('echo ${a[ $(echo RAN) ]}', 'subscript payload'),
+            ("s=abc; echo ${s: '$(echo RAN)'}", 'arithmetic'),
+            ('s=abc; echo ${s: $n}', 'arithmetic'),
+            ('echo "${a["]$(echo RAN)"]}"', 'subscript payload'),
+            ('a=(1); echo "${a["]$(echo RAN)"]}"', 'subscript payload'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (' + kind + ')', self.reason)
+
+    def test_conditional_arithmetic_refuses_substitution_groups(self):
+        """Catch substitution groups whose output receives recursive arithmetic evaluation."""
+        for command, arithmetic in (
+            ('[[ $(echo RAN) -gt 0 ]]', True), ('[[ $(echo RAN) -lt 1 ]]', True),
+            ('[[ $(echo RAN) -eq 1 ]]', True), ('[[ $(echo RAN) -ne 1 ]]', False),
+            ('[[ $(echo ]]) && y -gt 0 ]]', True), ('[[ `echo ]]` && y -gt 0 ]]', True),
+            ('[[ $(echo RAN) -le 1 ]]', False), ('[[ $(echo RAN) -ge 1 ]]', False),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                if arithmetic:
+                    self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_literal_substitutions_and_variable_operations_stay_admitted(self):
+        """Catch false refusals for literal operations and numeric loop variables."""
+        for command in (
+            'echo "$(date +%s)"', 'git commit -m "$(cat msg.txt)"',
+            'echo "$(git log --format="%h" -1)"', 'echo "`date`"',
+            'cd "$(git rev-parse --show-toplevel)" && make test',
+            '(( i = 1 + 2 ))', '(( x = 1 ))', 'let x=1', 'echo $(( 1 + 2 ))',
+            'echo "$((1+2))"', 'echo $(( 16#ff + 0x1f ))', 'echo ${s: -1}',
+            'echo "${PWD:0:10}"', 'echo "${a[@]}" "${#a[@]}"', 'echo "${a[1]} $HOME"',
+            'declare -i n=5', 'for ((i=0; i<10; i++)); do echo "$i"; done',
+            'n=3; (( n > 1 ))', '(( i = 0, i < 3 ))',
+            'i=0; while [ "$i" -lt 3 ]; do i=$((i+1)); done',
+            'total=0; for f in a b; do total=$((total + 1)); done',
+            'total=0; for f in a b; do total=$((total + 1)); done; echo "$total"',
+            'x=5; s=abcdef; echo ${s:x}',
+            'a=(x y z); for ((i=0; i<3; i++)); do echo "${a[i]}"; done',
+            'i=0; echo "${arr[i]}"', 'declare -i n=5; echo "$n"',
+            'declare -i n; n=5; echo "$n"',
+            r'''printf "%s: $x\n" "$y"''', r'''printf "Value: %s\n" "$x"''',
+            'printf -- "$fmt" "$x"', r'''printf "%s\n" "$@"''',
+            '[ -f "$f" ]', 'wait "$pid"', 'test -n "$x"',
+            "cat > f.py <<'EOF'\n# run `make test` and $(x) ${y}\nEOF\n",
+            'git commit -m "fix: # `x` $(y)"', "echo '# $(x) `y`'",
+            'echo ${#arr[@]} ${x##*/} ${x%%#*}', 'x=a#b; echo "$x"',
+            'echo hi # plain comment', 'ls # list files', '# comment line\nls -la',
+            'printf -v out %s "$x"', r'''printf "%-10s %s\n" "$a" "$b"''',
+            r'''printf -- "%s\n" "$x"''',
+            'b=([0]=x [1]=y)',
+            r'''printf '%s\n' ${HOME:-/tmp}''', r'''printf '%s\n' ${arr[@]}''',
+            r'''printf "%s\n" ${HOME}''',
+            'for ((i=0, j=0; i<3; i++, j++)); do :; done',
+            r'''for ((i=0; i<3; i++)); do printf 'i=%s\n' "$i"; done''',
+            'for ((i=0; i<3; i++)); do echo "i=$i"; done',
+            "for ((i=0; i<3; i++)); do git log -1 --format='%h i'; done",
+            'i=0; echo "i is $i"; (( i++ ))',
+            'echo "${!BASH*}"', 'echo "${!a[@]}"', 'echo "${!a[*]}"',
+            'declare -i n; n=5', 'declare -a a', 'local x=1',
+            'cp file{,.orig}', 'mkdir -p src/{local,remote}', 'mv "$f"{,.bak}',
+            r'''printf '%s\n' "$@"''', r'''printf '%s\n' "$a"''', r'''printf "%s\n" x''',
+            'printf -v X %s .', 'for f in a b; do printf -v X %s "$f"; done',
+            '[ -n "$x" ] && echo yes', '[ "$x" -gt 0 ]', 'test -f "$f"',
+            'mapfile -t lines < f', 'readarray -t lines < <(ls)',
+            'while getopts ab opt; do :; done', 's=abcdef; echo ${s: 1:2}',
+            'echo ${a[ 1 ]}', 'echo ${x:- default value}', 'echo ${x:- $HOME}',
+            'echo ${x:+ "$y"}', 'echo "${VAR:+set}" "${VAR:=d}" "${VAR:?err}"',
+            '[[ ( 1 -gt 0 ) ]]', '[[ "$a" == b && 1 -gt 0 ]]', '[[ -v HOME ]]',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     SUBSCRIPT_NAMES = (
         "'a[$(no\"\"de -\"\"e \"process.exit(42)\")]'",
         r'''"a[\$(no""de -""e 'process.exit(42)')]"''',
