@@ -1,0 +1,243 @@
+"""Thread ownership checks and the Bash boundary for review-thread writes."""
+import contextlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+HELPER = ROOT / 'plugins/ship/skills/babysit/scripts/thread_reply.py'
+spec = importlib.util.spec_from_file_location('ultraship_thread_reply', ROOT / 'plugins/ship/hooks/ultraship.py')
+ultraship = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ultraship)
+
+LOOKUP = 'query($id:ID!){node(id:$id){__typename ... on PullRequestReviewThread{pullRequest{number repository{nameWithOwner}}}}}'
+REPLY = 'mutation($id:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){comment{url}}}'
+RESOLVE = 'mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}'
+PR = 'https://github.com/o/r/pull/7'
+THREAD = 'PRRT_kwDOabc'
+COMMENT = PR + '#discussion_r123'
+PREFIX = ['api', '--hostname', 'github.com', 'graphql']
+
+REFUSE = (
+    "gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=PRRT_kwDOabc",
+    'gh api graphql -f query=\'mutation{addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:"PRRT_x",body:"done"}){comment{url}}}\'',
+    'gh api graphql -f query=\'mutation{unresolveReviewThread(input:{threadId:"PRRT_x"}){thread{id}}}\'',
+    'gh api graphql -f query=\'mutation{addPullRequestReviewComment(input:{pullRequestReviewId:"PRR_x",inReplyTo:"PRRC_y",body:"b"}){comment{id}}}\'',
+    "for id in PRRT_a PRRT_b; do gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=$id; done",
+    'gh api -X POST repos/o/r/pulls/7/comments/123/replies -f body=done',
+    'gh api repos/o/r/pulls/7/comments -f body=done -F in_reply_to=123',
+    'gh api --method POST repos/{owner}/{repo}/pulls/7/comments --input reply.json',
+    'gh api graphql -F query=@mutation.graphql -F id=PRRT_x',
+    'gh api graphql -f query="$Q" -F id=PRRT_x',
+    'gh api graphql --input body.json',
+    'gh api graphql -f query="$(cat q.graphql)"',
+    'Q=\'mutation{resolveReviewThread(input:{threadId:"PRRT_x"}){thread{id}}}\'; gh api graphql -f query="$Q"',
+    'bash -c "gh api graphql -F query=@q.graphql"',
+    'gh api https://api.github.com/graphql -F query=@q.graphql',
+    'curl -s -H "Authorization: bearer $T" https://api.github.com/graphql -d @body.json',
+    'curl -X POST https://api.github.com/repos/o/r/pulls/7/comments/1/replies -d \'{"body":"x"}\'',
+    'gh api "$ENDPOINT" -X POST -f body=x',
+    'gh api graphql -f \'query=mutation{resolveReview\'\'Thread(input:{threadId:"PRRT_x"}){thread{id}}}\'',
+    'echo PRRT_x | xargs -I{} gh api graphql -f query=\'mutation{resolveReviewThread(input:{threadId:"{}"}){thread{id}}}\'',
+    'python3 - <<\'EOF\'\nimport subprocess\nsubprocess.run([\'gh\', \'api\', \'graphql\', \'-f\', \'query=mutation{resolveReviewThread(input:{threadId:"PRRT_x"}){thread{id}}}\'])\nEOF',
+    'gh api graphql -f query="query($id:ID!){node(id:$id){id}}"',
+    'gh api graphql -f query=query\\{viewer{login}}',
+    'gh api repos/o/r/pulls/7/comments --method=PATCH -f body=x',
+    'gh api "repos/o/r/pulls/${NUMBER}suffix/comments" -X POST -f body=x',
+    'gh api -X POST -f body=x',
+    'gh api graphql -f query=\'query{viewer{login}}',
+)
+
+ADMIT = (
+    'python3 /abs/plugins/ship/skills/babysit/scripts/thread_reply.py reply https://github.com/o/r/pull/7 PRRT_kwDOabc /abs/.scratch/reply.md',
+    'python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" resolve https://github.com/o/r/pull/7 PRRT_kwDOabc',
+    'bash "${CLAUDE_SKILL_DIR}/scripts/threads.sh" 7',
+    "gh api graphql -f query='query{viewer{login}}'",
+    'gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$THREAD"',
+    "gh api graphql -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}' -F owner=o -F name=r",
+    "gh api graphql --paginate -f query='query($endCursor:String){viewer{repositories(first:10,after:$endCursor){nodes{name}}}}'",
+    'gh pr view https://github.com/o/r/pull/7 --json headRefOid',
+    'gh pr checks 7 --required',
+    'gh api repos/o/r/pulls/7/comments',
+    "gh api repos/o/r/pulls/7/comments --jq '.[] | .in_reply_to_id'",
+    'gh api repos/o/r/issues/7/comments -f body=hello',
+    'gh pr comment 7 --body /better-review',
+    'grep -n resolveReviewThread plugins/ship/skills/babysit/SKILL.md',
+    'curl -s https://api.linear.app/graphql -H "Authorization: $LINEAR" -d @q.json',
+    "git commit -m 'fix(ship): guard thread replies'",
+    'gh api graphql -f "query=query{viewer{login}}"',
+    'gh api graphql -f query=query{viewer{login}}',
+    "gh api graphql -f 'query=query($id:ID!){node(id:$id){id}}' -F id=PRRT_x",
+    'gh api repos/$OWNER/${REPO}/issues/7/comments -f body=hello',
+    'gh api repos/o/r/pulls/7/comments -X GET -f per_page=100',
+    'gh api repos/o/r/pulls/7/comments -X HEAD',
+    'bash -c \'gh api graphql -f "query=query{viewer{login}}"\'',
+)
+
+
+class HelperTests(unittest.TestCase):
+    def lookup(self, repository='o/r', number=7):
+        return {'data': {'node': {'__typename': 'PullRequestReviewThread', 'pullRequest': {
+            'number': number, 'repository': {'nameWithOwner': repository}}}}}
+
+    def call(self, query, body=None):
+        words = PREFIX + ['-f', 'query=' + query, '-f', 'id=' + THREAD]
+        return words + (['-f', 'body=' + body] if body is not None else [])
+
+    def run_helper(self, responses, action='reply', pr=PR, thread=THREAD, body='@done\nEvidence: café'):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            stub = folder / 'gh'
+            stub.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
+from pathlib import Path
+log = Path(os.environ['GH_TEST_LOG'])
+with log.open('a') as stream:
+    stream.write(json.dumps(sys.argv[1:]) + '\\n')
+responses = Path(os.environ['GH_TEST_RESPONSES'])
+queue = json.loads(responses.read_text())
+response = queue.pop(0)
+responses.write_text(json.dumps(queue))
+print(response['stdout'])
+sys.exit(response['code'])
+''')
+            stub.chmod(0o700)
+            log = folder / 'calls.jsonl'
+            canned = folder / 'responses.json'
+            canned.write_text(json.dumps([{'stdout': value if isinstance(value, str) else json.dumps(value),
+                                          'code': code} for value, code in responses]))
+            body_file = folder / 'body.txt'
+            body_file.write_text(body, encoding='utf-8')
+            arguments = [sys.executable, str(HELPER), action, pr, thread]
+            if action == 'reply':
+                arguments.append(str(body_file))
+            result = subprocess.run(arguments, text=True, capture_output=True,
+                                    env={**os.environ, 'PATH': directory, 'GH_TEST_LOG': str(log),
+                                         'GH_TEST_RESPONSES': str(canned)})
+            calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+            return result, calls
+
+    def test_reply_checks_ownership_before_sending_raw_body(self):
+        body = '@done\nEvidence: café'
+        result, calls = self.run_helper([(self.lookup(), 0), ({'data': {
+            'addPullRequestReviewThreadReply': {'comment': {'url': COMMENT}}}}, 0)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(result.stdout, COMMENT + '\n')
+        self.assertEqual(calls, [self.call(LOOKUP), self.call(REPLY, body)])
+
+    def test_resolve_checks_ownership_before_resolving(self):
+        result, calls = self.run_helper([(self.lookup(), 0), ({'data': {
+            'resolveReviewThread': {'thread': {'isResolved': True}}}}, 0)], action='resolve')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(result.stdout, 'resolved ' + THREAD + '\n')
+        self.assertEqual(calls, [self.call(LOOKUP), self.call(RESOLVE)])
+
+    def test_lookup_refusals_never_send_a_mutation(self):
+        cases = {
+            'repository': (self.lookup('other/repo'), 0),
+            'number': (self.lookup(number=8), 0),
+            'exit': ('lookup failed', 1),
+            'errors': ({'errors': [{'message': 'denied'}], **self.lookup()}, 0),
+            'null': ({'data': {'node': None}}, 0),
+            'type': ({'data': {'node': {'__typename': 'Issue'}}}, 0),
+            'repository missing': ({'data': {'node': {'__typename': 'PullRequestReviewThread',
+                                                      'pullRequest': {'number': 7}}}}, 0),
+            'json': ('invalid json', 0),
+            'shape': ([], 0),
+            'number type': (self.lookup(number='7'), 0),
+        }
+        for name, response in cases.items():
+            with self.subTest(case=name):
+                result, calls = self.run_helper([response])
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertTrue(result.stderr.startswith('refused: '), result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(calls, [self.call(LOOKUP)])
+
+    def test_invalid_arguments_make_zero_calls(self):
+        cases = [{'pr': pr} for pr in (PR + '/', PR + '?x=1', 'http://github.com/o/r/pull/7',
+                                       PR.replace('/7', '/0'), 'x' + PR, PR + '\n')]
+        cases += [{'thread': 'PRRT_'}, {'thread': 'PRRC_x'}, {'body': ' \n\t'}]
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                result, calls = self.run_helper([], **arguments)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertTrue(result.stderr.startswith('refused: '), result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(calls, [])
+
+    def test_bad_mutation_results_fail(self):
+        for response in ({'data': {'addPullRequestReviewThreadReply': {'comment': {'url': url}}}}
+                         for url in ('https://github.com/other/repo/pull/7#discussion_r1', PR + '0#discussion_r1')):
+            with self.subTest(response=response):
+                result, calls = self.run_helper([(self.lookup(), 0), (response, 0)])
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertTrue(result.stderr.strip())
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(calls, [self.call(LOOKUP), self.call(REPLY, '@done\nEvidence: café')])
+        for action, query in (('reply', REPLY), ('resolve', RESOLVE)):
+            for response in (('failed', 1), ('bad json', 0), ({'errors': []}, 0),
+                             ({'data': {'resolveReviewThread': {'thread': {'isResolved': False}}}}, 0)):
+                with self.subTest(action=action, response=response):
+                    result, calls = self.run_helper([(self.lookup(), 0), response], action=action)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertTrue(result.stderr.strip())
+                    self.assertEqual(result.stdout, '')
+                    self.assertEqual(calls, [self.call(LOOKUP), self.call(query, '@done\nEvidence: café'
+                                                                                  if action == 'reply' else None)])
+
+    def test_repository_names_compare_case_insensitively(self):
+        result, calls = self.run_helper([(self.lookup('O/R'), 0), ({'data': {
+            'addPullRequestReviewThreadReply': {'comment': {'url': 'https://github.com/O/R/pull/7#discussion_r123'}}}}, 0)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(calls, [self.call(LOOKUP), self.call(REPLY, '@done\nEvidence: café')])
+
+
+class HookTests(unittest.TestCase):
+    def decision(self, command, agent_type):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            try:
+                ultraship.pre({'agent_type': agent_type, 'tool_name': 'Bash', 'tool_input': {'command': command}})
+            except SystemExit as error:
+                self.assertEqual(error.code, 0)
+        text = output.getvalue()
+        return json.loads(text)['hookSpecificOutput'] if text else {}
+
+    def test_refuse_forms_for_every_caller(self):
+        for agent_type in ('', 'ship:driver', 'ship:writer--sol'):
+            for command in REFUSE:
+                with self.subTest(agent_type=agent_type, command=command):
+                    result = self.decision(command, agent_type)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    if agent_type != 'ship:writer--sol':
+                        self.assertTrue(result['permissionDecisionReason'].startswith(
+                            'Ship replies to and resolves review threads only through '))
+                        self.assertIn(' Rule: ', result['permissionDecisionReason'])
+
+    def test_admit_forms_for_main_and_driver(self):
+        for agent_type in ('', 'ship:driver'):
+            for command in ADMIT:
+                with self.subTest(agent_type=agent_type, command=command):
+                    self.assertEqual(self.decision(command, agent_type), {})
+
+    def test_guard_exception_denies_every_caller(self):
+        with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):
+            for agent_type in ('', 'ship:driver', 'ship:writer--sol'):
+                with self.subTest(agent_type=agent_type):
+                    result = self.decision('echo hello', agent_type)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn('review-thread guard parse failure', result['permissionDecisionReason'])
+
+
+if __name__ == '__main__':
+    unittest.main()
