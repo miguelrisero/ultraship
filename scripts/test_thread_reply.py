@@ -71,6 +71,11 @@ REFUSE = (
     'curl -X POST https://api.github.com/repos/o/r/pul%6cs/7/comments -d @b.json',
     "git commit -m 'fix: x' && gh api graphql -F query=@q.graphql",
     'gh api repos/{owner}/{repo}/{branch}/comments -f body=x',
+    'gh api repos/o/r/pull?/7/comments -f body=done -F in_reply_to=123',
+    'gh api repos/o/r/pulls/*/comments -f body=x',
+    'gh api repos/o/r/[p]ulls/7/comments -f body=x',
+    'gh ap? repos/o/r/pulls/7/comments -f body=x',
+    'cd /repo && curl -s https://api.github.com/graphql -d @body.json',
 )
 
 ADMIT = (
@@ -102,6 +107,10 @@ ADMIT = (
     'gh api https://api.github.com/repos/o/r/pulls/7/comments',
     'gh api repos/{owner}/{repo}/issues/7/comments -f body=hello',
     'gh pr view 7 --json body --jq \'.body | test("`")\'',
+    'cd /repo && gh api https://api.github.com/repos/o/r/pulls/7/comments',
+    'gh api https://api.github.com/repos/o/r/pulls/7/comments | head -5',
+    "gh api 'repos/o/r/pulls/7/comments?per_page=100' --jq '.[].id'",
+    'gh pr list --search "is:open author:*"',
 )
 
 

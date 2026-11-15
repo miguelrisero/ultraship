@@ -2979,7 +2979,7 @@ def writer_gh_denial(command, depth=0):
     return None
 
 
-# shortcut: script files run by path, gh aliases and extensions, variable command words, opaque non-gh URLs, and files written by Write/Edit then run escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
+# shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, and files written by Write/Edit then run escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
 def review_thread_denial(command):
     if read_only_shell(command) or literal_search_shell(command):
         return None
@@ -3020,10 +3020,15 @@ def review_thread_denial(command):
                 return reason
     segments.append(words)
     for words in segments:
+        if any(os.path.basename(value) == 'gh' for value, _ in words) and any(
+                re.search(r'[*?\[]', re.sub(r'''('([^']*)'|"(?:\\.|[^"\\])*")''', '', raw))
+                for _, raw in words):
+            return 'review-thread guard parse failure'
         calls = [index for index, (value, _) in enumerate(words)
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
-        if not calls and 'api.github.com' in normalized and any(
-                marker in normalized for marker in ('graphql', 'pulls', '%')):
+        text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words)).casefold()
+        if not calls and 'api.github.com' in text and any(
+                marker in text for marker in ('graphql', 'pulls', '%')):
             return 'GitHub API outside gh'
         for index in calls:
             endpoint, fields, methods, query, inputs = None, False, [], None, False

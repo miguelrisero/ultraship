@@ -54,7 +54,7 @@ Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-s
 
 The ship hooks need Claude Code 2.1.295 or later.
 
-The review-thread guard scans command text. Script files run by path, `gh` aliases and extensions, and variable command words escape its checks. It also misses opaque URLs in other clients and files written by Write or Edit then run. The upgrade path is a GitHub token that the driver cannot use for review-thread writes.
+The review-thread guard scans command text. Script files run by path, `gh` aliases and extensions, and command words built from variables or globs escape its checks. It also misses opaque URLs in other clients and files written by Write or Edit then run. The upgrade path is a GitHub token that the driver cannot use for review-thread writes.
 
 The reviewer boundary checks names and paths. It cannot see a copy of a protected row kept under another name, such as a scratch file. GitHub addresses content by ID, such as a blob or a `.diff`, with no path, so the hook denies reviewer `WebFetch` when the raw or decoded URL names `github.com`, `githubusercontent.com` or a subdomain after Unicode normalization, and denies any host that stays non-ASCII. A URL on another code host that addresses content by ID carries no path, so the hook cannot check it.
 
