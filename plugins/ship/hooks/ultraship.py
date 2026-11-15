@@ -3032,43 +3032,56 @@ def review_thread_denial(command):
             first = 0
             while first < len(words) and re.match(r'[A-Za-z_]\w*=', words[first][0]):
                 first += 1
+            if first < len(words) and os.path.basename(words[first][0]) == 'env':
+                first += 1
+                while first < len(words) and re.match(r'[A-Za-z_]\w*=', words[first][0]):
+                    first += 1
             if (first + 1 >= len(words) or os.path.basename(words[first][0]) != 'gh'
                     or words[first + 1][0] != 'api'):
                 return 'GitHub API outside gh'
         for index in calls:
             endpoint, fields, methods, query, inputs = None, False, [], None, False
             arguments = words[index + 2:]
-            cursor = 0
+            cursor, parsed = 0, True
+            value_options = {'-H', '-X', '-f', '-F', '-q', '-t', '-p', '--method', '--field', '--raw-field',
+                             '--input', '--header', '--jq', '--template', '--hostname', '--cache', '--preview'}
+            switches = {'-i', '--include', '--paginate', '--slurp', '--silent', '--verbose'}
             while cursor < len(arguments):
                 value, raw = arguments[cursor]
-                method = GH_METHOD.fullmatch(value)
-                field = GH_FIELD.fullmatch(value)
-                if method:
-                    method_value = method[1] if value.startswith('--') else method[2]
-                    if not method_value:
-                        cursor += 1
-                        method_value = arguments[cursor][0] if cursor < len(arguments) else ''
-                    methods.append(method_value.removeprefix('=').upper())
-                elif field:
-                    fields = True
-                    inputs = inputs or value.startswith('--input')
-                    if value in ('-f', '-F', '--field', '--raw-field', '--input'):
-                        cursor += 1
-                        field_value, field_raw = arguments[cursor] if cursor < len(arguments) else ('', '')
+                option = value.split('=', 1)[0] if value.startswith('--') else value
+                if option in value_options:
+                    if value.startswith('--') and '=' in value:
+                        option_value = value.split('=', 1)[1]
+                        option_raw = raw.split('=', 1)[1]
                     else:
-                        field_value = re.sub(r'^(?:--(?:raw-field|field|input)=|-[ip]*[fF])', '', value)
-                        field_raw = re.sub(r'^(?:--(?:raw-field|field|input)=|-[ip]*[fF])', '', raw)
-                    if field_value.startswith('query='):
-                        query_value = field_value[6:]
-                        single = re.fullmatch(r"query='[^']*'|'query=[^']*'", field_raw) is not None
-                        query = bool(query_value) and not query_value.startswith('@') and (
-                            single or not any(char in field_raw for char in '$`\\'))
-                elif value in ('-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache',
-                               '-p', '--preview'):
-                    cursor += 1
-                elif not value.startswith('-') and endpoint is None:
+                        cursor += 1
+                        if cursor >= len(arguments):
+                            parsed = False
+                            break
+                        option_value, option_raw = arguments[cursor]
+                    if option in ('-X', '--method'):
+                        methods.append(option_value.upper())
+                    elif option in ('-f', '-F', '--field', '--raw-field', '--input'):
+                        fields = True
+                        inputs = inputs or option == '--input'
+                        if option_value.startswith('query='):
+                            query_value = option_value[6:]
+                            single = re.fullmatch(r"query='[^']*'|'query=[^']*'", option_raw) is not None
+                            query = bool(query_value) and not query_value.startswith('@') and (
+                                single or not any(char in option_raw for char in '$`\\'))
+                elif value in switches:
+                    pass
+                elif value.startswith('-') or endpoint is not None:
+                    parsed = False
+                else:
                     endpoint = value
                 cursor += 1
+            if not parsed:
+                if any(re.match(r'-(?!-)[^\s]*[fFX]', value)
+                       or value.startswith(('--field', '--raw-field', '--input', '--method'))
+                       for value, _ in arguments):
+                    return 'review-thread guard parse failure'
+                continue
             raw_endpoint = endpoint or ''
             full_url = '://' in raw_endpoint
             host = None

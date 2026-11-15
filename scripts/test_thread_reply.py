@@ -81,6 +81,14 @@ REFUSE = (
     'gh api https://api.github.com/user && curl -d @body.json "$G/graphql"',
     'gh pr view 7; curl https://api.github.com/graphql -d @body.json',
     'curl -X POST https://api.github.com/repos/o/r/pulls/7/comments -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @reply.json -H gh api',
+    "gh api -iH 'Accept: application/vnd.github+json' graphql --input body.json",
+    'gh api -iX POST repos/o/r/pulls/7/comments -f body=x',
+    'gh api -XPOST repos/o/r/issues/7/comments -f body=x',
+    'gh api repos/o/r/issues/7/comments -fbody=x',
+    'gh api repos/o/r/issues/7/comments extra -f body=x',
+    "gh api -H 'Accept: x' -Z graphql --input body.json",
+    'gh api --unknown-option graphql --input body.json',
+    "env -S 'curl https://api.github.com/graphql -d @body.json'",
 )
 
 ADMIT = (
@@ -117,6 +125,10 @@ ADMIT = (
     "gh api 'repos/o/r/pulls/7/comments?per_page=100' --jq '.[].id'",
     'gh pr list --search "is:open author:*"',
     "gh api graphql -f query='query{viewer{login}}' && gh api https://api.github.com/user",
+    'env GH_TOKEN="$TOKEN" gh api https://api.github.com/repos/o/r/pulls/7/comments',
+    'gh api -i repos/o/r/pulls/7/comments',
+    "gh api -H 'Accept: application/vnd.github+json' repos/o/r/pulls/7/comments --paginate",
+    "gh api -iH 'Accept: application/vnd.github+json' repos/o/r/pulls/7/comments",
 )
 
 
