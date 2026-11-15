@@ -2870,6 +2870,8 @@ def writer_gh_denial(command, depth=0):
 
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                    'Report the blocked scope to the driver.')
+RECEIPT_CUSTODY_FAILED = ('The ship hook could not check refusal-receipt custody, so it denies this call. '
+                          'Report the blocked scope to the driver.')
 
 
 def receipt_custody(data, read_search=False):
@@ -2967,7 +2969,11 @@ def receipt_custody(data, read_search=False):
 
 def pre(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
-    receipt_custody(data)
+    try:
+        receipt_custody(data)
+    except Exception:
+        traceback.print_exc()
+        deny(RECEIPT_CUSTODY_FAILED)
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
         deny('ship agents pin their own model. Remove the `model` field and call the scoped agent '
              'or the next agent in its fallback chain.')
