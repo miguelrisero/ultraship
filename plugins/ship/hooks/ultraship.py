@@ -1683,10 +1683,10 @@ def inline_interpreter_denial(command, cwd=None):
             segment_relative_denied = (redirected or not safe_base or chdir_wrapper
                                        or directory and not safe_directory or reads_pipe)
             prefix_end = next((index for index, word in enumerate(words)
-                               if not re.match(r'[A-Za-z_]\w*=', word[1])), len(words))
+                               if not re.match(r'[A-Za-z_][A-Za-z0-9_]*=', word[1])), len(words))
             first = words[prefix_end] if prefix_end < len(words) else None
-            neutral_prefix = not any(interpreter_name(word[1]) or os.path.basename(word[1]) in STRING_WRAPPERS
-                                     for word in words)
+            neutral_prefix = prefix_end > 0 and not any(
+                interpreter_name(word[1]) or os.path.basename(word[1]) in STRING_WRAPPERS for word in words)
             path_part = r'(?:\$(?:PATH|\{PATH\})|\$(?:HOME|\{HOME\})(?:/[\w./@%+,-]*)?|/[\w./@%+,-]*)'
             if (piped_input and first and first[0] != '[' and first[1] != '$?'
                     and unresolved_shell_word(first[0])):
@@ -1694,7 +1694,7 @@ def inline_interpreter_denial(command, cwd=None):
             for index, (raw, value, start, end) in enumerate(words):
                 arguments = [word[1] for word in words[index + 1:]]
                 neutral = neutral_prefix and index < prefix_end and bool(re.fullmatch(
-                    rf'[A-Za-z_]\w*=("?){path_part}(?::{path_part})*\1', raw))
+                    rf'[A-Za-z_][A-Za-z0-9_]*=("?){path_part}(?::{path_part})*\1', raw, re.ASCII))
                 unresolved = (not neutral and raw != '[' and value != '$?' and start not in shell_programs
                               and unresolved_shell_word(raw))
                 names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))

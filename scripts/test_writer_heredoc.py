@@ -144,7 +144,7 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
 
     def test_path_prefix_preserves_unresolved_command_refusals(self):
-        for command in ("$VAR -c 'print(1)'", '"$VAR" -e x', '* -e x'):
+        for command in ("$VAR -c 'print(1)'", '"$VAR" -e x', '* -e x', 'A²=$HOME -c x'):
             with self.subTest(command=command):
                 self.assertTrue(self.denied('PATH="/x:$PATH" ' + command))
                 self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
