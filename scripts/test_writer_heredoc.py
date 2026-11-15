@@ -105,10 +105,29 @@ class WriterHeredocTests(unittest.TestCase):
             'until true; do ((i=0)); done; ((i))',
             'case x in y) ((i=0));; esac; ((i))',
             'false && ((i=0)); ((i))', 'true || ((i=0)); ((i))',
+            'if false; then for ((i=0; i<1; i++)); do :; done; fi; (( i ))',
+            'true || for ((i=0; i<1; i++)); do :; done; (( i ))',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_numeric_loop_headers_prove_names_within_their_bodies(self):
+        """Keep local numeric proof inside loops on conditional and nested paths."""
+        for command in (
+            'cd /tmp && for ((i=0; i<3; i++)); do echo "$i"; done',
+            'cd /tmp && for ((i=0; i<3; i++)); do echo "${a[i]}"; done',
+            'git fetch -q && for ((i=0; i<2; i++)); do git log -1; done',
+            'cd x || exit 1; for ((i=0; i<3; i++)); do echo "$i"; done',
+            'echo x | cat; for ((i=0; i<3; i++)); do echo "$i"; done',
+            'echo x | cat\nfor ((i=0; i<3; i++)); do echo "$i"; done',
+            'if [ -d x ]; then for ((i=0; i<3; i++)); do echo "$i"; done; fi',
+            'for f in a b; do for ((i=0; i<2; i++)); do echo "$f $i"; done; done',
+            'for ((i=0; i<3; i++)); do for ((j=0; j<2; j++)); do echo "$((i+j))"; done; done',
+            'while read -r line; do for ((i=0; i<2; i++)); do echo "$line $i"; done; done < f',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
 
     def test_only_executable_loop_headers_prove_numeric_names(self):
         """Protect numeric inference from comments, quoted data and heredoc data."""

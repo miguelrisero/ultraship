@@ -2142,28 +2142,55 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                                 if word[0] in {')', '`'} or neighbor in groups:
                                     return reason + 'arithmetic)'
                                 regions.append((word[2], word[3]))
-    numeric, assignments = set(), {}
-    loop_starts = {words[0][2] for words in commands if words and words[0][0] == 'for'}
+    numeric, assignments, numeric_scopes = set(), {}, {}
+    control_words = []
+    for words in commands:
+        for word in words:
+            if re.fullmatch(rf'{identifier}=.*', word[1], re.S):
+                continue
+            if word[0] != word[1]:
+                break
+            control_words.append(word)
+            if word[0] not in {'then', 'do', 'else', '{', '!', 'if', 'elif'}:
+                break
+    loop_ends, loop_stack = {}, []
+    for raw, _, start, end in sorted(control_words, key=lambda word: word[2]):
+        if raw in {'for', 'while', 'until', 'select'}:
+            loop_stack.append(start)
+        elif raw == 'done' and loop_stack:
+            loop_ends[loop_stack.pop()] = end
+    loop_starts = {start for raw, _, start, _ in control_words if raw == 'for'}
+    loop_headers = []
 
     def conditional_before(position):
         return any(raw == value and (value in {'if', 'while', 'until', 'case'} or raw in {'&', '|'})
                    for raw, value, start, _ in tokens if start < position)
 
     for loop in re.finditer(r'\bfor\s*\(\(([^;]*);', text):
-        if loop.start() not in loop_starts or conditional_before(loop.start()):
+        if loop.start() not in loop_starts:
             continue
+        opening = next((index for index, token in enumerate(tokens)
+                        if token[0] == '(' and loop.start() < token[2] < loop.start(1)), None)
+        if opening not in groups:
+            continue
+        header_end = tokens[groups[opening]][3]
+        loop_headers.append((loop.start(1), header_end))
+        scope_end = loop_ends.get(loop.start(), header_end)
         terms = loop[1].split(',')
         if all(re.fullmatch(rf'\s*{identifier}\s*=\s*[0-9]+\s*', term) for term in terms):
             for term in re.finditer(rf'({identifier})\s*=', loop[1]):
+                numeric_scopes.setdefault(term[1], []).append((loop.start(1), scope_end))
                 before = text[:loop.start(1) + term.start()]
-                if not re.search(rf'(?<![A-Za-z0-9_]){term[1]}(?![A-Za-z0-9_])', before):
+                if (scope_end > header_end and not conditional_before(loop.start())
+                        and not re.search(r'\b(?:for|select|function)\b|[({]', text[:loop.start()])
+                        and not re.search(rf'(?<![A-Za-z0-9_]){term[1]}(?![A-Za-z0-9_])', before)):
                     numeric.add(term[1])
     for start, end in regions:
         match = re.match(rf'\s*({identifier})\s*=\s*[0-9]+(?=\s*(?:[,;)]|$))', text[start:end])
         if match:
             position = start + match.start(1)
             before = text[:position]
-            if conditional_before(position):
+            if conditional_before(position) or any(left <= position < right for left, right in loop_headers):
                 continue
             if not re.search(rf'(?<![A-Za-z0-9_]){match[1]}(?![A-Za-z0-9_])', before):
                 if re.search(r'(?:^|[;\n])\s*(?:for\s*)?\(\(\s*$', before):
@@ -2194,8 +2221,11 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                                    for previous in words[:index])}
     code_operands = {word[2] for words in commands for index, word in enumerate(words)
                      if any(previous[1] in {'eval', 'trap'} for previous in words[:index])}
-    for name in tuple(numeric):
+    for name in numeric | numeric_scopes.keys():
         for raw, value, start, end in tokens:
+            if name not in numeric and not any(
+                    left <= start < right for left, right in numeric_scopes[name]):
+                continue
             if assignments.get(start) == name:
                 continue
             chars = list(raw)
@@ -2213,11 +2243,14 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                 remaining = re.sub(r'''(?:'[^']*'|"(?:\\.|[^"\\])*")''', '', remaining)
             if re.search(rf'(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])', remaining):
                 numeric.discard(name)
+                numeric_scopes.pop(name, None)
                 break
     for start, end in regions:
         expression = text[start:end]
         for match in re.finditer(rf'(?<![A-Za-z0-9_#]){identifier}', expression):
-            if match[0] in numeric or re.match(r'\s*=(?!=)', text[start + match.end():end]):
+            if (match[0] in numeric or any(left <= start + match.start() < right
+                    for left, right in numeric_scopes.get(match[0], []))
+                    or re.match(r'\s*=(?!=)', text[start + match.end():end])):
                 continue
             return reason + 'arithmetic)'
     return None
