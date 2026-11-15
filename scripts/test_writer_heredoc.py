@@ -63,6 +63,7 @@ class WriterHeredocTests(unittest.TestCase):
 
     def test_arithmetic_bare_names_refuse_runtime_payloads(self):
         """Catch recursive arithmetic evaluation of unresolved variable values."""
+        self.assertTrue(self.denied('i=0; declare \'i[0]\'="$x"; (( i ))'))
         for command in (
             "p='a[$'; q='(echo RAN)]'; y=$p$q; (( y ))", '(( y ))',
             'echo $(( y + 1 ))', 'echo "$(( y ))"', 'x=$(( n + 1 ))',
@@ -78,6 +79,13 @@ class WriterHeredocTests(unittest.TestCase):
             *('i=0 | cat; ' + expression for expression in ('(( i ))', 'echo ${a[i]}', 'echo ${s:i}')),
             '(( i )); i=0', 'echo ${a[i]}; i=0', 'echo ${s:i}; i=0',
             '(( i )); i=0; : x', 'i=$p$q; b=([i]=1)', 'b=([i]=1)',
+            "for ((i=0; i<3; i++)); do read 'i' < f; (( i )); done",
+            'for ((i=0; i<3; i++)); do read "i" < f; (( i )); done',
+            'i=0; declare "i=$x"; (( i ))', 'i=0; export "i=$x"; (( i ))',
+            'i=0; local "i+=$x"; (( i ))', "i=0; printf -v 'i' %s \"$x\"; (( i ))",
+            'i=0; mapfile -t "i" < f; (( i ))',
+            'i=0; eval "i=$x"; (( i ))', "i=0; eval 'i=$x'; (( i ))",
+            'i=0; trap "i=$x" DEBUG; (( i ))',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
@@ -213,6 +221,10 @@ class WriterHeredocTests(unittest.TestCase):
             r'''printf '%s\n' ${HOME:-/tmp}''', r'''printf '%s\n' ${arr[@]}''',
             r'''printf "%s\n" ${HOME}''',
             'for ((i=0, j=0; i<3; i++, j++)); do :; done',
+            r'''for ((i=0; i<3; i++)); do printf 'i=%s\n' "$i"; done''',
+            'for ((i=0; i<3; i++)); do echo "i=$i"; done',
+            "for ((i=0; i<3; i++)); do git log -1 --format='%h i'; done",
+            'i=0; echo "i is $i"; (( i++ ))',
             'echo "${!BASH*}"', 'echo "${!a[@]}"', 'echo "${!a[*]}"',
             'declare -i n; n=5', 'declare -a a', 'local x=1',
             'cp file{,.orig}', 'mkdir -p src/{local,remote}', 'mv "$f"{,.bak}',

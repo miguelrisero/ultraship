@@ -2120,8 +2120,13 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                 and re.search(r'(?:^|[;\n])\s*$', before)
                 and not re.search(r'&&|\|\||[|({]|\b(?:if|while|until|case|for|select|function)\b', before)):
             numeric.add(name)
+    declaration_operands = {word[2] for words in commands for index, word in enumerate(words)
+                            if any(previous[1] in {'declare', 'typeset', 'local', 'export', 'readonly'}
+                                   for previous in words[:index])}
+    code_operands = {word[2] for words in commands for index, word in enumerate(words)
+                     if any(previous[1] in {'eval', 'trap'} for previous in words[:index])}
     for name in tuple(numeric):
-        for raw, _, start, end in tokens:
+        for raw, value, start, end in tokens:
             if assignments.get(start) == name:
                 continue
             chars = list(raw)
@@ -2129,6 +2134,12 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                 for position in range(max(left, start), min(right, end)):
                     chars[position - start] = ' '
             remaining = re.sub(rf'\$(?:{name}(?![A-Za-z0-9_])|\{{{name}\}})', '', ''.join(chars))
+            name_operand = (value == name or start in code_operands
+                            or start in declaration_operands and value.startswith((name + '=', name + '+=', name + '[')))
+            if name_operand and ''.join(chars).strip():
+                remaining = value
+            else:
+                remaining = re.sub(r'''(?:'[^']*'|"(?:\\.|[^"\\])*")''', '', remaining)
             if re.search(rf'(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])', remaining):
                 numeric.discard(name)
                 break
