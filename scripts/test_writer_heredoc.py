@@ -85,11 +85,10 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied('i=0; ' + redirect + ' . ./s; (( i ))'))
                 self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
-    def test_conditional_words_in_any_quote_mode_prevent_loop_proof(self):
+    def test_conditional_argument_words_preserve_scoped_loop_proof(self):
         for word in ('if', '"while"', "'until'", 'case', 'select'):
             with self.subTest(word=word):
-                self.assertTrue(self.denied('echo ' + word + '; for ((i=0; i<3; i++)); do echo "$i"; done'))
-                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+                self.assertFalse(self.denied('echo ' + word + '; for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
 
     def test_plain_literal_proofs_and_data_controls_stay_admitted(self):
         for command in (
@@ -101,6 +100,52 @@ class WriterHeredocTests(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
+
+    def test_redirected_loop_pipeline_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('for ((i=0; i<1; i++)); do :; done > out | cat; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirected_loop_background_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('for ((i=0; i<1; i++)); do :; done >out & (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirected_arithmetic_pipeline_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('((i=0)) >x | cat; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirected_arithmetic_background_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('((i=0)) 2>&1 & (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_if_body_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('if [ -f x ]; then for ((i=0; i<3; i++)); do echo "$i"; done; fi'), self.reason)
+
+    def test_while_body_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('while true; do for ((i=0; i<3; i++)); do echo "$i"; done; break; done'), self.reason)
+
+    def test_closed_if_keeps_literal_arithmetic_initializer(self):
+        self.assertFalse(self.denied('if true; then :; fi; ((i=0)); (( i++ ))'), self.reason)
+
+    def test_if_argument_keeps_literal_arithmetic_initializer(self):
+        self.assertFalse(self.denied('echo if; ((i=0)); ((i++))'), self.reason)
+
+    def test_loop_body_if_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('for ((i=0; i<3; i++)); do if [ "$i" = 1 ]; then echo one; fi; done'), self.reason)
+
+    def test_closed_case_keeps_later_literal_loop_proof(self):
+        self.assertFalse(self.denied('case "$x" in a) echo a;; esac; for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_find_dot_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('find . -name x; for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_plain_literal_assignment_keeps_numeric_proof(self):
+        self.assertFalse(self.denied('i=0; (( i++ ))'), self.reason)
+
+    def test_literal_eval_read_keeps_numeric_proof(self):
+        self.assertFalse(self.denied("i=0; eval 'echo $i'; (( i++ ))"), self.reason)
+
+    def test_literal_printf_payload_keeps_data_exemption(self):
+        self.assertFalse(self.denied("printf '%s\\n' 'a[$(echo RAN)]'"), self.reason)
 
     def test_double_quoted_offset_quote_keeps_arithmetic_refused(self):
         self.assertTrue(self.denied('''echo "${s:'$((y))'}"'''))
@@ -330,9 +375,8 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
-    def test_closed_conditional_prevents_later_numeric_proof(self):
-        self.assertTrue(self.denied('if true; then :; fi; ((i=0)); (( i++ ))'))
-        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+    def test_closed_conditional_preserves_later_numeric_initializer(self):
+        self.assertFalse(self.denied('if true; then :; fi; ((i=0)); (( i++ ))'), self.reason)
 
     def test_nested_arithmetic_closes_keep_unresolved_names(self):
         """Protect the writer boundary when nested parentheses precede a runtime value."""
@@ -460,7 +504,7 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
     def test_numeric_loop_headers_prove_names_within_their_bodies(self):
-        """Keep loop proof local and refuse proof when conditional words occur."""
+        """Keep local numeric proof inside loops on conditional and nested paths."""
         for command in (
             'cd /tmp && for ((i=0; i<3; i++)); do echo "$i"; done',
             'cd /tmp && for ((i=0; i<3; i++)); do echo "${a[i]}"; done',
@@ -474,11 +518,7 @@ class WriterHeredocTests(unittest.TestCase):
             'while read -r line; do for ((i=0; i<2; i++)); do echo "$line $i"; done; done < f',
         ):
             with self.subTest(command=command):
-                if command.startswith(('if ', 'while ')):
-                    self.assertTrue(self.denied(command))
-                    self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
-                else:
-                    self.assertFalse(self.denied(command), self.reason)
+                self.assertFalse(self.denied(command), self.reason)
 
     def test_only_executable_loop_headers_prove_numeric_names(self):
         """Protect numeric inference from comments, quoted data and heredoc data."""

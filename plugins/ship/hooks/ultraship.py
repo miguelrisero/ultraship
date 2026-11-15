@@ -1736,11 +1736,12 @@ def safe_directory_state(command, cwd=None):
     return not forbidden(base) and not forbidden(target) and os.path.isdir(target)
 
 
-def shell_command_positions(tokens):
-    """Resolve shell prefixes without treating ordinary argument words as commands."""
-    positions, command_start, time_option, cursor = set(), True, False, 0
+def shell_without_redirections(tokens):
+    """Keep redirect targets and descriptor operators out of command and list positions."""
+    cursor = 0
     while cursor < len(tokens):
-        raw, value, start, end = tokens[cursor]
+        token = tokens[cursor]
+        raw, _, _, end = token
         cursor += 1
         if (re.fullmatch(r'\d+|\{[A-Za-z_][A-Za-z0-9_]*}', raw)
                 and cursor < len(tokens) and tokens[cursor][0] in {'<', '>'}
@@ -1754,6 +1755,13 @@ def shell_command_positions(tokens):
             if cursor < len(tokens) and tokens[cursor][0] not in {';', '&', '|', '(', ')', '`', '\n'}:
                 cursor += 1
             continue
+        yield token
+
+
+def shell_command_positions(tokens):
+    """Resolve shell prefixes without treating ordinary argument words as commands."""
+    positions, command_start, time_option = set(), True, False
+    for raw, value, start, _ in shell_without_redirections(tokens):
         if raw in {';', '&', '|', '(', ')', '`', '\n'}:
             command_start, time_option = True, False
             continue
@@ -2330,9 +2338,13 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
     numeric, assignments, numeric_scopes = set(), {}, {}
     control_words = []
     for words in commands:
+        if words:
+            previous = next((token for token in reversed(tokens) if token[2] < words[0][2]), None)
+            if previous is not None and previous[0] not in {';', '&', '|', '(', ')', '`', '\n'}:
+                continue
         for word in words:
             if re.fullmatch(rf'{identifier}=.*', word[1], re.S):
-                continue
+                break
             if word[0] != word[1]:
                 break
             control_words.append(word)
@@ -2347,9 +2359,21 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
     loop_starts = {start for raw, _, start, _ in control_words if raw == 'for'}
     loop_headers = []
 
+    list_tokens = list(shell_without_redirections(tokens))
+
     def conditional_before(position):
+        stack = []
+        for raw, _, start, _ in sorted(control_words, key=lambda word: word[2]):
+            if start >= position:
+                break
+            if raw in {'if', 'while', 'until', 'case', 'for', 'select'}:
+                stack.append(raw)
+            elif stack and raw == {'if': 'fi', 'case': 'esac'}.get(stack[-1], 'done'):
+                stack.pop()
+        if any(kind in {'if', 'while', 'until', 'case'} for kind in stack):
+            return True
         before = []
-        for token in tokens:
+        for token in list_tokens:
             if token[2] >= position:
                 break
             if token[0] == '\n' and before and before[-1][0] in {'&', '|'}:
@@ -2361,7 +2385,7 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                        for left, right in zip(before[boundary + 1:], before[boundary + 2:])))
 
     def parallel_after(position):
-        following = next((token for token in tokens if token[2] >= position), None)
+        following = next((token for token in list_tokens if token[2] >= position), None)
         return following is not None and following[0] in {'|', '&'}
 
     for loop in re.finditer(r'\bfor\s*\(\(([^;]*);', text):
@@ -2389,27 +2413,23 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
         if match:
             position = start + match.start(1)
             before = text[:position]
-            initializer_prefix = re.sub(r'\(\(\s*$', '', before)
             region_close = max((tokens[closing][3] for opening, closing in groups.items()
                                 if tokens[opening][2] < start < tokens[closing][3]), default=end)
-            if (re.search(r'[&|({]', initializer_prefix) or parallel_after(region_close)
+            if (conditional_before(position) or parallel_after(region_close)
                     or any(left <= position < right for left, right in loop_headers)):
                 continue
             if not re.search(rf'(?<![A-Za-z0-9_]){match[1]}(?![A-Za-z0-9_])', before):
                 if re.search(r'(?:^|[;\n])\s*(?:for\s*)?\(\(\s*$', before):
                     numeric.add(match[1])
-    for match in re.finditer(rf'(?<![A-Za-z0-9_])({identifier})=[0-9]+(?=\s*(?:[;\n]|$))', text):
+    for match in re.finditer(rf'(?<![A-Za-z0-9_])({identifier})=(?:[0-9]+|"?\$\(\([\s\S]*?\)\)"?)(?=\s*(?:[;\n]|$))', text):
         name, start, end = match[1], match.start(), match.end()
         assignments[start] = name
         before = text[:start]
         if (not re.search(rf'(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])', before)
                 and re.search(r'(?:^|[;\n])\s*$', before)
-                and not parallel_after(end)
-                and not re.search(r'[&|({]|\b(?:for|select|function)\b', before)):
+                and not conditional_before(start) and not parallel_after(end)
+                and not re.search(r'&&|\|\||[|({]|\b(?:if|while|until|case|for|select|function)\b', before)):
             numeric.add(name)
-    if any(value in {'if', 'while', 'until', 'case', 'select'} for _, value, _, _ in tokens):
-        numeric.clear()
-        numeric_scopes.clear()
     destination_operands = set()
     for words in commands:
         for index, word in enumerate(words):
