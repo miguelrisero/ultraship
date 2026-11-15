@@ -497,8 +497,9 @@ Send CI reports that say in the base file, missing at HEAD only to the existing 
 Apply the following surviving-claim requirements only when the brief selects a surviving-claim adaptation.
 Use the existing lane-derived route when an identical-operation re-anchor fits.
 Use the surviving-claim disposition only for an independently reviewed narrower mutant that preserves the full claim guarantee.
-Permit only the exact approved mutant fields under the exact CoC decision and admitted private-proposal gates.
-Preserve row ID, claim, designated test, subject, operator, pins, assertions, bounds and unrelated fields.
+Permit only the exact approved mutant fields and any designated-test change the exact CoC decision names, inside admitted private-proposal gates.
+Preserve row ID, claim, subject, operator, pins, assertions, bounds and unrelated fields; keep the designated test unless the exact CoC decision names its change.
+For a designated-test change, require independent review that the replacement test detects the surviving claim's violation and keeps the full claim guarantee.
 Review original and proposed local transformations inside separately admitted private scope.
 Identify the concrete violation of the surviving claim and the designated test's detection mechanism.
 Review relevant regressions that the narrower operation could omit.
