@@ -369,16 +369,16 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.enterContext(patch.dict(os.environ, {'HOME': temporary, 'XDG_STATE_HOME': str(self.state)}))
         self.store = self.state / 'ultraship' / 'text-lint'
 
-    def assert_custody_denial(self, event):
+    def assert_custody_denial(self, event, reason=(
+            'Only the text_lint hook reads or writes refusal receipts (custody rule). '
+            'Report the blocked scope to the driver.')):
         output = io.StringIO()
         with redirect_stdout(output), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exit:
             ultraship.guarded_pre({'cwd': str(self.cwd), **event})
         self.assertEqual(exit.exception.code, 0)
         result = json.loads(output.getvalue())['hookSpecificOutput']
         self.assertEqual(result['permissionDecision'], 'deny')
-        self.assertEqual(result['permissionDecisionReason'],
-                         'Only the text_lint hook reads or writes refusal receipts (custody rule). '
-                         'Report the blocked scope to the driver.')
+        self.assertEqual(result['permissionDecisionReason'], reason)
 
     def test_bash_store_glob_prefixes_deny_every_caller(self):
         patterns = ('ultra*/t*/pending/[0-9a-f]*',
@@ -424,6 +424,77 @@ class ReceiptCustodyTests(unittest.TestCase):
                                                               'tool_name': 'Bash',
                                                               'tool_input': {'command': command}}))
                     self.assertEqual(output.getvalue(), '')
+
+    def test_ordinary_calls_allow_every_caller(self):
+        """Catch custody checks that deny ordinary calls for a writer, driver or main session."""
+        inputs = (('Edit', {'file_path': str(self.cwd / 'file.py'), 'old_string': 'old', 'new_string': 'new'}),
+                  ('Write', {'file_path': str(self.cwd / 'file.py'), 'content': 'new'}),
+                  ('NotebookEdit', {'notebook_path': str(self.cwd / 'file.ipynb'), 'new_source': 'print(1)'}),
+                  ('Agent', {'subagent_type': 'ship:writer--sol', 'description': 'Check file',
+                             'prompt': 'Check the file.'}),
+                  ('WebSearch', {'query': 'Python documentation'}),
+                  ('SendMessage', {'type': 'message', 'recipient': 'main', 'content': 'Ready.'}))
+        for caller in ('ship:writer--sol', 'ship:driver', ''):
+            for tool, tool_input in inputs:
+                with self.subTest(caller=caller, tool=tool):
+                    output = io.StringIO()
+                    with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                        self.assertIsNone(ultraship.guarded_pre({'cwd': str(self.cwd), 'agent_type': caller,
+                                                              'tool_name': tool, 'tool_input': tool_input}))
+                    self.assertEqual(output.getvalue(), '')
+
+    def test_pre_error_denies_non_read_tools_for_every_caller(self):
+        """Catch tool calls escaping a pre failure outside receipt custody or reviewer checks."""
+        inputs = (('Bash', {'command': 'ls'}),
+                  ('Edit', {'file_path': str(self.cwd / 'file.py'), 'old_string': 'old', 'new_string': 'new'}),
+                  ('Write', {'file_path': str(self.cwd / 'file.py'), 'content': 'new'}),
+                  ('NotebookEdit', {'notebook_path': str(self.cwd / 'file.ipynb'), 'new_source': 'print(1)'}),
+                  ('Agent', {'subagent_type': 'ship:writer--sol', 'description': 'Check file',
+                             'prompt': 'Check the file.'}),
+                  ('WebSearch', {'query': 'Python documentation'}))
+        for caller in ('ship:writer--sol', 'ship:driver', ''):
+            for tool, tool_input in inputs:
+                output, errors = io.StringIO(), io.StringIO()
+                with self.subTest(caller=caller, tool=tool), \
+                        patch.object(ultraship, 'pre', side_effect=RuntimeError('pre failed')):
+                    with redirect_stdout(output), redirect_stderr(errors), self.assertRaises(SystemExit) as exit:
+                        ultraship.guarded_pre({'cwd': str(self.cwd), 'agent_type': caller,
+                                              'tool_name': tool, 'tool_input': tool_input})
+                    self.assertEqual(exit.exception.code, 0)
+                    result = json.loads(output.getvalue())['hookSpecificOutput']
+                    self.assertEqual(result['permissionDecision'], 'deny')
+                    self.assertEqual(result['permissionDecisionReason'],
+                                     'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
+                                     'Report the blocked scope to the driver.')
+                    self.assertIn('Traceback (most recent call last):', errors.getvalue())
+                    self.assertIn('RuntimeError: pre failed', errors.getvalue())
+
+    def test_pre_error_denies_malformed_tool_names(self):
+        """Catch malformed tool names escaping denial through an error in the custody fallback."""
+        for tool in (None, 1, ['Read'], {'name': 'Read'}):
+            with self.subTest(tool=tool), patch.object(ultraship, 'pre', side_effect=RuntimeError('pre failed')):
+                self.assert_custody_denial(
+                    {'tool_name': tool, 'tool_input': {}},
+                    'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
+                    'Report the blocked scope to the driver.')
+
+    def test_custody_error_denies_every_tool_for_every_caller(self):
+        """A failed custody check cannot permit any tool for a writer, driver or main session."""
+        inputs = (('Bash', {'command': 'ls'}),
+                  ('Edit', {'file_path': str(self.cwd / 'file.py'), 'old_string': 'old', 'new_string': 'new'}),
+                  ('Write', {'file_path': str(self.cwd / 'file.py'), 'content': 'new'}),
+                  ('NotebookEdit', {'notebook_path': str(self.cwd / 'file.ipynb'), 'new_source': 'print(1)'}),
+                  ('Agent', {'subagent_type': 'ship:writer--sol', 'description': 'Check file',
+                             'prompt': 'Check the file.'}),
+                  ('SendMessage', {'type': 'message', 'recipient': 'main', 'content': 'Ready.'}))
+        for caller in ('ship:writer--sol', 'ship:driver', ''):
+            for tool, tool_input in inputs:
+                with self.subTest(caller=caller, tool=tool), \
+                        patch.object(ultraship, 'receipt_custody', side_effect=OSError('custody failed')):
+                    self.assert_custody_denial(
+                        {'agent_type': caller, 'tool_name': tool, 'tool_input': tool_input},
+                        'The ship hook could not check refusal-receipt custody, so it denies this call. '
+                        'Report the blocked scope to the driver.')
 
     def test_role_failure_keeps_writer_read_custody_closed(self):
         with patch.object(ultraship, 'role', side_effect=RuntimeError('role failed')):

@@ -59,7 +59,7 @@ An admission record is the file `row-review/<agent ID>.json` in the hook state f
 
 The hook sees these tools: `Agent`, `Task`, `Bash`, `Edit`, `Write`, `NotebookEdit`, `WebSearch`, `Read`, `Grep`, `Glob`, `LSP`, `WebFetch`, `mcp__fff__*`, and the three `mcp__bettercoding__` Input tools (`create_input`, `update_input`, `set_input_status`). Reviewer agents list no MCP tools, so no other `mcp__` tool reaches a reviewer.
 
-A bug inside the `pre` hook lets the call through, except for reviewers, who stay blocked. A process-level failure, such as a missing `python3` or a syntax error in the hook file, still blocks the reads that need the hook for every role.
+An exception inside the `pre` hook denies every tool call for every caller. A process-level failure, such as a missing `python3` or a syntax error in the hook file, still blocks the reads that need the hook for every role.
 
 Hook state lives in `${XDG_STATE_HOME:-~/.local/state}/ultraship`.
 
