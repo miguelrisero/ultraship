@@ -35,7 +35,7 @@ class NativePeerRoutingTests(unittest.TestCase):
             lint.check('<p>' + 'word ' * 13 + '<span>' + 'word ' * 13 + '</span>.</p>')
         lint.check('<h2>What <em>is</em> wrong</h2><h2>Why now</h2><h2>Options</h2><h2>Recommendation</h2><h2>If no answer</h2>', 'decision')
         hooks = json.loads((ROOT / 'plugins/ship/hooks/hooks.json').read_text())['hooks']['PreToolUse']
-        for tool in ('SendMessage', 'mcp__bettercoding__create_input', 'mcp__bettercoding__update_input'):
+        for tool in ('Agent', 'Task', 'SendMessage', 'mcp__bettercoding__create_input', 'mcp__bettercoding__update_input'):
             self.assertTrue(any(re.fullmatch(h['matcher'], tool) and any('text_lint.py' in c['command'] for c in h['hooks']) for h in hooks))
         dispatch = (ROOT / 'plugins/chief/skills/run/references/dispatch.md').read_text()
         for requirement in ('full sentences of at most 25 words', 'Prohibit glued-word shorthand',

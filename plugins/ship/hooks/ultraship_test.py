@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Self-check for hooks/ultraship.py and skills/ship/scripts/ledger.py. Run with a workspace-local TMPDIR."""
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
+import io
 import json
 import time
 import os
@@ -9,6 +11,7 @@ import subprocess
 import tempfile
 import uuid
 import unittest
+from unittest.mock import patch
 import shlex
 import sys
 from pathlib import Path
@@ -61,6 +64,73 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     real_ruff.write_text('')
     ruff_remainder = ('uv run --frozen --directory backend/api ruff check --fix tests/integration/test_approval_expiry.py'
                       ' && uv run --frozen --directory backend/api ruff format tests/integration/test_approval_expiry.py')
+
+    receipt_store = Path(tmp) / 'ultraship' / 'text-lint'
+    custody = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
+               'Report the blocked scope to the driver.')
+    for caller in ({'agent_type': 'ship:writer--sol'}, {'agent_type': 'ship:driver'}, {}):
+        for tool, inputs in (
+                ('Edit', {'file_path': str(receipt_store / 'key')}),
+                ('Write', {'file_path': str(receipt_store / 'receipts/a.json')}),
+                ('NotebookEdit', {'notebook_path': str(receipt_store / 'book.ipynb')}),
+                ('Read', {'file_path': str(receipt_store / 'key')}),
+                ('Grep', {'path': str(receipt_store), 'pattern': 'key'}),
+                ('Grep', {'path': str(receipt_store.parent), 'pattern': 'key'}),
+                ('Grep', {'path': tmp, 'pattern': 'key'}),
+                ('Glob', {'pattern': str(receipt_store / '*')}),
+                ('Glob', {'pattern': str(receipt_store.parent / '*')}),
+                ('LSP', {'file_path': str(receipt_store / 'key')}),
+                ('LSP', {'filePath': str(receipt_store / 'key')}),
+                ('mcp__fff__grep', {'pattern': str(receipt_store)}),
+                ('Bash', {'command': 'echo forged > ' + str(receipt_store / 'key')}),
+                ('Bash', {'command': 'python3 plugins/ship/hooks/text_lint.py' + ' hook'}),
+                ('Bash', {'command': 'python3 "plugins/ship/hooks/text_lint.py"' + ' hook'}),
+                ('Bash', {'command': 'cat ' + str(receipt_store / 'key').replace('text-lint', "text-''lint")}),
+                ('Bash', {'command': 'cat ' + str(receipt_store / 'key').replace('/text-lint', '//text-lint')}),
+                ('Bash', {'command': 'cat ' + str(receipt_store / 'key').replace('/text-lint', '/./text-lint')}),
+                ('Bash', {'command': 'cat ${XDG_STATE_HOME:-' + tmp + '}/ultraship/*'}),
+                ('Bash', {'command': "python3 plugins/ship/hooks/text_lint.py ho''ok"}),
+                ('Bash', {'command': 'python3 -m plugins.ship.hooks.text_lint hook'}),
+                ('Bash', {'command': "python3 -c 'import text_lint'"}),
+                ('Read', {'file_path': str(receipt_store / 'key').upper()}),
+                ('mcp__fff__grep', {'query': {'text': str(receipt_store)}})):
+            result = hook('pre', {**caller, 'tool_name': tool, 'tool_input': inputs}, env)
+            assert denied(result), (caller, tool, inputs)
+            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+        for tool, inputs in (('Bash', {'command': 'git status --short'}),
+                             ('Bash', {'command': 'git add plugins/ship/hooks/text_lint.py'}),
+                             ('Bash', {'command': 'python3 -m unittest scripts.test_text_lint'}),
+                             ('Bash', {'command': 'python3 plugins/ship/hooks/text_lint.py --self-test'}),
+                             ('Grep', {'path': str(HOOK.parent), 'pattern': 'key'}),
+                             ('Grep', {'path': str(HOOK.parent), 'pattern': '/'}),
+                             ('Read', {'file_path': str(Path(tmp) / 'ordinary.txt')})):
+            assert not denied(hook('pre', {**caller, 'tool_name': tool, 'tool_input': inputs}, env)), (caller, tool, inputs)
+        for cwd in (tmp, str(receipt_store.parent), str(receipt_store)):
+            for tool, inputs in (('Grep', {'pattern': 'key'}), ('Glob', {'pattern': '*'}),
+                                 ('Bash', {'command': 'pwd'})):
+                result = hook('pre', {**caller, 'cwd': cwd, 'tool_name': tool, 'tool_input': inputs}, env)
+                assert denied(result), (caller, cwd, tool)
+                assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+    receipt_alias = Path(tmp) / 'ReceiptAlias'
+    receipt_store.mkdir(parents=True)
+    receipt_alias.symlink_to(receipt_store, target_is_directory=True)
+    for caller in ({'agent_type': 'ship:writer--sol'}, {'agent_type': 'ship:driver'}, {}):
+        for tool in ('Edit', 'Read', 'Write'):
+            result = hook('pre', {**caller, 'tool_name': tool,
+                                  'tool_input': {'file_path': str(receipt_alias / 'key')}}, env)
+            assert denied(result), (caller, tool)
+            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+        for command, state_root in (
+                ('cat ~/.local/sta[t]e/ultraship/*/key', str(Path(tmp) / '.local/state')),
+                ('cat $HOME/.local/sta[t]e/ultraship/*/key', str(Path(tmp) / '.local/state')),
+                ('cat ${HOME}/.local/sta[t]e/ultraship/*/key', str(Path(tmp) / '.local/state')),
+                ('cat $XDG_STATE_HOME/ultra*/t*/key', tmp),
+                ('cat ${XDG_STATE_HOME}/ultra*/t*/key', tmp)):
+            result = hook('pre', {**caller, 'tool_name': 'Bash', 'tool_input': {'command': command}},
+                          {**env, 'XDG_STATE_HOME': state_root})
+            assert denied(result), (caller, command)
+            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+    assert denied(hook('pre', {'tool_name': 'Write', 'tool_input': {'file_path': str(receipt_store).upper()}}, env))
 
     assert denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol', 'model': 'opus'}}, env))
     assert not denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol'}}, env))
@@ -288,6 +358,85 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     assert hook('stop', session, env) == ''
 
 print('ultraship hooks: ok')
+
+
+class ReceiptCustodyTests(unittest.TestCase):
+    def setUp(self):
+        temporary = self.enterContext(tempfile.TemporaryDirectory())
+        self.state = Path(temporary).resolve() / 'custom-state'
+        self.cwd = Path(temporary).resolve() / 'repo'
+        self.cwd.mkdir()
+        self.enterContext(patch.dict(os.environ, {'HOME': temporary, 'XDG_STATE_HOME': str(self.state)}))
+        self.store = self.state / 'ultraship' / 'text-lint'
+
+    def assert_custody_denial(self, event):
+        output = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exit:
+            ultraship.guarded_pre({'cwd': str(self.cwd), **event})
+        self.assertEqual(exit.exception.code, 0)
+        result = json.loads(output.getvalue())['hookSpecificOutput']
+        self.assertEqual(result['permissionDecision'], 'deny')
+        self.assertEqual(result['permissionDecisionReason'],
+                         'Only the text_lint hook reads or writes refusal receipts (custody rule). '
+                         'Report the blocked scope to the driver.')
+
+    def test_bash_store_glob_prefixes_deny_every_caller(self):
+        patterns = ('ultra*/t*/pending/[0-9a-f]*',
+                    'ultra*/t*/receipts/' + '?' * 32 + '.json',
+                    'ultra*/text-*/key')
+        for caller in ('ship:writer--sol', 'ship:driver', ''):
+            for pattern in patterns:
+                with self.subTest(caller=caller, pattern=pattern):
+                    self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                               'tool_input': {'command': 'cat ' + str(self.state / pattern)}})
+
+    def test_bash_state_shortcuts_deny_every_caller(self):
+        for caller in ('ship:writer--sol', 'ship:driver', ''):
+            for command in ('cd ~/.local/state/ultraship && cat text-lint/key',
+                            'cd ~/.local/sta*', 'ls $HOME/.local/s*',
+                            'pushd ~/.local/state/ultraship',
+                            'cat ~/.local/state/ultraship/text-lint/key') + tuple(
+                                'ls $HOME/.local/' + suffix
+                                for suffix in ('staging', 's*', 's?', 's[', 's{', '*', '?', '[', '{', '$', '')):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                               'tool_input': {'command': command}})
+
+    def test_bash_state_ancestors_deny_every_caller(self):
+        for caller in ('ship:writer--sol', 'ship:driver', ''):
+            for command in ('rm -rf ' + str(self.state / 'ultraship'),
+                            'rm -rf ' + str(self.state),
+                            'grep -r . ' + str(self.state / 'ultraship')):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                               'tool_input': {'command': command}})
+
+    def test_bash_ordinary_paths_allow_every_caller(self):
+        for caller in ('ship:writer--sol', 'ship:driver', ''):
+            for command in ('PATH="/home/miguel/.local/share/uv-0.12/bin:$PATH" make openapi api-types preview-mask-sql',
+                            'PATH="${HOME}/.local/bin:${PATH}" make -r test',
+                            'ls ' + str(self.state / 'ultraship/owed/x.tsv'),
+                            'ls ' + os.environ['HOME'], 'ls /'):
+                with self.subTest(caller=caller, command=command):
+                    output = io.StringIO()
+                    with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                        self.assertIsNone(ultraship.guarded_pre({'cwd': str(self.cwd), 'agent_type': caller,
+                                                              'tool_name': 'Bash',
+                                                              'tool_input': {'command': command}}))
+                    self.assertEqual(output.getvalue(), '')
+
+    def test_role_failure_keeps_writer_read_custody_closed(self):
+        with patch.object(ultraship, 'role', side_effect=RuntimeError('role failed')):
+            self.assert_custody_denial({'agent_type': 'ship:writer--sol', 'tool_name': 'Read',
+                                       'tool_input': {'file_path': str(self.store / 'key')}})
+
+    def test_custody_failure_denies_read_and_search_for_every_caller(self):
+        for caller in ('ship:writer--sol', 'ship:driver', ''):
+            for tool in ('Read', 'Grep', 'Glob', 'LSP', 'mcp__fff__grep', 'mcp__fff__multi_grep'):
+                with self.subTest(caller=caller, tool=tool), \
+                        patch.object(ultraship, 'pre', side_effect=RuntimeError('pre failed')), \
+                        patch.object(ultraship, 'receipt_custody', side_effect=OSError('custody failed')):
+                    self.assert_custody_denial({'agent_type': caller, 'tool_name': tool, 'tool_input': {}})
 
 
 class WorkspaceRowAdmissionTests(unittest.TestCase):

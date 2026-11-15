@@ -10,7 +10,7 @@
         "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py\" pre", "timeout": 15, "onFailure": "block" }]
       },
       {
-        "matcher": "SendMessage|mcp__bettercoding__(create_input|update_input)",
+        "matcher": "Agent|Task|SendMessage|mcp__bettercoding__(create_input|update_input)",
         "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/text_lint.py\" hook" }]
       }
     ],
