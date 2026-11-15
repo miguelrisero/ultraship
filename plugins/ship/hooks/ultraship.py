@@ -3003,20 +3003,20 @@ def review_thread_denial(command):
         tokens = list(lexer)
     except ValueError:
         return 'review-thread guard parse failure' if re.search(r'\bgh\b', normalized) else None
-    names_gh = any(os.path.basename(word) == 'gh' for word in re.split(r'[\s;&|()<>]+', normalized))
+    names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word)) == 'gh'
+                   for word in re.split(r'[\s;&|()<>]+', normalized))
     if names_gh:
+        command_position = True
         for index, token in enumerate(tokens):
-            if token == 'eval':
+            shell = os.path.basename(token) in ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'busybox')
+            shell = shell or command_position and token in ('eval', 'source', '.')
+            if shell and not (index + 1 < len(tokens) and tokens[index + 1].endswith('.sh')
+                              and not tokens[index + 1].startswith(('/dev/', '/proc/'))):
                 return 'shell runner names gh'
-            if os.path.basename(token) not in ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'busybox'):
-                continue
-            cursor = index + 1
-            while cursor < len(tokens) and tokens[cursor].startswith('-'):
-                if tokens[cursor].startswith('-') and not tokens[cursor].startswith('--') and 'c' in tokens[cursor]:
-                    return 'shell runner names gh'
-                cursor += 1
-            if cursor == len(tokens) or all(char in ';&|\n()' for char in tokens[cursor]):
-                return 'shell runner names gh'
+            if token and all(char in ';&|\n()' for char in token):
+                command_position = True
+            elif not (command_position and re.match(r'[A-Za-z_]\w*=', token)):
+                command_position = False
     # Keep quote boundaries: GraphQL variables are literal only inside a single-quoted query value.
     pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s'"\\;&|()])+|[;&|\n()]+'''
     segments, words = [], []
@@ -3028,7 +3028,8 @@ def review_thread_denial(command):
             continue
         value = shlex.split(raw)[0]
         words.append((value, raw))
-        if re.search(r'\bgh\s+api\b', value) and value != raw and not value.startswith('query='):
+        if (re.search(r'\bgh\s+api\b', re.sub(r'''['"\\]''', '', value))
+                and value != raw and not value.startswith('query=')):
             reason = review_thread_denial(value)
             if reason:
                 return reason

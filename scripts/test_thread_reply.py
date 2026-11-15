@@ -125,6 +125,17 @@ REFUSE = (
     'gh api repos/{owner}/{repo}/issues/7/comments -f body=hello',
     "gh api graphql -f query='query{viewer{login}}' && gh api https://api.github.com/user",
     'gh api repos/o/r/issues/7/comments -f body="$BODY"',
+    'bash -o posix -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'bash -O extglob -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'bash +e -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'bash --rcfile x -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'sh -s <<<\'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'bash /dev/stdin <<<\'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    '. /dev/stdin <<<\'gh api repos/o/r/pulls/7/comments -f body=x\'',
+    'bash -x scripts/check.sh \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    "source <(echo 'gh api repos/o/r/pulls/7/comments -f body=x')",
+    'watch -n 60 \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'su -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\' miguel',
 )
 
 ADMIT = (
@@ -162,6 +173,9 @@ ADMIT = (
     'bash scripts/threads.sh 7 && gh pr view 7',
     'gh api ~',
     'gh api -X GET search/issues -f q=x',
+    'bash -n plugins/ship/skills/babysit/scripts/threads.sh',
+    'find . -name x && gh pr view 7',
+    'gh pr create --title "fix(ship): refuse gh api writes" --body-file body.md',
 )
 
 
