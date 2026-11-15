@@ -170,6 +170,12 @@ REFUSE = (
     'gh api repos/o/r/pulls/7/comments 2>&1 -f body=x',
     'gh api repos/o/r/pulls/7/comments >&2 -f body=x',
     "tmux new 'gh 2>/dev/null api repos/o/r/pulls/7/comments -f body=x'",
+    'gh 2>|/dev/null api repos/o/r/pulls/7/comments --input reply.json',
+    'gh >| /dev/null api repos/o/r/pulls/7/comments -f body=x',
+    'gh api repos/o/r/pulls/7/comments >| out -f body=x',
+    'gh >| x api repos/o/r/pulls/7/comments -f body=x',
+    'gh 2>|/dev/null api repos/o/r/pulls/7/comments -f body=x',
+    'gh api repos/o/r/pulls/7/comments -f body=x >',
 )
 
 ADMIT = (
@@ -222,6 +228,9 @@ ADMIT = (
     'gh pr view 7 2>&1 | head',
     'gh api repos/o/r/pulls/7 > out.json',
     'gh pr checks 7 &> checks.txt',
+    'gh api repos/o/r/pulls/7 >| out.json',
+    'gh pr view 7 >| out.txt',
+    'gh api repos/o/r/pulls/7 | head',
 )
 
 

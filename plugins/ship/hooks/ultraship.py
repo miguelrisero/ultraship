@@ -3047,7 +3047,7 @@ def review_thread_denial(command):
                               and not tokens[index + 1].startswith(('/dev/', '/proc/'))):
                 return 'shell runner names gh'
     # Keep quote boundaries: GraphQL variables are literal only inside a single-quoted query value.
-    pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?<=[<>])&|&(?=>)|[^\s'"\\;&|()])+|(?:[;|\n()]|(?<![<>])&(?!>))+'''
+    pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?<=[<>])&|&(?=>)|(?<=>)\||[^\s'"\\;&|()])+|(?:[;\n()]|(?<!>)\||(?<![<>])&(?!>))+'''
     segments, words = [], []
     for match in re.finditer(pattern, command):
         raw = match[0]
@@ -3070,11 +3070,13 @@ def review_thread_denial(command):
             if skip_target:
                 skip_target = False
                 continue
-            redirect = re.match(r'^[0-9]*(?:&>>?|[<>]+&?)', raw)
+            redirect = re.match(r'^[0-9]*(?:&>>?|>\||[<>]+&?)', raw)
             if redirect:
                 skip_target = redirect.end() == len(raw)
                 continue
             command_words.append((value, raw))
+        if skip_target and names_gh:
+            return 'review-thread guard parse failure'
         words = command_words
         for index, (value, _) in enumerate(words[:-1]):
             if os.path.basename(value) == 'gh':
@@ -3092,11 +3094,11 @@ def review_thread_denial(command):
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
         text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words))
         hidden_words, skip_target = [], False
-        for token in re.findall(r'[0-9]*(?:&>>?|[<>]+&?)[^\s;&|()]*|[^\s;&|()<>]+', text):
+        for token in re.findall(r'[0-9]*(?:&>>?|>\||[<>]+&?)[^\s;&|()]*|[^\s;&|()<>]+', text):
             if skip_target:
                 skip_target = False
                 continue
-            redirect = re.match(r'^[0-9]*(?:&>>?|[<>]+&?)', token)
+            redirect = re.match(r'^[0-9]*(?:&>>?|>\||[<>]+&?)', token)
             if redirect:
                 skip_target = redirect.end() == len(token)
                 continue
