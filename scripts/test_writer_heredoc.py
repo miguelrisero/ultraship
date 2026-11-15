@@ -387,6 +387,31 @@ class WriterHeredocTests(unittest.TestCase):
         """Catch false expansion refusals for quoted numeric arithmetic."""
         self.assertFalse(self.denied('echo "$((1+2))"'), self.reason)
 
+    def test_quoted_subscript_brackets_and_arithmetic_grep_words_refuse_evaluation(self):
+        """Catch quoted closing brackets, arithmetic grep operands and nested conditional terminators."""
+        for command in (
+            '''echo ${a[']$(no""de -""e 1)']}''',
+            '''(( grep + '$(no""de -""e 1)' ))''',
+            '[[ $(echo ]]) && 1 -lt $n ]]',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_escaped_quotes_preserve_parameter_offset_refusals(self):
+        """Catch arithmetic offsets whose surrounding quote characters are escaped."""
+        for command in (
+            r'''s=abc; echo \'${s:'$(no""de -""e 1)'}\' ''',
+            r'''echo \'${s:$n}\' ''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command.rstrip()))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_single_quoted_grep_backslashes_remain_data(self):
+        """Catch false expansion refusals for backslashes inside single-quoted grep patterns."""
+        self.assertFalse(self.denied(r'''grep -F 'a[$i]\path' f'''), self.reason)
+
     def test_literal_variable_operations_and_quoted_data_remain_admitted(self):
         """Catch refusals of literal names, inert arithmetic and ordinary quoted data."""
         for command in (

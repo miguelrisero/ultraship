@@ -1619,22 +1619,54 @@ def safe_directory_state(command, cwd=None):
     return not forbidden(base) and not forbidden(target) and os.path.isdir(target)
 
 
-def array_subscript_denial(words, arithmetic, tokens, names_only=False):
+def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
+    spans = []
+    for raw, _, _, _ in words:
+        parts, start, cursor, double = [], 0, 0, False
+        while cursor < len(raw):
+            char = raw[cursor]
+            if char == '\\':
+                cursor += 2
+                continue
+            if char == '"':
+                double = not double
+            elif char == "'" and not double:
+                end = raw.find("'", cursor + 1)
+                if end < 0:
+                    parts = None
+                    break
+                parts.extend(((raw[start:cursor], False), (raw[cursor:end + 1], True)))
+                start = cursor = end + 1
+                continue
+            cursor += 1
+        spans.append(None if parts is None or double else parts + [(raw[start:], False)])
     checked_words = [] if names_only else words
-    spans = [[(word[0], False)] if '\\' in word[0] else single_quoted_spans(word[0]) for word in checked_words]
     legacy = any(parts is None or any('$[' in span for span, single in parts if not single) for parts in spans)
     expanded = lambda value: '$' in value or '`' in value
     unsafe_name = lambda value: '[' in value or expanded(value)
     for index, (raw, value, start, _) in enumerate(checked_words):
         parts = spans[index]
+        if (start in arithmetic or legacy) and expanded(value):
+            return 'array subscript evaluation rule (arithmetic)'
         if (grep_data_token(words, index) and parts is not None
                 and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
             continue
+        payload, quote, cursor = [], '', 0
+        while cursor < len(raw):
+            char = raw[cursor]
+            if char == '\\' and quote != "'" and cursor + 1 < len(raw):
+                cursor += 1
+                payload.append('_' if raw[cursor] == ']' else raw[cursor])
+            elif char == quote:
+                quote = ''
+            elif not quote and char in "'\"":
+                quote = char
+            else:
+                payload.append('_' if char == ']' and quote else char)
+            cursor += 1
         # Bash can evaluate a stored subscript payload long after shell quote removal.
-        if re.search(r'\[[^]]*(?:\$[({\[A-Za-z_]|\x60|[<>]\()', value):
+        if any(re.search(r'\[[^]]*(?:\$[({\[A-Za-z_]|\x60|[<>]\()', text) for text in (value, ''.join(payload))):
             return 'array subscript evaluation rule (subscript payload)'
-        if (start in arithmetic or legacy) and expanded(value):
-            return 'array subscript evaluation rule (arithmetic)'
         offset = 0
         for span, single in parts or []:
             if not single:
@@ -1654,7 +1686,7 @@ def array_subscript_denial(words, arithmetic, tokens, names_only=False):
 
     names = {'printf', 'test', '[', '[[', 'declare', 'typeset', 'local', 'export', 'readonly', 'unset', 'read', 'wait', 'let'}
     for position, (raw, name, start, end) in enumerate(words):
-        parts = single_quoted_spans(raw)
+        parts = spans[position]
         if (grep_data_token(words, position) and parts is not None
                 and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
             continue
@@ -1669,7 +1701,18 @@ def array_subscript_denial(words, arithmetic, tokens, names_only=False):
         arguments = words[position + 1:]
         if name == '[[':
             start = next(index for index, token in enumerate(tokens) if token[2] == start)
-            end = next((index for index in range(start + 1, len(tokens)) if tokens[index][0] == ']]'), len(tokens))
+            end = start + 1
+            while end < len(tokens):
+                token = tokens[end]
+                substitution = (token[0] == '`' or token[0] == '(' and end > 0
+                                and tokens[end - 1][3] == token[2]
+                                and (tokens[end - 1][0].endswith('$') or tokens[end - 1][0] in {'<', '>'}))
+                if substitution and end in groups:
+                    end = groups[end] + 1
+                elif token[0] == ']]':
+                    break
+                else:
+                    end += 1
             arguments = tokens[start + 1:end]
             for index, word in enumerate(arguments):
                 if word[1] in {'-eq', '-ne', '-lt', '-le', '-gt', '-ge'}:
@@ -1839,7 +1882,7 @@ def inline_interpreter_denial(command, cwd=None):
                 commands.append(command_words)
             for command_words in commands:
                 if subscript_reason is None:
-                    subscript_reason = array_subscript_denial(command_words, arithmetic, tokens, names_only=True)
+                    subscript_reason = array_subscript_denial(command_words, arithmetic, tokens, groups, names_only=True)
         except Exception:
             if subscript_reason is None:
                 subscript_reason = 'array subscript evaluation rule (parse error)'
@@ -1876,8 +1919,8 @@ def inline_interpreter_denial(command, cwd=None):
         for words, piped in segments:
             if subscript_reason is None:
                 try:
-                    subscript_reason = (array_subscript_denial(words, arithmetic, tokens)
-                                        or array_subscript_denial(words, arithmetic, tokens, names_only=True))
+                    subscript_reason = (array_subscript_denial(words, arithmetic, tokens, groups)
+                                        or array_subscript_denial(words, arithmetic, tokens, groups, names_only=True))
                 except Exception:
                     subscript_reason = 'array subscript evaluation rule (parse error)'
             reads_pipe = inherited[0] or piped or any(word[0] == '<' for word in words)
