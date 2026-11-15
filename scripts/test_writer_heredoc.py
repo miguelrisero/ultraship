@@ -66,6 +66,15 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule (indirect)', self.reason)
 
+    def test_nested_indirect_expansions_refuse_runtime_names(self):
+        """Catch indirect name evaluation inside parameter operands."""
+        for command in (
+            'echo "${x:-${!name}}"', 'echo "${x:+${!name}}"', 'echo "${s:${!name}}"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
     def test_integer_and_nameref_attributes_guard_later_names(self):
         """Catch later writes through integer and nameref attributes."""
         for command in (

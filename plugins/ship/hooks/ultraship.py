@@ -1899,7 +1899,7 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                     offset = close + 1 if close >= 0 else len(body)
                 if body[offset:offset + 1] == ':' and body[offset + 1:offset + 2] not in {'-', '=', '?', '+'}:
                     regions.append((start + offset + 1, end))
-            cursor = end
+            cursor = start - 1
         cursor += 1
     for raw, _, start, _ in tokens:
         match = re.match(rf'{identifier}\[(.*?)\](?:\+?=)', raw)
