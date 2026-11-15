@@ -241,6 +241,9 @@ class WriterHeredocTests(unittest.TestCase):
                 r'''rg needle {-,}* /x/python*/a''',
                 r'''rg needle a#b /x/python*/a''',
                 r'''rg needle "/"* /x/python*/a''',
+                r'''rg needle "!!" /x/python*/a''',
+                r'''rg needle '!!' /x/python*/a''',
+                r'''rg needle \!\! /x/python*/a''',
             )),
         ):
             for command in commands:
