@@ -119,6 +119,59 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied('$P -c x'))
         self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
 
+    def test_safe_path_prefix_admits_plain_commands(self):
+        for command in (
+            'PATH="/home/miguel/.local/share/uv-0.12/bin:$PATH" make openapi api-types preview-mask-sql',
+            'PATH="$HOME/.bun/bin:$PATH" make -e api-types',
+            'PATH="${HOME}/.local/bin:${PATH}" make -r test',
+            'PATH=/x:$PATH make -e x',
+            'PATH="/run/python3/bin:$PATH" make api-types',
+            'PATH="/x:$PATH" uv run --frozen alembic -c migrations/postgresql/alembic.ini heads',
+            'PATH="$HOME:${HOME}:$PATH:${PATH}:/x/@v%1+2,3-4" make -e x',
+            'BIN_DIR="/x:$PATH" PATH="${HOME}/bin:${PATH}" make -e x',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_path_prefix_preserves_interpreter_and_wrapper_refusals(self):
+        for command in (
+            "python3 -c 'print(1)'", "uv run python -c 'print(1)'",
+            "bash -c 'python3 -c \"print(1)\"'", "env python3 -c 'print(1)'",
+            "node -e '1'", "make -e bash",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied('PATH="/x:$PATH" ' + command))
+                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_path_prefix_preserves_unresolved_command_refusals(self):
+        for command in ("$VAR -c 'print(1)'", '"$VAR" -e x', '* -e x'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied('PATH="/x:$PATH" ' + command))
+                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_unsafe_path_prefix_values_keep_refusals(self):
+        for value in (
+            '"$(pwd):$PATH"', '"`pwd`:$PATH"', '"$X:$PATH"',
+            '"${PATH:-/x}"', '"${HOME:-/x}:$PATH"', '"${PATH}/bin"',
+            '"$HOME-suffix:$PATH"', '"/x:$PATH:h"', '"/x*:$PATH"',
+            '"/x?:$PATH"', '"/x[ab]:$PATH"', r'"/x\y:$PATH"',
+            "'$HOME/bin:$PATH'", '"$HOME"/bin:"$PATH"',
+        ):
+            with self.subTest(value=value):
+                self.assertTrue(self.denied('PATH=' + value + ' make -e x'), self.reason)
+
+    def test_path_assignment_after_command_keeps_refusal(self):
+        self.assertTrue(self.denied('make PATH="/x:$PATH" -e x'))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_safe_path_prefix_preserves_bare_segment_denial(self):
+        for command in ('make $VAR -c x', 'make "${X}run"', 'cat x | $VAR -e x'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                reason = self.reason
+                self.assertTrue(self.denied('PATH="/x:$PATH" ' + command))
+                self.assertEqual(self.reason, reason)
+
     def test_glob_and_quoted_expansion_command_words_are_denied(self):
         for command in ('* -c x', '? -e x', '[ab] -e x', '{a,b} -c x', '=node -e x',
                         '"literal"* -e x', r'\* -e x', '"$(which node)" -e x',
