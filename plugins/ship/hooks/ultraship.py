@@ -1151,13 +1151,22 @@ STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock
 
 def read_only_argument_word(command, tokens, words, index):
     # These commands never run an argument word within read-only pipelines after a literal directory change.
-    if not index or any(char in command for char in '$`<>~'):
+    if not index or any(char in command for char in '$`<~'):
         return False
     try:
         original = shell_raw_words(command)
     except ValueError:
         return False
-    if original != tokens or not original or any(token[0] in {';', '(', ')', '\n'} for token in original):
+    if original != tokens or not original or any(token[0] in {'(', ')', '\n'} for token in original):
+        return False
+    null_redirects = set()
+    for position, token in enumerate(original):
+        if (token[0] == '>' and position and position + 1 < len(original)
+                and original[position - 1][0] == '2' and original[position + 1][0] == '/dev/null'
+                and original[position - 1][3] == token[2] and token[3] == original[position + 1][2]
+                and (position == 1 or original[position - 2][3] < original[position - 1][2])):
+            null_redirects.add(token[2])
+    if command.count('>') != len(null_redirects):
         return False
     cursor = 0
     for token in original:
@@ -1185,7 +1194,11 @@ def read_only_argument_word(command, tokens, words, index):
             pipelines.append([[]])
             cursor += 2
             continue
-        if token[0] == '|':
+        if token[0] == ';':
+            if not pipelines[-1][-1]:
+                return False
+            pipelines.append([[]])
+        elif token[0] == '|':
             if not pipelines[-1][-1]:
                 return False
             pipelines[-1].append([])
@@ -1196,8 +1209,9 @@ def read_only_argument_word(command, tokens, words, index):
         return False
     options = {
         'grep': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})',
+        'git': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})|--',
         'rg': r'-(?:[nilrFEweCABgt]|[nilFw]{2,})|--glob(?:=.*)?',
-        'find': r'-(?:name|iname|type|path|maxdepth|mindepth|print)',
+        'find': r'-(?:name|iname|type|path|maxdepth|mindepth|print|o)',
         'ls': r'-(?:[lah1]|[lah1]{2,})',
         'cat': r'(?!)',
         'head': r'-(?:n|[0-9]+)',
@@ -1205,14 +1219,15 @@ def read_only_argument_word(command, tokens, words, index):
         'wc': r'-[lcwm]',
     }
     for pipeline in pipelines:
-        if (pipeline[0][0][0] not in {'rg', 'grep', 'ls', 'cat', 'find'}
+        git_grep = len(pipeline[0]) > 1 and pipeline[0][0][0] == 'git' and pipeline[0][1][0] == 'grep'
+        if (pipeline[0][0][0] not in {'rg', 'grep', 'ls', 'cat', 'find'} and not git_grep
                 or any(part[0][0] not in {'head', 'tail', 'wc'} for part in pipeline[1:])):
             return False
         for part in pipeline:
             if any(word[1].startswith('-') and not re.fullmatch(options[part[0][0]], word[1]) for word in part):
                 return False
     for raw, value, start, end in original:
-        if raw in {'|', '&'}:
+        if raw in {'|', '&', ';'} or start in null_redirects:
             continue
         if raw.startswith('='):
             return False

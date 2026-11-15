@@ -69,6 +69,70 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
 
+    def test_read_only_pipelines_admit_literal_paths_with_separators_and_null_stderr(self):
+        """Catch false refusals of read-only inspection pipelines and the neutral PATH build prefix."""
+        for command in (
+            r'''cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-7516 && ls -l /home/miguel/.local/bin/uv* /usr/local/bin/uv* /home/miguel/.cargo/bin/uv* 2>/dev/null; ls -l /home/miguel/.claude/plugins/cache/better-plugin/chief-of-chiefs/1.82.4/skills/run/scripts/*SHA*; git grep -n -e 'required-version' -- backend/api/pyproject.toml ':(exclude)backend/api/tests/mutation/'; find /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/.scratch -maxdepth 4 -type f \( -name 'uv' -o -name 'battery*7516*.sh' \) -print''',
+            r'''cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-7516 && PATH=/tmp/bc-8baf849472bd4fe5bb378ae4bbb3f485/uv012/bin:$PATH UV_PROJECT_ENVIRONMENT=/home/miguel/projects/patricia-monorepo/backend/api/.venv UV_NO_SYNC=1 make preview-mask-sql && PATH=/tmp/bc-8baf849472bd4fe5bb378ae4bbb3f485/uv012/bin:/home/miguel/projects/patricia-monorepo/frontend/packages/api-types/node_modules/.bin:$PATH UV_PROJECT_ENVIRONMENT=/home/miguel/projects/patricia-monorepo/backend/api/.venv UV_NO_SYNC=1 make openapi api-types''',
+            r'''cd /w && ls -l /a/uv* /b/uv* 2>/dev/null; ls -l /w/skills/run/scripts/*SHA*''',
+            r"""ls -l /w/skills/run/scripts/*SHA*; git grep -n -e 'required-version' -- backend/api/pyproject.toml ':(exclude)backend/api/tests/mutation/'""",
+            r'''ls /w/run/x*; find /s -maxdepth 4 -type f \( -name 'uv' -o -name 'battery*7516*.sh' \) -print''',
+            r'''ls /w/run/*SHA* 2>/dev/null | head -5''',
+            r'''git grep -n -e foo -- /w/lib/python3.13/*''',
+            r'''git grep -n foo /w/python*/a | head -3 && ls /run/user/*''',
+            r'''cd /w && git grep -e x -- f; ls /w/skills/run/scripts/*''',
+            r'''PATH=/a/uv012/bin:/b/node_modules/.bin:$PATH UV_NO_SYNC=1 make openapi api-types''',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_read_only_pipelines_preserve_executable_and_redirect_refusal_reasons(self):
+        """Catch executable options, shell syntax, and other redirects escaping the read-only exception."""
+        for command, reason in (
+            (r"""node -e 'console.log(1)'""", 'inline interpreter code rule (node)'),
+            (r"""PATH=/x node -e 'console.log(1)'""", 'inline interpreter code rule (node)'),
+            (r"""PATH=/a/node_modules/.bin:$PATH node -e 'console.log(1)'""", 'inline interpreter code rule (unresolved command word)'),
+            (r'''PATH=$PWD/node_modules/.bin:$PATH make openapi''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git grep -O/x/pyth* foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git grep -nO/x/pyth* foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git grep --open-files-in-pager=/x/pyth* foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git grep --open=/x/pyth* foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git grep --textconv foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git grep -c foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git grep --count foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git grep --no-index foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git grep -f /x/p foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -c core.pager=less grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C /x grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git --no-pager grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git log /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git grep foo /x/python*/a; perl -e 1''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a; git status''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a; cd /y && ls /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''cd /x; ls /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a;''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a;; ls /y''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a 2>/tmp/x''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a 2>/dev/nullx''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a >/dev/null''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a 2>>/dev/null''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a 2>&1 | python3''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a 2>/dev/null >/tmp/x''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a 2>/dev/null | sh''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''2>/dev/null ls /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a x2>/dev/null''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''grep '>' /x/python*/a 2>/dev/null''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''find /x/python*/a -o -exec python3 {} \;''', 'process-capable python -c rule'),
+            (r'''find /x/python*/a \( -name a -o -fprint /x/b \)''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''find /x/python*/a -or -name b''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a; ls /x/python*(e:'python3 -c 1':)''', 'process-capable python -c rule'),
+            (r'''ls /x/python*/a 2 >/dev/null''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''ls /x/python*/a 2> /dev/null''', 'inline interpreter code rule (unresolved command word)'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'), reason)
+
     def test_double_quoted_substitutions_scan_interpreter_bodies(self):
         """Catch split interpreter names inside double-quoted substitution bodies."""
         for command in (
