@@ -64,6 +64,7 @@ class WriterHeredocTests(unittest.TestCase):
             r'''rg needle a/b==c /x/python*/a''',
             r'''rg needle '!!' /x/python*/a''',
             r'''rg needle \!\! /x/python*/a''',
+            r'''rg needle '#' /x/python*/a''',
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
@@ -453,6 +454,9 @@ class WriterHeredocTests(unittest.TestCase):
                 r'''rg needle a#b /x/python*/a''',
                 r'''rg needle "/"* /x/python*/a''',
                 r'''rg needle "!!" /x/python*/a''',
+                r'''rg needle /x/python*/a # --pre=python3''',
+                r'''rg needle /x/python*/a # ; node -e 1''',
+                r'''rg needle /x/python*/a #''',
             )),
         ):
             for command in commands:

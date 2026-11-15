@@ -1160,6 +1160,13 @@ def read_only_argument_word(command, tokens, words, index):
     if original != tokens or not original or any(token[0] in {';', '(', ')', '\n'} for token in original):
         return False
     cursor = 0
+    for token in original:
+        if command[cursor:token[2]].strip():
+            return False
+        cursor = token[3]
+    if command[cursor:].strip():
+        return False
+    cursor = 0
     if original[0][0] == 'cd':
         if (len(original) < 5 or original[2][0] != '&' or original[3][0] != '&'
                 or original[2][3] != original[3][2]):
