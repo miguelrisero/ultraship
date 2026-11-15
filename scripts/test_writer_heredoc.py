@@ -53,6 +53,11 @@ class WriterHeredocTests(unittest.TestCase):
             r'''cd /x && rg foo /x/python*/a | head -3 && ls /run/user/*''',
             r'''rg -F foo /x/python*/a''',
             r'''grep -F foo /x/python*/a''',
+            r'''ls -la /x/python*''',
+            r'''rg -n -g '*.py' -t py foo /x/python*/a''',
+            r'''rg --glob='*.py' foo /x/python*/a''',
+            r'''grep -rn -C 3 foo /x/python*/a | tail -n 5''',
+            r'''find /x -maxdepth 2 -type f -path /x/python*''',
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
@@ -190,6 +195,26 @@ class WriterHeredocTests(unittest.TestCase):
                 r'''rg -f /x/patterns /x/python*/a''',
                 r'''rg --file /x/patterns /x/python*/a''',
                 r'''rg --ignore-file /x/ignore foo /x/python*/a''',
+                r'''grep --exclude-f=/x/globs foo /x/python*/a''',
+                r'''grep --exclude-fr=/x/globs foo /x/python*/a''',
+                r'''grep --exclude-fro=/x/globs foo /x/python*/a''',
+                r'''grep --exclude-fro /x/globs foo /x/python*/a''',
+                r'''grep --include-from=/x/globs foo /x/python*/a''',
+                r'''grep --config=/x/c foo /x/python*/a''',
+                r'''grep ---/x/c foo /x/python*/a''',
+                r'''grep --filter='*:cat' foo /x/python*/a''',
+                r'''grep --pager=less foo /x/python*/a''',
+                r'''grep --view=less foo /x/python*/a''',
+                r'''grep --save-config foo /x/python*/a''',
+                r'''find /x -rm -path /x/python*''',
+                r'''grep -o foo /x/python*/a''',
+                r'''rg -nz foo /x/python*/a''',
+                r'''cat -n /x/python*/a''',
+                r'''ls -R /x/python*''',
+                r'''rg -- foo /x/python*/a''',
+                r'''find /x -L -path /x/python*''',
+                r'''rg foo /x/python*/a | head -c 5''',
+                r'''rg foo /x/python*/a | wc --files0-from=/x/f''',
             )),
         ):
             for command in commands:

@@ -1187,23 +1187,23 @@ def read_only_argument_word(command, tokens, words, index):
         cursor += 1
     if not pipelines[-1][-1] or not any(pipeline[0] == words for pipeline in pipelines):
         return False
+    options = {
+        'grep': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})',
+        'rg': r'-(?:[nilrFEweCABgt]|[nilFw]{2,})|--glob(?:=.*)?',
+        'find': r'-(?:name|iname|type|path|maxdepth|mindepth|print)',
+        'ls': r'-(?:[lah1]|[lah1]{2,})',
+        'cat': r'(?!)',
+        'head': r'-(?:n|[0-9]+)',
+        'tail': r'-(?:n|[0-9]+)',
+        'wc': r'-[lcwm]',
+    }
     for pipeline in pipelines:
-        first = pipeline[0]
-        name = first[0][0]
-        if (name not in {'rg', 'grep', 'ls', 'cat', 'find'}
+        if (pipeline[0][0][0] not in {'rg', 'grep', 'ls', 'cat', 'find'}
                 or any(part[0][0] not in {'head', 'tail', 'wc'} for part in pipeline[1:])):
             return False
-        if name in {'grep', 'rg'} and any(
-                word[1].startswith(('--file', '--exclude-from', '--ignore-file'))
-                or word[1].startswith('-') and not word[1].startswith('--') and 'f' in word[1] for word in first):
-            return False
-        if name == 'rg' and any(
-                word[1].startswith(('--pre', '--hostname-bin', '--search-zip'))
-                or word[1].startswith('-') and not word[1].startswith('--') and 'z' in word[1] for word in first):
-            return False
-        if name == 'find' and any(word[1] in {
-                '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls', '-delete'} for word in first):
-            return False
+        for part in pipeline:
+            if any(word[1].startswith('-') and not re.fullmatch(options[part[0][0]], word[1]) for word in part):
+                return False
     for raw, value, start, end in original:
         if raw == '|' or not unresolved_shell_word(raw):
             continue
