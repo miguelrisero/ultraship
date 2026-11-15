@@ -1149,6 +1149,105 @@ SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh',
 STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su'}
 
 
+def read_only_argument_word(command, tokens, words, index):
+    # These commands never run an argument word within read-only pipelines after a literal directory change.
+    if not index or any(char in command for char in '$`<>~'):
+        return False
+    try:
+        original = shell_raw_words(command)
+    except ValueError:
+        return False
+    if original != tokens or not original or any(token[0] in {';', '(', ')', '\n'} for token in original):
+        return False
+    cursor = 0
+    for token in original:
+        if command[cursor:token[2]].strip():
+            return False
+        cursor = token[3]
+    if command[cursor:].strip():
+        return False
+    cursor = 0
+    if original[0][0] == 'cd':
+        if (len(original) < 5 or original[2][0] != '&' or original[3][0] != '&'
+                or original[2][3] != original[3][2]):
+            return False
+        path = original[1][0]
+        if path.startswith('-') or any(char in path for char in "'\"\\$*?[{~^#"):
+            return False
+        cursor = 4
+    pipelines = [[[]]]
+    while cursor < len(original):
+        token = original[cursor]
+        if token[0] == '&':
+            if (not pipelines[-1][-1] or cursor + 1 >= len(original)
+                    or original[cursor + 1][0] != '&' or token[3] != original[cursor + 1][2]):
+                return False
+            pipelines.append([[]])
+            cursor += 2
+            continue
+        if token[0] == '|':
+            if not pipelines[-1][-1]:
+                return False
+            pipelines[-1].append([])
+        else:
+            pipelines[-1][-1].append(token)
+        cursor += 1
+    if not pipelines[-1][-1] or not any(pipeline[0] == words for pipeline in pipelines):
+        return False
+    options = {
+        'grep': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})',
+        'rg': r'-(?:[nilrFEweCABgt]|[nilFw]{2,})|--glob(?:=.*)?',
+        'find': r'-(?:name|iname|type|path|maxdepth|mindepth|print)',
+        'ls': r'-(?:[lah1]|[lah1]{2,})',
+        'cat': r'(?!)',
+        'head': r'-(?:n|[0-9]+)',
+        'tail': r'-(?:n|[0-9]+)',
+        'wc': r'-[lcwm]',
+    }
+    for pipeline in pipelines:
+        if (pipeline[0][0][0] not in {'rg', 'grep', 'ls', 'cat', 'find'}
+                or any(part[0][0] not in {'head', 'tail', 'wc'} for part in pipeline[1:])):
+            return False
+        for part in pipeline:
+            if any(word[1].startswith('-') and not re.fullmatch(options[part[0][0]], word[1]) for word in part):
+                return False
+    for raw, value, start, end in original:
+        if raw in {'|', '&'}:
+            continue
+        if raw.startswith('='):
+            return False
+        quote, cursor, prefix_end = '', 0, len(raw)
+        while cursor < len(raw):
+            char = raw[cursor]
+            if char == '!' and quote == '"':
+                return False
+            if char == '\\' and quote != "'":
+                cursor += 2
+                continue
+            if char == quote:
+                quote = ''
+            elif not quote:
+                if char in "'\"":
+                    quote = char
+                elif not (char.isascii() and char.isalnum() or char in '_./-*?,{}='):
+                    return False
+                elif char in '*?{' and prefix_end == len(raw):
+                    prefix_end = cursor
+            cursor += 1
+        if prefix_end == len(raw) and not unresolved_shell_word(raw):
+            continue
+        try:
+            prefix = ''.join(shlex.split(raw[:prefix_end]))
+        except ValueError:
+            return False
+        if not prefix or prefix.startswith('-'):
+            return False
+        if prefix_end < len(raw) and not (
+                (raw[0].isascii() and raw[0].isalnum() or raw[0] in '_./') and '/' in prefix):
+            return False
+    return True
+
+
 def grep_data_token(tokens, index):
     start = index
     while start and tokens[start - 1][0] not in {';', '&', '|', '(', ')', '`', '\n'}:
@@ -2457,8 +2556,9 @@ def inline_interpreter_denial(command, cwd=None):
                 unresolved = (not neutral and raw != '[' and value != '$?' and start not in shell_programs
                               and unresolved_shell_word(raw))
                 names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
-                joined_code = not neutral and unresolved_shell_word(raw) and bool(re.search(
+                joined_code = (not neutral and unresolved_shell_word(raw) and bool(re.search(
                     rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw))
+                               and not read_only_argument_word(command, tokens, words, index))
                 if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
                                                    or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'}):
                     return 'inline interpreter code rule (unresolved command word)'
