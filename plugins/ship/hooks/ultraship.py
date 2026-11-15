@@ -1653,13 +1653,14 @@ def array_subscript_denial(words, arithmetic, tokens, names_only=False):
         return None
 
     names = {'printf', 'test', '[', '[[', 'declare', 'typeset', 'local', 'export', 'readonly', 'unset', 'read', 'wait', 'let'}
-    for position, (raw, name, start, _) in enumerate(words):
+    for position, (raw, name, start, end) in enumerate(words):
         parts = single_quoted_spans(raw)
         if (grep_data_token(words, position) and parts is not None
                 and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
             continue
         unquoted = re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', raw)
-        if (re.search(r'\{[^}]*,[^}]*}', unquoted) and unsafe_name(name)
+        if (any(char in unquoted for char in '{,')
+                and (unsafe_name(name) or any(token[2] == end for token in tokens))
                 and any(piece in names for piece in re.split(r'[{,}]', name))):
             return 'array subscript evaluation rule (name)'
         if name not in names:

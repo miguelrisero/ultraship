@@ -366,6 +366,13 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied('{[,-v,"$x",]}'))
         self.assertIn('array subscript evaluation rule', self.reason)
 
+    def test_brace_expansion_substitutions_refuse_evaluated_names(self):
+        """Catch brace expansion split across tokenizer words by command substitutions."""
+        for command in ('{printf,-v,$(echo "$x"),%s,1}', '{printf,-v,`echo "$x"`,%s,1}'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
     def test_quoted_arithmetic_and_escaped_quote_offsets_refuse_evaluation(self):
         """Catch arithmetic hidden in one quoted word or behind escaped quote characters."""
         for command in (
