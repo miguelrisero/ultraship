@@ -1,4 +1,4 @@
-"""Squash containment requires PR linkage and equal per-file patches."""
+"""Squash containment requires PR linkage, equal modes and exact diff bytes."""
 import json
 import os
 from pathlib import Path
@@ -21,11 +21,12 @@ CONTRACT_PATHS = (
 BODY = '''Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
 A single-parent squash commit meets that requirement only when it contains the recorded base and both conditions below hold.
 1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
-2. Both diffs change the same files, and each changed file has an equal patch ID in both diffs.
+2. Both diffs change the same files with the same file modes, and each file's diff is byte-equal.
 Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent.
+Ignore only each diff's `index` line and the line numbers in its hunk headers; apply no whitespace normalization.
 The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
 Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
-Refuse the squash commit when either condition fails, a file has no patch ID, or the evidence is missing, stale or ambiguous.
+Refuse the squash commit when either condition fails or the evidence is missing, stale or ambiguous.
 Every other commit keeps the containment requirement unchanged.
 '''
 
@@ -113,7 +114,34 @@ class SquashContainmentTests(unittest.TestCase):
     def test_different_patch_with_the_same_files_refuses(self):
         self.commit({'alpha.txt': 'different feature\n'})
         squash = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-m', 'Different squash')
-        self.assert_refuse(self.check(squash=squash), 'patch IDs differ')
+        self.assert_refuse(self.check(squash=squash), 'file diffs differ')
+
+    def test_whitespace_difference_refuses(self):
+        self.commit({'alpha.txt': 'alpha feature \n'})
+        squash = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-m', 'Whitespace squash')
+        self.assert_refuse(self.check(squash=squash), 'file diffs differ')
+
+    def test_file_mode_difference_refuses(self):
+        self.git('update-index', '--chmod=+x', 'alpha.txt')
+        tree = self.git('write-tree')
+        squash = self.git('commit-tree', tree, '-p', self.parent, '-m', 'Executable squash')
+        self.assert_refuse(self.check(squash=squash), 'file diffs differ')
+
+    def test_main_edits_far_from_feature_hunk_allow_shifted_line_numbers(self):
+        self.git('checkout', '-b', 'shifted-main', self.base)
+        lines = ''.join(f'line {number}\n' for number in range(30))
+        self.commit({'long.txt': lines})
+        base = self.git('rev-parse', 'HEAD')
+        self.git('checkout', '-b', 'shifted-feature')
+        self.commit({'long.txt': lines.replace('line 25\n', 'feature line\n')})
+        author = self.git('rev-parse', 'HEAD')
+        self.git('checkout', 'shifted-main')
+        self.commit({'long.txt': 'main prefix\n' + lines})
+        self.git('merge', '--squash', 'shifted-feature')
+        self.git('commit', '-m', 'Shifted squash')
+        result = self.check(base=base, author=author, squash=self.git('rev-parse', 'HEAD'))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(result.stdout.startswith('PASS '), result.stdout)
 
     def test_extra_changed_file_refuses(self):
         self.commit({'extra.txt': 'extra\n'})

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Verify a PR-linked squash commit against each author-head file patch."""
+"""Verify a PR-linked squash with exact per-file modes and normalized diff bytes."""
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -21,12 +22,25 @@ def paths(revisions):
     return set(git(*DIFF, '--name-only', '-z', *revisions, '--').split(b'\0')) - {b''}
 
 
-def patch_id(revisions, path):
-    patch = git(*DIFF, *revisions, '--', os.fsdecode(path))
-    rows = run('git', 'patch-id', '--stable', input=patch).splitlines()
-    if len(rows) != 1 or len(rows[0].split()) != 2:
-        raise ValueError(f'missing or ambiguous patch ID for {os.fsdecode(path)!r}')
-    return rows[0].split()[0]
+def file_diff(revisions, path):
+    path = os.fsdecode(path)
+    raw = git('diff', '--no-ext-diff', '--no-renames', '--raw', '-z',
+              *revisions, '--', path).split(b'\0')
+    fields = raw[0].split()
+    if len(raw) != 3 or raw[1] != os.fsencode(path) or len(fields) != 5:
+        raise ValueError(f'missing or ambiguous file modes for {path!r}')
+    patch = git(*DIFF, *revisions, '--', path)
+    if not patch:
+        raise ValueError(f'empty file diff for {path!r}')
+    lines = []
+    header = True
+    for line in patch.split(b'\n'):
+        if line.startswith((b'@@', b'GIT binary patch')):
+            header = False
+        if header and line.startswith(b'index '):
+            continue
+        lines.append(re.sub(rb'^@@ -[0-9]+(?:,[0-9]+)? \+[0-9]+(?:,[0-9]+)? @@', b'@@ @@', line))
+    return fields[:2], b'\n'.join(lines)
 
 
 def main(args):
@@ -57,8 +71,8 @@ def main(args):
         if not changed or changed != paths(right):
             raise ValueError('changed file sets must be equal and non-empty')
         for path in sorted(changed):
-            if patch_id(left, path) != patch_id(right, path):
-                raise ValueError(f'patch IDs differ for {os.fsdecode(path)!r}')
+            if file_diff(left, path) != file_diff(right, path):
+                raise ValueError(f'file diffs differ for {os.fsdecode(path)!r}')
     except subprocess.CalledProcessError as exc:
         print(f'REFUSE {exc.cmd[0]} command failed (exit {exc.returncode})')
         return 1
