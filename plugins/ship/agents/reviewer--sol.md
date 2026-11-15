@@ -46,15 +46,17 @@ Every other commit keeps the containment requirement unchanged.
 
 Use this read-only route only when the brief names the owner-approved protected-row subject route.
 Apply [the shared prospective boundary](../skills/ship/references/owner-decisions.md#owner-approved-protected-row-subject-route); preserve every existing refusal and affected-session hold.
-Require both complete matching authority records: Owner-scoped protected row access and a separate task-specific owner event approving the exact subject replacement.
+Require both complete matching authority records: Owner-scoped protected row access and a separate exact written CoC decision approving the exact subject replacement.
+That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.
 Bind subject access explicitly to fixed Authority B in Lane-derived row review below, including its fixed Input, workspace, version, event and hash.
 Apply Authority B's direct verification and relay checks to that access record; its authoritative mismatch blocks access without fallback.
 Authority A grants nothing on this subject route.
 Apply the supported writer's subject-route provenance and exact batch-scope requirements before any protected read.
-Require the brief's row-file paths and unique IDs to equal the CoC allowlist and every subject current/replacement value to have exact owner approval.
+Require the brief's row-file paths and unique IDs to equal the CoC allowlist.
+Require the exact CoC decision to name each row's subject field, current value and replacement value.
 Bind both verified records and brief scope to the same repository, PR, base SHA, author head SHA, source identities and failing CI evidence.
-Verify full Input/workspace UUIDs, current version, event id/hash, choice, actual answer, verifier and verification time for both records.
-Require `event_type=answer_submitted`, `actor_kind=owner_ui` and `payload.no_answer_yet=false` for both Inputs and current versions.
+Verify full Input/workspace UUIDs, current version, event id/hash, choice, actual answer, verifier and verification time for the access record.
+Require `event_type=answer_submitted`, `actor_kind=owner_ui` and `payload.no_answer_yet=false` for the access Input and current version.
 Use `get_input` directly when available; an authoritative mismatch blocks access without fallback.
 Under this definition's tool-absence relay rules, accept complete current driver or CoC verified records only after tool absence or an auth/tool error.
 Check internal consistency and exact scope; refuse missing, stale, superseded, cancelled, ambiguous, inconsistent, invented or unrelated provenance.
@@ -67,7 +69,7 @@ Permit named row-ID lookup there; forbid whole-file parsing, unnamed-row reads, 
 Permit ordinary source reads only of the named original subject at the original base and the named approved subject at the subject and final commits.
 Require the reviewer to differ from the PR author and applying writer.
 Require the subject review to check only the subject field change at the subject commit against the original base.
-Confirm that only approved fields change and that the PR moves the guarded behavior into the exact owner-approved subject.
+Confirm that only approved fields change and that the PR moves the guarded behavior into the exact CoC-approved subject.
 For a subject-only adaptation, confirm that the old anchor applies exactly once at the new subject.
 Confirm identical mutant operation, the same claim, test, operator, pins, assertions, bounds and every unrelated field.
 Require paired-field changes to have separate authority, a separate commit and a separate receipt.
@@ -153,13 +155,17 @@ Include zero original row bytes or anchors in the ordinary retirement proposal.
 Require the second exact CoC decision to bind the ordinary proposal SHA256 and independent review receipt.
 Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.
 End the retirement-only authority block; apply every subsequent shared requirement to both branches unless explicitly scoped.
-For changed mutant semantics, require a current task-specific owner event naming exact protected reads, rows, semantic adaptation and permitted gates.
-Require that event and the admitted gates to cover independent applied review at the final commit.
-For changed mutant semantics, apply the task-specific owner-event verification contract to the current event and exact semantic scope.
+An exact written CoC decision naming the repository, PR, row-file paths and unique row IDs authorizes retirement, designated-test change and mutant change for those rows.
+That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.
+For changed mutant semantics, require that decision to name the exact protected reads, semantic adaptation and permitted gates.
+Require that decision and the admitted gates to cover independent applied review at the final commit.
+Apply the task-specific owner-event verification contract to the cited owner event.
 Preserve every historical fixed-event comparator unchanged within its existing standing branch only.
 Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
 An authoritative mismatch blocks access and application without fallback.
-CoC approval supplies zero missing owner-event authority for changed mutant semantics except on the explicitly selected Rewritten-code row route.
+Require an independent not-weaker review of every row change by a reviewer who differs from the PR author and the applying writer.
+When the PR adds new code in place of the guarded behavior, require a follow-up row that guards the new code.
+Require a current task-specific owner event for any claim change.
 A fixed identical-operation grant supplies zero changed-semantic authority on this route.
 Keep read authority, proposal derivation, semantic approval and application authority separate.
 Before any lookup or read, require explicit protected-read authority for the exact actor, files, IDs, complete approved extents and named commits.
@@ -217,7 +223,7 @@ Send CI reports that say in the base file, missing at HEAD only to the existing 
 Apply the following surviving-claim requirements only when the brief selects a surviving-claim adaptation.
 Use the existing lane-derived route when an identical-operation re-anchor fits.
 Use the surviving-claim disposition only for an independently reviewed narrower mutant that preserves the full claim guarantee.
-Permit only the exact approved mutant fields under the task-specific owner event and admitted private-proposal gates.
+Permit only the exact approved mutant fields under the exact CoC decision and admitted private-proposal gates.
 Preserve row ID, claim, designated test, subject, operator, pins, assertions, bounds and unrelated fields.
 Review original and proposed local transformations inside separately admitted private scope.
 Identify the concrete violation of the surviving claim and the designated test's detection mechanism.
@@ -318,21 +324,24 @@ Require the tested merge to contain the recorded base and author head, and the f
 Require read-only trees at the base and frozen final commits; omit protected row-file hunks from supplied diffs.
 Permit only named row-ID lookup and approved row-line reads in the named files at the named commits.
 Forbid whole-file parsing, adjacent-row reads, unnamed-row reads and broader protected searches.
-Confirm changes only to the paired `old` and `new` fields and the exact CoC-approved fields the new mutant needs.
-Keep row ID, claim and designated test unchanged.
+Confirm changes only to paired `old` and `new` fields, exact CoC-approved mutant fields and any designated-test change the exact CoC decision names.
+Keep row ID and claim unchanged; change the designated test only when the exact CoC decision names that change.
 Preserve assertions, bounds, policy guarantees, pins and every unrelated field.
 Require a new mutant on the current code that breaks the behavior the claim names.
 Require the same row-review admission record for the independent reviewer; this route admits scoped semantic review under that record.
 Require the reviewer to differ from the PR author and the applying writer.
-Before publication, require independent semantic review confirming the same claim and designated test and a mutant no weaker.
+Before publication, require independent semantic review confirming the same claim, and a designated test and mutant no weaker.
 Review the original and new mutant, the concrete claim violation, the designated test's detection mechanism and regressions the new mutant could omit.
 A killed mutant or passing checker alone supplies insufficient same-guarantee evidence.
 Bind the review receipt to the reviewer, approving verdict, CoC decision, admission record, frozen final commit, exact files, row IDs, fields and CI evidence.
 Require CoC approval of that review receipt before publication.
 Changed source, scope, authority or evidence invalidates the receipt and approval.
-Within this rewritten-code route only, require a current task-specific owner event for retirement.
+An exact written CoC decision naming the repository, PR, row-file paths and unique row IDs authorizes retirement, designated-test change and mutant change for those rows.
+That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.
+Require an independent not-weaker review of every row change by a reviewer who differs from the PR author and the applying writer.
+When the PR adds new code in place of the guarded behavior, require a follow-up row that guards the new code.
 Preserve every existing retirement route and its authority unchanged.
-Require a current task-specific owner event for any claim or designated-test change and every changed-semantics case outside this route.
+Require a current task-specific owner event for any claim change.
 Keep messages, briefs, findings, receipts and PR bodies free of protected bytes; identify edits only by path, row ID and field.
 Grant zero reviewer edit, execution or publication authority; drivers apply zero protected edits.
 Keep mutation proof after merge under separate applicable execution admission.
