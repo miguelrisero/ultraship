@@ -2758,8 +2758,106 @@ def writer_gh_denial(command, depth=0):
     return None
 
 
+RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
+                   'Report the blocked scope to the driver.')
+
+
+def receipt_custody(data, read_search=False):
+    tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
+    if read_search and tool not in ('Read', 'Grep', 'Glob', 'LSP') and not tool.startswith('mcp__fff__'):
+        return
+    state_root = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
+    receipt_store = state_root / 'ultraship' / 'text-lint'
+
+    def normalized(value):
+        value = value.casefold().translate(str.maketrans('', '', "\"'\\"))
+        return re.sub(r'/\.(?=/|$)', '', re.sub(r'/+', '/', value))
+
+    def resolved(value):
+        path = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(value))
+        return {normalized(os.path.abspath(path)), normalized(os.path.realpath(path))}
+
+    receipt_paths = resolved(str(receipt_store))
+    state_paths = resolved(str(state_root))
+
+    def receipt_text(value):
+        value = normalized(value)
+        return any(path in value for path in receipt_paths) or 'ultraship' + '/text-lint' in value
+
+    def receipt_path(value, ancestors=False, state_only=False):
+        if not isinstance(value, str) or not value:
+            return False
+        return any(candidate == store or candidate.startswith(store + '/')
+                   or (ancestors and store.startswith(candidate.rstrip('/') + '/')
+                       and (not state_only or any(candidate == root or candidate.startswith(root + '/')
+                                                  for root in state_paths)))
+                   for candidate in resolved(value) for store in receipt_paths)
+
+    def strings(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from strings(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from strings(item)
+
+    if read_search:
+        try:
+            paths = [tin.get(field) for field in ('file_path', 'filePath', 'path', 'notebook_path')]
+            if tool == 'Glob' and isinstance(tin.get('pattern'), str):
+                paths.append(re.split(r'[*?\[{]', tin['pattern'], maxsplit=1)[0] or '.')
+            if tool in ('Grep', 'Glob') and not tin.get('path'):
+                paths.append(data.get('cwd') or os.getcwd())
+            if any(receipt_text(value) for value in strings(tin)) or any(receipt_path(path, ancestors=True) for path in paths):
+                deny(RECEIPT_CUSTODY)
+        except Exception:
+            deny(RECEIPT_CUSTODY)
+        return
+    if tool in ('Edit', 'Write', 'NotebookEdit') and receipt_path(tin.get('file_path') or tin.get('notebook_path')):
+        deny(RECEIPT_CUSTODY)
+    # shortcut: runtime path construction and rebuilt shell expansion escape Bash checks; upgrade to isolated state access.
+    if tool == 'Bash':
+        raw = str(tin.get('command', ''))
+        command = normalized(raw)
+        raw_words = [word.translate(str.maketrans('', '', "\"'\\"))
+                     for word in re.split(r'[\s;&|<>()]+', raw) if word]
+        words = [re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
+                        lambda match: os.environ.get(match[1] or match[2], ''), word)
+                 for word in raw_words]
+
+        def glob_prefix(word):
+            for pattern in resolved(word):
+                segments = pattern.split('/')
+                for store in receipt_paths:
+                    store_segments = store.split('/')
+                    if len(segments) >= len(store_segments) and all(
+                            fnmatch.fnmatchcase(segment, pattern_segment)
+                            for segment, pattern_segment in zip(store_segments, segments)):
+                        return True
+            return False
+
+        if (receipt_text(raw)
+                or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
+                or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
+                or (('.local/state' in command or 'xdg_state_home' in command)
+                    and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
+                         or any(char in raw for char in '*?[]{}$`')))
+                or any(any(char in word for char in '*?[{$`')
+                       and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
+                            or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
+                       for word in raw_words)
+                or re.search(r'text_lint(\.py)?\s+hook\b', command)
+                or ('text_lint' in command and any(token in command for token in
+                    ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec(')))
+                or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
+            deny(RECEIPT_CUSTODY)
+
+
 def pre(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
+    receipt_custody(data)
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
         deny('ship agents pin their own model. Remove the `model` field and call the scoped agent '
              'or the next agent in its fallback chain.')
@@ -3087,6 +3185,7 @@ def pre(data):
                             roots.append(entry.path)
         except Exception:
             deny('Reviewers cannot proceed when search scope validation fails. Report the blocked scope to the coordinator.')
+    receipt_custody(data, read_search=True)
 
 
 def owed_file(data):
@@ -3282,11 +3381,17 @@ def compact(data):
 
 
 def guarded_pre(data):
-    """A bug in `pre` must not block every role's tools; a reviewer still fails closed."""
+    """Keep receipt custody and reviewer access closed when `pre` fails."""
     try:
         pre(data)
     except Exception:
         traceback.print_exc()
+        try:
+            receipt_custody(data, read_search=True)
+        except Exception:
+            tool = data.get('tool_name', '') if isinstance(data, dict) else ''
+            if tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__'):
+                deny(RECEIPT_CUSTODY)
         if isinstance(data, dict) and role(data, 'reviewer'):
             deny('Reviewers cannot proceed when the ship hook fails. Report the blocked scope to the coordinator.')
 
