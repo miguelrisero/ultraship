@@ -3006,17 +3006,12 @@ def review_thread_denial(command):
     names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word)) == 'gh'
                    for word in re.split(r'[\s;&|()<>]+', normalized))
     if names_gh:
-        command_position = True
         for index, token in enumerate(tokens):
             shell = os.path.basename(token) in ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'busybox')
-            shell = shell or command_position and token in ('eval', 'source', '.')
+            shell = shell or token in ('eval', 'source', '.')
             if shell and not (index + 1 < len(tokens) and tokens[index + 1].endswith('.sh')
                               and not tokens[index + 1].startswith(('/dev/', '/proc/'))):
                 return 'shell runner names gh'
-            if token and all(char in ';&|\n()' for char in token):
-                command_position = True
-            elif not (command_position and re.match(r'[A-Za-z_]\w*=', token)):
-                command_position = False
     # Keep quote boundaries: GraphQL variables are literal only inside a single-quoted query value.
     pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s'"\\;&|()])+|[;&|\n()]+'''
     segments, words = [], []
