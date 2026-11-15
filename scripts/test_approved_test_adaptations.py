@@ -196,11 +196,19 @@ EXPECTED_FIXED_ACCESS = [
 
 EXPECTED_FIXED_DRIVER_ACCESS = EXPECTED_FIXED_ACCESS[:19] + EXPECTED_FIXED_ACCESS[20:]
 
+EXPECTED_COC_ROW_DECISION = [
+    'An exact written CoC decision naming the repository, PR, row-file paths and unique row IDs authorizes retirement, designated-test change and mutant change for those rows.',
+    'That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.',
+    'Require an independent not-weaker review of every row change by a reviewer who differs from the PR author and the applying writer.',
+    'When the PR adds new code in place of the guarded behavior, require a follow-up row that guards the new code.',
+    'Require a current task-specific owner event for any claim change.',
+]
+
 EXPECTED_SHARED_MUTANT_RULE = (
-    'The ban on weakening a test and the independent not-weaker review still apply. '
-    'Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route or Rewritten-code row route; '
-    'changed mutant semantics on the lane-owned disposition route require current task-specific owner-event authority and independent semantic review '
-    'under its separately admitted gates. The Rewritten-code row route requires its exact CoC decision and independent semantic review.'
+    'The ban on weakening a test and the independent not-weaker review still apply.\n'
+    'Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route or Rewritten-code row route.\n'
+    'Changed mutant semantics on the lane-owned disposition route require the exact written CoC decision and independent semantic review '
+    'under its separately admitted gates.\nThe Rewritten-code row route requires its exact CoC decision and independent semantic review.'
 )
 
 
@@ -220,13 +228,15 @@ EXPECTED_COMMON_DISPOSITION_AUTHORITY = [
     'Require the second exact CoC decision to bind the ordinary proposal SHA256 and independent review receipt.',
     'Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.',
     'End the retirement-only authority block; apply every subsequent shared requirement to both branches unless explicitly scoped.',
-    'For changed mutant semantics, require a current task-specific owner event naming exact protected reads, rows, semantic adaptation and permitted gates.',
-    'Require that event and the admitted gates to cover independent applied review at the final commit.',
-    'For changed mutant semantics, apply the task-specific owner-event verification contract to the current event and exact semantic scope.',
+    *EXPECTED_COC_ROW_DECISION[:2],
+    'For changed mutant semantics, require that decision to name the exact protected reads, semantic adaptation and permitted gates.',
+    'Require that decision and the admitted gates to cover independent applied review at the final commit.',
+    "Verify the cited owner event's Input, workspace, current version, event id and hash, `event_type=answer_submitted`, `actor_kind=owner_ui` and answer text.",
+    'That event delegates authority to the CoC; the exact CoC decision supplies the exact rows, fields and adaptation scope.',
     'Preserve every historical fixed-event comparator unchanged within its existing standing branch only.',
     'Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.',
     'An authoritative mismatch blocks access and application without fallback.',
-    'CoC approval supplies zero missing owner-event authority for changed mutant semantics except on the explicitly selected Rewritten-code row route.',
+    *EXPECTED_COC_ROW_DECISION[2:],
     'A fixed identical-operation grant supplies zero changed-semantic authority on this route.',
     'Keep read authority, proposal derivation, semantic approval and application authority separate.',
     'Before any lookup or read, require explicit protected-read authority for the exact actor, files, IDs, complete approved extents and named commits.',
@@ -280,8 +290,9 @@ EXPECTED_DISPOSITION_SURVIVING = [
     'Apply the following surviving-claim requirements only when the brief selects a surviving-claim adaptation.',
     'Use the existing lane-derived route when an identical-operation re-anchor fits.',
     'Use the surviving-claim disposition only for an independently reviewed narrower mutant that preserves the full claim guarantee.',
-    'Permit only the exact approved mutant fields under the task-specific owner event and admitted private-proposal gates.',
-    'Preserve row ID, claim, designated test, subject, operator, pins, assertions, bounds and unrelated fields.',
+    'Permit only the exact approved mutant fields and any designated-test change the exact CoC decision names, inside admitted private-proposal gates.',
+    'Preserve row ID, claim, subject, operator, pins, assertions, bounds and unrelated fields; keep the designated test unless the exact CoC decision names its change.',
+    "For a designated-test change, require independent review that the replacement test detects the surviving claim's violation and keeps the full claim guarantee.",
     'Review original and proposed local transformations inside separately admitted private scope.',
     'Identify the concrete violation of the surviving claim and the designated test\'s detection mechanism.',
     'Review relevant regressions that the narrower operation could omit.',
@@ -448,24 +459,52 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 for phrase in (
                     "Use this separate route outside category 5 only when the PR's own diff replaces the code a row guards and no identical mutant fits.",
                     'Require an exact CoC decision naming the row-file paths, unique row IDs and permitted mutant fields before any protected read or edit.',
-                    'Keep row ID, claim and designated test unchanged.',
+                    'Keep row ID and claim unchanged; change the designated test only when the exact CoC decision names that change.',
                     'Require a new mutant on the current code that breaks the behavior the claim names.',
                     'Permit only named row-ID lookup and approved row-line reads in the named files at the named commits.',
                     'Forbid whole-file parsing, adjacent-row reads, unnamed-row reads and broader protected searches.',
                     'Require the same row-review admission record for the independent reviewer; this route admits scoped semantic review under that record.',
                     'Require the reviewer to differ from the PR author and the applying writer.',
-                    'Before publication, require independent semantic review confirming the same claim and designated test and a mutant no weaker.',
+                    'Before publication, require independent semantic review confirming the same claim, and a designated test and mutant no weaker.',
                     'Require CoC approval of that review receipt before publication.',
-                    'Within this rewritten-code route only, require a current task-specific owner event for retirement.',
+                    *EXPECTED_COC_ROW_DECISION,
                     'Preserve every existing retirement route and its authority unchanged.',
-                    'Require a current task-specific owner event for any claim or designated-test change and every changed-semantics case outside this route.',
                     'Preserve assertions, bounds, policy guarantees, pins and every unrelated field.',
                     'Keep mutation proof after merge under separate applicable execution admission.',
                     'Source delivery grants zero runtime-adoption or retry authority.',
                 ):
                     self.assertIn(phrase, route)
-                self.assertIn('except on the explicitly selected Rewritten-code row route', text)
-                self.assertNotIn('CoC approval supplies zero missing owner-event authority for changed mutant semantics.', text)
+                self.assertIn(EXPECTED_COC_ROW_DECISION[0], text)
+                for removed in (
+                    'Apply the task-specific owner-event verification contract to the cited owner event.',
+                    'Permit only the exact approved mutant fields under the exact CoC decision and admitted private-proposal gates.',
+                    'Preserve row ID, claim, designated test, subject, operator, pins, assertions, bounds and unrelated fields.',
+                    'Within this rewritten-code route only, require a current task-specific owner event for retirement.',
+                    'Require a current task-specific owner event for any claim or designated-test change and every changed-semantics case outside this route.',
+                    'Keep row ID, claim and designated test unchanged.',
+                    'Before publication, require independent semantic review confirming the same claim and designated test and a mutant no weaker.',
+                    'For changed mutant semantics, require a current task-specific owner event naming exact protected reads, rows, semantic adaptation and permitted gates.',
+                    'Require that event and the admitted gates to cover independent applied review at the final commit.',
+                    'For changed mutant semantics, apply the task-specific owner-event verification contract to the current event and exact semantic scope.',
+                    'CoC approval supplies zero missing owner-event authority for changed mutant semantics.',
+                    'CoC approval supplies zero missing owner-event authority for changed mutant semantics except on the explicitly selected Rewritten-code row route.',
+                    'Permit only the exact approved mutant fields under the task-specific owner event and admitted private-proposal gates.',
+                    'require current task-specific owner-event authority and independent semantic review',
+                    'Require Owner-scoped protected row access above and a separate current task-specific owner answer event approving the exact subject edit.',
+                    'Require exact owner approval for each row\'s subject field, current value and replacement value.',
+                    'Require both complete matching authority records: Owner-scoped protected row access and a separate task-specific owner event approving the exact subject replacement.',
+                    'Require the brief\'s row-file paths and unique IDs to equal the CoC allowlist and every subject current/replacement value to have exact owner approval.',
+                    'for both Inputs and current versions',
+                    'exact owner-approved subject',
+                ):
+                    with self.subTest(removed=removed):
+                        self.assertNotIn(removed, text)
+                field_prefix = ('Change only the paired' if 'writer--' in name else
+                                'Confirm changes only to paired' if 'reviewer--' in name else
+                                'Permit changes only to paired')
+                fields = (field_prefix + ' `old` and `new` fields, exact CoC-approved mutant fields '
+                          'and any designated-test change the exact CoC decision names.')
+                self.assertIn(fields, route)
                 if 'writer--' in name:
                     self.assertIn('Use native Edit with replace_all=false and a unique approved row-ID-contained old_string within the approved row extent.', route)
                 else:
@@ -497,7 +536,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             'plugins/ship/skills/ship/SKILL.md',
         )
         contracts = {
-            'authority': (r'Owner-scoped protected row access', r'separate.*task-specific.*owner.*event',
+            'authority': (r'Owner-scoped protected row access', r'separate exact written CoC decision approving the exact subject edit',
                           r'allowlist.*(?:equal|exact.*match)', r'current.*replacement',
                           r'both.*(?:records|authorit).*same.*(?:source|identit)',
                           r'mismatch.*(?:entire|whole).*batch', r'authoritative mismatch.*(?:fallback|reject)',
@@ -524,6 +563,15 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
             with self.subTest(path=name):
                 self.assertTrue(heading)
+                for phrase in (
+                    EXPECTED_COC_ROW_DECISION[1],
+                    'Require Owner-scoped protected row access above and a separate exact written CoC decision approving the exact subject edit.',
+                    "Require the exact CoC decision to name each row's subject field, current value and replacement value.",
+                    'Bind the access record to full Input/workspace UUIDs, current version, event id/hash, choice, actual answer, verifier and verification time.',
+                    'Require `event_type=answer_submitted`, `actor_kind=owner_ui` and `payload.no_answer_yet=false` for the access Input and current version.',
+                ):
+                    self.assertIn(phrase, route)
+                self.assertNotIn('Bind each record to full Input/workspace UUIDs', route)
                 for contract, patterns in contracts.items():
                     for pattern in patterns:
                         with self.subTest(contract=contract, pattern=pattern):
@@ -551,6 +599,15 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
             with self.subTest(path=name):
                 self.assertTrue(heading)
+                for phrase in (
+                    EXPECTED_COC_ROW_DECISION[1],
+                    'Require both complete matching authority records: Owner-scoped protected row access and a separate exact written CoC decision approving the exact subject replacement.',
+                    "Require the exact CoC decision to name each row's subject field, current value and replacement value.",
+                    'Verify full Input/workspace UUIDs, current version, event id/hash, choice, actual answer, verifier and verification time for the access record.',
+                    'Require `event_type=answer_submitted`, `actor_kind=owner_ui` and `payload.no_answer_yet=false` for the access Input and current version.',
+                ):
+                    self.assertIn(phrase, route)
+                self.assertNotIn('for both records.', route)
                 for pattern in (r'both.*authorit.*(?:matching|same)', r'read-only.*(?:base|trees).*final',
                                 r'old anchor.*exactly once.*new subject', r'identical mutant.*(?:claim|test)',
                                 r'CoC.*receipt.*before publication', r'line counts.*(?:only|cannot)',
@@ -592,6 +649,12 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         _, heading, after = text.partition('## Owner-approved protected-row subject route\n')
         self.assertTrue(heading)
         boundary = re.split(r'^ {0,3}#{1,2}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+        for phrase in (
+            EXPECTED_COC_ROW_DECISION[1],
+            "Require a separate exact written CoC decision for each subject edit under the supported writer's loaded subject route.",
+            'Keep Owner-scoped protected row access independent, with its full owner-event verification requirements.',
+        ):
+            self.assertIn(phrase, boundary)
         for pattern in (r'future briefs.*verified runtime adoption', r'Native Edit.*zero.*alternate.*denied',
                         r'actual cause.*fresh applicable disposition', r'(?:never|zero).*replay.*(?:equivalent|actor)',
                         r'product-limit.*cost.*zero.*(?:protected|subject)',
@@ -1200,7 +1263,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                           'These routes are part of this definition, so the stop-and-report rule above does not block them. ')
                 suffix = (' A CoC decision never covers product, billing, security-policy, architecture, resource, host, '
                           'or spend bounds; those use the `owner_ui` route or the product-limit exception.')
-                self.assertEqual(lines, [prefix + EXPECTED_SHARED_MUTANT_RULE + suffix])
+                authority = text[text.index('Authority route:'):text.index('\n### Execution admission')].rstrip('\n')
+                self.assertEqual(authority, prefix + EXPECTED_SHARED_MUTANT_RULE + suffix)
 
     def test_lane_owned_disposition_keeps_writer_and_reviewer_parity(self):
         writers = []
