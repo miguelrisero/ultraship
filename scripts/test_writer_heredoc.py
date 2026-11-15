@@ -47,6 +47,51 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('process-capable python -c rule', self.reason)
 
+    def test_free_threaded_python_names_get_the_python3_13_verdict(self):
+        code = 'import subprocess; subprocess.run(["git", "pu" + "sh"])'
+        shapes = (
+            ('process_inline', "{python} -c '" + code + "'"),
+            ('inert_inline', "{python} -c 'print(1)'"),
+            ('path_prefix', 'PATH="/x:$PATH" {python} -c \'print(1)\''),
+            ('piped_stdin', 'echo hi | {python}'),
+            ('inert_heredoc', "{python} -I - <<'EOF'\nprint(1)\nEOF\n"),
+            ('process_heredoc', '{python} - <<EOF\n' + code + '\nEOF\n'),
+        )
+        for python, twin in (
+            ('python3.13t', 'python3.13'), ('python3t', 'python3.13'),
+            ('/usr/bin/python3.13t', '/usr/bin/python3.13'),
+        ):
+            for shape, template in shapes:
+                with self.subTest(python=python, shape=shape):
+                    twin_denied = self.denied(template.format(python=twin))
+                    twin_reason = self.reason
+                    denied = self.denied(template.format(python=python))
+                    reason = self.reason
+                    if shape == 'process_inline':
+                        self.assertTrue(twin_denied, twin_reason)
+                        self.assertTrue(denied, reason)
+                    self.assertEqual(denied, twin_denied)
+                    self.assertEqual(reason, twin_reason)
+
+    def test_run_path_inside_command_substitution_is_not_the_run_keyword(self):
+        for command in (
+            'cat "$(ls /run/user)"',
+            'cat "$(git -C skills/run/scripts rev-parse HEAD)"',
+            'X="$(ls /run/user/1000)"',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+        for command in (
+            'cat "$(pwd)/run/x"',
+            'cat "$(x run y)"',
+            'cat "$(ls /run/user) run"',
+            '"$(ls /run/user)" -c x',
+            'cat "$(python3 /run/x)"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command), self.reason)
+                self.assertEqual(self.reason, 'inline interpreter code rule (unresolved command word)')
+
     def test_inert_python_inline_strings_are_admitted(self):
         for command in (
             "python3 -c 'print(1)'", 'python3 -c "print(1)"',
