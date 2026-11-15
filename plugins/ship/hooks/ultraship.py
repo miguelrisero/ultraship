@@ -2879,6 +2879,95 @@ def writer_gh_denial(command, depth=0):
     return None
 
 
+# shortcut: script files run by path, gh aliases and extensions, variable command words, opaque non-gh URLs, and files written by Write/Edit then run escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
+def review_thread_denial(command):
+    if read_only_shell(command) or literal_search_shell(command):
+        return None
+    command = command.replace('\\\n', '')
+    normalized = re.sub(r'''['"\\]''', '', command).casefold()
+    if (any(name in normalized for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
+                                            'resolvereviewthread'))
+            or re.search(r'comments/\S*/replies', normalized)):
+        return 'raw review-thread mutation'
+    command = cat_heredoc_data(command)
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        list(lexer)
+    except ValueError:
+        return 'review-thread guard parse failure' if re.search(r'\bgh\b', normalized) else None
+    # Keep quote boundaries: GraphQL variables are literal only inside a single-quoted query value.
+    pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s'"\\;&|()])+|[;&|\n()]+'''
+    segments, words = [], []
+    for match in re.finditer(pattern, command):
+        raw = match[0]
+        if all(char in ';&|\n()' for char in raw):
+            segments.append(words)
+            words = []
+            continue
+        value = shlex.split(raw)[0]
+        words.append((value, raw))
+        if re.search(r'\bgh\s+api\b', value) and value != raw and not value.startswith('query='):
+            reason = review_thread_denial(value)
+            if reason:
+                return reason
+    segments.append(words)
+    for words in segments:
+        calls = [index for index, (value, _) in enumerate(words)
+                 if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
+        text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words)).casefold()
+        if not calls and 'api.github.com' in text and (
+                'graphql' in text or re.search(r'pulls/[^/]+/comments', text)):
+            return 'GitHub API outside gh'
+        for index in calls:
+            endpoint, fields, methods, query, inputs = None, False, [], None, False
+            arguments = words[index + 2:]
+            cursor = 0
+            while cursor < len(arguments):
+                value, raw = arguments[cursor]
+                method = GH_METHOD.fullmatch(value)
+                field = GH_FIELD.fullmatch(value)
+                if method:
+                    method_value = method[1] if value.startswith('--') else method[2]
+                    if not method_value:
+                        cursor += 1
+                        method_value = arguments[cursor][0] if cursor < len(arguments) else ''
+                    methods.append(method_value.removeprefix('=').upper())
+                elif field:
+                    fields = True
+                    inputs = inputs or value.startswith('--input')
+                    if value in ('-f', '-F', '--field', '--raw-field', '--input'):
+                        cursor += 1
+                        field_value, field_raw = arguments[cursor] if cursor < len(arguments) else ('', '')
+                    else:
+                        field_value = re.sub(r'^(?:--(?:raw-field|field|input)=|-[ip]*[fF])', '', value)
+                        field_raw = re.sub(r'^(?:--(?:raw-field|field|input)=|-[ip]*[fF])', '', raw)
+                    if field_value.startswith('query='):
+                        query_value = field_value[6:]
+                        single = re.fullmatch(r"query='[^']*'|'query=[^']*'", field_raw) is not None
+                        query = bool(query_value) and not query_value.startswith('@') and (
+                            single or not any(char in field_raw for char in '$`\\'))
+                elif value in ('-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache',
+                               '-p', '--preview'):
+                    cursor += 1
+                elif not value.startswith('-') and endpoint is None:
+                    endpoint = value
+                cursor += 1
+            route = (endpoint or '').removeprefix('https://api.github.com/').strip('/')
+            if route == 'graphql' and (inputs or query is not True):
+                return 'opaque GraphQL query'
+            write = any(method not in ('GET', 'HEAD') for method in methods) or fields and 'GET' not in methods
+            visible = endpoint is not None and not endpoint.startswith('$') and '$(' not in endpoint and '`' not in endpoint
+            for segment in route.split('/'):
+                if '$' in segment and not re.fullmatch(r'\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\}', segment):
+                    visible = False
+            if write and (not visible or re.search(r'(?:^|/)pulls/[^/]+/comments(?:/|$)', route)):
+                return 'REST review-comment write or opaque endpoint'
+    return None
+
+
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                    'Report the blocked scope to the driver.')
 RECEIPT_CUSTODY_FAILED = ('The ship hook could not check refusal-receipt custody, so it denies this call. '
@@ -3073,6 +3162,14 @@ def pre(data):
             destination = destination.resolve()
             if any(destination.is_relative_to(path.expanduser().resolve()) for path in gh_paths):
                 deny('Writers do not edit GitHub CLI configuration.')
+    if tool == 'Bash':
+        try:
+            reason = review_thread_denial(tin.get('command', ''))
+        except Exception:
+            reason = 'review-thread guard parse failure'
+        if reason:
+            deny("Ship replies to and resolves review threads only through `skills/babysit/scripts/thread_reply.py`, "
+                 "which first checks that the thread belongs to the PR's own repository and number. Rule: " + reason + '.')
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
         counter.parent.mkdir(parents=True, exist_ok=True)
