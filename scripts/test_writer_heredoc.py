@@ -99,6 +99,16 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('inline interpreter code rule', self.reason)
 
+    def test_literal_quoted_globs_in_git_grep_are_data(self):
+        for pattern in ('"toEqual([])"', "'toEqual([])'", """pre"[*"']'""",
+                        '"*?[{}"', '"=literal"', "'=literal'"):
+            command = ('git -C /workspace grep -n -e "toBe(\'\')" -e ' + pattern
+                       + ' -e "clears" -e "empty composer" -- '
+                       'frontend/app/src/composables/__tests__/useComposer.test.ts '
+                       'frontend/app/src/views/__tests__/ComposerView.test.ts')
+            with self.subTest(pattern=pattern):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_unresolved_inline_command_words_are_denied(self):
         for command in ('"python3" -c x', "pyth''on3 -c x", r'p\ython3 -c x',
                         '$P -c x', '$(which node) -e x'):
@@ -106,6 +116,14 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
         self.assertTrue(self.denied('$P -c x'))
         self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_glob_and_quoted_expansion_command_words_are_denied(self):
+        for command in ('* -c x', '? -e x', '[ab] -e x', '{a,b} -c x', '=node -e x',
+                        '"literal"* -e x', r'\* -e x', '"$(which node)" -e x',
+                        "'$P' -c x", "'`which node`' -e x"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
 
     def test_heredoc_reader_allowlist_denies_interpreters_and_wrappers(self):
         for reader in ('node -', 'node', 'perl', 'pypy3 -', 'ruby', '"python3" -',

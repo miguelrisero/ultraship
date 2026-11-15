@@ -1333,10 +1333,27 @@ def shell_line_continuations(text):
 
 
 def unresolved_shell_word(raw):
-    """Treat expansion markers conservatively; single quotes protect only glob characters."""
-    spans = single_quoted_spans(raw)
-    return '$' in raw or '`' in raw or spans is None or any(
-        re.search(r'[*?\[{]|^=', span) for span, single in spans if not single)
+    """Keep expansion markers unresolved; quotes protect glob characters and leading equals."""
+    if '$' in raw or '`' in raw or single_quoted_spans(raw) is None:
+        return True
+    quote, start, index = '', 0, 0
+    while index < len(raw):
+        char = raw[index]
+        if char == '\\' and quote != "'":
+            if index + 1 == len(raw) or not quote and raw[index + 1] in '*?[{':
+                return True
+            index += 2
+            continue
+        if char == quote:
+            quote = ''
+            start = index + 1
+        elif not quote:
+            if char in "'\"":
+                quote = char
+            elif char in '*?[{' or char == '=' and index == start:
+                return True
+        index += 1
+    return bool(quote)
 
 
 def nested_work_exceeded(tokens, seen):
