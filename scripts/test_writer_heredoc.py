@@ -88,9 +88,35 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied('for ((i=0; i<1; i++)); do :; done |\ncat; (( i ))'))
         self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
+    def test_pipeline_continuation_assignment_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('false |\ni=0; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pipeline_continuation_arithmetic_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('false |\n((i=0)); (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pipeline_loop_cannot_prove_numeric_name_in_parent(self):
+        self.assertTrue(self.denied('false | for ((i=0; i<1; i++)); do :; done; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pipeline_continuation_loop_cannot_prove_numeric_name_in_parent(self):
+        self.assertTrue(self.denied('false |\nfor ((i=0; i<1; i++)); do :; done; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pipeline_loop_scopes_and_later_initializers_stay_admitted(self):
+        for command in (
+            'ls | for ((i=0; i<3; i++)); do echo "$i"; done',
+            'ls |\nhead -1; i=0; (( i++ ))',
+            'ls | head -1; i=0; (( i++ ))',
+            'for ((i=0; i<3; i++)); do echo "$i"; done | cat',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_literal_eval_parenthesis_function_invalidates_numeric_proof(self):
         self.assertTrue(self.denied("i=0; eval 'f() { :; }'; f; (( i ))"))
-        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+        self.assertIn('process-capable python -c rule', self.reason)
 
     def test_literal_eval_keyword_function_invalidates_numeric_proof(self):
         self.assertTrue(self.denied("i=0; eval 'function f { :; }'; f; (( i ))"))

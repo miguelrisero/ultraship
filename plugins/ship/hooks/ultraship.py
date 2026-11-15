@@ -2337,8 +2337,9 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                 continue
             before.append(token)
         boundary = max((index for index, token in enumerate(before) if token[0] in {';', '\n'}), default=-1)
-        return any(left[0] == right[0] and left[0] in {'&', '|'} and left[3] == right[2]
-                   for left, right in zip(before[boundary + 1:], before[boundary + 2:]))
+        return (any(token[0] == '|' for token in before[boundary + 1:])
+                or any(left[0] == right[0] == '&' and left[3] == right[2]
+                       for left, right in zip(before[boundary + 1:], before[boundary + 2:])))
 
     def parallel_after(position):
         following = next((token for token in tokens if token[2] >= position), None)
