@@ -2592,13 +2592,13 @@ def receipt_custody(data, read_search=False):
             return False
 
         if (receipt_text(raw)
-                or any(receipt_path(word) for word in words)
+                or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
                 or (('.local/state' in command or 'xdg_state_home' in command)
                     and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
                          or any(char in raw for char in '*?[]{}$`')))
                 or any(any(char in word for char in '*?[{$`')
-                       and (re.search(r'\.local/(s|[*?\[{$]|$)', word.casefold())
+                       and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
                             or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
                        for word in raw_words)
                 or re.search(r'text_lint(\.py)?\s+hook\b', command)

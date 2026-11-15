@@ -395,10 +395,35 @@ class ReceiptCustodyTests(unittest.TestCase):
             for command in ('cd ~/.local/state/ultraship && cat text-lint/key',
                             'cd ~/.local/sta*', 'ls $HOME/.local/s*',
                             'pushd ~/.local/state/ultraship',
-                            'cat ~/.local/state/ultraship/text-lint/key'):
+                            'cat ~/.local/state/ultraship/text-lint/key') + tuple(
+                                'ls $HOME/.local/' + suffix
+                                for suffix in ('staging', 's*', 's?', 's[', 's{', '*', '?', '[', '{', '$', '')):
                 with self.subTest(caller=caller, command=command):
                     self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
                                                'tool_input': {'command': command}})
+
+    def test_bash_state_ancestors_deny_every_caller(self):
+        for caller in ('ship:writer--sol', 'ship:driver', ''):
+            for command in ('rm -rf ' + str(self.state / 'ultraship'),
+                            'rm -rf ' + str(self.state),
+                            'grep -r . ' + str(self.state / 'ultraship')):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                               'tool_input': {'command': command}})
+
+    def test_bash_ordinary_paths_allow_every_caller(self):
+        for caller in ('ship:writer--sol', 'ship:driver', ''):
+            for command in ('PATH="/home/miguel/.local/share/uv-0.12/bin:$PATH" make openapi api-types preview-mask-sql',
+                            'PATH="${HOME}/.local/bin:${PATH}" make -r test',
+                            'ls ' + str(self.state / 'ultraship/owed/x.tsv'),
+                            'ls ' + os.environ['HOME'], 'ls /'):
+                with self.subTest(caller=caller, command=command):
+                    output = io.StringIO()
+                    with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                        self.assertIsNone(ultraship.guarded_pre({'cwd': str(self.cwd), 'agent_type': caller,
+                                                              'tool_name': 'Bash',
+                                                              'tool_input': {'command': command}}))
+                    self.assertEqual(output.getvalue(), '')
 
     def test_role_failure_keeps_writer_read_custody_closed(self):
         with patch.object(ultraship, 'role', side_effect=RuntimeError('role failed')):
