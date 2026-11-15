@@ -1151,7 +1151,7 @@ STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock
 
 def read_only_argument_word(command, tokens, words, index):
     # These commands never run an argument word within read-only pipelines after a literal directory change.
-    if not index or any(char in command for char in '$`<>'):
+    if not index or any(char in command for char in '$`<>~'):
         return False
     try:
         original = shell_raw_words(command)
@@ -1193,10 +1193,12 @@ def read_only_argument_word(command, tokens, words, index):
         if (name not in {'rg', 'grep', 'ls', 'cat', 'find'}
                 or any(part[0][0] not in {'head', 'tail', 'wc'} for part in pipeline[1:])):
             return False
-        if name == 'rg' and any(word[1].startswith(('--pre', '--hostname-bin')) for word in first):
+        if name == 'rg' and any(
+                word[1].startswith(('--pre', '--hostname-bin', '--search-zip'))
+                or word[1].startswith('-') and not word[1].startswith('--') and 'z' in word[1] for word in first):
             return False
         if name == 'find' and any(word[1] in {
-                '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'} for word in first):
+                '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls', '-delete'} for word in first):
             return False
     for raw, value, start, end in original:
         if raw == '|' or not unresolved_shell_word(raw):
@@ -2030,9 +2032,9 @@ def inline_interpreter_denial(command, cwd=None):
                 unresolved = (not neutral and raw != '[' and value != '$?' and start not in shell_programs
                               and unresolved_shell_word(raw))
                 names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
-                joined_code = (not neutral and unresolved_shell_word(raw)
-                               and not read_only_argument_word(command, tokens, words, index) and bool(re.search(
-                    rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw)))
+                joined_code = (not neutral and unresolved_shell_word(raw) and bool(re.search(
+                    rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw))
+                               and not read_only_argument_word(command, tokens, words, index))
                 if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
                                                    or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'}):
                     return 'inline interpreter code rule (unresolved command word)'

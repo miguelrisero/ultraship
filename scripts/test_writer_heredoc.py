@@ -162,6 +162,14 @@ class WriterHeredocTests(unittest.TestCase):
                 r'''cd -P /x && rg foo /x/python*/a''',
                 r'''cd /x && rg foo /x/python*/a; perl -e 1''',
                 r'''cd /x && rg foo /x/python*/a && perl -e 1''',
+                r'''find /x -delete -path /x/python*''',
+                r'''find /x -delete -name python*''',
+                r'''find /x/python* ~ /x/payload \;''',
+                r'''rg foo ~/python*/a''',
+                r'''cat ~/python*/a''',
+                r'''rg --search-zip needle /x/python*.gz''',
+                r'''rg -z needle /x/python*.gz''',
+                r'''rg -nz needle /x/python*.gz''',
             )),
         ):
             for command in commands:
