@@ -1867,6 +1867,16 @@ def shell_substitution_bodies(text):
             yield text[start:]
 
 
+def shell_brace_text(raw):
+    """Keep bare braces separate from parameter expansion braces."""
+    while '${' in raw:
+        reduced = re.sub(r'\$\{[^{}]*\}', '', raw)
+        if reduced == raw:
+            break
+        raw = reduced
+    return re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', raw)
+
+
 def runtime_name_denial(text, tokens, arithmetic, groups, commands):
     """Refuse unresolved values where Bash recursively evaluates names or arithmetic."""
     reason = 'array subscript evaluation rule ('
@@ -1975,7 +1985,8 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                     if not re.fullmatch(literal, value):
                         return reason + 'attribute)'
             unquoted = re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', raw)
-            if (unquoted.startswith('{') and any(char in value for char in '$`')
+            if (shell_brace_text(raw).startswith('{') and re.search(r'[,]|\.\.', shell_brace_text(raw))
+                    and any(char in value for char in '$`')
                     and all(re.fullmatch(rf'{identifier}=.*', word[1], re.S) for word in words[:index])
                     and not re.match(rf'{identifier}=', value)):
                 return reason + 'name)'
@@ -1999,7 +2010,7 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                         word[1].startswith('-') or any(char in word[1] for char in '$`[') for word in arguments)):
                     return reason + 'name)'
                 continue
-            if any('{' in re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', word[0])
+            if any(re.search(r'\{[^}]*?(?:,|\.\.)', shell_brace_text(word[0]))
                    and any(char in word[1] for char in '-$`') for word in arguments):
                 return reason + 'name)'
             if value in {'printf', 'test', '[', 'wait'}:
@@ -2086,6 +2097,13 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                                     return reason + 'arithmetic)'
                                 regions.append((word[2], word[3]))
     numeric, assignments = set(), {}
+    for loop in re.finditer(r'\bfor\s*\(\(([^;]*);', text):
+        terms = loop[1].split(',')
+        if all(re.fullmatch(rf'\s*{identifier}\s*=\s*[0-9]+\s*', term) for term in terms):
+            for term in re.finditer(rf'({identifier})\s*=', loop[1]):
+                before = text[:loop.start(1) + term.start()]
+                if not re.search(rf'(?<![A-Za-z0-9_]){term[1]}(?![A-Za-z0-9_])', before):
+                    numeric.add(term[1])
     for start, end in regions:
         match = re.match(rf'\s*({identifier})\s*=\s*[0-9]+(?=\s*(?:[,;)]|$))', text[start:end])
         if match:
