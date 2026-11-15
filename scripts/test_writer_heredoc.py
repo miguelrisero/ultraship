@@ -73,19 +73,22 @@ class WriterHeredocTests(unittest.TestCase):
                     self.assertEqual(denied, twin_denied)
                     self.assertEqual(reason, twin_reason)
 
-    def test_run_path_inside_command_substitution_is_not_the_run_keyword(self):
+    def test_run_path_inside_fixed_sha256sum_substitution_is_not_the_run_keyword(self):
         for command in (
-            'cat "$(ls /run/user)"',
-            'cat "$(git -C skills/run/scripts rev-parse HEAD)"',
-            'X="$(ls /run/user/1000)"',
+            'cat "$(sha256sum /run/user/1000/x)"',
+            'echo "$(sha256sum /home/x/skills/run/scripts/watchers.py)"',
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
         for command in (
+            'cat "$(printf /run/)"',
+            'cat "$(echo /run/x | cut -d/ -f2)"',
+            'cat "$(ls /run/user)"',
+            'cat "$(sha256sum /run/x | tr -d /)"',
             'cat "$(pwd)/run/x"',
             'cat "$(x run y)"',
-            'cat "$(ls /run/user) run"',
-            '"$(ls /run/user)" -c x',
+            'cat "$(sha256sum /run/x) run"',
+            '"$(sha256sum /run/x)" -c x',
             'cat "$(python3 /run/x)"',
         ):
             with self.subTest(command=command):

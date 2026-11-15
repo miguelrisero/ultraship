@@ -1699,9 +1699,9 @@ def inline_interpreter_denial(command, cwd=None):
                 unresolved = (not neutral and raw != '[' and value != '$?' and start not in shell_programs
                               and unresolved_shell_word(raw))
                 names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
-                # A substitution's /run/ path does not name an interpreter subcommand.
-                joined_word = re.sub(r'''\$\([^()"'`$\\]*\)''',
-                                     lambda match: re.sub(r'(?<=/)run(?=/)', '', match[0]), raw)
+                # A fixed sha256sum substitution cannot rewrite a path into an interpreter subcommand.
+                joined_word = (re.sub(r'(?<=/)run(?=/)', '', raw)
+                               if re.fullmatch(r'"\$\(sha256sum /[\w./@%+,-]+\)"', raw) else raw)
                 joined_code = not neutral and unresolved_shell_word(raw) and bool(re.search(
                     rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', joined_word))
                 if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
