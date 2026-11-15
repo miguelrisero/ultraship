@@ -469,6 +469,15 @@ class ReceiptCustodyTests(unittest.TestCase):
                     self.assertIn('Traceback (most recent call last):', errors.getvalue())
                     self.assertIn('RuntimeError: pre failed', errors.getvalue())
 
+    def test_pre_error_denies_malformed_tool_names(self):
+        """Catch malformed tool names escaping denial through an error in the custody fallback."""
+        for tool in (None, 1, ['Read'], {'name': 'Read'}):
+            with self.subTest(tool=tool), patch.object(ultraship, 'pre', side_effect=RuntimeError('pre failed')):
+                self.assert_custody_denial(
+                    {'tool_name': tool, 'tool_input': {}},
+                    'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
+                    'Report the blocked scope to the driver.')
+
     def test_custody_error_denies_every_tool_for_every_caller(self):
         """A failed custody check cannot permit any tool for a writer, driver or main session."""
         inputs = (('Bash', {'command': 'ls'}),
