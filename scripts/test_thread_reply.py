@@ -76,6 +76,11 @@ REFUSE = (
     'gh api repos/o/r/[p]ulls/7/comments -f body=x',
     'gh ap? repos/o/r/pulls/7/comments -f body=x',
     'cd /repo && curl -s https://api.github.com/graphql -d @body.json',
+    'U=https://api.github.com; curl $U/graphql -d @body.json',
+    'curl $(echo https://api.github.com)/graphql -d @body.json',
+    'gh api https://api.github.com/user && curl -d @body.json "$G/graphql"',
+    'gh pr view 7; curl https://api.github.com/graphql -d @body.json',
+    'curl -X POST https://api.github.com/repos/o/r/pulls/7/comments -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @reply.json -H gh api',
 )
 
 ADMIT = (
@@ -111,6 +116,7 @@ ADMIT = (
     'gh api https://api.github.com/repos/o/r/pulls/7/comments | head -5',
     "gh api 'repos/o/r/pulls/7/comments?per_page=100' --jq '.[].id'",
     'gh pr list --search "is:open author:*"',
+    "gh api graphql -f query='query{viewer{login}}' && gh api https://api.github.com/user",
 )
 
 

@@ -3027,9 +3027,14 @@ def review_thread_denial(command):
         calls = [index for index, (value, _) in enumerate(words)
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
         text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words)).casefold()
-        if not calls and 'api.github.com' in text and any(
-                marker in text for marker in ('graphql', 'pulls', '%')):
-            return 'GitHub API outside gh'
+        if ('api.github.com' in normalized and any(marker in normalized for marker in ('graphql', 'pulls', '%'))
+                and any(marker in text for marker in ('api.github.com', 'graphql', 'pulls', '%'))):
+            first = 0
+            while first < len(words) and re.match(r'[A-Za-z_]\w*=', words[first][0]):
+                first += 1
+            if (first + 1 >= len(words) or os.path.basename(words[first][0]) != 'gh'
+                    or words[first + 1][0] != 'api'):
+                return 'GitHub API outside gh'
         for index in calls:
             endpoint, fields, methods, query, inputs = None, False, [], None, False
             arguments = words[index + 2:]
