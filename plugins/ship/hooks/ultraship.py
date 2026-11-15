@@ -2257,32 +2257,66 @@ def writer_gh_denial(command, depth=0):
 
 def pre(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
-    receipt_store = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'ultraship' / 'text-lint'
-    receipt_paths = {os.path.abspath(receipt_store).casefold(), os.path.realpath(receipt_store).casefold()}
+    state_root = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
+    receipt_store = state_root / 'ultraship' / 'text-lint'
     custody = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                'Report the blocked scope to the driver.')
 
-    def receipt_path(value, contains=False):
+    def normalized(value):
+        value = value.casefold().translate(str.maketrans('', '', "\"'\\"))
+        return re.sub(r'/\.(?=/|$)', '', re.sub(r'/+', '/', value))
+
+    def resolved(value):
+        path = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(value))
+        return {normalized(os.path.abspath(path)), normalized(os.path.realpath(path))}
+
+    receipt_paths = resolved(str(receipt_store))
+    state_paths = resolved(str(state_root))
+
+    def receipt_text(value):
+        value = normalized(value)
+        return any(path in value for path in receipt_paths) or 'ultraship' + '/text-lint' in value
+
+    def receipt_path(value, ancestors=False, state_only=False):
         if not isinstance(value, str) or not value:
             return False
-        if contains and (any(path in value.casefold() for path in receipt_paths)
-                         or 'ultraship' + '/text-lint' in value.casefold()):
-            return True
-        path = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(value))
         return any(candidate == store or candidate.startswith(store + '/')
-                   for candidate in (os.path.abspath(path).casefold(), os.path.realpath(path).casefold())
-                   for store in receipt_paths)
+                   or (ancestors and store.startswith(candidate.rstrip('/') + '/')
+                       and (not state_only or any(candidate == root or candidate.startswith(root + '/')
+                                                  for root in state_paths)))
+                   for candidate in resolved(normalized(value)) for store in receipt_paths)
+
+    def strings(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from strings(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from strings(item)
 
     if tool in ('Edit', 'Write', 'NotebookEdit') and receipt_path(tin.get('file_path') or tin.get('notebook_path')):
         deny(custody)
-    if (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')) and any(
-            receipt_path(tin.get(field), contains=True) for field in ('file_path', 'path', 'pattern', 'glob')):
-        deny(custody)
-    # shortcut: Bash matches text, so a path built from pieces slips past it; upgrade to isolated state access.
+    if tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__'):
+        paths = [tin.get(field) for field in ('file_path', 'filePath', 'path', 'notebook_path')]
+        if tool == 'Glob' and isinstance(tin.get('pattern'), str):
+            paths.append(re.split(r'[*?\[{]', tin['pattern'], maxsplit=1)[0] or '.')
+        if tool in ('Grep', 'Glob') and not tin.get('path'):
+            paths.append(data.get('cwd') or os.getcwd())
+        if any(receipt_text(value) for value in strings(tin)) or any(receipt_path(path, ancestors=True) for path in paths):
+            deny(custody)
+    # shortcut: Bash checks normalized text, so same-user runtime path construction escapes; upgrade to isolated state access.
     if tool == 'Bash':
-        command = str(tin.get('command', '')).casefold()
-        if ('ultraship' + '/text-lint' in command
-                or re.search(r'''text_lint\.py["']?\s+["']?hook\b''', command)):
+        raw = str(tin.get('command', ''))
+        command = normalized(raw)
+        if (receipt_text(raw)
+                or (('.local/state' in command or 'xdg_state_home' in command)
+                    and any(char in raw for char in '*?[]{}$`'))
+                or re.search(r'text_lint(\.py)?\s+hook\b', command)
+                or ('text_lint' in command and any(token in command for token in
+                    ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec(')))
+                or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
             deny(custody)
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
         deny('ship agents pin their own model. Remove the `model` field and call the scoped agent '

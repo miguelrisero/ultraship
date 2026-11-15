@@ -178,7 +178,7 @@ def now():
 
 
 def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode('utf-8')
 
 
 def store_dir():
@@ -245,25 +245,89 @@ def signature(receipt, key):
     return hmac.new(key, canonical({k: v for k, v in receipt.items() if k != 'mac'}), hashlib.sha256).hexdigest()
 
 
+def pending_path(identity):
+    key = hashlib.sha256(canonical([identity.get(field) for field in
+                                   ('session_id', 'tool_name', 'recipient')])).hexdigest()
+    return store_dir() / 'pending' / key
+
+
+def clear_pending(receipt):
+    path = pending_path(receipt)
+    try:
+        if path.read_text() == receipt['id']:
+            path.unlink(missing_ok=True)
+    except FileNotFoundError:
+        pass
+
+
 def prune_receipts(directory):
-    cutoff = now().timestamp() - 7 * 24 * 3600
+    timestamp = now().timestamp()
     receipts = []
     for path in directory.glob('*.json'):
-        info = path.lstat()
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
         if re.fullmatch(r'[0-9a-f]{32}', path.stem) and stat.S_ISREG(info.st_mode):
             receipts.append((info.st_mtime, path))
-    receipts.sort()
-    excess = max(0, len(receipts) - 2000)
-    for index, (modified, path) in enumerate(receipts):
-        if modified < cutoff or index < excess:
+    remaining = len(receipts)
+    young = 0
+    for modified, path in sorted(receipts):
+        if modified >= timestamp - 24 * 3600:
+            young += 1
+        elif modified < timestamp - 7 * 24 * 3600 or remaining > 2000:
             path.unlink(missing_ok=True)
             path.with_suffix('.consumed').unlink(missing_ok=True)
+            remaining -= 1
+    for path in (store_dir() / 'pending').glob('*'):
+        try:
+            if path.lstat().st_mtime < timestamp - 7 * 24 * 3600:
+                path.unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
+    return young
+
+
+def check_pending(event):
+    args = event.get('tool_input') or {}
+    tool = event.get('tool_name', '')
+    if tool == 'SendMessage':
+        prose = args.get('message') or args.get('content')
+    elif tool.endswith(('create_input', 'update_input')):
+        content = args.get('content') or {}
+        if isinstance(content, str):
+            content = json.loads(content)
+        prose = content.get('html') or content.get('title')
+    else:
+        return
+    session = event.get('session_id')
+    if not prose or not isinstance(session, str) or not session:
+        return
+    path = pending_path({'session_id': session, **input_identity(event)})
+    try:
+        receipt_id = path.read_text()
+        if not re.fullmatch(r'[0-9a-f]{32}', receipt_id):
+            raise ValueError('Invalid pending receipt id.')
+        receipt_path = store_dir() / 'receipts' / (receipt_id + '.json')
+        receipt = json.loads(receipt_path.read_bytes())
+        created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
+        active = (timedelta(seconds=-300) <= now() - created < timedelta(hours=24)
+                  and not receipt_path.with_suffix('.consumed').exists())
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
+        active = False
+    if active:
+        raise ValueError('A formatting-only refusal to this recipient is pending. Cite its receipt `'
+                         + receipt_id + '` with `<!-- ultraship-receipt:' + receipt_id + ' -->` in this message.')
+    path.unlink(missing_ok=True)
 
 
 def write_receipt(event, findings, formatting_only, parent):
     key = receipt_key()
     directory = store_dir() / 'receipts'
     directory.mkdir(mode=0o700, exist_ok=True)
+    if prune_receipts(directory) >= 2000:
+        raise OSError('Receipt store contains 2000 receipts younger than 24 hours.')
+    session = event.get('session_id')
     receipt = {
         'id': uuid.uuid4().hex,
         'session_id': event.get('session_id'),
@@ -272,7 +336,7 @@ def write_receipt(event, findings, formatting_only, parent):
         **input_identity(event),
         'findings': [finding[:500] for finding in findings],
         'formatting_only': formatting_only,
-        'resend_allowed': formatting_only and parent is None,
+        'resend_allowed': formatting_only and parent is None and isinstance(session, str) and bool(session),
         'parent': parent,
         'created_at': now().isoformat().replace('+00:00', 'Z'),
     }
@@ -287,6 +351,16 @@ def write_receipt(event, findings, formatting_only, parent):
         os.replace(temporary, directory / (receipt['id'] + '.json'))
     finally:
         Path(temporary).unlink(missing_ok=True)
+    if receipt['resend_allowed']:
+        pending = pending_path(receipt)
+        pending.parent.mkdir(mode=0o700, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(dir=pending.parent)
+        try:
+            with os.fdopen(fd, 'w') as output:
+                output.write(receipt['id'])
+            os.replace(temporary, pending)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
     prune_receipts(directory)
     return receipt
 
@@ -297,6 +371,8 @@ def citation(event):
         return None
     if tool == 'SendMessage':
         fields = [args.get(name, '') for name in ('message', 'content', 'summary')]
+    elif tool in ('Agent', 'Task'):
+        fields = [args.get('prompt', '')]
     elif tool.endswith(('create_input', 'update_input')):
         content = args.get('content') or {}
         if isinstance(content, str):
@@ -336,17 +412,21 @@ def consume_receipt(receipt_id, event):
             raise ValueError('Receipt does not permit a resend.')
         if not event.get('session_id') or receipt.get('session_id') != event['session_id']:
             raise ValueError('Receipt session differs or is absent.')
-        identity = input_identity(event)
-        if any(receipt.get(field) != identity[field] for field in ('tool_name', 'recipient', 'fields_sha256')):
-            raise ValueError('Receipt tool, recipient or non-prose fields differ.')
+        if event.get('tool_name') not in ('Agent', 'Task'):
+            identity = input_identity(event)
+            if any(receipt.get(field) != identity[field] for field in ('tool_name', 'recipient', 'fields_sha256')):
+                raise ValueError('Receipt tool, recipient or non-prose fields differ.')
         created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
         if created.tzinfo is None or now() - created > timedelta(hours=24):
             raise ValueError('Receipt expires after 24 hours.')
+        if created - now() > timedelta(seconds=300):
+            raise ValueError('Receipt creation exceeds the 300-second future allowance.')
         try:
             fd = os.open(path.with_suffix('.consumed'), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         except FileExistsError:
             raise ValueError('Receipt is consumed.') from None
         os.close(fd)
+        clear_pending(receipt)
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise ValueError('Invalid receipt citation: ' + str(exc)) from None
 
@@ -359,6 +439,10 @@ def hook(event, parse_error=None):
         parent = citation(event)
         if parent:
             consume_receipt(parent, event)
+        if event.get('tool_name') in ('Agent', 'Task'):
+            return
+        if not parent:
+            check_pending(event)
         outgoing(event)
         return
     except Exception as exc:
@@ -367,7 +451,7 @@ def hook(event, parse_error=None):
     reason = 'Output contract: ' + ' '.join(findings)
     try:
         receipt = write_receipt(event, findings, formatting_only, parent)
-    except OSError:
+    except Exception:
         reason += ' No receipt was written, so no resend of this message is allowed in any form.'
     else:
         if receipt['resend_allowed']:
@@ -435,7 +519,7 @@ if __name__ == '__main__':
             event = json.load(sys.stdin)
             if not isinstance(event, dict):
                 raise ValueError('Hook event must be an object.')
-        except ValueError as exc:
+        except Exception as exc:
             hook({}, parse_error=exc)
         else:
             hook(event)

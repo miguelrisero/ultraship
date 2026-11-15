@@ -72,18 +72,42 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
                 ('NotebookEdit', {'notebook_path': str(receipt_store / 'book.ipynb')}),
                 ('Read', {'file_path': str(receipt_store / 'key')}),
                 ('Grep', {'path': str(receipt_store), 'pattern': 'key'}),
+                ('Grep', {'path': str(receipt_store.parent), 'pattern': 'key'}),
+                ('Grep', {'path': tmp, 'pattern': 'key'}),
                 ('Glob', {'pattern': str(receipt_store / '*')}),
+                ('Glob', {'pattern': str(receipt_store.parent / '*')}),
                 ('LSP', {'file_path': str(receipt_store / 'key')}),
+                ('LSP', {'filePath': str(receipt_store / 'key')}),
                 ('mcp__fff__grep', {'pattern': str(receipt_store)}),
                 ('Bash', {'command': 'echo forged > ' + str(receipt_store / 'key')}),
                 ('Bash', {'command': 'python3 plugins/ship/hooks/text_lint.py' + ' hook'}),
-                ('Bash', {'command': 'python3 "plugins/ship/hooks/text_lint.py"' + ' hook'})):
+                ('Bash', {'command': 'python3 "plugins/ship/hooks/text_lint.py"' + ' hook'}),
+                ('Bash', {'command': 'cat ' + str(receipt_store / 'key').replace('text-lint', "text-''lint")}),
+                ('Bash', {'command': 'cat ' + str(receipt_store / 'key').replace('/text-lint', '//text-lint')}),
+                ('Bash', {'command': 'cat ' + str(receipt_store / 'key').replace('/text-lint', '/./text-lint')}),
+                ('Bash', {'command': 'cat ${XDG_STATE_HOME:-' + tmp + '}/ultraship/*'}),
+                ('Bash', {'command': "python3 plugins/ship/hooks/text_lint.py ho''ok"}),
+                ('Bash', {'command': 'python3 -m plugins.ship.hooks.text_lint hook'}),
+                ('Bash', {'command': "python3 -c 'import text_lint'"}),
+                ('Read', {'file_path': str(receipt_store / 'key').upper()}),
+                ('mcp__fff__grep', {'query': {'text': str(receipt_store)}})):
             result = hook('pre', {**caller, 'tool_name': tool, 'tool_input': inputs}, env)
             assert denied(result), (caller, tool, inputs)
             assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
         for tool, inputs in (('Bash', {'command': 'git status --short'}),
+                             ('Bash', {'command': 'git add plugins/ship/hooks/text_lint.py'}),
+                             ('Bash', {'command': 'python3 -m unittest scripts.test_text_lint'}),
+                             ('Bash', {'command': 'python3 plugins/ship/hooks/text_lint.py --self-test'}),
+                             ('Grep', {'path': str(HOOK.parents[3]), 'pattern': 'key'}),
+                             ('Grep', {'path': str(HOOK.parents[3]), 'pattern': '/'}),
                              ('Read', {'file_path': str(Path(tmp) / 'ordinary.txt')})):
-            assert not denied(hook('pre', {**caller, 'tool_name': tool, 'tool_input': inputs}, env))
+            assert not denied(hook('pre', {**caller, 'tool_name': tool, 'tool_input': inputs}, env)), (caller, tool, inputs)
+        for cwd in (tmp, str(receipt_store.parent), str(receipt_store)):
+            for tool, inputs in (('Grep', {'pattern': 'key'}), ('Glob', {'pattern': '*'}),
+                                 ('Bash', {'command': 'pwd'})):
+                result = hook('pre', {**caller, 'cwd': cwd, 'tool_name': tool, 'tool_input': inputs}, env)
+                assert denied(result), (caller, cwd, tool)
+                assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
     receipt_alias = Path(tmp) / 'receipt-alias'
     receipt_store.mkdir(parents=True)
     receipt_alias.symlink_to(receipt_store, target_is_directory=True)
