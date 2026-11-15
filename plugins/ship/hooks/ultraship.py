@@ -1621,7 +1621,7 @@ def safe_directory_state(command, cwd=None):
 
 def array_subscript_denial(words, arithmetic, tokens, names_only=False):
     checked_words = [] if names_only else words
-    spans = [single_quoted_spans(word[0]) for word in checked_words]
+    spans = [[(word[0], False)] if '\\' in word[0] else single_quoted_spans(word[0]) for word in checked_words]
     legacy = any(parts is None or any('$[' in span for span, single in parts if not single) for parts in spans)
     expanded = lambda value: '$' in value or '`' in value
     unsafe_name = lambda value: '[' in value or expanded(value)
@@ -1638,6 +1638,9 @@ def array_subscript_denial(words, arithmetic, tokens, names_only=False):
         offset = 0
         for span, single in parts or []:
             if not single:
+                for arithmetic_text in re.finditer(r'\$\(\(|\$\[', span):
+                    if expanded(raw[offset + arithmetic_text.end():]):
+                        return 'array subscript evaluation rule (arithmetic)'
                 for parameter in re.finditer(r'\$\{', span):
                     tail = raw[offset + parameter.end():]
                     braced = tail.partition('}')[0]
@@ -1655,7 +1658,9 @@ def array_subscript_denial(words, arithmetic, tokens, names_only=False):
         if (grep_data_token(words, position) and parts is not None
                 and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
             continue
-        if unsafe_name(name) and any(piece in names for piece in re.split(r'[{,}]', name)):
+        unquoted = re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', raw)
+        if (re.search(r'\{[^}]*,[^}]*}', unquoted) and unsafe_name(name)
+                and any(piece in names for piece in re.split(r'[{,}]', name))):
             return 'array subscript evaluation rule (name)'
         if name not in names:
             continue

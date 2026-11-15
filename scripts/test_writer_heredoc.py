@@ -352,6 +352,34 @@ class WriterHeredocTests(unittest.TestCase):
             self.assertTrue(self.denied('echo synthetic'))
         self.assertIn('array subscript evaluation rule (parse error)', self.reason)
 
+    def test_bracket_tests_and_quoted_jq_filters_remain_admitted(self):
+        """Catch brace-expansion false refusals for bracket commands and quoted jq data."""
+        for command in (
+            '[ -v HOME ]', '[[ -v HOME ]]', '[ -n "$x" ] && echo yes', '[ "$x" -gt 0 ]',
+            "gh pr list --json number,title -q '[{a: .number, b: .title}]'",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_brace_expanded_bracket_command_refuses_evaluated_names(self):
+        """Catch evaluated names passed through a brace-expanded bracket command."""
+        self.assertTrue(self.denied('{[,-v,"$x",]}'))
+        self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_quoted_arithmetic_and_escaped_quote_offsets_refuse_evaluation(self):
+        """Catch arithmetic hidden in one quoted word or behind escaped quote characters."""
+        for command in (
+            '''echo "$(( '$(no""de -""e 1)' ))"''',
+            r'''s=abc; echo \'${s:'$(no""de -""e 1)'}\' ''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command.rstrip()))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_quoted_literal_arithmetic_remains_admitted(self):
+        """Catch false expansion refusals for quoted numeric arithmetic."""
+        self.assertFalse(self.denied('echo "$((1+2))"'), self.reason)
+
     def test_literal_variable_operations_and_quoted_data_remain_admitted(self):
         """Catch refusals of literal names, inert arithmetic and ordinary quoted data."""
         for command in (
