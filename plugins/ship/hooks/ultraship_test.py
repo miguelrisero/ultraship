@@ -108,10 +108,25 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
                 result = hook('pre', {**caller, 'cwd': cwd, 'tool_name': tool, 'tool_input': inputs}, env)
                 assert denied(result), (caller, cwd, tool)
                 assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
-    receipt_alias = Path(tmp) / 'receipt-alias'
+    receipt_alias = Path(tmp) / 'ReceiptAlias'
     receipt_store.mkdir(parents=True)
     receipt_alias.symlink_to(receipt_store, target_is_directory=True)
-    assert denied(hook('pre', {'tool_name': 'Edit', 'tool_input': {'file_path': str(receipt_alias / 'key')}}, env))
+    for caller in ({'agent_type': 'ship:writer--sol'}, {'agent_type': 'ship:driver'}, {}):
+        for tool in ('Edit', 'Read', 'Write'):
+            result = hook('pre', {**caller, 'tool_name': tool,
+                                  'tool_input': {'file_path': str(receipt_alias / 'key')}}, env)
+            assert denied(result), (caller, tool)
+            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+        for command, state_root in (
+                ('cat ~/.local/sta[t]e/ultraship/*/key', str(Path(tmp) / '.local/state')),
+                ('cat $HOME/.local/sta[t]e/ultraship/*/key', str(Path(tmp) / '.local/state')),
+                ('cat ${HOME}/.local/sta[t]e/ultraship/*/key', str(Path(tmp) / '.local/state')),
+                ('cat $XDG_STATE_HOME/ultra*/t*/key', tmp),
+                ('cat ${XDG_STATE_HOME}/ultra*/t*/key', tmp)):
+            result = hook('pre', {**caller, 'tool_name': 'Bash', 'tool_input': {'command': command}},
+                          {**env, 'XDG_STATE_HOME': state_root})
+            assert denied(result), (caller, command)
+            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
     assert denied(hook('pre', {'tool_name': 'Write', 'tool_input': {'file_path': str(receipt_store).upper()}}, env))
 
     assert denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol', 'model': 'opus'}}, env))

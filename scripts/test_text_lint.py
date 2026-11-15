@@ -290,6 +290,24 @@ class TextLintTests(unittest.TestCase):
         self.assertEqual(self.last_receipt['parent'], receipt_id)
         self.assertFalse(self.last_receipt['resend_allowed'])
         self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        pending = next((self.state / 'pending').iterdir())
+        spent = {'id': self.last_receipt['id'], 'state': 'spent'}
+        self.assertEqual(json.loads(pending.read_text()), spent)
+        self.hook_refusal(self.event())
+        self.assertTrue(self.last_receipt['formatting_only'])
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertEqual(json.loads(pending.read_text()), spent)
+        valid = 'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.'
+        self.assertIsNone(self.hook_output(self.event(valid)))
+        self.assertEqual(json.loads(pending.read_text()), spent)
+
+    def test_spent_entry_expires_after_24_hours(self):
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        self.hook_refusal(self.resend(receipt_id, 'The review passes.'))
+        with patch.object(text_lint, 'now', return_value=self.clock + timedelta(hours=24)):
+            self.hook_refusal(self.event())
+        self.assertTrue(self.last_receipt['resend_allowed'])
 
     def test_write_failure_denies_without_resend(self):
         with patch.object(text_lint, 'write_receipt', side_effect=OSError('disk full')):
@@ -390,17 +408,20 @@ class TextLintTests(unittest.TestCase):
             self.assertFalse(self.last_receipt['resend_allowed'])
             self.assertEqual(list((self.state / 'pending').glob('*')), [])
 
-    def test_future_receipt_refused_beyond_300_seconds(self):
-        for seconds, accepted in ((300, True), (301, False)):
-            with self.subTest(seconds=seconds):
-                with patch.object(text_lint, 'now', return_value=self.clock + timedelta(seconds=seconds)):
-                    receipt = text_lint.write_receipt(self.event(), ['Missing section: Facts'], True, None)
-                event = self.resend(receipt['id'])
-                if accepted:
-                    self.assertIsNone(self.hook_output(event))
-                else:
-                    self.assertIn('300-second future allowance', self.hook_refusal(event))
-                    self.assertFalse(self.last_receipt['resend_allowed'])
+    def test_future_receipt_refused_at_one_microsecond(self):
+        with patch.object(text_lint, 'now', return_value=self.clock + timedelta(microseconds=1)):
+            receipt = text_lint.write_receipt(self.event(), ['Missing section: Facts'], True, None)
+        self.assertIn('Receipt creation is in the future.', self.hook_refusal(self.resend(receipt['id'])))
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertFalse((self.state / 'receipts' / (receipt['id'] + '.consumed')).exists())
+
+    def test_future_pending_entry_is_inactive_at_one_microsecond(self):
+        with patch.object(text_lint, 'now', return_value=self.clock + timedelta(microseconds=1)):
+            self.hook_refusal(self.event())
+        pending = next((self.state / 'pending').iterdir())
+        valid = 'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.'
+        self.assertIsNone(self.hook_output(self.event(valid)))
+        self.assertFalse(pending.exists())
 
     def test_pending_refusal_requires_citation_for_same_recipient(self):
         self.hook_refusal(self.event())
@@ -409,7 +430,7 @@ class TextLintTests(unittest.TestCase):
         expected_key = hashlib.sha256(json.dumps(['session-one', 'SendMessage', 'chief'],
                                                separators=(',', ':'), ensure_ascii=True).encode()).hexdigest()
         self.assertEqual(pending.name, expected_key)
-        self.assertEqual(pending.read_text(), receipt_id)
+        self.assertEqual(json.loads(pending.read_text()), {'id': receipt_id, 'state': 'open'})
         valid = self.resend(receipt_id)['tool_input']['message'].split('\n<!--')[0]
         for message in (valid, 'The review passes.'):
             reason = self.hook_refusal(self.event(message))
@@ -417,7 +438,7 @@ class TextLintTests(unittest.TestCase):
             self.assertIn('Cite its receipt `' + receipt_id + '`', reason)
             self.assertFalse(self.last_receipt['resend_allowed'])
             self.assertFalse(self.last_receipt['formatting_only'])
-            self.assertEqual(pending.read_text(), receipt_id)
+            self.assertEqual(json.loads(pending.read_text()), {'id': receipt_id, 'state': 'open'})
         self.assertIsNone(self.hook_output(self.event(valid, to='another-chief')))
         self.assertIsNone(self.hook_output(self.resend(receipt_id)))
         self.assertFalse(pending.exists())
@@ -488,8 +509,11 @@ class TextLintTests(unittest.TestCase):
         cases = (
             ('Agent', {'subagent_type': 'ship:writer--sol', 'model': 'opus', 'prompt': marker}, 'pin their own model'),
             ('Bash', {'command': 'git push origin HEAD # ' + marker}, 'Writers never push'),
-            ('Write', {'file_path': str(credential_dir / 'hosts.yml'), 'content': marker}, 'credential'),
-            ('Write', {'file_path': str(self.state.parent / '.claude/settings.json'), 'content': marker}, 'settings'),
+            ('Write', {'file_path': str(credential_dir / 'hosts.yml'), 'content': marker},
+             'Writers do not edit GitHub CLI configuration.'),
+            ('Write', {'file_path': str(self.state.parent / '.claude/settings.json'), 'content': marker},
+             'Writers do not edit harness configuration.'),
+            ('Bash', {'command': 'gh repo delete owner/repo --yes # ' + marker}, 'Writers never push'),
             ('Bash', {'command': 'cat ' + str(self.state / 'key') + ' # ' + marker}, 'custody rule'),
         )
         for tool, inputs, reason in cases:

@@ -254,7 +254,7 @@ def pending_path(identity):
 def clear_pending(receipt):
     path = pending_path(receipt)
     try:
-        if path.read_text() == receipt['id']:
+        if json.loads(path.read_text())['id'] == receipt['id']:
             path.unlink(missing_ok=True)
     except FileNotFoundError:
         pass
@@ -288,6 +288,25 @@ def prune_receipts(directory):
     return young
 
 
+def pending_entry(identity):
+    path = pending_path(identity)
+    try:
+        entry = json.loads(path.read_text())
+        receipt_id = entry['id']
+        if entry['state'] not in ('open', 'spent') or not re.fullmatch(r'[0-9a-f]{32}', receipt_id):
+            raise ValueError('Invalid pending receipt entry.')
+        receipt_path = store_dir() / 'receipts' / (receipt_id + '.json')
+        receipt = json.loads(receipt_path.read_bytes())
+        created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
+        if (timedelta(0) <= now() - created < timedelta(hours=24)
+                and (entry['state'] == 'spent' or not receipt_path.with_suffix('.consumed').exists())):
+            return entry
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
+        pass
+    path.unlink(missing_ok=True)
+    return None
+
+
 def check_pending(event):
     args = event.get('tool_input') or {}
     tool = event.get('tool_name', '')
@@ -303,31 +322,22 @@ def check_pending(event):
     session = event.get('session_id')
     if not prose or not isinstance(session, str) or not session:
         return
-    path = pending_path({'session_id': session, **input_identity(event)})
-    try:
-        receipt_id = path.read_text()
-        if not re.fullmatch(r'[0-9a-f]{32}', receipt_id):
-            raise ValueError('Invalid pending receipt id.')
-        receipt_path = store_dir() / 'receipts' / (receipt_id + '.json')
-        receipt = json.loads(receipt_path.read_bytes())
-        created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
-        active = (timedelta(seconds=-300) <= now() - created < timedelta(hours=24)
-                  and not receipt_path.with_suffix('.consumed').exists())
-    except (FileNotFoundError, ValueError, KeyError, TypeError):
-        active = False
-    if active:
+    entry = pending_entry({'session_id': session, **input_identity(event)})
+    if entry and entry['state'] == 'open':
+        receipt_id = entry['id']
         raise ValueError('A formatting-only refusal to this recipient is pending. Cite its receipt `'
                          + receipt_id + '` with `<!-- ultraship-receipt:' + receipt_id + ' -->` in this message.')
-    path.unlink(missing_ok=True)
 
 
-def write_receipt(event, findings, formatting_only, parent):
+def write_receipt(event, findings, formatting_only, parent, resend_refused=False):
     key = receipt_key()
     directory = store_dir() / 'receipts'
     directory.mkdir(mode=0o700, exist_ok=True)
     if prune_receipts(directory) >= 2000:
         raise OSError('Receipt store contains 2000 receipts younger than 24 hours.')
     session = event.get('session_id')
+    entry = None if resend_refused else pending_entry({'session_id': session, **input_identity(event)})
+    spent = entry is not None and entry['state'] == 'spent'
     receipt = {
         'id': uuid.uuid4().hex,
         'session_id': event.get('session_id'),
@@ -336,7 +346,7 @@ def write_receipt(event, findings, formatting_only, parent):
         **input_identity(event),
         'findings': [finding[:500] for finding in findings],
         'formatting_only': formatting_only,
-        'resend_allowed': formatting_only and parent is None and isinstance(session, str) and bool(session),
+        'resend_allowed': formatting_only and parent is None and not spent and isinstance(session, str) and bool(session),
         'parent': parent,
         'created_at': now().isoformat().replace('+00:00', 'Z'),
     }
@@ -351,13 +361,13 @@ def write_receipt(event, findings, formatting_only, parent):
         os.replace(temporary, directory / (receipt['id'] + '.json'))
     finally:
         Path(temporary).unlink(missing_ok=True)
-    if receipt['resend_allowed']:
+    if receipt['resend_allowed'] or resend_refused:
         pending = pending_path(receipt)
         pending.parent.mkdir(mode=0o700, exist_ok=True)
         fd, temporary = tempfile.mkstemp(dir=pending.parent)
         try:
             with os.fdopen(fd, 'w') as output:
-                output.write(receipt['id'])
+                json.dump({'id': receipt['id'], 'state': 'spent' if resend_refused else 'open'}, output)
             os.replace(temporary, pending)
         finally:
             Path(temporary).unlink(missing_ok=True)
@@ -419,38 +429,39 @@ def consume_receipt(receipt_id, event):
         created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
         if created.tzinfo is None or now() - created > timedelta(hours=24):
             raise ValueError('Receipt expires after 24 hours.')
-        if created - now() > timedelta(seconds=300):
-            raise ValueError('Receipt creation exceeds the 300-second future allowance.')
+        if created > now():
+            raise ValueError('Receipt creation is in the future.')
         try:
             fd = os.open(path.with_suffix('.consumed'), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         except FileExistsError:
             raise ValueError('Receipt is consumed.') from None
         os.close(fd)
-        clear_pending(receipt)
+        return receipt
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise ValueError('Invalid receipt citation: ' + str(exc)) from None
 
 
 def hook(event, parse_error=None):
-    parent = None
+    parent, consumed = None, None
     try:
         if parse_error is not None:
             raise parse_error
         parent = citation(event)
         if parent:
-            consume_receipt(parent, event)
-        if event.get('tool_name') in ('Agent', 'Task'):
-            return
-        if not parent:
-            check_pending(event)
-        outgoing(event)
+            consumed = consume_receipt(parent, event)
+        if event.get('tool_name') not in ('Agent', 'Task'):
+            if not parent:
+                check_pending(event)
+            outgoing(event)
+        if consumed:
+            clear_pending(consumed)
         return
     except Exception as exc:
         findings = exc.findings if isinstance(exc, FindingsError) else [str(exc)]
         formatting_only = isinstance(exc, FindingsError) and exc.formatting_only
     reason = 'Output contract: ' + ' '.join(findings)
     try:
-        receipt = write_receipt(event, findings, formatting_only, parent)
+        receipt = write_receipt(event, findings, formatting_only, parent, resend_refused=consumed is not None)
     except Exception:
         reason += ' No receipt was written, so no resend of this message is allowed in any form.'
     else:

@@ -2284,7 +2284,7 @@ def pre(data):
                    or (ancestors and store.startswith(candidate.rstrip('/') + '/')
                        and (not state_only or any(candidate == root or candidate.startswith(root + '/')
                                                   for root in state_paths)))
-                   for candidate in resolved(normalized(value)) for store in receipt_paths)
+                   for candidate in resolved(value) for store in receipt_paths)
 
     def strings(value):
         if isinstance(value, str):
@@ -2298,19 +2298,24 @@ def pre(data):
 
     if tool in ('Edit', 'Write', 'NotebookEdit') and receipt_path(tin.get('file_path') or tin.get('notebook_path')):
         deny(custody)
-    if tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__'):
-        paths = [tin.get(field) for field in ('file_path', 'filePath', 'path', 'notebook_path')]
-        if tool == 'Glob' and isinstance(tin.get('pattern'), str):
-            paths.append(re.split(r'[*?\[{]', tin['pattern'], maxsplit=1)[0] or '.')
-        if tool in ('Grep', 'Glob') and not tin.get('path'):
-            paths.append(data.get('cwd') or os.getcwd())
-        if any(receipt_text(value) for value in strings(tin)) or any(receipt_path(path, ancestors=True) for path in paths):
-            deny(custody)
-    # shortcut: Bash checks normalized text, so same-user runtime path construction escapes; upgrade to isolated state access.
+    # shortcut: runtime path construction still escapes the Bash text and glob checks; upgrade to isolated state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
         command = normalized(raw)
+        words = []
+        for word in re.split(r'[\s;&|<>()]+', raw):
+            word = word.translate(str.maketrans('', '', "\"'\\"))
+            word = re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
+                          lambda match: os.environ.get(match[1] or match[2], ''), word)
+            if word:
+                words.append(word)
+        glob_targets = {path + suffix for path in receipt_paths
+                        for suffix in ('', '/key', '/receipts/x.json', '/pending/x')}
         if (receipt_text(raw)
+                or any(receipt_path(word) for word in words)
+                or any(fnmatch.fnmatchcase(target, pattern)
+                       for word in words if any(char in word for char in '*?[')
+                       for pattern in resolved(word) for target in glob_targets)
                 or (('.local/state' in command or 'xdg_state_home' in command)
                     and any(char in raw for char in '*?[]{}$`'))
                 or re.search(r'text_lint(\.py)?\s+hook\b', command)
@@ -2645,6 +2650,14 @@ def pre(data):
                             roots.append(entry.path)
         except Exception:
             deny('Reviewers cannot proceed when search scope validation fails. Report the blocked scope to the coordinator.')
+    if tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__'):
+        paths = [tin.get(field) for field in ('file_path', 'filePath', 'path', 'notebook_path')]
+        if tool == 'Glob' and isinstance(tin.get('pattern'), str):
+            paths.append(re.split(r'[*?\[{]', tin['pattern'], maxsplit=1)[0] or '.')
+        if tool in ('Grep', 'Glob') and not tin.get('path'):
+            paths.append(data.get('cwd') or os.getcwd())
+        if any(receipt_text(value) for value in strings(tin)) or any(receipt_path(path, ancestors=True) for path in paths):
+            deny(custody)
 
 
 def owed_file(data):
