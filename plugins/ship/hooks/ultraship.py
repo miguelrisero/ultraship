@@ -2977,6 +2977,9 @@ def review_thread_denial(command):
                 return 'opaque GraphQL query'
             write = any(method not in ('GET', 'HEAD') for method in methods) or fields and 'GET' not in methods
             visible = endpoint is not None and not any(char in raw_endpoint for char in '$`%')
+            if any(placeholder not in ('{owner}', '{repo}')
+                   for placeholder in re.findall(r'\{[^}]*\}', raw_endpoint)):
+                visible = False
             if write and (not visible or full_url and host != 'api.github.com'
                           or re.search(r'(?:^|/)pulls/[^/]+/comments(?:/|$)', route)):
                 return 'REST review-comment write or opaque endpoint'

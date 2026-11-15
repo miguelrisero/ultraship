@@ -70,6 +70,7 @@ REFUSE = (
     '`gh api repos/o/r/pulls/7/comments -f body=x`',
     'curl -X POST https://api.github.com/repos/o/r/pul%6cs/7/comments -d @b.json',
     "git commit -m 'fix: x' && gh api graphql -F query=@q.graphql",
+    'gh api repos/{owner}/{repo}/{branch}/comments -f body=x',
 )
 
 ADMIT = (
