@@ -3078,11 +3078,12 @@ def review_thread_denial(command):
             return 'review-thread guard parse failure'
         calls = [index for index, (value, _) in enumerate(words)
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
-        text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words)).casefold()
+        text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words))
         hidden_words = [word for word in re.split(r'[\s;&|()<>]+', text) if word]
-        hidden_calls = sum(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', word)[-1]) == 'gh'
-                           and hidden_words[index + 1] == 'api'
+        hidden_calls = sum(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', word)[-1]).casefold() == 'gh'
+                           and hidden_words[index + 1].casefold() == 'api'
                            for index, word in enumerate(hidden_words[:-1]))
+        text = text.casefold()
         if hidden_calls > len(calls):
             return 'review-thread guard parse failure'
         for index, (value, raw) in enumerate(words):
