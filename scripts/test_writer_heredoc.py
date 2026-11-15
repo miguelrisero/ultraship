@@ -31,6 +31,84 @@ class WriterHeredocTests(unittest.TestCase):
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
+    def test_read_only_argument_words_with_interpreter_names_are_admitted(self):
+        """Catch false refusals of literal read-only paths and patterns containing interpreter names."""
+        for command in (
+            r'''cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-video && rg -n 'TIMEOUT|DEADLINE|timeout|CHUNK' backend/api/adapters/integrations/recall.py backend/api/tools/native/inspect_video.py backend/api/adapters/chat/attachment*.py && rg -n 'class AsyncFileStreamReader|async def __aexit__|async def aclose|async def __anext__' /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-intent/backend/api/.venv/lib/python3.13/site-packages/e2b/filesystem/* && rg -n '^Version:' /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-intent/backend/api/.venv/lib/python3.13/site-packages/e2b-2.30.0.dist-info/METADATA''',
+            r'''cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/ca8f-pati-why-shippin/us-lint-resend && grep -n -e SLOT -e slot_gate -e sha256 -e RAM -e disk -e timeout /home/miguel/.claude/plugins/marketplaces/better-plugin/remote-run/battery-local.sh && grep -n -e SLOT -e slot_gate -e SHA -e gate_child /home/miguel/.claude/plugins/marketplaces/better-plugin/plugins/chief-of-chiefs/skills/run/scripts/* | head -60 && git status --short''',
+            r'''cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/188e-pati-pr-backlog/lanes/pr-7327 && ls /home/miguel/.claude/plugins/cache/better-plugin/chief-of-chiefs/1.81.9/skills/run/scripts/*sha* && df -h / && free -m && date -u +%FT%TZ''',
+            r'''cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/ca8f-pati-why-shippin/bp-sweep-alarms && git diff --check && git diff --stat && git diff -- plugins/chief-of-chiefs/skills/run/scripts/bootstrap.py plugins/chief-of-chiefs/skills/run/scripts/state.py && rg -n "timer\(|['\"]sweep['\"]|services.py.*run" plugins/chief-of-chiefs/tests/test_{recovery,slack_collector_20261114}.py | head -30''',
+            r'''rg -n 'class AsyncFileStreamReader|async def aclose' /w/.venv/lib/python3.13/site-packages/e2b/filesystem/*''',
+            r'''grep -n -e SLOT -e slot_gate /w/plugins/chief-of-chiefs/skills/run/scripts/* | head -60''',
+            r'''ls /w/chief-of-chiefs/1.81.9/skills/run/scripts/*sha*''',
+            r'''rg -n "timer\(|['\"]sweep['\"]|services.py.*run" plugins/x/tests/test_{recovery,slack}.py | head -30''',
+            r'''rg -n "x\".*run" a.py''',
+            r'''grep -rn foo /x/run/*''',
+            r'''ls /run/user/*''',
+            r'''cat /x/python*/a.txt''',
+            "find /x/lib/python3.13/site-packages/* -name '*.py'",
+            r'''rg foo /x/python*/a | head -5 | wc -l''',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_command_capable_argument_words_keep_their_refusal_reasons(self):
+        """Catch argument exemptions that admit executable words or replace the owning refusal."""
+        for reason, commands in (
+            ('process-capable python -c rule', (
+                "python -c 'import os'",
+                r'''env python -c 1''',
+                r'''echo x | xargs python -c 1''',
+                r'''find . -exec python -c 1 \;''',
+                r'''find /x/lib/python3.13/site-packages/* -exec python3 {} \;''',
+            )),
+            ('process-capable heredoc rule (unsupported interpreter header)', (
+                "python - <<'PY'",
+            )),
+            ('inline interpreter code rule (program from a pipe)', (
+                r'''cat <(python3 -c 'print(1)')''',
+            )),
+            ('inline interpreter code rule (unresolved command word)', (
+                r'''/usr/bin/pyth* -c 1''',
+                r'''$PY -c 1''',
+                r'''"$PY" -c 1''',
+                "${PY} -c 'print(1)'",
+                r'''/x/lib/python3.13/bin/* -c 1''',
+                r'''rg foo "$(python3 -c 'print(1)')"''',
+                r'''grep foo "$(python3 -c 'print(1)')"''',
+                r'''ls "$(python3 -c 'print(1)')"''',
+                r'''rg --pre python3 foo /x/lib/python3.13/site-packages/*''',
+                r'''rg --hostname-bin=python3 foo /x/python*/a''',
+                r'''find /run/* -execdir sh -c 'echo' \;''',
+                r'''find /x/python*/a -fprint /x/b''',
+                r'''rg foo /x/$python/a''',
+                r'''rg foo /x/${python}/a''',
+                r'''rg foo ""*python*''',
+                r'''rg foo {--pre=python3,.}''',
+                r'''xargs rg foo /x/python*/a''',
+                r'''env rg foo /x/python*/a''',
+                r'''X=1 rg foo /x/python*/a''',
+                r'''rg foo /x/python*/a > out.txt''',
+                r'''rg foo /x/run/* -e bar''',
+                r'''ls /x/python3.13/* -c''',
+                r'''ls /run/* | xargs python3''',
+                r'''ls /x/lib/python3.13/* | sh''',
+                r'''cat /x/python*/a.txt | python3''',
+                r'''$(ls /x/lib/python3.13/*)''',
+                r'''echo "$(ls /x/python*/a)"''',
+                r'''x=`ls /x/python*/a`''',
+                r'''(cd /x && ls /x/lib/python3.13/*)''',
+                r'''ls /x/lib/python3.13/* | head -1 | sh''',
+                r'''ls /x/lib/python3.13/* | tee f''',
+                r'''rg foo /x/python*/a |& sh''',
+                r'''if rg -q foo /x/python*/a; then echo y; fi''',
+            )),
+        ):
+            for command in commands:
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command), self.reason)
+                    self.assertEqual(self.reason.rsplit('Rule: ', 1)[-1].removesuffix('.'), reason)
+
     SUBSCRIPT_NAMES = (
         "'a[$(no\"\"de -\"\"e \"process.exit(42)\")]'",
         r'''"a[\$(no""de -""e 'process.exit(42)')]"''',
