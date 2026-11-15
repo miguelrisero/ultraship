@@ -95,6 +95,35 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command), self.reason)
                 self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
 
+    def test_run_path_exemption_needs_a_data_command_argument(self):
+        for command in (
+            'sh "$(sha256sum /run/user/1000/empty)"',
+            'bash "$(sha256sum /run/x)"',
+            '"$(sha256sum /run/x)"',
+            'xargs "$(sha256sum /run/x)"',
+            'X="$(sha256sum /run/x)" cat y',
+            'source "$(sha256sum /run/x)"',
+            '. "$(sha256sum /run/x)"',
+            'eval "$(sha256sum /run/x)"',
+            'env "$(sha256sum /run/x)"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command), self.reason)
+                self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+        for command in (
+            'grep -F "$(sha256sum /run/x)" SHA256SUMS',
+            'test "$(sha256sum /run/x)" = x',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_free_threaded_suffix_needs_a_python3_version(self):
+        command = "{python} - <<'PY'\npass\nPY\ngit commit -m x\n"
+        twin_denied = self.denied(command.format(python='python.13x'))
+        twin_reason = self.reason
+        self.assertEqual(self.denied(command.format(python='python.13t')), twin_denied)
+        self.assertEqual(self.reason, twin_reason)
+
     def test_inert_python_inline_strings_are_admitted(self):
         for command in (
             "python3 -c 'print(1)'", 'python3 -c "print(1)"',

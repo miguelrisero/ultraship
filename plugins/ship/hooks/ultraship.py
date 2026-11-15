@@ -1491,6 +1491,9 @@ INLINE_INTERPRETERS = {
 }
 
 
+CHECKSUM_DATA_COMMANDS = {'cat', 'echo', 'printf', 'grep', 'test', '['}
+
+
 def interpreter_name(value):
     base = os.path.basename(value)
     for name in INLINE_INTERPRETERS:
@@ -1699,9 +1702,10 @@ def inline_interpreter_denial(command, cwd=None):
                 unresolved = (not neutral and raw != '[' and value != '$?' and start not in shell_programs
                               and unresolved_shell_word(raw))
                 names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
-                # A fixed sha256sum substitution cannot rewrite a path into an interpreter subcommand.
+                # Only data commands may receive checksum output without interpreting it as executable text.
                 joined_word = (re.sub(r'(?<=/)run(?=/)', '', raw)
-                               if re.fullmatch(r'"\$\(sha256sum /[\w./@%+,-]+\)"', raw) else raw)
+                               if index > prefix_end and first[0] in CHECKSUM_DATA_COMMANDS
+                               and re.fullmatch(r'"\$\(sha256sum /[\w./@%+,-]+\)"', raw) else raw)
                 joined_code = not neutral and unresolved_shell_word(raw) and bool(re.search(
                     rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', joined_word))
                 if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
@@ -2124,7 +2128,7 @@ def git_commit_step(command):
     """Whether the whole shell text after the first heredoc is one line of plain `git add` and `git commit` steps."""
     lines = command.splitlines(keepends=True)
     # Only a whole known header counts; a quoted delimiter keeps backslash-newline literal, so a physical line ends the body.
-    match = re.fullmatch(r"(?:cd(?: --)? [\w./-]+ && )?(?:/usr/bin/)?python(?:3(?:\.[0-9]+)?t?|\.[0-9]+t?)?(?: -[IB]+)* - "
+    match = re.fullmatch(rf"(?:cd(?: --)? [\w./-]+ && )?(?:/usr/bin/)?{PYTHON_NAME}(?: -[IB]+)* - "
                          r"<<(-?)(['\"])([_a-zA-Z0-9]+)\2[ \t]*\n?", lines[0]) if lines else None
     if not match:
         return False
