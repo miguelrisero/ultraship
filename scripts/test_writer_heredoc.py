@@ -134,7 +134,100 @@ class WriterHeredocTests(unittest.TestCase):
                     command = '[[ ' + left + ' ' + operator + ' ' + right + ' ]]'
                     with self.subTest(command=command):
                         self.assertTrue(self.denied(command))
-                        self.assertIn('array subscript evaluation rule', self.reason)
+                        if operator in {'-lt', '-gt'}:
+                            self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_listed_evaluated_subscripts_refuse_every_admitted_form(self):
+        """Catch each independently probed subscript form at the writer boundary."""
+        for command in (
+            '''printf -v 'a[$(no""de -""e "process.exit(42)")]' %s x''',
+            r'''printf -v "a[\$(no""de -""e 'process.exit(42)')]" %s x''',
+            '''printf -v'a[$(no""de -""e "process.exit(42)")]' %s x''',
+            '''builtin printf -v 'a[$(no""de -""e "process.exit(42)")]' %s x''',
+            '''command printf -v 'a[$(no""de -""e "process.exit(42)")]' %s x''',
+            '''test -v 'a[$(no""de -""e "process.exit(42)")]' ''',
+            '''[ -v 'a[$(no""de -""e "process.exit(42)")]' ]''',
+            '''[[ -v 'a[$(no""de -""e "process.exit(42)")]' ]]''',
+            '''declare 'a[$(no""de -""e "process.exit(42)")]=1' ''',
+            '''typeset 'a[$(no""de -""e "process.exit(42)")]=1' ''',
+            '''local 'a[$(no""de -""e "process.exit(42)")]=1' ''',
+            '''export 'a[$(no""de -""e "process.exit(42)")]=1' ''',
+            '''readonly 'a[$(no""de -""e "process.exit(42)")]=1' ''',
+            '''declare -i x='a[$(no""de -""e "process.exit(42)")]' ''',
+            '''declare -n r='a[$(no""de -""e "process.exit(42)")]'; echo $r''',
+            '''read 'a[$(no""de -""e "process.exit(42)")]' < /dev/null''',
+            '''unset 'a[$(no""de -""e "process.exit(42)")]' ''',
+            '''let 'a[$(no""de -""e "process.exit(42)")]=1' ''',
+            '''(( 'a[$(no""de -""e "process.exit(42)")]' ))''',
+            '''(( '$(no""de -""e "process.exit(42)")' ))''',
+            '''(( "$(no""de -""e 'process.exit(42)')" ))''',
+            '''echo $(( 'a[$(no""de -""e "process.exit(42)")]' ))''',
+            '''echo $[ 'a[$(no""de -""e "process.exit(42)")]' ]''',
+            '''for (( i='a[$(no""de -""e "process.exit(42)")]'; 0; )); do :; done''',
+            '''x=(1); echo ${x['$(no""de -""e "process.exit(42)")']}''',
+            '''s=abc; echo ${s:'a[$(no""de -""e "process.exit(42)")]'}''',
+            r'''bash -c "printf -v 'a[\$(no\"\"de -\"\"e 1)]' %s x"''',
+            '''x='a[$(no""de -""e "process.exit(42)")]'; printf -v "$x" %s 1''',
+            '''Q='$(no""de -""e "process.exit(42)")'; printf -v "a[$Q]" %s 1''',
+            '''[[ 1 -lt 'a[$(no""de -""e "process.exit(42)")]' ]]''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command.rstrip()))
+                self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_control_words_and_assignments_refuse_subscript_payloads(self):
+        """Catch payloads behind control words and in stored or compound assignments."""
+        for command in (
+            '''if test -v 'a[$(no""de -""e 1)]'; then :; fi''',
+            '''! printf -v 'a[$(no""de -""e 1)]' %s x''',
+            '''time printf -v 'a[$(no""de -""e 1)]' %s x''',
+            '''{ printf -v 'a[$(no""de -""e 1)]' %s x; }''',
+            '''while read 'a[$(no""de -""e 1)]'; do :; done < /dev/null''',
+            '''for x in 1; do let 'a[$(no""de -""e 1)]=1'; done''',
+            '''if [[ 1 -lt 'a[$(no""de -""e 1)]' ]]; then :; fi''',
+            '''coproc printf -v 'a[$(no""de -""e 1)]' %s x''',
+            '''a=(['$(no""de -""e 1)']=1)''',
+            '''a+=(['$(no""de -""e 1)']=1)''',
+            '''declare -a a=(['$(no""de -""e 1)']=1)''',
+            r'''declare -a "a=([\$(no""de -""e 1)]=1)"''',
+            '''declare -i x; x='a[$(no""de -""e 1)]' ''',
+            '''declare -n r; r='a[$(no""de -""e 1)]'; echo $r''',
+            '''x='a[$(no""de -""e 1)]' let x''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command.rstrip()))
+                if command != '''a+=(['$(no""de -""e 1)']=1)''':
+                    self.assertIn('array subscript evaluation rule', self.reason)
+
+    def test_wrappers_options_and_offsets_refuse_subscript_payloads(self):
+        """Catch payloads hidden by redirects, wrappers, option expansion and offsets."""
+        for command in (
+            '''>/dev/null printf -v 'a[$(no""de -""e 1)]' %s x''',
+            '''>/dev/null test -v 'a[$(no""de -""e 1)]' ''',
+            '''printf >/dev/null -v 'a[$(no""de -""e 1)]' %s x''',
+            '''X+=1 printf -v 'a[$(no""de -""e 1)]' %s x''',
+            '''command builtin printf -v 'a[$(no""de -""e 1)]' %s x''',
+            '''command -- printf -v 'a[$(no""de -""e 1)]' %s x''',
+            '''builtin -- printf -v 'a[$(no""de -""e 1)]' %s x''',
+            '''[[ 1 && -v 'a[$(no""de -""e 1)]' ]]''',
+            '''[[ 1 && 1 -lt 'a[$(no""de -""e 1)]' ]]''',
+            '''[[ ( -v 'a[$(no""de -""e 1)]' ) ]]''',
+            '''printf {-v,'a[$(no""de -""e 1)]'} %s x''',
+            '''o=-v; printf "$o" 'a[$(no""de -""e 1)]' %s x''',
+            '''set -- -v 'a[$(no""de -""e 1)]'; test "$@"''',
+            '''a['$(no""de -""e 1)']=1''',
+            r'''a["\$(no""de -""e 1)"]+=1''',
+            r'''echo \'$[ 'a[$(no""de -""e 1)]' ]''',
+            '''x=(1); echo ${x['}'+'$(no""de -""e 1)']}''',
+            '''true & wait -n -p 'a[$(no""de -""e 1)]' ''',
+            '''declare -i x; declare x='a[$(no""de -""e 1)]' ''',
+            '''declare -i x; printf -v x %s 'a[$(no""de -""e 1)]' ''',
+            '''declare -i x; for x in 'a[$(no""de -""e 1)]'; do :; done''',
+            '''set -- 'a[$(no""de -""e 1)]'; (( $1 ))''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command.rstrip()))
+                self.assertIn('array subscript evaluation rule', self.reason)
 
     def test_literal_variable_operations_and_quoted_data_remain_admitted(self):
         """Catch refusals of literal names, inert arithmetic and ordinary quoted data."""
@@ -143,6 +236,16 @@ class WriterHeredocTests(unittest.TestCase):
             'declare -a a', 'local x=1', 'export PATH="$HOME/bin:$PATH"', 'let x=1', '(( x = 1 ))',
             'echo $(( 1 + 2 ))', 'unset X', 'read -r line < f', 'echo "${HOME}/x"',
             'echo "${HOME}/$(date)"', "grep -n 'a[$(x)]' f",
+            'if test -v HOME; then :; fi', 'time printf -v X %s .', '! test -v HOME',
+            'while read -r line; do echo "$line"; done < f',
+            'for f in a b; do printf -v X %s "$f"; done',
+            'HEAD="$(git rev-parse HEAD)"; echo "$HEAD"', 'X=1 make -n',
+            'a=(1 2); echo "${a[@]}"', 'declare -a a=(x y)', "R='[a-z]'; grep -n \"$R\" f",
+            'read -r line < "$file"', 'declare -p arr > "$out"',
+            "grep -n '${a[$i]}' f", "grep -n '${a[$(date)]}' f",
+            '[[ "$(git rev-list --count HEAD)" -gt 0 ]]', 'declare -i n=$#',
+            "unset 'arr[0]'", '[[ -v arr[0] ]]', "awk '/[0-9]+/ {print $NF}' f",
+            "grep -E '^[a-z]+$' f", "sed -n 's/[a-z]$/X/p' f",
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
