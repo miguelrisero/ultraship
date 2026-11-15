@@ -22,6 +22,20 @@ Apply [execution admission and cleanup](writer--sol.md#execution-admission-and-c
 Preserve ordinary touched-file automatic admission and special-run GOs, including paid-run GOs and caps.
 Apply the caller-owned TERM-grace boundary to cleanup commands and repository process helpers.
 
+### Squash-merge containment
+
+Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
+A single-parent squash commit meets that requirement only when it contains the recorded base and all conditions below hold.
+1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
+2. Both diffs change the same files with the same file modes, and each file's diff is byte-equal.
+3. The squash commit's tree equals the clean merge of the author head into the squash commit's parent.
+Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent, with submodule changes included.
+Ignore only each diff's `index` line and the line numbers in its hunk headers; apply no whitespace normalization.
+The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
+Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
+Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.
+Every other commit keeps the containment requirement unchanged.
+
 ### Standing owner rule
 
 The fixed-coordinate requirements apply only to the standing branch; a designated owner-event route replaces CoC/Chief approval for its exact edit.
