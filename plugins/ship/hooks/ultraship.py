@@ -2255,12 +2255,16 @@ def writer_gh_denial(command, depth=0):
     return None
 
 
-def pre(data):
+RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
+                   'Report the blocked scope to the driver.')
+
+
+def receipt_custody(data, read_search=False):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
+    if read_search and tool not in ('Read', 'Grep', 'Glob', 'LSP') and not tool.startswith('mcp__fff__'):
+        return
     state_root = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
     receipt_store = state_root / 'ultraship' / 'text-lint'
-    custody = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
-               'Report the blocked scope to the driver.')
 
     def normalized(value):
         value = value.casefold().translate(str.maketrans('', '', "\"'\\"))
@@ -2296,33 +2300,61 @@ def pre(data):
             for item in value:
                 yield from strings(item)
 
+    if read_search:
+        try:
+            paths = [tin.get(field) for field in ('file_path', 'filePath', 'path', 'notebook_path')]
+            if tool == 'Glob' and isinstance(tin.get('pattern'), str):
+                paths.append(re.split(r'[*?\[{]', tin['pattern'], maxsplit=1)[0] or '.')
+            if tool in ('Grep', 'Glob') and not tin.get('path'):
+                paths.append(data.get('cwd') or os.getcwd())
+            if any(receipt_text(value) for value in strings(tin)) or any(receipt_path(path, ancestors=True) for path in paths):
+                deny(RECEIPT_CUSTODY)
+        except Exception:
+            deny(RECEIPT_CUSTODY)
+        return
     if tool in ('Edit', 'Write', 'NotebookEdit') and receipt_path(tin.get('file_path') or tin.get('notebook_path')):
-        deny(custody)
-    # shortcut: runtime path construction still escapes the Bash text and glob checks; upgrade to isolated state access.
+        deny(RECEIPT_CUSTODY)
+    # shortcut: runtime path construction and rebuilt shell expansion escape Bash checks; upgrade to isolated state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
         command = normalized(raw)
-        words = []
-        for word in re.split(r'[\s;&|<>()]+', raw):
-            word = word.translate(str.maketrans('', '', "\"'\\"))
-            word = re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
-                          lambda match: os.environ.get(match[1] or match[2], ''), word)
-            if word:
-                words.append(word)
-        glob_targets = {path + suffix for path in receipt_paths
-                        for suffix in ('', '/key', '/receipts/x.json', '/pending/x')}
+        raw_words = [word.translate(str.maketrans('', '', "\"'\\"))
+                     for word in re.split(r'[\s;&|<>()]+', raw) if word]
+        words = [re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
+                        lambda match: os.environ.get(match[1] or match[2], ''), word)
+                 for word in raw_words]
+
+        def glob_prefix(word):
+            for pattern in resolved(word):
+                segments = pattern.split('/')
+                for store in receipt_paths:
+                    store_segments = store.split('/')
+                    if len(segments) >= len(store_segments) and all(
+                            fnmatch.fnmatchcase(segment, pattern_segment)
+                            for segment, pattern_segment in zip(store_segments, segments)):
+                        return True
+            return False
+
         if (receipt_text(raw)
                 or any(receipt_path(word) for word in words)
-                or any(fnmatch.fnmatchcase(target, pattern)
-                       for word in words if any(char in word for char in '*?[')
-                       for pattern in resolved(word) for target in glob_targets)
+                or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
                 or (('.local/state' in command or 'xdg_state_home' in command)
-                    and any(char in raw for char in '*?[]{}$`'))
+                    and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
+                         or any(char in raw for char in '*?[]{}$`')))
+                or any(any(char in word for char in '*?[{$`')
+                       and (re.search(r'\.local/(s|[*?\[{$]|$)', word.casefold())
+                            or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
+                       for word in raw_words)
                 or re.search(r'text_lint(\.py)?\s+hook\b', command)
                 or ('text_lint' in command and any(token in command for token in
                     ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec(')))
                 or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
-            deny(custody)
+            deny(RECEIPT_CUSTODY)
+
+
+def pre(data):
+    tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
+    receipt_custody(data)
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
         deny('ship agents pin their own model. Remove the `model` field and call the scoped agent '
              'or the next agent in its fallback chain.')
@@ -2650,14 +2682,7 @@ def pre(data):
                             roots.append(entry.path)
         except Exception:
             deny('Reviewers cannot proceed when search scope validation fails. Report the blocked scope to the coordinator.')
-    if tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__'):
-        paths = [tin.get(field) for field in ('file_path', 'filePath', 'path', 'notebook_path')]
-        if tool == 'Glob' and isinstance(tin.get('pattern'), str):
-            paths.append(re.split(r'[*?\[{]', tin['pattern'], maxsplit=1)[0] or '.')
-        if tool in ('Grep', 'Glob') and not tin.get('path'):
-            paths.append(data.get('cwd') or os.getcwd())
-        if any(receipt_text(value) for value in strings(tin)) or any(receipt_path(path, ancestors=True) for path in paths):
-            deny(custody)
+    receipt_custody(data, read_search=True)
 
 
 def owed_file(data):
@@ -2853,11 +2878,17 @@ def compact(data):
 
 
 def guarded_pre(data):
-    """A bug in `pre` must not block every role's tools; a reviewer still fails closed."""
+    """Keep receipt custody and reviewer access closed when `pre` fails."""
     try:
         pre(data)
     except Exception:
         traceback.print_exc()
+        try:
+            receipt_custody(data, read_search=True)
+        except Exception:
+            tool = data.get('tool_name', '') if isinstance(data, dict) else ''
+            if tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__'):
+                deny(RECEIPT_CUSTODY)
         if isinstance(data, dict) and role(data, 'reviewer'):
             deny('Reviewers cannot proceed when the ship hook fails. Report the blocked scope to the coordinator.')
 

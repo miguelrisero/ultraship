@@ -301,6 +301,26 @@ class TextLintTests(unittest.TestCase):
         self.assertIsNone(self.hook_output(self.event(valid)))
         self.assertEqual(json.loads(pending.read_text()), spent)
 
+    def test_failed_resend_keeps_spent_state_when_receipt_write_fails(self):
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        pending = next((self.state / 'pending').iterdir())
+        with patch.object(text_lint, 'write_receipt', side_effect=OSError('disk full')):
+            result = self.hook_output(self.resend(receipt_id, 'The review passes.'))
+        self.assertEqual(result['permissionDecision'], 'deny')
+        self.assertIn('No receipt was written, so no resend', result['permissionDecisionReason'])
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        self.hook_refusal(self.event())
+        self.assertTrue(self.last_receipt['formatting_only'])
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertTrue(pending.exists())
+        valid = 'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.'
+        self.assertIsNone(self.hook_output(self.event(valid)))
+        self.assertTrue(pending.exists())
+        with patch.object(text_lint, 'now', return_value=self.clock + timedelta(hours=24)):
+            self.hook_refusal(self.event())
+        self.assertTrue(self.last_receipt['resend_allowed'])
+
     def test_spent_entry_expires_after_24_hours(self):
         self.hook_refusal(self.event())
         receipt_id = self.last_receipt['id']
@@ -468,7 +488,7 @@ class TextLintTests(unittest.TestCase):
                 with patch.object(text_lint, 'now', return_value=clock):
                     valid = self.resend(receipt_id)['tool_input']['message'].split('\n<!--')[0]
                     self.assertIsNone(self.hook_output(self.event(valid)))
-                self.assertFalse(pending.exists())
+                self.assertEqual(pending.exists(), stale == 'consumed')
 
     def test_agent_dispatch_consumes_receipt_without_linting_prompt(self):
         for tool in ('Agent', 'Task'):

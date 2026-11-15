@@ -298,10 +298,11 @@ def pending_entry(identity):
         receipt_path = store_dir() / 'receipts' / (receipt_id + '.json')
         receipt = json.loads(receipt_path.read_bytes())
         created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
-        if (timedelta(0) <= now() - created < timedelta(hours=24)
-                and (entry['state'] == 'spent' or not receipt_path.with_suffix('.consumed').exists())):
+        if timedelta(0) <= now() - created < timedelta(hours=24):
+            if receipt_path.with_suffix('.consumed').exists():
+                entry['state'] = 'spent'
             return entry
-    except (FileNotFoundError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError):
         pass
     path.unlink(missing_ok=True)
     return None
