@@ -3021,7 +3021,9 @@ def review_thread_denial(command):
     segments.append(words)
     for words in segments:
         if any(os.path.basename(value) == 'gh' for value, _ in words) and any(
-                re.search(r'[*?\[]', re.sub(r'''('([^']*)'|"(?:\\.|[^"\\])*")''', '', raw))
+                re.search(r'[*?\[]|\{[^}]*?(?:,|\.\.)[^}]*\}',
+                          re.sub(r'''('([^']*)'|"(?:\\.|[^"\\])*")''', '', raw))
+                or re.search(r'''\$['"]''', outside_single_quotes(raw))
                 for _, raw in words):
             return 'review-thread guard parse failure'
         calls = [index for index, (value, _) in enumerate(words)
@@ -3040,25 +3042,55 @@ def review_thread_denial(command):
                     or words[first + 1][0] != 'api'):
                 return 'GitHub API outside gh'
         for index in calls:
+            if any(os.path.basename(value) in ('xargs', 'parallel') or value in ('-exec', '-execdir', '-ok', '-okdir')
+                   for value, _ in words[:index]):
+                return 'review-thread guard parse failure'
             endpoint, fields, methods, query, inputs = None, False, [], None, False
             arguments = words[index + 2:]
-            cursor, parsed = 0, True
+            if any('$' in re.sub(r'''('([^']*)'|"(?:\\.|[^"\\])*")''', '', raw)
+                   for _, raw in arguments):
+                return 'review-thread guard parse failure'
+            cursor, parsed, options = 0, True, True
+            expanded_values = set()
             value_options = {'-H', '-X', '-f', '-F', '-q', '-t', '-p', '--method', '--field', '--raw-field',
                              '--input', '--header', '--jq', '--template', '--hostname', '--cache', '--preview'}
-            switches = {'-i', '--include', '--paginate', '--slurp', '--silent', '--verbose'}
+            switches = {'--include', '--paginate', '--slurp', '--silent', '--verbose'}
             while cursor < len(arguments):
                 value, raw = arguments[cursor]
-                option = value.split('=', 1)[0] if value.startswith('--') else value
+                option, attached = None, None
+                if options and value == '--':
+                    options = False
+                    cursor += 1
+                    continue
+                if options and value.startswith('--'):
+                    option = value.split('=', 1)[0]
+                    if '=' in value:
+                        attached = value.split('=', 1)[1]
+                        prefix = option + '='
+                elif options and value.startswith('-') and value != '-':
+                    letter = 1
+                    while letter < len(value):
+                        if value[letter] == 'i':
+                            letter += 1
+                            if value[letter:letter + 1] == '=':
+                                break
+                            continue
+                        option = '-' + value[letter]
+                        prefix = value[:letter + 1]
+                        attached = value[letter + 1:].removeprefix('=') or None
+                        break
                 if option in value_options:
-                    if value.startswith('--') and '=' in value:
-                        option_value = value.split('=', 1)[1]
-                        option_raw = raw.split('=', 1)[1]
+                    if attached is not None:
+                        option_value = attached
+                        option_raw = raw.removeprefix(prefix) if raw.startswith(prefix) else raw
+                        option_raw = option_raw.removeprefix('=')
                     else:
                         cursor += 1
                         if cursor >= len(arguments):
                             parsed = False
                             break
                         option_value, option_raw = arguments[cursor]
+                    expanded_values.add(cursor)
                     if option in ('-X', '--method'):
                         methods.append(option_value.upper())
                     elif option in ('-f', '-F', '--field', '--raw-field', '--input'):
@@ -3069,19 +3101,24 @@ def review_thread_denial(command):
                             single = re.fullmatch(r"query='[^']*'|'query=[^']*'", option_raw) is not None
                             query = bool(query_value) and not query_value.startswith('@') and (
                                 single or not any(char in option_raw for char in '$`\\'))
-                elif value in switches:
+                elif options and (value in switches or option is None and value.startswith('-i')):
                     pass
-                elif value.startswith('-') or endpoint is not None:
+                elif options and value.startswith('-') or endpoint is not None:
                     parsed = False
                 else:
                     endpoint = value
+                    if value and value[0] not in '$-':
+                        expanded_values.add(cursor)
                 cursor += 1
             if not parsed:
                 if any(re.match(r'-(?!-)[^\s]*[fFX]', value)
                        or value.startswith(('--field', '--raw-field', '--input', '--method'))
-                       for value, _ in arguments):
+                       or '$' in outside_single_quotes(raw) for value, raw in arguments):
                     return 'review-thread guard parse failure'
                 continue
+            if any('$' in outside_single_quotes(raw) and position not in expanded_values
+                   for position, (_, raw) in enumerate(arguments)):
+                return 'review-thread guard parse failure'
             raw_endpoint = endpoint or ''
             full_url = '://' in raw_endpoint
             host = None

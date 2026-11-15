@@ -83,12 +83,27 @@ REFUSE = (
     'curl -X POST https://api.github.com/repos/o/r/pulls/7/comments -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @reply.json -H gh api',
     "gh api -iH 'Accept: application/vnd.github+json' graphql --input body.json",
     'gh api -iX POST repos/o/r/pulls/7/comments -f body=x',
-    'gh api -XPOST repos/o/r/issues/7/comments -f body=x',
-    'gh api repos/o/r/issues/7/comments -fbody=x',
+    'gh api -XPOST repos/o/r/pulls/7/comments -f body=x',
+    'gh api repos/o/r/pulls/7/comments -fbody=x',
     'gh api repos/o/r/issues/7/comments extra -f body=x',
     "gh api -H 'Accept: x' -Z graphql --input body.json",
     'gh api --unknown-option graphql --input body.json',
     "env -S 'curl https://api.github.com/graphql -d @body.json'",
+    "gh api -i repos/o/r/pulls/7/comments $'-f' body=x",
+    'gh api -i repos/o/r/pulls/7/comments $"-f" body=x',
+    'gh api repos/o/r/pulls/7/comments {-f,body=x}',
+    'F=-f; gh api repos/o/r/pulls/7/comments $F body=x',
+    'gh api repos/o/r/pulls/7/comments "$F" body=x',
+    'gh api $ARGS',
+    'gh api "$F" repos/o/r/pulls/7/comments',
+    'gh api repos/o/r/pulls/7/comments ${F:--f} body=x',
+    "gh api -i graphql $'-F' query=@q.graphql",
+    'gh api graphql {-F,query=@q.graphql}',
+    'gh api -iXPOST repos/o/r/pulls/7/comments',
+    'gh api -X=POST repos/o/r/pulls/7/comments',
+    'echo -f body=x | xargs gh api repos/o/r/pulls/7/comments',
+    'xargs -a args.txt gh api repos/o/r/pulls/7/comments',
+    'find . -name x -exec gh api repos/o/r/pulls/7/comments {} +',
 )
 
 ADMIT = (
@@ -129,6 +144,11 @@ ADMIT = (
     'gh api -i repos/o/r/pulls/7/comments',
     "gh api -H 'Accept: application/vnd.github+json' repos/o/r/pulls/7/comments --paginate",
     "gh api -iH 'Accept: application/vnd.github+json' repos/o/r/pulls/7/comments",
+    'gh api "repos/o/r/pulls/$PR/comments" --jq \'.[].id\'',
+    'gh api repos/o/r/issues/7/comments -f body="$BODY"',
+    'gh api -X GET search/issues -fq=value',
+    "gh api -X GET search/issues -fq='is:open author:x'",
+    'gh api repos/o/r/pulls/7/comments | xargs echo',
 )
 
 
