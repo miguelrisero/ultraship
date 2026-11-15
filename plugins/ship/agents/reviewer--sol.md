@@ -28,6 +28,18 @@ Glob and LSP stay denied under `tests/mutation`.
 If the hook denies a call, report its message as the blocked scope and do not retry in another form.
 This section adds no authority beyond the route that the brief names.
 
+## Squash-merge containment
+
+Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
+A single-parent squash commit meets that requirement only when it contains the recorded base and both conditions below hold.
+1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
+2. Both diffs change the same files, and each changed file has an equal patch ID in both diffs.
+Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent.
+The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
+Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
+Refuse the squash commit when either condition fails, a file has no patch ID, or the evidence is missing, stale or ambiguous.
+Every other commit keeps the containment requirement unchanged.
+
 ## Owner-approved protected-row subject review
 
 Use this read-only route only when the brief names the owner-approved protected-row subject route.

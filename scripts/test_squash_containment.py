@@ -1,0 +1,149 @@
+"""Squash containment requires PR linkage and equal per-file patches."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+SHIP = ROOT / 'plugins/ship'
+SCRIPT = SHIP / 'skills/ship/scripts/squash-containment.py'
+PR = 'https://github.com/example/repo/pull/1'
+CONTRACT_PATHS = (
+    SHIP / 'skills/ship/SKILL.md',
+    *(SHIP / f'agents/{name}.md' for name in (
+        'driver', 'driver--sol', 'reviewer--sol', 'reviewer--opus',
+        'writer--sol', 'writer--sonnet', 'writer--fable52',
+    )),
+)
+BODY = '''Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
+A single-parent squash commit meets that requirement only when it contains the recorded base and both conditions below hold.
+1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
+2. Both diffs change the same files, and each changed file has an equal patch ID in both diffs.
+Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent.
+The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
+Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
+Refuse the squash commit when either condition fails, a file has no patch ID, or the evidence is missing, stale or ambiguous.
+Every other commit keeps the containment requirement unchanged.
+'''
+
+
+class ContractTests(unittest.TestCase):
+    def test_each_contract_carries_the_exact_body_once(self):
+        for path in CONTRACT_PATHS:
+            with self.subTest(path=path):
+                text = path.read_text()
+                self.assertEqual(text.count('Squash-merge containment\n'), 1)
+                section = text.split('Squash-merge containment\n\n', 1)[1].split('\n\n', 1)[0]
+                self.assertEqual(section + '\n', BODY)
+                self.assertEqual(text.count(BODY), 1)
+
+
+class SquashContainmentTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.directory = Path(temp.name)
+        self.repo = self.directory / 'repo'
+        self.repo.mkdir()
+        self.env = {**os.environ, 'GIT_CONFIG_NOSYSTEM': '1',
+                    'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_TERMINAL_PROMPT': '0'}
+        for key in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR'):
+            self.env.pop(key, None)
+        self.git('init', '-b', 'main')
+        self.git('config', 'user.name', 'Test Author')
+        self.git('config', 'user.email', 'test@example.invalid')
+        self.git('config', 'commit.gpgsign', 'false')
+        self.commit({'alpha.txt': 'alpha\n', 'beta.txt': 'beta\n'})
+        self.base = self.git('rev-parse', 'HEAD')
+        self.git('checkout', '-b', 'feature')
+        self.commit({'alpha.txt': 'alpha feature\n', 'added file.txt': 'new\n'})
+        self.commit({'beta.txt': 'beta feature\n'})
+        self.author = self.git('rev-parse', 'HEAD')
+        self.git('checkout', 'main')
+        self.commit({'unrelated.txt': 'main advances\n'})
+        self.parent = self.git('rev-parse', 'HEAD')
+        self.git('merge', '--squash', 'feature')
+        self.git('commit', '-m', 'Squash feature')
+        self.squash = self.git('rev-parse', 'HEAD')
+        binary = self.directory / 'bin'
+        binary.mkdir()
+        gh = binary / 'gh'
+        gh.write_text('#!/bin/sh\nprintf "%s\\n" "$GH_JSON"\n')
+        gh.chmod(0o755)
+        self.env['PATH'] = f'{binary}{os.pathsep}{self.env["PATH"]}'
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.repo, env=self.env,
+                              capture_output=True, text=True, check=True).stdout.strip()
+
+    def commit(self, files):
+        for name, text in files.items():
+            (self.repo / name).write_text(text)
+        self.git('add', '--', *files)
+        self.git('commit', '-m', 'Fixture commit')
+
+    def check(self, squash=None, linked=None, state='MERGED', base=None, author=None):
+        squash = squash or self.squash
+        info = {'state': state, 'mergeCommit': {'oid': linked or squash}}
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), PR, base or self.base, author or self.author, squash],
+            cwd=self.repo, env={**self.env, 'GH_JSON': json.dumps(info)},
+            capture_output=True, text=True,
+        )
+
+    def assert_refuse(self, result, reason):
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertTrue(result.stdout.startswith('REFUSE '), result.stdout)
+        self.assertIn(reason, result.stdout)
+        self.assertNotIn('PASS', result.stdout)
+
+    def test_linked_equal_squash_records_full_commit_identities(self):
+        result = self.check(base=self.base[:12], author=self.author[:12], squash=self.squash[:12],
+                            linked=self.squash)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, f'PASS pr={PR} base={self.base} author_head={self.author} '
+                         f'squash={self.squash} parent={self.parent} files=3\n')
+
+    def test_unlinked_squash_refuses(self):
+        self.assert_refuse(self.check(linked=self.parent), 'mergeCommit')
+
+    def test_different_patch_with_the_same_files_refuses(self):
+        self.commit({'alpha.txt': 'different feature\n'})
+        squash = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-m', 'Different squash')
+        self.assert_refuse(self.check(squash=squash), 'patch IDs differ')
+
+    def test_extra_changed_file_refuses(self):
+        self.commit({'extra.txt': 'extra\n'})
+        squash = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-m', 'Extra squash')
+        self.assert_refuse(self.check(squash=squash), 'file sets')
+
+    def test_two_parent_commit_refuses(self):
+        merge = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-p', self.author, '-m', 'Merge')
+        self.assert_refuse(self.check(squash=merge), 'exactly one parent')
+
+    def test_open_pr_refuses(self):
+        self.assert_refuse(self.check(state='OPEN'), 'state must be MERGED')
+
+    def test_base_outside_squash_history_refuses(self):
+        self.assert_refuse(self.check(base=self.author), 'git command failed')
+
+    def test_missing_commit_refuses(self):
+        self.assert_refuse(self.check(author='missing-commit'), 'git command failed')
+
+    def test_empty_diff_refuses(self):
+        empty = self.git('commit-tree', f'{self.parent}^{{tree}}', '-p', self.parent, '-m', 'Empty')
+        self.assert_refuse(self.check(squash=empty, author=self.base), 'non-empty')
+
+    def test_wrong_argument_count_exits_two(self):
+        result = subprocess.run([sys.executable, str(SCRIPT)], cwd=self.repo,
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('usage:', result.stderr)
+        self.assertNotIn('PASS', result.stdout)
+
+
+if __name__ == '__main__':
+    unittest.main()

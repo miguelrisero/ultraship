@@ -145,6 +145,18 @@ The fixed-event comparator in the following paragraph applies only to the standi
 
 Approved test adaptations follow the writer contract (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379`, workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`): five standing test adaptations cover register classification, a census re-pin from CI output after a reviewed body PASS, a race-helper timeout replacement, a setup-only fixture change, and the exact paired-anchor category below, which also retires a row the PR's own diff removed. The driver puts the Input ID and workspace ID in the writer brief. For a writer without a `get_input` tool, the driver or the CoC runs `get_input` and the brief also records the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name; the writer stops on any mismatch with its definition. Loosened assertions, widened bounds, and deleted checks stay forbidden.
 
+### Squash-merge containment
+
+Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
+A single-parent squash commit meets that requirement only when it contains the recorded base and both conditions below hold.
+1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
+2. Both diffs change the same files, and each changed file has an equal patch ID in both diffs.
+Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent.
+The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
+Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
+Refuse the squash commit when either condition fails, a file has no patch ID, or the evidence is missing, stale or ambiguous.
+Every other commit keeps the containment requirement unchanged.
+
 ### Fifth standing adaptation
 
 Refresh paired `old` and `new` anchor strings only in exact approved PR-owned rows.
