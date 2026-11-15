@@ -31,6 +31,153 @@ class WriterHeredocTests(unittest.TestCase):
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
+    def test_nested_arithmetic_closes_keep_unresolved_names(self):
+        """Protect the writer boundary when nested parentheses precede a runtime value."""
+        for command in (
+            'echo "$(( ((1)) + y ))"', 'read -r y < f; echo "$(( ((1)) + y ))"',
+            '(( ((1)) + y ))', 'echo "$[ (1 + (2)) + y ]"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_substitution_boundaries_keep_parameter_closes_and_case(self):
+        """Protect the complete executable body from parameter and case terminators."""
+        for command, reason in (
+            ('echo "$(echo ${x:-)}; no""de -""e 1)"', 'inline interpreter code rule (node)'),
+            ('echo "$(case x in x) no""de -""e 1;; esac)"',
+             'inline interpreter code rule (substitution boundary)'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn(reason, self.reason)
+
+    def test_double_quoted_parameter_operands_keep_expansions_active(self):
+        """Protect evaluated operands where a single quote is literal inside double quotes."""
+        for command, kind in (
+            ("echo \"${x:-'$((y))'}\"", 'arithmetic'),
+            ("echo \"${x:-'${!n}'}\"", 'indirect'),
+            ("echo \"${x:-'${a[y]}'}\"", 'arithmetic'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (' + kind + ')', self.reason)
+
+    def test_comments_cannot_supply_quotes_or_numeric_assignments(self):
+        """Protect runtime name checks from inert comment text."""
+        for command, kind in (
+            ("read -r name < f; # '\necho \"${!name}\"", 'indirect'),
+            ('# ; i=0;\n(( i ))', 'arithmetic'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (' + kind + ')', self.reason)
+
+    def test_command_prefixes_keep_hidden_name_commands_refused(self):
+        """Protect name operands after shell control words and command wrappers."""
+        for body in (
+            '! "$c" -v "$x" %s 1', 'time "$c" -v "$x" %s 1',
+            'time -p "$c" -v "$x" %s 1', 'exec "$c" -v "$x" %s 1',
+            'if "$c" -v "$x" %s 1; then :; fi',
+            'while "$c" -v "$x" %s 1; do :; done', '{ "$c" -v "$x" %s 1; }',
+            '! command "$c" -v "$x" %s 1',
+            'if false; then :; elif "$c" -v "$x" %s 1; then :; fi',
+            'until "$c" -v "$x" %s 1; do :; done',
+            'if true; then "$c" -v "$x" %s 1; else "$c" -v "$x" %s 1; fi',
+        ):
+            command = 'c=printf; ' + body
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (name)', self.reason)
+
+    def test_command_brace_alternatives_keep_name_commands_refused(self):
+        """Protect command-position brace alternatives without expansion markers."""
+        for command in ('{let,y}', 'x=1; {let,y}', '{let,y,}'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (name)', self.reason)
+
+    def test_conditional_initializers_cannot_prove_numeric_names(self):
+        """Require numeric initializers to execute on every path."""
+        for command in (
+            'if false; then :; ((i=0)); fi; ((i))',
+            'while false; do ((i=0)); done; ((i))',
+            'until true; do ((i=0)); done; ((i))',
+            'case x in y) ((i=0));; esac; ((i))',
+            'false && ((i=0)); ((i))', 'true || ((i=0)); ((i))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_only_executable_loop_headers_prove_numeric_names(self):
+        """Protect numeric inference from comments, quoted data and heredoc data."""
+        for command in (
+            '# for ((i=0;\n(( i ))', "echo 'for ((i=0;'; (( i ))",
+            "cat <<'EOF'\nfor ((i=0;\nEOF\n(( i ))",
+            'echo for; ((i=0)); (( i ))',
+        ):
+            with self.subTest(command=command):
+                if command == 'echo for; ((i=0)); (( i ))':
+                    self.assertFalse(self.denied(command), self.reason)
+                else:
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_attached_quoted_destinations_invalidate_numeric_names(self):
+        """Protect arithmetic after writes through attached destination options."""
+        for command in (
+            'i=0; printf -v"i" %s "$x"; (( i ))',
+            "i=0; printf -v'i' %s \"$x\"; (( i ))",
+            'i=0; read -a"i" < f; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_quoted_declaration_compound_indices_keep_arithmetic_checks(self):
+        """Protect evaluated array indices inside quoted declaration operands."""
+        for declaration in ('declare', 'typeset', 'local'):
+            command = declaration + " -a 'b=([i]=1)'"
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_printf_glob_options_keep_runtime_names_refused(self):
+        """Protect printf destinations when filename expansion can supply an option."""
+        for command in ('printf ?v "$x" %s 1', 'printf *v "$x" %s 1',
+                        'printf [-v] "$x" %s 1'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (name)', self.reason)
+
+    def test_single_quoted_printf_data_stays_inert(self):
+        """Keep a literal data argument separate from an evaluated name operand."""
+        self.assertFalse(self.denied("printf '%s\\n' 'a[$(echo RAN)]'"), self.reason)
+
+    def test_eval_and_trap_numeric_reads_preserve_numeric_status(self):
+        """Keep permitted variable reads from masquerading as writes."""
+        for command in (
+            "i=0; eval 'echo $i'; (( i++ ))", "i=0; trap 'echo $i' EXIT; (( i++ ))",
+            "i=0; eval 'echo ${i}'; (( i++ ))", "i=0; trap 'echo ${i}' EXIT; (( i++ ))",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_parser_boundary_literal_controls_stay_admitted(self):
+        """Keep ordinary commands, parameter defaults and literal loops admitted."""
+        for command in (
+            'echo "$(git rev-parse --show-toplevel)"', 'echo "${x:-$(date)}"',
+            "echo ${x:-'$((y))'}", 'echo "${x:-default}"', "echo \"${x:-'quoted text'}\"",
+            '! grep -q x f', 'time make test', 'if grep -q x f; then echo y; fi',
+            '{ echo a; echo b; }', 'cp file{,.orig}', 'mkdir -p a/{b,c}', 'mv "$f"{,.bak}',
+            'for ((i=0; i<10; i++)); do echo "$i"; done', 'n=3; (( n > 1 ))',
+            '(( i = 0, i < 3 ))', 'printf -v X %s .',
+            'for f in a b; do printf -v X %s "$f"; done', "printf '%s\\n' \"$@\"",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_double_quoted_substitutions_scan_interpreter_bodies(self):
         """Catch split interpreter names inside double-quoted substitution bodies."""
         for command in (
