@@ -433,6 +433,7 @@ class WriterHeredocTests(unittest.TestCase):
         """Catch expansions inside nested brackets in parameter subscripts and stored values."""
         for command in (
             "x='a[[]$(id)]'", '''echo ${a[[]'$(no""de -""e 1)']}''', r'''y="a[[]\$(id)]"''',
+            "x='a[[]$n]'", 'echo ${a[[]$n]}',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
