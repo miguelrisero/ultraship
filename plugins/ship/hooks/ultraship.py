@@ -1193,6 +1193,10 @@ def read_only_argument_word(command, tokens, words, index):
         if (name not in {'rg', 'grep', 'ls', 'cat', 'find'}
                 or any(part[0][0] not in {'head', 'tail', 'wc'} for part in pipeline[1:])):
             return False
+        if name in {'grep', 'rg'} and any(
+                word[1].startswith(('--file', '--exclude-from', '--ignore-file'))
+                or word[1].startswith('-') and not word[1].startswith('--') and 'f' in word[1] for word in first):
+            return False
         if name == 'rg' and any(
                 word[1].startswith(('--pre', '--hostname-bin', '--search-zip'))
                 or word[1].startswith('-') and not word[1].startswith('--') and 'z' in word[1] for word in first):

@@ -51,6 +51,8 @@ class WriterHeredocTests(unittest.TestCase):
             r'''rg foo /x/python*/a | head -5 | wc -l''',
             r'''cd /x && rg foo /x/python*/a''',
             r'''cd /x && rg foo /x/python*/a | head -3 && ls /run/user/*''',
+            r'''rg -F foo /x/python*/a''',
+            r'''grep -F foo /x/python*/a''',
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
@@ -170,6 +172,24 @@ class WriterHeredocTests(unittest.TestCase):
                 r'''rg --search-zip needle /x/python*.gz''',
                 r'''rg -z needle /x/python*.gz''',
                 r'''rg -nz needle /x/python*.gz''',
+                r'''find /x -exec rm {} \; -o -path /x/python*''',
+                r'''find /x -execdir rm {} \; -o -path /x/python*''',
+                r'''find /x -ok rm {} \; -o -path /x/python*''',
+                r'''find /x -okdir rm {} \; -o -path /x/python*''',
+                r'''find /x -fprint /x/b -path /x/python*''',
+                r'''find /x -fprint0 /x/b -path /x/python*''',
+                r'''find /x -fprintf /x/b %p -path /x/python*''',
+                r'''find /x -fls /x/b -path /x/python*''',
+                r'''rg --pre-glob '*.gz' foo /x/python*/a''',
+                r'''rg --pre python3 foo /x/python*/a''',
+                r'''rg --hostname-bin /x/h foo /x/python*/a''',
+                r'''grep -f /x/patterns /x/python*/a''',
+                r'''grep -nf /x/patterns /x/python*/a''',
+                r'''grep --file=/x/patterns /x/python*/a''',
+                r'''grep --exclude-from=/x/globs foo /x/python*/a''',
+                r'''rg -f /x/patterns /x/python*/a''',
+                r'''rg --file /x/patterns /x/python*/a''',
+                r'''rg --ignore-file /x/ignore foo /x/python*/a''',
             )),
         ):
             for command in commands:
