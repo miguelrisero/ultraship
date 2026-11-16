@@ -34,8 +34,9 @@ EXPECTED_LANE_REVIEW = [
     "Require the CoC-approved exact allowlist of row-file paths and unique row IDs from the PR's own failing anchor CI evidence.",
     'Require the recorded base SHA, author head SHA, and frozen SHA after the edit before any protected read.',
     "Require the brief to name two read-only trees: one at the base SHA and one at the frozen SHA after the edit. On the ordinary lane-derived route only, if the PR creates the row file absent at the CI base, use the last PR commit before the re-anchor as the before tree and this section's row comparison base. Keep the original CI base for causality and evidence; preserve every other route condition.",
-    "In that case, if only main merges into the PR branch changed the subject after the last PR-authored commit that edited the row file, use that commit as the before tree and this section's row comparison base instead.",
+    "In that case, if only main merges into the PR branch changed the subject after the last PR-authored commit before the re-anchor that edited the row file, use that commit as the before tree and this section's row comparison base instead.",
     "Then require the recorded diff to show that no PR-authored commit after that tree changed the subject, so main merges alone broke each named row; this replaces only the PR's own subject change requirement.",
+    'A merge commit changes the subject as a PR-authored commit unless its subject blob equals the subject blob of the clean automatic merge of its parents.',
     'Rows in a row file that exists at the CI base keep every current rule.',
     'Read rows only inside those two trees.',
     'Require every supplied diff to leave out the row-file hunks.',
@@ -560,12 +561,18 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertIn('Keep the original CI base for causality and evidence; '
                               'preserve every other route condition.', text)
                 self.assertEqual(text.count('last PR commit before the re-anchor'), 1)
-                self.assertEqual(text.count('last PR-authored commit that edited'), 1)
+                self.assertEqual(text.count('last PR-authored commit before the re-anchor that edited'), 1)
                 if name.endswith('owner-decisions.md'):
+                    existing = ('For ordinary lane-derived review of a row file the PR creates absent at the CI base, '
+                                'use the last PR commit before the re-anchor as the before tree and row comparison base. '
+                                'Keep the original CI base for causality and evidence; preserve every other route condition.')
                     sentence = ('If only main merges into the PR branch changed the subject after the last '
-                                'PR-authored commit that edited that row file, use that commit as the before '
-                                'tree instead, and require that no PR-authored commit after it changed the subject.')
-                    self.assertEqual(text.count(sentence), 1)
+                                'PR-authored commit before the re-anchor that edited that row file, use that commit as the before '
+                                'tree instead, and require that no PR-authored commit after it changed the subject. '
+                                'A merge commit changes the subject as a PR-authored commit unless its subject blob equals '
+                                'the subject blob of the clean automatic merge of its parents.')
+                    self.assertIn(existing + ' ' + sentence, text)
+                    self.assertEqual(text.count(existing + ' ' + sentence), 1)
                 else:
                     reviewer = 'reviewer--' in name
                     comparison = "this section's row comparison base" if reviewer else 'row comparison base'
@@ -576,9 +583,11 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                                 + comparison + '. Keep the original CI base for causality and evidence; preserve every other route condition.')
                     lines = (
                         'In that case, if only main merges into the PR branch changed the subject after the last '
-                        'PR-authored commit that edited the row file, use that commit as the before tree and ' + comparison + ' instead.',
+                        'PR-authored commit before the re-anchor that edited the row file, use that commit as the before tree and ' + comparison + ' instead.',
                         'Then require the recorded diff to show that no PR-authored commit after that tree changed the subject, '
                         "so main merges alone broke each named row; this replaces only the PR's own subject change requirement.",
+                        'A merge commit changes the subject as a PR-authored commit unless its subject blob equals '
+                        'the subject blob of the clean automatic merge of its parents.',
                         'Rows in a row file that exists at the CI base keep every current rule.',
                     )
                     for line in lines:
