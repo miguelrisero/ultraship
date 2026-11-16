@@ -112,10 +112,11 @@ class EnvDirectoryTests(unittest.TestCase):
                     self.assertTrue(self.denied(command))
                     self.assertIn(': relative script after an unproven directory change', self.reason)
 
-    def test_env_directory_repeated_nested_text_is_admitted(self):
+    def test_env_directory_repeated_nested_text_is_denied(self):
         with tempfile.TemporaryDirectory() as a:
             command = f'env -C {a} python3 scripts/report.py --from "$(date +%F)" --to "$(date +%F)"'
-            self.assertFalse(self.denied(command), self.reason)
+            self.assertTrue(self.denied(command))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
     def test_env_directory_input_pipe_keeps_the_pipe_label(self):
         for command in ('printf x | env -C "$D" python3 x.py',
@@ -180,13 +181,42 @@ class EnvDirectoryTests(unittest.TestCase):
         for command in (
             'python3 scripts/x.py > out.json',
             'python3 scripts/x.py; rm -f out.json',
-            'true 2>&1; python3 scripts/x.py',
-            'true >&2; python3 scripts/x.py',
-            'true >&-; python3 scripts/x.py',
-            'true >/dev/null; python3 scripts/x.py',
+            'true; python3 scripts/x.py',
+            'echo ready; python3 scripts/x.py',
+            'printf ready; python3 scripts/x.py',
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
+
+
+    def test_relative_scripts_refuse_unlisted_writers(self):
+        for command in (
+            'printf code | tee x.py; python3 x.py',
+            'dd if=payload of=x.py; python3 x.py',
+            "sed -i 's/a/b/' x.py; python3 x.py",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_scripts_refuse_nested_path_changes(self):
+        for command in (
+            "eval 'ln -sfn /dev/stdin x.js'; node x.js",
+            "sh -c 'ln -sfn /dev/stdin x.js'; node x.js",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_scripts_refuse_paths_changed_in_substitutions(self):
+        command = 'echo "$(ln -sfn /dev/stdin x.js)"; node x.js'
+        self.assertTrue(self.denied(command))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_scripts_refuse_descriptor_file_redirection(self):
+        command = 'printf code >&x.py; python3 x.py'
+        self.assertTrue(self.denied(command))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
 
 if __name__ == '__main__':

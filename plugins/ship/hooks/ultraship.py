@@ -1297,14 +1297,14 @@ def grep_data_token(tokens, index):
     return cursor < index and tokens[cursor][0] == 'grep'
 
 
-def nested_shell_strings(tokens, text=None):
+def nested_shell_strings(tokens, text=None, include_env=True):
     """Keep the identity of each argument that a shell or string wrapper can execute."""
     if text is not None:
         for body in shell_substitution_bodies(text):
             yield ('', body, 0, len(text))
     for index, token in enumerate(tokens):
         name = os.path.basename(token[1])
-        if name not in STRING_WRAPPERS:
+        if name not in STRING_WRAPPERS or name == 'env' and not include_env:
             continue
         grep_data = grep_data_token(tokens, index)
         if grep_data:
@@ -2751,23 +2751,15 @@ UNPROVEN_DIRECTORY_LABEL = ('inline interpreter code rule (program from a pipe)'
 
 
 def shell_changes_paths(tokens):
-    if any(os.path.basename(token[1]) in {
-            'ln', 'mv', 'cp', 'rm', 'mkdir', 'install', 'touch', 'mkfifo', 'mknod'} for token in tokens):
-        return True
-    for index, token in enumerate(tokens):
-        if token[0] != '>':
-            continue
-        cursor = index + 1
-        if cursor < len(tokens) and tokens[cursor][0] == '>' and token[3] == tokens[cursor][2]:
-            cursor += 1
-        if cursor < len(tokens):
-            target = tokens[cursor]
-            if target[0] == '&' and tokens[cursor - 1][3] == target[2]:
-                continue
-            if target[1] == '/dev/null':
-                continue
-        return True
-    return False
+    if not tokens:
+        return False
+    name = tokens[0][0]
+    if name in {'cd', 'pushd'}:
+        return (len(tokens) != 2 or unresolved_shell_word(tokens[1][0])
+                or not re.fullmatch(r'[\w./-]+', tokens[1][1]))
+    if name in {'echo', 'printf'}:
+        return any(token[0] in {'<', '>'} for token in tokens)
+    return name != 'true' or len(tokens) != 1
 
 
 def inline_interpreter_denial(command, cwd=None):
@@ -2806,6 +2798,11 @@ def inline_interpreter_denial(command, cwd=None):
         if nested_work_exceeded(tokens, seen):
             return 'inline interpreter code rule (nesting limit)'
         nested = list(nested_shell_strings(tokens))
+        bodies = list(shell_substitution_bodies(text))
+        nested_paths = bool(list(nested_shell_strings(tokens, include_env=False)) or bodies
+                            or any(token[0] == '`' or token[1] == 'eval'
+                            or token[0] == '(' and index > 0 and tokens[index - 1][0] in {'<', '>'}
+                            and tokens[index - 1][3] == token[2] for index, token in enumerate(tokens)))
         input_tokens = shell_raw_words(shell_line_continuations(shell))
         state = shell_input_state(tokens, text, shell_input_state(input_tokens, shell_line_continuations(shell), inherited))
         piped_input, directory, redirected = state
@@ -2892,7 +2889,7 @@ def inline_interpreter_denial(command, cwd=None):
         test_safe = (top_level and not TEST_SHAPE_REDEFINE.search(command)
                      and test_operand_shape(tokens, groups))
         segments, words, piped, pipe_groups = [], [], False, []
-        paths_changed = inherited_paths
+        paths_changed = inherited_paths or nested_paths
         for token in tokens:
             raw = token[0]
             if raw == '{' and token[2] in command_positions:
@@ -2902,7 +2899,7 @@ def inline_interpreter_denial(command, cwd=None):
             if raw in {';', '&', '|', '(', ')', '`', '\n'}:
                 if words:
                     segments.append((words, piped or any(pipe_groups), paths_changed))
-                    paths_changed = paths_changed or shell_changes_paths(words + [token])
+                    paths_changed = paths_changed or shell_changes_paths(words)
                     words = []
                 if raw == '(':
                     pipe_groups.append(piped or any(pipe_groups))
@@ -2942,7 +2939,7 @@ def inline_interpreter_denial(command, cwd=None):
             reads_pipe = inherited[0] or piped or any(word[0] == '<' for word in words)
             unproven_directory = chdir_wrapper or directory and not safe_directory
             segment_relative_denied = redirected or not safe_base or unproven_directory or reads_pipe or paths_changed
-            directory_only = unproven_directory and safe_base and not reads_pipe and not paths_changed
+            directory_only = unproven_directory and safe_base and not reads_pipe
             prefix_end = next((index for index, word in enumerate(words)
                                if not re.match(r'[A-Za-z_][A-Za-z0-9_]*=', word[1])), len(words))
             first = words[prefix_end] if prefix_end < len(words) else None
@@ -3033,7 +3030,7 @@ def inline_interpreter_denial(command, cwd=None):
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
         pending.extend((token[1], state, containing_paths) for token in nested)
-        substitutions.extend((body, state, containing_paths) for body in shell_substitution_bodies(text))
+        substitutions.extend((body, state, containing_paths) for body in bodies)
     return subscript_reason or runtime_reason
 
 
