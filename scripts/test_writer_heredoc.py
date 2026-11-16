@@ -754,12 +754,23 @@ class WriterHeredocTests(unittest.TestCase):
             "git grep --open -e '$(shell' -e y",
             "git grep -e '$(shell' -e y --open-files-in-pager=x",
             "git grep --textconv -e '$(shell' -e y",
+            "rg '--glob=$(x)' -e y f",
+            "git -C /work/lane log -n -e '$(shell' -e y",
+            "path=/tmp/x; rg -e '$X' -e code f",
+            "echo `grep '$X' -e code f`",
+            "opt=--pre=/bin/sh; rg -l -e '$X' -e y f $opt",
+            "opt=--pre=/bin/sh; rg -l -e '$X' -e y f \"$opt\"",
+            "rg --glob=$g -e '$X' -e y f",
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertIn(reason, self.reason)
+                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'), reason)
+        self.assertTrue(self.denied("git -C '$X' grep -e y -e code"))
+        reason = 'git hidden subcommand rule'
+        self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'), reason)
         self.assertTrue(self.denied('grep -e "$(python3 -c code)" -e y f'))
-        self.assertIn('process-capable python -c rule', self.reason)
+        reason = 'process-capable python -c rule'
+        self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'), reason)
 
     def test_read_only_argument_words_with_interpreter_names_are_admitted(self):
         """Catch false refusals of literal read-only paths and patterns containing interpreter names."""

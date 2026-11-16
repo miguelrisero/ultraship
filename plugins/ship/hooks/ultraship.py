@@ -2900,8 +2900,8 @@ def inline_interpreter_denial(command, cwd=None):
             if subscript_reason is None:
                 subscript_reason = 'array subscript evaluation rule (parse error)'
         command_positions = shell_command_positions(tokens)
-        limit = (test_operand_limit(tokens, groups)
-                 if top_level and not TEST_SHAPE_REDEFINE.search(command) else 0)
+        test_shape = top_level and not TEST_SHAPE_REDEFINE.search(command)
+        limit = test_operand_limit(tokens, groups) if test_shape else 0
         segments, words, piped, pipe_groups = [], [], False, []
         runtime_paths = inherited_paths or nested_paths or shell_defines_function(tokens, command_positions) or any(
             token[1] in {'while', 'until', 'for', 'select'} and token[2] in command_positions for token in tokens)
@@ -2980,10 +2980,11 @@ def inline_interpreter_denial(command, cwd=None):
                     and unresolved_shell_word(first[0])):
                 return 'inline interpreter code rule (unresolved command word)'
             test_operands, test_commands, closing = set(), set(), None
-            # A single-quoted search pattern is data only after a prefix that cannot redefine the search command, with only listed options.
-            literal_ready = (bool(words) and words[0][0] in {'grep', 'git', 'rg'}
-                             and top_level and not TEST_SHAPE_REDEFINE.search(command) and prefix_end == 0
+            # A single-quoted search pattern is data only when no prefix can redefine the command and every option and expansion is listed or literal.
+            literal_ready = (bool(words) and words[0][0] in {'grep', 'git', 'rg'} and test_shape and prefix_end == 0
                              and all(not word[1].startswith('-') or re.fullmatch(READ_ONLY_OPTIONS[words[0][0]], word[1])
+                                     for word in words)
+                             and all(re.fullmatch(r"'(?!-)[^']*'", word[0]) or not unresolved_shell_word(word[0])
                                      for word in words)
                              and not any(limit <= token[2] < words[0][2] and token[0] not in {';', '&', '|', '\n'}
                                          for token in tokens))
@@ -3014,12 +3015,12 @@ def inline_interpreter_denial(command, cwd=None):
                 joined_code = (not neutral and unresolved_shell_word(raw) and bool(re.search(
                     rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw))
                                and not read_only_argument_word(command, tokens, words, index))
-                literal_data = literal_ready and re.fullmatch(r"'(?!-)[^']*'", raw) and grep_data_token(words, index)
-                if start not in test_operands and not literal_data and (joined_code or unresolved and (
+                data = grep_data_token(words, index)
+                if start not in test_operands and not (literal_ready and data) and (joined_code or unresolved and (
                         any(code_option(argument) for argument in arguments)
                         or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'})):
                     return 'inline interpreter code rule (unresolved command word)'
-                if grep_data_token(words, index):
+                if data:
                     continue
                 name = interpreter_name(value)
                 if not name:
