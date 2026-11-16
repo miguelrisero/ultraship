@@ -119,13 +119,16 @@ def check(text, kind='result'):
     errors = []
     if len(long) >= 3 or (tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2:
         errors.append('Separate glued words with spaces; remove compressed shorthand.')
-    sentences = re.split(r'(?<=[.!?])\s+|\n+', prose)
+    sentence_prose = '\n'.join(line for line in prose.splitlines()
+                              if kind != 'peer' or not re.match(r'^[ \t]*(?:[-*][ \t]*)?Owner helper request:', line))
+    sentences = re.split(r'(?<=[.!?])\s+|\n+', sentence_prose)
     if any(len(s.split()) > 25 for s in sentences):
         errors.append('Write at most 25 words per sentence.')
     sections = ('Facts', 'Decision', 'Next') if kind == 'peer' else (
         ('What is wrong', 'Why now', 'Options', 'Recommendation', 'If no answer') if kind == 'decision' else ())
+    section_text = plain + '\n' + text if kind == 'peer' else plain
     for section in sections:
-        if not re.search(r'^\s*(?:#{1,6}\s*)?' + re.escape(section) + r'\b', plain, re.M | re.I):
+        if not re.search(r'^\s*(?:#{1,6}\s*)?' + re.escape(section) + r'\b', section_text, re.M | re.I):
             errors.append('Missing section: ' + section)
     if errors:
         raise FormatError(errors)
