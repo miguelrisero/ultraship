@@ -727,6 +727,8 @@ class WriterGitHubGuardTests(unittest.TestCase):
             "env gh api -X GET search/issues -f 'q=gh in:title'",
             "timeout 60 gh api -X GET search/issues -f 'q=gh in:title'",
             "env GH_PAGER=cat gh api -X GET search/issues -f 'q=gh in:title'",
+            'gh api -X GET repos/o/r/contents/env -f ref=gh',
+            'GH_PAGER=cat gh pr view 1',
         )
         for command in commands:
             with self.subTest(command=command):
@@ -771,6 +773,11 @@ class WriterGitHubGuardTests(unittest.TestCase):
             'env \'-vSGIT_EDITOR="gh issue close 1" git commit -e -m x\'',
             'env \'--split=GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
             "GIT_EDITOR='command gh api repos/o/r/pulls/1/merge' git config --file=-XPUT --edit",
+            'git submodule foreach gh pr view 1 \'; GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            "GH_PAGER='gh issue close 1' gh pr view 1",
+            'env \'-SGIT_EDITOR="g""h issue close 1" git commit -e -m x\'',
+            'env \'-iSGIT_EDITOR="g""h issue close 1" git commit -e -m x\'',
+            'env \'--split-string=GIT_EDITOR="g""h issue close 1" git commit -e -m x\'',
         )
         for command in commands:
             with self.subTest(command=command):

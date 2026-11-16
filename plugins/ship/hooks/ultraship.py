@@ -3412,23 +3412,47 @@ def writer_gh_denial(command, depth=0, *, scan_values=True, judged_value=False):
             segment.append(token)
     segments.append(segment)
     for words in segments:
-        cli_argument = False
-        for token in words:
+        command_index = 0
+        while command_index < len(words):
+            word = words[command_index]
+            if re.match(r'[A-Za-z_]\w*\+?=', word):
+                command_index += 1
+                continue
+            wrapper = os.path.basename(word)
+            if wrapper not in WRAPPERS and wrapper != 'time':
+                break
+            command_index += 1
+            while command_index < len(words):
+                word = words[command_index]
+                if word == '--':
+                    command_index += 1
+                    break
+                if word.startswith('-'):
+                    command_index += 2 if word in WRAPPERS.get(wrapper, set()) else 1
+                elif wrapper == 'env' and re.match(r'[A-Za-z_]\w*\+?=', word):
+                    command_index += 1
+                else:
+                    break
+            if wrapper == 'timeout' and command_index < len(words):
+                command_index += 1
+        cli_command = command_index < len(words) and os.path.basename(words[command_index]) == 'gh'
+        for index, token in enumerate(words):
             if any(char.isspace() or char in ';&|()' for char in token):
-                nested = writer_gh_denial(token, depth + 1, scan_values=scan_values and not cli_argument,
+                nested = writer_gh_denial(token, depth + 1,
+                                          scan_values=scan_values and not (cli_command and index > command_index),
                                           judged_value=judged_value)
                 if nested:
                     return nested
-            cli_argument = cli_argument or os.path.basename(token) == 'gh'
-        if not any(re.search(r'\bgh\b', word) for word in words):
+        if not re.search(r'\bgh\b', re.sub(r'''['"\\]''', '', ' '.join(words))):
             continue
         if scan_values:
-            starts = [(0, None)] + [(index + 1, os.path.basename(word)) for index, word in enumerate(words)
+            value_words = words[:command_index] if cli_command else words
+            starts = [(0, None)] + [(index + 1, os.path.basename(word)) for index, word in enumerate(value_words)
                                     if os.path.basename(word) in ('env', 'export')]
             for cursor, mode in starts:
                 options = mode == 'env'
-                while cursor < len(words):
-                    word = words[cursor]
+                while cursor < len(value_words):
+                    word = value_words[cursor]
                     if re.match(r'[A-Za-z_]\w*\+?=', word):
                         nested = writer_gh_denial(re.sub(r'^[!\s]*', '', word.split('=', 1)[1]), depth + 1,
                                                   judged_value=True)
@@ -3437,6 +3461,22 @@ def writer_gh_denial(command, depth=0, *, scan_values=True, judged_value=False):
                     elif options and word == '--':
                         options = False
                     elif options and word.startswith('-'):
+                        split_value = None
+                        if not word.startswith('--') and 'S' in word:
+                            split_value = word.split('S', 1)[1] or None
+                        elif word.startswith('--') and '=' in word:
+                            flag, value = word.split('=', 1)
+                            if len(flag) >= 4 and '--split-string'.startswith(flag):
+                                split_value = value
+                        if split_value is not None:
+                            try:
+                                split_value = ' '.join(shlex.split(split_value, posix=True))
+                            except ValueError:
+                                return reason
+                            nested = writer_gh_denial(re.sub(r'^[!\s]*', '', split_value), depth + 1,
+                                                      judged_value=True)
+                            if nested:
+                                return nested
                         if re.search(r'\bgh\b', word):
                             return reason
                         takes_value = (not word.startswith('--') and word[-1:] in ('u', 'C', 'S', 'P')
@@ -3445,7 +3485,7 @@ def writer_gh_denial(command, depth=0, *, scan_values=True, judged_value=False):
                                                ('--unset', '--chdir', '--split-string')))
                         if takes_value:
                             cursor += 1
-                            value = words[cursor] if cursor < len(words) else ''
+                            value = value_words[cursor] if cursor < len(value_words) else ''
                             if re.search(r'\bgh\b', value):
                                 return reason
                             nested = writer_gh_denial(re.sub(r'^[!\s]*', '', value), depth + 1, judged_value=True)
@@ -3454,15 +3494,15 @@ def writer_gh_denial(command, depth=0, *, scan_values=True, judged_value=False):
                     elif mode != 'export':
                         break
                     cursor += 1
-            for index, word in enumerate(words):
+            for index, word in enumerate(value_words):
                 if os.path.basename(word) != 'git':
                     continue
                 cursor = index + 1
-                while cursor < len(words) and words[cursor].startswith('-'):
-                    option = words[cursor]
+                while cursor < len(value_words) and value_words[cursor].startswith('-'):
+                    option = value_words[cursor]
                     if option == '-c':
                         cursor += 1
-                        value = words[cursor] if cursor < len(words) else ''
+                        value = value_words[cursor] if cursor < len(value_words) else ''
                     elif option.startswith('-c'):
                         value = option[2:]
                     else:
