@@ -2343,7 +2343,9 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
             if previous is not None and previous[0] not in {';', '&', '|', '(', ')', '`', '\n'}:
                 continue
         time_prefix = False
-        for word in words:
+        for index, word in enumerate(words):
+            if index and any(words[index - 1][3] <= token[2] < word[2] for token in tokens):
+                break
             if re.fullmatch(rf'{identifier}=.*', word[1], re.S):
                 break
             if word[0] != word[1]:
