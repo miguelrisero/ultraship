@@ -3441,12 +3441,17 @@ def writer_git_config_read(words):
         word in {'set', 'unset', 'rename-section', 'remove-section', 'edit'} for word in operands[:1])
 
 
+def writer_trigger_text(command):
+    """Keep shell quote joining and attached quoted operands visible to trigger checks."""
+    return re.sub(r'''['"\\]''', '', command) + '\n' + re.sub(r'''['"\\]''', ' ', command)
+
+
 def writer_gh_denial(command, depth=0):
     if depth == 0:
         command = commit_message_removed(command)
     command = cat_heredoc_data(command).replace('\\\n', '')
-    unquoted = re.sub(r'''['"\\]''', '', command)
-    if not re.search(r'\bgh\b|GIT_|(?:EDITOR|VISUAL|PAGER)\+?=|\bgit\b|ext::', unquoted):
+    unquoted = writer_trigger_text(command)
+    if not re.search(r'\bgh\b|GIT_|(?:EDITOR|VISUAL|PAGER)\+?=|\bgit\b|ext::|-[iv0]*S', unquoted):
         return None
     if depth >= 4:
         return 'Writers cannot run deeply nested GitHub commands.'
@@ -3581,6 +3586,10 @@ def writer_gh_denial(command, depth=0):
                         or word.startswith(('--fixup=amend:', '--fixup=reword:'))):
                     return 'git editor option rule'
             nested_word = word
+            if any(os.path.basename(previous) in SHELL_INTERPRETERS for previous in words[:index]):
+                shell_code = re.match(r'-[a-zA-Z]*c(.+)\Z', word, re.S)
+                if shell_code:
+                    nested_word = shell_code[1]
             if env_command:
                 split = re.match(r'-[iv0]*S(.*)\Z', word, re.S)
                 option, separator, value = word.partition('=')
@@ -4152,7 +4161,7 @@ def pre(data):
                 match = WRITER_BASH.search(file_text_removed)
                 if match:
                     deny(publication_reason + ' Rule: WRITER_BASH ' + repr(match[2].strip()) + '.')
-                names_gh = re.search(r'\bgh\b', re.sub(r'''['"\\]''', '', file_text_removed))
+                names_gh = re.search(r'\bgh\b', writer_trigger_text(file_text_removed))
                 github_reason = writer_gh_denial(file_text_removed)
                 if names_gh and github_reason:
                     deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + github_reason)

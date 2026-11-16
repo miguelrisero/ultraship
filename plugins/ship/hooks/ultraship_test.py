@@ -702,6 +702,18 @@ class PythonHeredocGuardTests(unittest.TestCase):
 
 
 class WriterGitHubGuardTests(unittest.TestCase):
+    def test_writer_attached_quoted_command_operands_are_denied(self):
+        for command in ("env -S'gh pr merge 1'", "env -iS'gh pr merge 1'",
+                        "env -vS'gh pr merge 1'", "env -0S'gh pr merge 1'",
+                        '\"g\"\"h\" pr merge 1', "sh -c'gh pr merge 1'",
+                        "bash -c'gh pr merge 1'", "env --split-string='gh pr merge 1'",
+                        "env -S'\"g\"\"h\" pr merge 1'"):
+            with self.subTest(command=command):
+                result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
+                self.assertTrue(denied(result))
+                self.assertIn('Rule:', result['hookSpecificOutput']['permissionDecisionReason'])
+                self.assertIn('driver', result['hookSpecificOutput']['permissionDecisionReason'])
+
     def test_writer_env_zero_split_and_post_filter_globs_are_denied(self):
         for command in ("env '-0SGIT_EDITOR=vim git status'", "env '-0iSGIT_EDITOR=vim git status'",
                         "gh pr view 1 -q .x 'a*'"):
