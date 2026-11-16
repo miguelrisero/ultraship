@@ -807,6 +807,43 @@ class TextLintTests(unittest.TestCase):
                     self.assertEqual(pending.read_bytes(), pending_bytes)
                 self.assertFalse((self.state / 'receipts' / (sibling['id'] + '.consumed')).exists())
 
+    def test_cited_input_resend_survives_pending_cleanup_errors_once(self):
+        for case in ('malformed', 'missing-id', 'wrong-type', 'missing-sibling', 'bad-mac'):
+            with self.subTest(case=case):
+                event = self.input_event('input-one')
+                event['session_id'] = case
+                legacy, legacy_pending = self.legacy_input_receipt(event)
+                sibling = text_lint.write_receipt(
+                    event, ['Missing section: Recommendation'], True, None)
+                pending = text_lint.pending_path(sibling)
+                sibling_path = self.state / 'receipts' / (sibling['id'] + '.json')
+                if case == 'malformed':
+                    pending.write_text('{')
+                elif case == 'missing-id':
+                    pending.write_text('{}')
+                elif case == 'wrong-type':
+                    pending.write_text('[]')
+                elif case == 'missing-sibling':
+                    sibling_path.unlink()
+                else:
+                    sibling['mac'] = '0' * 64
+                    sibling_path.write_text(json.dumps(sibling))
+                pending_bytes = pending.read_bytes()
+                event['tool_input']['content']['html'] = (
+                    '<meta name="output-kind" content="result"><p>The review passes.</p>'
+                    '<!-- ultraship-receipt:' + legacy['id'] + ' -->')
+
+                self.assertIsNone(self.hook_output(event))
+
+                self.assertEqual(pending.read_bytes(), pending_bytes)
+                self.assertFalse(legacy_pending.exists())
+                consumed = self.state / 'receipts' / (legacy['id'] + '.consumed')
+                self.assertTrue(consumed.exists())
+                self.assertFalse((self.state / 'receipts' / (sibling['id'] + '.consumed')).exists())
+                self.assertIn('Receipt is consumed.', self.hook_refusal(event))
+                self.assertFalse(self.last_receipt['resend_allowed'])
+                self.assertTrue(consumed.exists())
+
     def test_expiry_uses_injected_clock(self):
         self.hook_refusal(self.event())
         receipt_id = self.last_receipt['id']

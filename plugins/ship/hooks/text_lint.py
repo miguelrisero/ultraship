@@ -298,7 +298,7 @@ def clear_pending(receipt, event):
                         and sibling.get('tool_use_id') == receipt.get('tool_use_id'))
             if same:
                 path.unlink(missing_ok=True)
-        except FileNotFoundError:
+        except (OSError, ValueError, KeyError, TypeError):
             pass
 
 
