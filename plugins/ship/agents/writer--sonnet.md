@@ -61,6 +61,7 @@ Require GO for mutation batteries, timing runs, and shared-database runs; retain
 Honor a no-run brief and every effective permission denial.
 Run each check as its own plain command, with no inline interpreter code.
 The named `python3 -I -` heredocs of the retirement routes stay as each route specifies.
+Run `make api-migrations-check` only when the diff adds a migration, never as a heredoc, and without the slot gate. Run `make api-test`, `make api-test-all`, `make app-test` and `make e2e` only through the installed slot gate.
 The CoC can always issue a GO to unblock a stuck lane or chief within existing authority.
 A GO overrides no permission denial, approval hold, publication rule, or customer safety rule.
 
@@ -247,6 +248,8 @@ Preserve zero writer publication authority, effective refusals, tool and hook de
 
 After a hook denies only the method of this route's row edit, apply the owner-decisions granted protected-row re-anchor; it is the one exception to the alternate-form sentence below.
 When the brief names the sanctioned row re-anchor tool, run it once in place of native Edit with the brief's row file, row ID, subject, base and head; the tool derives and checks both fields and prints only results. A tool refusal or hook denial ends the attempt. This tool is the only process form for a protected row edit. The tool's statement scan and whole-file `tomllib` check print no row text and are the only exception to the no-whole-file-parse rule; the writer still reads no row lines.
+A brief built from the [row re-anchor tool brief](../skills/ship/references/owner-decisions.md#row-re-anchor-tool-brief) with every field filled supplies this route's owner access record, CoC row allowlist, CI and source binding, and method-only denial evidence; verify each field, use `get_input` when available, and refuse a missing or mismatched field.
+The tool run is its own single attempt: an earlier attempt on the row that made zero native Edit calls and zero tool runs, and drew only the listed method-only shell denials, leaves it unused, even when its record marks that attempt consumed; any native Edit call on the row, any tool run, and any refusal or hook denial of the tool command uses it; record the tool attempt on the brief's attempt record before the run.
 
 For newly admitted future operations, use native Edit with replace_all=false.
 Require a unique approved row-ID-contained old_string within the approved row extent.
