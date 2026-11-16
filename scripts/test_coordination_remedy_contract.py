@@ -163,6 +163,18 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, self.refusals)
 
+    def test_writer_and_driver_receipt_lines_include_the_receiptless_fresh_brief(self):
+        receipt = ('when every returned finding matches a known `text_lint.py` formatting message and, '
+                   'for a `text_lint.py` refusal, a resend cites its hook receipt '
+                   'and a fresh brief records it on the run board.')
+        exception = ('Its fresh-brief route also admits one fresh reviewer, and a receiptless hook version '
+                     'records the full refusal text and hook version in place of the receipt id.')
+        for name in ('driver.md', 'driver--sol.md', 'writer--sol.md',
+                     'writer--sonnet.md', 'writer--fable52.md'):
+            with self.subTest(carrier=name):
+                text = (ROOT / 'plugins/ship/agents' / name).read_text()
+                self.assertIn(receipt + '\n' + exception, text)
+
     def test_lane_derived_route_names_the_granted_re_anchor_exception(self):
         for name in (
             'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
