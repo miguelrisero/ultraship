@@ -3364,7 +3364,27 @@ def load_ledger():
 
 
 # ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, Bash writes to gh configuration, glob `?` and writer-created file names, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
+COMMIT_MESSAGE = re.compile(r"""((?:^|\s)(?:-[A-Za-z]*m|--message)(?:\s+|=))(?:'[^']*'|"[^$`\\"]*")+(?=\s|$)""")
+
+
+def commit_message_removed(command):
+    """Blank each quoted -m/--message value of a plain `git add`/`git commit` chain; return other commands unchanged."""
+    bare = COMMIT_MESSAGE.sub(r"\1''", command)
+    words = re.sub(r"'[^']*'|" r'"[^$`\\"]*"', "''", command)
+    steps = words.split('&&')
+    if re.fullmatch(r'\s*cd\s+\S+\s*', steps[0]):
+        steps = steps[1:]
+    if (not steps or re.search(r"""[\n;|&()<>$`\\"'#]""", words.replace('&&', '').replace("''", ''))
+            or re.search(r'\s(?:-[A-Za-z]*[ect]|--[ert])', words)
+            or not all(re.fullmatch(r'\s*git\s+(?:-C\s+\S+\s+)?(?:add|commit)(?:\s+\S+)*\s*', step)
+                       for step in steps)):
+        return command
+    return bare
+
+
 def writer_gh_denial(command, depth=0):
+    if depth == 0:
+        command = commit_message_removed(command)
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = re.sub(r'''['"\\]''', '', command)
     if not re.search(r'\bgh\b', unquoted):

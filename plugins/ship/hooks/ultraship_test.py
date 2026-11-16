@@ -711,6 +711,66 @@ class WriterGitHubGuardTests(unittest.TestCase):
                         GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
         self.writer = {'agent_type': 'ship:writer--sol', 'tool_name': 'Bash'}
 
+    def test_writer_plain_commit_message_text_is_admitted(self):
+        commands = (
+            "git commit -m 'fix: no gh calls'",
+            "cd /repo && git add a.py && git commit -m 'fix: no gh calls'",
+            'git -C /repo commit -m "fix: no gh calls"',
+            "git commit --message 'no gh calls'",
+            "git commit --message='no gh calls'",
+            "git commit -m 'fix: message\nno gh calls'",
+            "git commit -m 'docs: explain `gh api` reads'",
+            "gh api -X GET search/issues -f 'q=gh in:title'",
+            "gh api -X GET search/code -f 'q=label:gh-pages is:open'",
+            'git -c remote.origin.url=https://github.com/o/gh-tools.git fetch',
+            "command gh api -X GET search/issues -f 'q=gh in:title'",
+            "env gh api -X GET search/issues -f 'q=gh in:title'",
+            "timeout 60 gh api -X GET search/issues -f 'q=gh in:title'",
+            "env GH_PAGER=cat gh api -X GET search/issues -f 'q=gh in:title'",
+            'gh api -X GET repos/o/r/contents/env -f ref=gh',
+            'GH_PAGER=cat gh pr view 1',
+            "git commit -am 'fix: no gh calls'",
+            "git add a.py && git commit -m 'fix: no gh calls' -m 'second gh paragraph'",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_executable_commit_message_shapes_are_denied(self):
+        commands = (
+            'git commit -m "$(gh api repos/o/r)"',
+            'git commit -m x; gh issue close 1',
+            'git commit -m x && gh issue close 1',
+            'git commit -m x || gh issue close 1',
+            'git commit -m x & gh issue close 1',
+            'git commit -m x | gh issue close 1',
+            'git commit -m x\ngh issue close 1',
+            "git commit -m 'x; gh pr merge 1' | sh",
+            'git commit -m "`gh pr merge 1`"',
+            "sh -c \"git commit -m 'gh pr comment 1 --body y'\"",
+            "git commit -m 'gh calls' && sh -c x",
+            "x='gh issue close 1'; GIT_EDITOR=$x git commit -e -m x",
+            "git -c alias.x='!gh issue close 1' x",
+            "env -iS 'gh issue close 1'",
+            "GIT_EDITOR='command gh api repos/o/r/pulls/1/merge' git config --file=-XPUT --edit",
+            "git commit -e -m 'gh issue close 1'",
+            "git commit -em 'gh issue close 1'",
+            "git commit --edit -m 'gh issue close 1'",
+            "git commit -c HEAD -m 'gh issue close 1'",
+            "git commit -t tpl -m 'gh issue close 1'",
+            "GIT_EDITOR=vim git commit -m 'gh issue close 1'",
+            "git -c core.editor=vim commit -m 'gh issue close 1'",
+            "git commit -m 'gh issue close 1' > out.txt",
+            "git add 'gh issue close 1' && git commit -m x",
+            "git commit -m x 'gh issue close 1'",
+            "git commit 'x -m '; gh issue close 1; ' y'",
+            'git commit "x -m "; gh issue close 1; " y"',
+            'git commit -m "prefix -m \'$(gh issue close 1)\'"',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
     def test_writer_gh_reads_are_admitted(self):
         for command in ('gh api repos/x/y/pulls/1', 'gh api -X GET repos/x/y/pulls/1',
                         'gh api --method=GET repos/x/y/pulls/1', 'gh pr view 1', 'gh pr checks 1', 'gh run view 1'):
