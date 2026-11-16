@@ -87,6 +87,8 @@ Each pending result keeps its recorded ledger path and run identity across branc
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
 ```
 
+Copy both paths from the Stop diagnostic; run the command alone on one line with evidence in single quotes.
+
 Use the pending file and result ID from the Stop diagnostic. Supply the actual agent, reviewed SHA, verdict and evidence from the completed result. The command appends an `account-result` record to the recorded ledger. It preserves all existing rows and the run's closure, and exact retries append nothing. This bookkeeping covers only the named result; it grants no pipeline step, review or completion evidence of its own. Never reopen a closed run or invent review rows to clear Stop.
 
 When an accounted result is bound to another result's row, move its credit with:
