@@ -2652,9 +2652,9 @@ def test_shape_word(raw, group=False):
     return True
 
 
-def test_operand_shape(tokens, groups):
-    """True only for the command shape whose `[` and `test` operands count as data; any other word fails it."""
-    count = len(tokens)
+def test_operand_limit(tokens, groups):
+    """End offset of the longest whole-segment prefix whose `[` and `test` operands count as data."""
+    count, boundary = len(tokens), 0
 
     def touching(index):
         return index + 1 < count and tokens[index][3] == tokens[index + 1][2]
@@ -2693,33 +2693,35 @@ def test_operand_shape(tokens, groups):
     while index < count:
         raw = tokens[index][0]
         if raw in {';', '\n', '|', '&'}:
+            separator = tokens[index][2]
             if raw == '&' or raw == '|' and touching(index) and tokens[index + 1][0] in {'|', '&'}:
                 if not (touching(index) and tokens[index + 1][0] == raw):
-                    return False
+                    return boundary
                 index += 1
             if not complete(segment):
-                return False
+                return boundary
+            boundary = separator
             segment, index = fresh(), index + 1
         elif raw in {'(', ')', '`'}:
-            return False
+            return boundary
         elif raw in {'<', '>'}:
             end = index + 1 + (raw == '>' and touching(index) and tokens[index + 1][0] == '>')
             follows = end < count and touching(end - 1)
             if descriptor and end == index + 1 and follows and tokens[end][0] == '&':
                 if not (end + 1 < count and touching(end) and tokens[end + 1][0] == '1'):
-                    return False
+                    return boundary
                 index, descriptor = end + 2, False
                 continue
             if end >= count or tokens[end][0] in TEST_SHAPE_OPERATORS:
-                return False
+                return boundary
             descriptor = False
             index = word_end(end)
             if index is None:
-                return False
+                return boundary
         elif raw == '2' and touching(index) and tokens[index + 1][0] == '>':
             descriptor, index = True, index + 1
         elif segment['fi'] or segment['closed']:
-            return False
+            return boundary
         elif segment['position']:
             assignment = TEST_SHAPE_ASSIGNMENT.match(raw)
             if not segment['assigned'] and raw in {'if', 'then', 'elif', 'else', '!'}:
@@ -2729,13 +2731,13 @@ def test_operand_shape(tokens, groups):
                 index += 1
             elif assignment:
                 if not test_shape_name(assignment.group(1)):
-                    return False
+                    return boundary
                 index = word_end(index)
                 if index is None:
-                    return False
+                    return boundary
                 segment['assigned'] = True
             elif segment['assigned'] or raw not in TEST_SHAPE_COMMANDS and not TEST_SHAPE_PATH.fullmatch(raw):
-                return False
+                return boundary
             else:
                 segment['command'], segment['position'] = raw, False
                 segment['bracket'] = raw == '['
@@ -2747,8 +2749,8 @@ def test_operand_shape(tokens, groups):
             segment['args'].append(raw)
             index = word_end(index)
             if index is None:
-                return False
-    return complete(segment)
+                return boundary
+    return tokens[-1][3] if tokens and complete(segment) else boundary
 
 
 UNPROVEN_DIRECTORY_LABEL = ('inline interpreter code rule (program from a pipe)'
@@ -2898,8 +2900,8 @@ def inline_interpreter_denial(command, cwd=None):
             if subscript_reason is None:
                 subscript_reason = 'array subscript evaluation rule (parse error)'
         command_positions = shell_command_positions(tokens)
-        test_safe = (top_level and not TEST_SHAPE_REDEFINE.search(command)
-                     and test_operand_shape(tokens, groups))
+        limit = (test_operand_limit(tokens, groups)
+                 if top_level and not TEST_SHAPE_REDEFINE.search(command) else 0)
         segments, words, piped, pipe_groups = [], [], False, []
         runtime_paths = inherited_paths or nested_paths or shell_defines_function(tokens, command_positions) or any(
             token[1] in {'while', 'until', 'for', 'select'} and token[2] in command_positions for token in tokens)
@@ -2978,7 +2980,7 @@ def inline_interpreter_denial(command, cwd=None):
                     and unresolved_shell_word(first[0])):
                 return 'inline interpreter code rule (unresolved command word)'
             test_operands, test_commands, closing = set(), set(), None
-            if test_safe:
+            if words and words[-1][3] <= limit:
                 reserved_prefix = True
                 for _, value, start, _ in words:
                     if closing is not None:
