@@ -241,7 +241,10 @@ Change nothing else in the named file: no existing line, row, field, pin, or tab
 Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.
 Read, search, or parse no existing content of the named file.
 Permit the applying writer to parse only the appended text, never the named file, to check that it is valid TOML.
-Append with one isolated `python3 -I -` heredoc that imports only `tomllib`, checks the appended text with `tomllib.loads`, and appends to the literal absolute row-file path.
+Append with `python3 -I "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/retire-rows.py" <record-file>`, one call per named file.
+Write the record file with native Write outside the repository checkout: a JSON object with `row_file`, the literal absolute row-file path, and `rows`, a list of objects with `id` and `reason`.
+The script checks only the appended text with `tomllib.loads`, never reads the named file, and appends to that path.
+Use this command for new retirements only; a recorded refusal of an earlier retirement stays final.
 Run nothing else in that Bash call; get the line counts with `git diff --numstat` in a later, separate call.
 Check the retirement commit only with content-free line counts for each named file: added lines only, zero deleted lines.
 Refuse a row whose guarded behavior still exists in any form, including a changed form at the same site, or that moved or has a replacement row.
