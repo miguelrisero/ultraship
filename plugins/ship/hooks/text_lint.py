@@ -121,16 +121,22 @@ def hold_wall(text):
 
 
 def check(text, kind='result'):
-    plain = text if kind == 'peer' else ''.join(VisibleText(text).parts)
-    prose = re.sub(r'`[^`]*`', '', plain)
-    token_prose = re.sub(r'[<>]', ' ', prose) if kind == 'peer' else prose
-    tokens = [t for t in token_prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
-    long = [t for t in tokens if len(t) >= 22]
+    visible = ''.join(VisibleText(text).parts)
+    plain = peer_text(text) if kind == 'peer' else visible
+    # A peer reads plain text; main's HTML view of the raw text keeps every word and sentence refusal main made.
+    views = (plain, visible) if kind == 'peer' else (plain,)
+    shorthand = long_sentence = False
+    for index, view in enumerate(views):
+        prose = re.sub(r'`[^`]*`', '', view)
+        token_prose = re.sub(r'[<>]', ' ', prose) if kind == 'peer' and index == 0 else prose
+        tokens = [t for t in token_prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
+        long = [t for t in tokens if len(t) >= 22]
+        shorthand |= len(long) >= 3 or bool(tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2
+        long_sentence |= any(len(s.split()) > 25 for s in re.split(r'(?<=[.!?])\s+|\n+', prose))
     errors = []
-    if len(long) >= 3 or (tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2:
+    if shorthand:
         errors.append('Separate glued words with spaces; remove compressed shorthand.')
-    sentences = re.split(r'(?<=[.!?])\s+|\n+', prose)
-    if any(len(s.split()) > 25 for s in sentences):
+    if long_sentence:
         errors.append('Write at most 25 words per sentence.')
     sections = ('Facts', 'Decision', 'Next') if kind == 'peer' else (
         ('What is wrong', 'Why now', 'Options', 'Recommendation', 'If no answer') if kind == 'decision' else ())
@@ -159,7 +165,7 @@ def outgoing(event):
         if tool == 'SendMessage':
             text = args.get('message') or args.get('content') or ''
             if text:  # Native subscriptions and lifecycle controls can have no prose body.
-                collect(check, peer_text(text), 'peer')
+                collect(check, text, 'peer')
                 if not SUBAGENT.fullmatch(str(args.get('to', '')).strip()):  # A brief to a child carries its restrictions.
                     collect(hold_wall, text)
         elif tool.endswith(('create_input', 'update_input')):
@@ -550,6 +556,4 @@ if __name__ == '__main__':
         else:
             hook(event)
     else:
-        kind = sys.argv[1] if len(sys.argv) > 1 else 'result'
-        text = sys.stdin.read()
-        check(peer_text(text) if kind == 'peer' else text, kind)
+        check(sys.stdin.read(), sys.argv[1] if len(sys.argv) > 1 else 'result')

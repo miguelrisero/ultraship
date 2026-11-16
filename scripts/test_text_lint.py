@@ -277,6 +277,28 @@ class TextLintTests(unittest.TestCase):
                                      ['Keep any new hold in one line, drop restated standing holds, '
                                       'and send what changed and the next action.'])
 
+    def test_peer_token_checks_keep_main_html_view(self):
+        for message in (
+                'Facts: deadline<b></b>2026 release<b></b>2027\nDecision: Continue.\nNext: Resume.',
+                'Facts: abcdefghijklmnopqrstuv <b>one</b> <b>two</b> <b>three</b> <b>four</b>\n'
+                'Decision: Continue.\nNext: Resume.'):
+            with self.subTest(message=message):
+                event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'peer', 'message': message}}
+                with self.assertRaises(text_lint.FormatError) as refusal:
+                    text_lint.outgoing(event)
+                self.assertEqual(refusal.exception.findings,
+                                 ['Separate glued words with spaces; remove compressed shorthand.'])
+
+    def test_peer_sentence_check_keeps_main_html_view(self):
+        message = ('Facts: one two three four five six seven eight nine ten eleven twelve <!--\n--> '
+                   'thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone '
+                   'twentytwo twentythree twentyfour twentyfive twentysix.\n'
+                   'Decision: Continue.\nNext: Resume.')
+        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'peer', 'message': message}}
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.outgoing(event)
+        self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+
     def test_peer_hold_wall_reads_text_after_tag_like_text(self):
         message = ('Facts: Checks wait.\ncat <<EOF\n'
                    'Preserve every hold. Custody stays. Admission waits. Preserve the refusal.\n'
