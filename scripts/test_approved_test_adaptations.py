@@ -588,6 +588,11 @@ EXPECTED_FALSE_CLAIM_ROUTE = [
     'After that report, the CoC has the follow-up row merged or the retirement reverted; a retirement never stays on main without a merged follow-up row.',
     'The CoC decides any revert of this retirement.',
     'The lane that applied the retirement opens the revert as a normal PR with an independent review.',
+    'A revert that restores retired rows is a CoC-owned protected edit, limited to the rows that this PR retired.',
+    "Only a `git revert` of this PR's merge commit may restore those rows; a hand edit never restores a row.",
+    'The CoC names the revert commit in a frozen file before the push.',
+    "Each restored row file must equal its blob before the retirement, byte for byte; the CoC's git check proves it, without a not-weaker review.",
+    'Any other row change in the revert stops the push.',
     'Refuse the retirement when the claim is still true at the final code, or when the reviewer cannot confirm any requirement.',
     'Refuse on any doubt about any requirement.',
     'Bind the review receipt to reviewer identity, approving verdict, decision file SHA256, frozen commit SHA, row-file paths, row IDs, cited `file:line`, cited hunk and follow-up row ID.',
@@ -642,6 +647,11 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             "The follow-up row merges within 24 hours of this PR's merge, the same limit as the post-merge battery.",
             'The CoC decides any revert of this retirement.',
             'The lane that applied the retirement opens the revert as a normal PR with an independent review.',
+            'A revert that restores retired rows is a CoC-owned protected edit, limited to the rows that this PR retired.',
+            "Only a `git revert` of this PR's merge commit may restore those rows; a hand edit never restores a row.",
+            'The CoC names the revert commit in a frozen file before the push.',
+            "Each restored row file must equal its blob before the retirement, byte for byte; the CoC's git check proves it, without a not-weaker review.",
+            'Any other row change in the revert stops the push.',
             'Agreement with the PR body alone supplies zero confirmation.',
         ):
             with self.subTest(requirement=line):
