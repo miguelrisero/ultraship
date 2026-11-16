@@ -1635,11 +1635,14 @@ def unsafe_script_path(value, base):
     return path in {'/proc', '/dev'} or path.startswith(('/proc/', '/dev/'))
 
 
-def chdir_wrapper_present(command):
+def chdir_wrapper_present(command, env_directories=None):
     pending, seen = [shell_without_heredoc_bodies(command)], set()
+    targets = []
+    directory_change = split_string = repeated = False
     while pending:
         text = shell_line_continuations(pending.pop())
         if text in seen:
+            repeated = True
             continue
         seen.add(text)
         try:
@@ -1648,6 +1651,8 @@ def chdir_wrapper_present(command):
                 return True
             for index, token in enumerate(tokens):
                 name = os.path.basename(token[1])
+                if token[1] in {'cd', 'pushd'}:
+                    directory_change = True
                 if name in {'chroot', 'nsenter', 'unshare', 'setpriv', 'runuser', 'su', 'systemd-run', 'doas'}:
                     if index + 1 < len(tokens):
                         return True
@@ -1668,10 +1673,26 @@ def chdir_wrapper_present(command):
                         break
                     if option == '--':
                         break
-                    if option in flags:
+                    if name == 'env' and (option in {'-C', '--chdir'}
+                            or option.startswith(('-C', '--chdir='))):
+                        separate = option in {'-C', '--chdir'}
+                        if separate:
+                            if cursor + 1 >= len(tokens):
+                                return True
+                            raw, target = tokens[cursor + 1][:2]
+                        else:
+                            offset = 2 if option.startswith('-C') else len('--chdir=')
+                            raw, target = tokens[cursor][0], option[offset:]
+                        if (unresolved_shell_word(raw) or not os.path.isabs(target)
+                                or '..' in target.split('/') or not re.fullmatch(r'[\w./-]+', target)):
+                            return True
+                        targets.append(target)
+                        cursor += 2 if separate else 1
+                    elif option in flags:
                         cursor += 1
                     elif option in values:
                         if name == 'env' and option in {'-S', '--split-string'}:
+                            split_string = True
                             if cursor + 1 >= len(tokens):
                                 return True
                             payload = tokens[cursor + 1][1]
@@ -1681,12 +1702,14 @@ def chdir_wrapper_present(command):
                         cursor += 2
                     elif '=' in option and option.partition('=')[0] in values:
                         if name == 'env' and option.startswith('--split-string='):
+                            split_string = True
                             payload = option.partition('=')[2]
                             if '\\' in payload or '$' in payload:
                                 return True
                             pending.append('env ' + payload)
                         cursor += 1
                     elif name == 'env' and option.startswith('-S') and len(option) > 2:
+                        split_string = True
                         payload = option[2:]
                         if '\\' in payload or '$' in payload:
                             return True
@@ -1697,6 +1720,10 @@ def chdir_wrapper_present(command):
             pending.extend(token[1] for token in nested_shell_strings(tokens, text))
         except ValueError:
             return True
+    if targets:
+        if env_directories is None or len(targets) != 1 or directory_change or split_string or repeated:
+            return True
+        env_directories.extend(targets)
     return False
 
 
@@ -2717,10 +2744,13 @@ def test_operand_shape(tokens, groups):
 
 
 def inline_interpreter_denial(command, cwd=None):
-    chdir_wrapper = chdir_wrapper_present(command)
+    env_directories = []
+    chdir_wrapper = chdir_wrapper_present(command, env_directories)
     safe_directory = not chdir_wrapper and safe_directory_state(command, cwd)
-    base = os.path.realpath(cwd or os.getcwd())
-    safe_base = base not in {'/proc', '/dev'} and not base.startswith(('/proc/', '/dev/'))
+    bases = [os.path.realpath(cwd or os.getcwd())]
+    bases.extend(os.path.realpath(target) for target in env_directories)
+    safe_base = all(base not in {'/proc', '/dev'} and not base.startswith(('/proc/', '/dev/'))
+                    for base in bases)
     shell = literal_variables(shell_without_heredoc_bodies(command))
     lines = command.splitlines(keepends=True)
     if lines and ANY_PYTHON_HEREDOC.fullmatch(lines[0]) and not process_heredoc_denial(command):
@@ -2872,8 +2902,10 @@ def inline_interpreter_denial(command, cwd=None):
                 except Exception:
                     subscript_reason = 'array subscript evaluation rule (parse error)'
             reads_pipe = inherited[0] or piped or any(word[0] == '<' for word in words)
-            segment_relative_denied = (redirected or not safe_base or chdir_wrapper
-                                       or directory and not safe_directory or reads_pipe)
+            unproven_directory = chdir_wrapper or directory and not safe_directory
+            segment_relative_denied = redirected or not safe_base or unproven_directory or reads_pipe
+            directory_label = ('inline interpreter code rule (program from a pipe)'
+                               ': relative script after an unproven directory change')
             prefix_end = next((index for index, word in enumerate(words)
                                if not re.match(r'[A-Za-z_][A-Za-z0-9_]*=', word[1])), len(words))
             first = words[prefix_end] if prefix_end < len(words) else None
@@ -2938,20 +2970,30 @@ def inline_interpreter_denial(command, cwd=None):
                     if arguments == ['--version']:
                         continue
                     script = arguments[0] if arguments else ''
-                    if (not script or script.startswith('-') or stdin_program_path(script) or unsafe_script_path(script, base)
+                    unsafe_script = any(unsafe_script_path(script, base) for base in bases)
+                    if (not script or script.startswith('-') or stdin_program_path(script) or unsafe_script
                             or (segment_relative_denied or piped) and not os.path.isabs(script)
                             or not re.fullmatch(r'[\w./:@%+,-]+', words[index + 1][0])):
-                        return ('inline interpreter code rule (program from a pipe)' if piped_input or stdin_program_path(script) or unsafe_script_path(script, base)
+                        if (script and not script.startswith('-') and not os.path.isabs(script)
+                                and unproven_directory and safe_base and not unsafe_script
+                                and not stdin_program_path(script) and not piped_input and not reads_pipe
+                                and re.fullmatch(r'[\w./:@%+,-]+', words[index + 1][0])):
+                            return directory_label
+                        return ('inline interpreter code rule (program from a pipe)' if piped_input or stdin_program_path(script) or unsafe_script
                                 or (segment_relative_denied or piped) and script and not os.path.isabs(script)
                                 else f'inline interpreter code rule ({name})')
                 elif not arguments or any(stdin_program_path(argument) for argument in arguments):
                     return 'inline interpreter code rule (program from a pipe)'
                 else:
                     kind, flags, operand, offset = python_program(arguments)
-                    if (kind == 'script' and operand < len(arguments) and (
-                            (segment_relative_denied or piped) and not os.path.isabs(arguments[operand])
-                            or unsafe_script_path(arguments[operand], base))):
-                        return 'inline interpreter code rule (program from a pipe)'
+                    if kind == 'script' and operand < len(arguments):
+                        script = arguments[operand]
+                        unsafe_script = any(unsafe_script_path(script, base) for base in bases)
+                        if (segment_relative_denied or piped) and not os.path.isabs(script) or unsafe_script:
+                            if (not os.path.isabs(script) and unproven_directory and safe_base
+                                    and not unsafe_script and not piped_input and not reads_pipe):
+                                return directory_label
+                            return 'inline interpreter code rule (program from a pipe)'
                     if (piped_input or piped) and (kind not in {'c', 'm', 'script'} or operand >= len(arguments)
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
