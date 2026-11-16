@@ -413,16 +413,20 @@ Use native Edit with replace_all=false; require old_string to cover the full row
 Refuse unclear extent, missing or multiple matches, and any unapproved neighboring content.
 Change nothing else in the named file: no other line, row, field, pin, or table.
 Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.
-Commit the retirement alone; check it only with content-free `git diff --numstat` counts for each named file.
+Commit the retirement alone, with one native Edit per named row and no other change to the named file.
+Check it only with content-free `git diff --numstat` counts for each named file.
+Require the deleted lines to equal the named rows' table lines at the base SHA, and the added lines to equal the `[[retired]]` table lines.
+Refuse any other count.
 Before the push, require an independent reviewer who differs from the PR author and the applying writer.
-Require the brief to supply read-only trees at the base SHA and at the frozen commit after the edit.
+Require the brief to supply read-only trees at the base SHA and at the frozen commit after the edit, the retirement commit SHA and its line counts.
 Admit each reviewer row read with the driver's reviewer admission record for protected row reads.
+Permit the reviewer to locate each named row ID and read only its row lines at the base SHA and its `[[retired]]` table at the frozen commit.
 Require the reviewer to read each retired row's lines at the base SHA and confirm its row ID, subject file and claim.
 Require the reviewer to confirm that the PR body quotes that claim exactly and that the PR's own diff changes that subject file.
 Require the reviewer to read the cited final code at the frozen commit and to search non-row source and test files for the claimed behavior.
 Require the reviewer to confirm that the claim is false at the final code and that the final code implements the stated behavior change.
 Agreement with the PR body alone supplies zero confirmation.
-Require the reviewer to confirm that the retirement commit replaces only the named row tables, each with one `[[retired]]` table.
+Require the reviewer to confirm that the retirement commit replaces only the named row tables, each with one `[[retired]]` table, and that the line counts match the lines it read.
 Require a follow-up row that guards the new behavior, in this PR or in a follow-up PR that this PR body names by direct URL.
 Create the follow-up row only under its own applicable route; this route grants zero row-creation authority.
 Require the same reviewer to read the follow-up row at its frozen commit and confirm that it is not weaker than the retired row.
