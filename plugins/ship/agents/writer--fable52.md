@@ -261,6 +261,12 @@ Require the brief to select this route and record why an identical-operation re-
 The exact CoC decision supplies this route's scoped read/edit authority under the owner's testing delegation: "The CoC decides CI/CD, testing and tooling items for me."
 Require an exact CoC decision naming the row-file paths, unique row IDs and permitted mutant fields before any protected read or edit.
 Bind the decision and row-review admission to the repository, PR, base SHA, author head SHA, frozen final commit and failing CI identity.
+The exact CoC decision may be a CoC decision file that the brief names by absolute path and SHA256.
+Before any protected read, verify the file SHA256 and that the file binds the repository, PR, base SHA, author head SHA, tested merge SHA and tree, failing CI run, attempt and job.
+Also verify that the file binds one pre-edit commit, the row-file paths, the unique row IDs and the permitted fields.
+For that file, the frozen final commit is your single commit whose parent is the named pre-edit commit and that changes only the named row files.
+Refuse a SHA256 mismatch, a missing or different binding, a passed expiry that the file states, and a branch head other than the pre-edit commit before the edit.
+A decision file authorizes only designated-test and mutant changes; a claim change still requires a current task-specific owner event.
 Require the recorded base/head diff to show that the PR's own rewrite breaks each named row.
 Require the tested merge to contain the recorded base and author head, and the frozen final commit to contain the author head.
 Permit only named row-ID lookup and approved row-line reads in the named files at the named commits.

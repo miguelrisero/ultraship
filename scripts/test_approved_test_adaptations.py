@@ -216,6 +216,15 @@ EXPECTED_STANDING_GRANT_DECISION = [
     'That grant supplies zero claim or subject change authority and waives no other requirement of this route.',
 ]
 
+EXPECTED_REWRITTEN_DECISION_FILE = [
+    'The exact CoC decision may be a CoC decision file that the brief names by absolute path and SHA256.',
+    'Before any protected read, verify the file SHA256 and that the file binds the repository, PR, base SHA, author head SHA, tested merge SHA and tree, failing CI run, attempt and job.',
+    'Also verify that the file binds one pre-edit commit, the row-file paths, the unique row IDs and the permitted fields.',
+    'For that file, the frozen final commit is your single commit whose parent is the named pre-edit commit and that changes only the named row files.',
+    'Refuse a SHA256 mismatch, a missing or different binding, a passed expiry that the file states, and a branch head other than the pre-edit commit before the edit.',
+    'A decision file authorizes only designated-test and mutant changes; a claim change still requires a current task-specific owner event.',
+]
+
 EXPECTED_SHARED_MUTANT_RULE = (
     'The ban on weakening a test and the independent not-weaker review still apply.\n'
     'Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route or Rewritten-code row route.\n'
@@ -476,6 +485,33 @@ EXPECTED_NEW_ROW_BOUNDARY = [
 
 
 class ApprovedTestAdaptationsTests(unittest.TestCase):
+    def test_rewritten_code_writers_accept_sha_bound_decision_files(self):
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            _, heading, after = text.partition('#### Rewritten-code row route\n')
+            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+            with self.subTest(path=name):
+                self.assertTrue(heading)
+                self.assertIn('\n'.join([
+                    'Bind the decision and row-review admission to the repository, PR, base SHA, author head SHA, frozen final commit and failing CI identity.',
+                    *EXPECTED_REWRITTEN_DECISION_FILE,
+                ]), route)
+                self.assertIn('Change only the paired `old` and `new` fields, exact CoC-approved mutant fields and any designated-test change the exact CoC decision names.', route)
+
+    def test_rewritten_code_decision_files_keep_claim_changes_owner_only(self):
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            _, heading, after = text.partition('#### Rewritten-code row route\n')
+            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+            with self.subTest(path=name):
+                self.assertTrue(heading)
+                self.assertIn('Keep row ID and claim unchanged; change the designated test only when the exact CoC decision names that change.', route)
+                self.assertIn('Require a current task-specific owner event for any claim change.', route)
+                self.assertEqual([
+                    line for line in route.splitlines()
+                    if 'decision file' in line.lower() and 'claim' in line.lower()
+                ], [EXPECTED_REWRITTEN_DECISION_FILE[-1]])
+
     def test_rewritten_code_rows_require_exact_coc_scope_and_independent_semantic_review(self):
         carriers = (
             'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
