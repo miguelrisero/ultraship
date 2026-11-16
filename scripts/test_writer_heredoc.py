@@ -100,6 +100,26 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
+    def test_case_pattern_openers_cannot_hide_false_closers(self):
+        for command in (
+            'for ((i=0;i<1;i++)); do case x in x|if|done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in a) :;; x|esac|done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in a) :;; (if|done) :;; esac; done | cat; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_case_closers_and_nested_bodies_keep_valid_numeric_proof(self):
+        for command in (
+            '((n=0)); case x in a) :;; esac | cat; (( n++ ))',
+            '((n=0)); (case x in a) :;; esac); (( n++ ))',
+            'for ((i=0;i<3;i++)); do case $i in 1) if true; then echo $((i)); fi;; esac; done',
+            'for ((i=0;i<3;i++)); do case $i in 1) for x in a; do echo $((i)); done;; esac; done',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_case_and_subshell_commands_keep_valid_numeric_proof(self):
         for command in (
             'for ((i=0;i<3;i++)); do case $i in 1) echo $((i));; esac; done | cat',
