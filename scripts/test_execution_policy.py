@@ -60,6 +60,43 @@ class ReviewerSearchTests(unittest.TestCase):
     def assert_not_canonical(self, tool, arguments, **event):
         self.assert_rule(tool, arguments, 'exact absolute path', **event)
 
+    def test_triage_and_verifiers_share_the_reviewer_search_boundary(self):
+        cases = (
+            ('Grep', {'path': self.root + '/backend', 'glob': '!tests/mutation/**',
+                      'pattern': 'identifier'}, 'cannot access explicit tests/mutation/'),
+            ('Grep', {'path': self.root + '/backend', 'pattern': 'identifier'},
+             'cannot access explicit tests/mutation/'),
+            ('Read', {'file_path': self.root + '/tests/mutation/x.txt'},
+             'cannot access explicit tests/mutation/'),
+            ('Grep', {'pattern': 'identifier'}, 'scope searches to an explicit path'),
+            ('mcp__fff__grep', {'query': 'identifier'}, 'cannot use mcp__ tools'),
+        )
+        for agent in ('ship:triage--sol', 'triage--sol',
+                      'ship:verifier--fable', 'ship:verifier--astra'):
+            for tool, arguments, rule in cases:
+                with self.subTest(agent=agent, tool=tool, arguments=arguments):
+                    reviewer = self.decision(tool, arguments)
+                    decision = self.decision(tool, arguments, agent)
+                    self.assertEqual(decision.get('permissionDecision'), 'deny')
+                    self.assertIn(rule, decision['permissionDecisionReason'])
+                    self.assertEqual(decision['permissionDecisionReason'],
+                                     reviewer['permissionDecisionReason'])
+            with self.subTest(agent=agent, scope='ordinary'):
+                self.assertEqual(self.decision('Grep', {'path': self.root + '/src',
+                                                       'pattern': 'identifier'}, agent), {})
+
+    def test_researcher_and_writer_keep_their_search_decisions(self):
+        with patch.object(ultraship, 'STATE', Path(self.root, 'state')):
+            for agent in ('ship:researcher--luna', 'ship:writer--sol'):
+                for arguments in (
+                    {'path': self.root + '/backend', 'glob': '!tests/mutation/**', 'pattern': 'identifier'},
+                    {'path': self.root + '/backend', 'pattern': 'identifier'},
+                    {'path': self.root + '/src', 'pattern': 'identifier'},
+                    {'pattern': 'identifier'},
+                ):
+                    with self.subTest(agent=agent, arguments=arguments):
+                        self.assertEqual(self.decision('Grep', arguments, agent), {})
+
     def test_explicit_protected_paths_in_each_tool_argument(self):
         for protected in (self.root + '/tests/mutation/x.txt',
                           self.root + '/pkg/tests/mutation/x.txt', '**/tests/mutation/**',

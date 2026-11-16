@@ -3833,7 +3833,7 @@ def pre(data):
             deny(f'Research budget of {RESEARCH_BUDGET} discovery calls is spent. Return your answer '
                  'with the evidence you have and list what stays unconfirmed.')
         counter.write_text(str(used + 1))
-    if role(data, 'reviewer') and (tool in ('Read', 'Grep', 'Glob', 'LSP', 'WebFetch') or tool.startswith('mcp__')):
+    if LEDGER_ROLES.match(data.get('agent_type') or '') and (tool in ('Read', 'Grep', 'Glob', 'LSP', 'WebFetch') or tool.startswith('mcp__')):
         if tool.startswith('mcp__'):
             deny('Reviewers cannot use mcp__ tools. Use Grep or Glob with an explicit path.')
         try:

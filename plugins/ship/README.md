@@ -36,7 +36,7 @@ The plugin defines 21 agents. [`skills/ship/references/roster.md`](skills/ship/r
 - Writers: `gpt-6.1-sol` at high effort, with `claude-sonnet-5-5` (high) as the fallback.
 - Reviewers: `gpt-6.1-sol`, `claude-opus-5-5`, `gpt-6-astra`, `gpt-6-luna`, and `kimi-k3`.
 - Opt-in Fable 5.2 seats: `writer--fable52` and `reviewer--fable52` run `claude-fable-5-2`. Dispatch them only when the brief or the owner names Fable 5.2.
-- Read-only agents get read, LSP, fff, and web tools only. Reviewers use no MCP (`mcp__`) tools, and their LSP use is hover and documentSymbol only.
+- Read-only agents get read, LSP, and web tools only. Planners and researchers also get fff tools. Reviewers, triage and verifiers use no MCP (`mcp__`) tools, and their LSP use is hover and documentSymbol only.
 
 Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-shunt.md).
 
@@ -46,7 +46,7 @@ Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-s
 |---|---|---|
 | Model guard | PreToolUse `Agent` | Denies a `model` override on a `ship:*` agent |
 | Role guard | PreToolUse `Bash`, `Edit`, `Write` | Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch. The ban covers every path. The hook denies common CLI forms and harness-config edits. |
-| Reviewer boundary | PreToolUse `Read`, `Grep`, `Glob`, `LSP`, `WebFetch`, `mcp__fff__*` | A reviewer passes exact canonical absolute paths and scopes every search. The hook denies `tests/mutation` paths, `.git` paths, Claude data under `~/.claude` and `CLAUDE_CONFIG_DIR` (except `CLAUDE.md`, `plugins/cache`, and `plugins/marketplaces`), and the `mcp__fff__*` tools and the three `mcp__bettercoding__` Input tools, the only `mcp__` tools the hook sees. A driver-written admission record admits Read or Grep of the exact row files it lists. |
+| Reviewer, triage and verifier boundary | PreToolUse `Read`, `Grep`, `Glob`, `LSP`, `WebFetch`, `mcp__fff__*` | Reviewers, triage and verifiers pass exact canonical absolute paths and scope every search. The hook denies `tests/mutation` paths, `.git` paths, Claude data under `~/.claude` and `CLAUDE_CONFIG_DIR` (except `CLAUDE.md`, `plugins/cache`, and `plugins/marketplaces`), and the `mcp__fff__*` tools and the three `mcp__bettercoding__` Input tools, the only `mcp__` tools the hook sees. A driver-written admission record admits Read or Grep of the exact row files it lists. |
 | Review-thread guard | PreToolUse `Bash`, every caller | Requires `thread_reply.py` for review-thread replies and resolves. The helper checks the thread's repository and PR number through GitHub. |
 | Row re-anchor gate | PreToolUse `Bash`, every caller | Admits only the exact isolated `row_reanchor.py` command for a writer with a matching driver-written admission record. |
 | Research budget | PreToolUse discovery tools | Denies the 41st discovery call of a researcher |
@@ -71,7 +71,7 @@ The tool derives both fields from Git blobs, preserves the whole-file mutant hun
 A tool refusal or hook denial ends the attempt.
 See [Row re-anchor tool admission record](skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
 
-The hook sees these tools: `Agent`, `Task`, `Bash`, `Edit`, `Write`, `NotebookEdit`, `WebSearch`, `Read`, `Grep`, `Glob`, `LSP`, `WebFetch`, `mcp__fff__*`, and the three `mcp__bettercoding__` Input tools (`create_input`, `update_input`, `set_input_status`). Reviewer agents list no MCP tools, so no other `mcp__` tool reaches a reviewer.
+The hook sees these tools: `Agent`, `Task`, `Bash`, `Edit`, `Write`, `NotebookEdit`, `WebSearch`, `Read`, `Grep`, `Glob`, `LSP`, `WebFetch`, `mcp__fff__*`, and the three `mcp__bettercoding__` Input tools (`create_input`, `update_input`, `set_input_status`). Reviewer, triage and verifier agents list no MCP tools, so no other `mcp__` tool reaches these agents.
 
 An exception inside the `pre` hook denies every tool call for every caller. A process failure blocks every tool the PreToolUse hooks see. This includes missing `python3`, syntax or import errors, timeouts, and bad exit codes. Input that fails JSON parsing or contains a value other than an object denies the call.
 
