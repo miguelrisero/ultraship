@@ -2652,7 +2652,7 @@ def test_shape_word(raw, group=False):
     return True
 
 
-def test_operand_shape(tokens, groups):
+def test_operand_limit(tokens, groups):
     """End offset of the longest whole-segment prefix whose `[` and `test` operands count as data."""
     count, boundary = len(tokens), 0
 
@@ -2900,7 +2900,7 @@ def inline_interpreter_denial(command, cwd=None):
             if subscript_reason is None:
                 subscript_reason = 'array subscript evaluation rule (parse error)'
         command_positions = shell_command_positions(tokens)
-        limit = (test_operand_shape(tokens, groups)
+        limit = (test_operand_limit(tokens, groups)
                  if top_level and not TEST_SHAPE_REDEFINE.search(command) else 0)
         segments, words, piped, pipe_groups = [], [], False, []
         runtime_paths = inherited_paths or nested_paths or shell_defines_function(tokens, command_positions) or any(

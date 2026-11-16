@@ -1896,7 +1896,8 @@ class WriterHeredocTests(unittest.TestCase):
     def test_checksum_comparison_before_launcher_keeps_operands_as_data(self):
         """Catch checksum operands refused as command words before a later launcher."""
         digest = 'a' * 64
-        check = "test \"$(sha256sum /opt/tools/run/gate.sh | cut -d ' ' -f1)\" = " + digest
+        operands = "\"$(sha256sum /opt/tools/run/gate.sh | cut -d ' ' -f1)\" = " + digest
+        check = 'test ' + operands
         launch = ('env -u GATE_LOAD bash /opt/tools/run/gate.sh --deadline 1900000000 '
                   '/work/scratch/battery-checks.sh')
         for command in (
@@ -1904,7 +1905,7 @@ class WriterHeredocTests(unittest.TestCase):
             'cd /work/lane && ' + check + ' && chmod +x /work/scratch/battery-checks.sh && '
             + launch + ' > /work/scratch/checks.log 2>&1; result=$?; '
             'tail -n 30 /work/scratch/checks.log; exit "$result"',
-            '[' + check[len('test'):] + ' ] && ' + launch,
+            '[ ' + operands + ' ] && ' + launch,
             'if ' + check + '; then ' + launch + '; fi',
             'sha256sum --check /work/scratch/gate.sha256 && env -u GATE_LOAD bash '
             '/opt/tools/run/gate.sh --deadline "$(date -u -d \'+600 seconds\' +%s)" '
