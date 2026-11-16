@@ -219,6 +219,64 @@ class TextLintTests(unittest.TestCase):
         event['tool_input']['message'] = message.replace('&#', '&amp;#')
         text_lint.outgoing(event)
 
+    def test_peer_hold_wall_reads_the_helper_label_raw(self):
+        message = ('Facts: Owner helper requ&#101;st: retained. Preserve every hold. '
+                   'Custody stays. Admission waits. Preserve the refusal.\n'
+                   'Decision: Wait.\nNext: Resume.')
+        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'chief', 'message': message}}
+        with self.assertRaises(text_lint.FindingsError) as refusal:
+            text_lint.outgoing(event)
+        self.assertEqual(refusal.exception.findings,
+                         ['Keep any new hold in one line, drop restated standing holds, '
+                          'and send what changed and the next action.'])
+        event['tool_input']['message'] = message.replace('requ&#101;st', 'request')
+        text_lint.outgoing(event)
+
+    def test_peer_hold_wall_counts_words_inside_tags(self):
+        message = ('Facts: <b>Preserve</b> every <b>hold</b>. <b>Custody</b> stays. '
+                   '<b>Admission</b> waits. <b>Preserve</b> the <b>refusal</b>.\n'
+                   'Decision: Wait.\nNext: Resume.')
+        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'chief', 'message': message}}
+        with self.assertRaises(text_lint.FindingsError) as refusal:
+            text_lint.outgoing(event)
+        self.assertEqual(refusal.exception.findings,
+                         ['Keep any new hold in one line, drop restated standing holds, '
+                          'and send what changed and the next action.'])
+
+    def test_peer_hold_wall_refuses_every_form_main_refuses(self):
+        """Main's hold wall refuses every form; the driver's census checks each form against main."""
+        labels = ('', 'Owner helper requ&#101;st: retained.\n',
+                  'Owner helper request&#58; retained.\n', 'Owner <b>helper</b> request: retained.\n')
+        wraps = (
+            ('bold', lambda w: f'<b>{w}</b>'),
+            ('span', lambda w: f'<span class="x">{w}</span>'),
+            ('link', lambda w: f'<a href="/x">{w}</a>'),
+            ('closed-break', lambda w: f'{w}<br/>'),
+            ('break', lambda w: f'{w}<br>'),
+            ('comment', lambda w: f'{w}<!-- c -->'),
+            ('in-word-empty-tag', lambda w: w[:2] + '<b></b>' + w[2:]),
+            ('in-word-tag', lambda w: w[:2] + '<b>' + w[2:] + '</b>'),
+            ('in-word-comment', lambda w: w[:2] + '<!-- c -->' + w[2:]),
+            ('decimal', lambda w: w[:2] + f'&#{ord(w[2])};' + w[3:]),
+            ('hex', lambda w: w[:2] + f'&#x{ord(w[2]):x};' + w[3:]),
+            ('bold-decimal', lambda w: '<b>' + w[:2] + f'&#{ord(w[2])};' + w[3:] + '</b>'),
+            ('path', lambda w: f'{w} /tmp/x'),
+            ('bold-path', lambda w: f'<b>{w}</b> /tmp/{w}'),
+        )
+        for label in labels:
+            for name, wrap in wraps:
+                with self.subTest(label=label, wrap=name):
+                    body = ' '.join(wrap(word) + '.' for word in
+                                    ('Preserve', 'hold', 'Custody', 'Admission', 'Preserve', 'refusal'))
+                    message = 'Facts: ' + label + body + '\nDecision: Wait.\nNext: Resume.'
+                    event = {'tool_name': 'SendMessage',
+                             'tool_input': {'to': 'chief', 'message': message}}
+                    with self.assertRaises(text_lint.FindingsError) as refusal:
+                        text_lint.outgoing(event)
+                    self.assertEqual(refusal.exception.findings,
+                                     ['Keep any new hold in one line, drop restated standing holds, '
+                                      'and send what changed and the next action.'])
+
     def test_peer_hold_wall_reads_text_after_tag_like_text(self):
         message = ('Facts: Checks wait.\ncat <<EOF\n'
                    'Preserve every hold. Custody stays. Admission waits. Preserve the refusal.\n'

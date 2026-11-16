@@ -112,10 +112,12 @@ def hold_wall(text):
     """Six or more hold words in a status message restate standing holds; a brief carries its restrictions."""
     if 'Owner helper request:' in text:
         return
-    prose = re.sub(r'`[^`]*`', '', text)
-    words = ' '.join(t for t in prose.split() if not re.search(r'https?://|/', t))
-    if len(HOLD_WORDS.findall(words)) >= 6:
-        raise ValueError('Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.')
+    # Main's HTML view joins a word that a tag splits; the split view also reads text after a stray `<`.
+    for view in (re.sub(r'[<>]', ' ', peer_text(text)), ''.join(VisibleText(text).parts)):
+        prose = re.sub(r'`[^`]*`', '', view)
+        words = ' '.join(t for t in prose.split() if not re.search(r'https?://|/', t))
+        if len(HOLD_WORDS.findall(words)) >= 6:
+            raise ValueError('Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.')
 
 
 def check(text, kind='result'):
@@ -157,8 +159,7 @@ def outgoing(event):
         if tool == 'SendMessage':
             text = args.get('message') or args.get('content') or ''
             if text:  # Native subscriptions and lifecycle controls can have no prose body.
-                text = peer_text(text)
-                collect(check, text, 'peer')
+                collect(check, peer_text(text), 'peer')
                 if not SUBAGENT.fullmatch(str(args.get('to', '')).strip()):  # A brief to a child carries its restrictions.
                     collect(hold_wall, text)
         elif tool.endswith(('create_input', 'update_input')):
