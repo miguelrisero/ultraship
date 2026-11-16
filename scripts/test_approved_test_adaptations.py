@@ -204,6 +204,14 @@ EXPECTED_COC_ROW_DECISION = [
     'Require a current task-specific owner event for any claim change.',
 ]
 
+EXPECTED_STANDING_GRANT_DECISION = [
+    'The decision may instead cite the owner standing grant as its authority for retirement, designated-test change and mutant change.',
+    'For that grant, directly verify ~/.claude/CLAUDE.md, heading CoC decisions (standing grant), and these exact sentences: The CoC decides CI/CD, testing and tooling items for me. It also includes adapting those rows when the diff makes the old mutant impossible: retiring a row whose target code the PR deletes, or changing its designated test or mutant, each with an independent not-weaker review and a follow-up row for the new code. The CoC owns these changes; no per-row owner event is needed.',
+    'Refuse a missing, unreadable or mismatched grant; accept zero relay for this verification.',
+    "Under that grant, require the PR's own diff to break each named row and make its old mutant impossible, and retire only a row whose target code the PR deletes.",
+    'That grant supplies zero claim or subject change authority and waives no other requirement of this route.',
+]
+
 EXPECTED_SHARED_MUTANT_RULE = (
     'The ban on weakening a test and the independent not-weaker review still apply.\n'
     'Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route or Rewritten-code row route.\n'
@@ -229,10 +237,11 @@ EXPECTED_COMMON_DISPOSITION_AUTHORITY = [
     'Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.',
     'End the retirement-only authority block; apply every subsequent shared requirement to both branches unless explicitly scoped.',
     *EXPECTED_COC_ROW_DECISION[:2],
+    *EXPECTED_STANDING_GRANT_DECISION,
     'For changed mutant semantics, require that decision to name the exact protected reads, semantic adaptation and permitted gates.',
     'Require that decision and the admitted gates to cover independent applied review at the final commit.',
-    "Verify the cited owner event's Input, workspace, current version, event id and hash, `event_type=answer_submitted`, `actor_kind=owner_ui` and answer text.",
-    'That event delegates authority to the CoC; the exact CoC decision supplies the exact rows, fields and adaptation scope.',
+    'When the decision cites that owner event, verify its Input, workspace, current version, event id and hash, `event_type=answer_submitted`, `actor_kind=owner_ui` and answer text.',
+    'That event or the standing grant delegates authority to the CoC; the exact CoC decision supplies the exact rows, fields and adaptation scope.',
     'Preserve every historical fixed-event comparator unchanged within its existing standing branch only.',
     'Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.',
     'An authoritative mismatch blocks access and application without fallback.',
@@ -468,6 +477,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     'Before publication, require independent semantic review confirming the same claim, and a designated test and mutant no weaker.',
                     'Require CoC approval of that review receipt before publication.',
                     *EXPECTED_COC_ROW_DECISION,
+                    *EXPECTED_STANDING_GRANT_DECISION,
                     'Preserve every existing retirement route and its authority unchanged.',
                     'Preserve assertions, bounds, policy guarantees, pins and every unrelated field.',
                     'Keep mutation proof after merge under separate applicable execution admission.',
@@ -475,6 +485,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 ):
                     self.assertIn(phrase, route)
                 self.assertIn(EXPECTED_COC_ROW_DECISION[0], text)
+                self.assertIn('\n'.join([*EXPECTED_COC_ROW_DECISION[:2], *EXPECTED_STANDING_GRANT_DECISION]), route)
                 for removed in (
                     'Apply the task-specific owner-event verification contract to the cited owner event.',
                     'Permit only the exact approved mutant fields under the exact CoC decision and admitted private-proposal gates.',
@@ -509,6 +520,29 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     self.assertIn('Use native Edit with replace_all=false and a unique approved row-ID-contained old_string within the approved row extent.', route)
                 else:
                     self.assertIn('Grant zero reviewer edit, execution or publication authority; drivers apply zero protected edits.', route)
+
+    def test_standing_grant_authority_stays_in_rewritten_and_disposition_routes(self):
+        carriers = (
+            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/writer--fable52.md', 'plugins/ship/agents/driver.md',
+            'plugins/ship/agents/driver--sol.md', 'plugins/ship/agents/reviewer--sol.md',
+            'plugins/ship/agents/reviewer--opus.md', 'plugins/ship/skills/ship/SKILL.md',
+        )
+        for name in carriers:
+            text = (ROOT / name).read_text()
+            heading = ('## Owner-approved protected-row subject review' if 'reviewer--' in name else
+                       '### Owner-approved protected-row subject route')
+            _, _, after = text.partition(heading + '\n')
+            subject = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+            with self.subTest(path=name):
+                self.assertEqual(text.count(EXPECTED_STANDING_GRANT_DECISION[0]), 2)
+                for phrase in EXPECTED_STANDING_GRANT_DECISION:
+                    self.assertNotIn(phrase, subject)
+                self.assertIn('Require a current task-specific owner event for any claim change.', text)
+        reference = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        for phrase in EXPECTED_STANDING_GRANT_DECISION:
+            with self.subTest(reference=phrase):
+                self.assertNotIn(phrase, reference)
 
     def test_pr_created_row_file_uses_pre_reanchor_comparison_without_changing_ci_base(self):
         carriers = (
