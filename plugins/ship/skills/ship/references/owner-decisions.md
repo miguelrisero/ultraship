@@ -119,6 +119,14 @@ Preserve every existing refusal, tool and hook denial, and affected-session hold
 Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
+A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
+It made zero protected reads and named no content, scope, protected-access, hook, permission or tool finding.
+Its cause resolves only when a new CoC decision, with a new SHA256, quotes the refusal verbatim, names that sole cause and records its zero protected reads.
+The next agent in the refusing role must also find the selected route heading in its own loaded contract by native Read, under a section that implements that route and does not refuse it.
+A follow-on refusal is a refusal whose only reason is that an earlier refusal stayed effective; it also made zero protected reads.
+A follow-on refusal resolves with that earlier refusal when this rule resolves the earlier one and the same CoC decision quotes the follow-on refusal verbatim.
+Hook, permission and tool denials, `REFUSED` tool results, and any refusal with a reason outside these two definitions never qualify.
+The fresh disposition and every other route requirement still apply.
 
 ## Draft PR for new lane-owned row review
 
@@ -238,6 +246,14 @@ Never replay a denied command, equivalent operation or substitute actor while it
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
+A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
+It made zero protected reads and named no content, scope, protected-access, hook, permission or tool finding.
+Its cause resolves only when a new CoC decision, with a new SHA256, quotes the refusal verbatim, names that sole cause and records its zero protected reads.
+The next agent in the refusing role must also find the selected route heading in its own loaded contract by native Read, under a section that implements that route and does not refuse it.
+A follow-on refusal is a refusal whose only reason is that an earlier refusal stayed effective; it also made zero protected reads.
+A follow-on refusal resolves with that earlier refusal when this rule resolves the earlier one and the same CoC decision quotes the follow-on refusal verbatim.
+Hook, permission and tool denials, `REFUSED` tool results, and any refusal with a reason outside these two definitions never qualify.
+The fresh disposition and every other route requirement still apply.
 The driver applies zero protected edits; the writer has zero publication authority.
 
 ## Owner-approved protected-row subject route
@@ -249,6 +265,14 @@ Native Edit grants zero alternate form for a denied operation.
 Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt.
 Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
+A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
+It made zero protected reads and named no content, scope, protected-access, hook, permission or tool finding.
+Its cause resolves only when a new CoC decision, with a new SHA256, quotes the refusal verbatim, names that sole cause and records its zero protected reads.
+The next agent in the refusing role must also find the selected route heading in its own loaded contract by native Read, under a section that implements that route and does not refuse it.
+A follow-on refusal is a refusal whose only reason is that an earlier refusal stayed effective; it also made zero protected reads.
+A follow-on refusal resolves with that earlier refusal when this rule resolves the earlier one and the same CoC decision quotes the follow-on refusal verbatim.
+Hook, permission and tool denials, `REFUSED` tool results, and any refusal with a reason outside these two definitions never qualify.
+The fresh disposition and every other route requirement still apply.
 The driver applies zero protected edits; the writer publishes nothing.
 A product-limit or cost approval alone grants zero protected read, subject, paired-field, retirement or pin-edit authority.
 Require a separate exact written CoC decision for each subject edit under the supported writer's loaded subject route.
