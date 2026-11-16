@@ -21,6 +21,7 @@ GLUE_EXEMPT = re.compile(r'[0-9a-f]+|b[a-z0-9]{8}|(sha|md)[0-9]*sum|python[0-9.]
 HOLD_WORDS = re.compile(r'\b(preserv\w*|holds?|custody|custodian|admission|admits?|admitted|provenance|refusals?)\b', re.I)
 # The harness addresses an in-session subagent by its agent ID and a background subagent's parent as `main`.
 SUBAGENT = re.compile(r'main|a[0-9a-f]{16}')
+RECEIPT_MARKER = re.compile(r'<!-- ultraship-receipt:[0-9a-f]{32} -->')
 PEER_TEMPLATE = """<Outcome in one sentence, and what it means for the recipient.>
 Facts
 - <Verified fact with its source: PR number, run ID or UTC time.>
@@ -105,17 +106,18 @@ def hold_wall(text):
     """Six or more hold words in a status message restate standing holds; a brief carries its restrictions."""
     if 'Owner helper request:' in text:
         return
-    prose = re.sub(r'`[^`]*`', '', ''.join(VisibleText(text).parts))
+    prose = re.sub(r'`[^`]*`', '', RECEIPT_MARKER.sub('', text))
     words = ' '.join(t for t in prose.split() if not re.search(r'https?://|/', t))
     if len(HOLD_WORDS.findall(words)) >= 6:
         raise ValueError('Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.')
 
 
 def check(text, kind='result'):
-    text = re.sub(r'<(?!!--|/?[A-Za-z][A-Za-z0-9]*(?:[ \t][^<>\n]*)?/?>)', '&lt;', text) if kind == 'peer' else text
-    plain = ''.join(VisibleText(text).parts)
+    # A peer reads SendMessage text as plain text.
+    plain = RECEIPT_MARKER.sub('', text) if kind == 'peer' else ''.join(VisibleText(text).parts)
     prose = re.sub(r'`[^`]*`', '', plain)
-    tokens = [t for t in prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
+    token_prose = re.sub(r'[<>]', ' ', prose) if kind == 'peer' else prose
+    tokens = [t for t in token_prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
     long = [t for t in tokens if len(t) >= 22]
     errors = []
     if len(long) >= 3 or (tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2:

@@ -163,12 +163,6 @@ class TextLintTests(unittest.TestCase):
                     text_lint.check(message, 'peer')
                 self.assertEqual(refusal.exception.findings, ['Missing section: Decision'])
 
-    def test_peer_commented_decision_keeps_missing_section(self):
-        message = ('Facts: Checks pass.\n<!--\nDecision: Continue.\n-->\nNext: Resume.')
-        with self.assertRaises(text_lint.FormatError) as refusal:
-            text_lint.check(message, 'peer')
-        self.assertEqual(refusal.exception.findings, ['Missing section: Decision'])
-
     def test_peer_heredoc_keeps_later_sentence_limit(self):
         message = ('Facts: Checks pass.\ncat <<EOF\n'
                    'Owner helper request: one two three four five six seven eight nine ten '
@@ -187,19 +181,20 @@ class TextLintTests(unittest.TestCase):
         self.assertEqual(refusal.exception.findings,
                          ['Separate glued words with spaces; remove compressed shorthand.'])
 
-    def test_peer_html_blocks_keep_section_breaks(self):
-        for message in (
-                '<p>Facts: Checks pass.</p><p>Decision: Continue.</p><p>Next: Resume.</p>',
-                'Facts: Checks pass.<br>Decision: Continue.<br>Next: Resume.'):
-            with self.subTest(message=message):
-                text_lint.check(message, 'peer')
+    def test_peer_hold_wall_reads_text_after_tag_like_text(self):
+        message = ('Facts: Checks wait.\ncat <<EOF\n'
+                   'Preserve every hold. Custody stays. Admission waits. Preserve the refusal.\n'
+                   'Decision: Wait.\nNext: Resume.')
+        with self.assertRaises(ValueError) as refusal:
+            text_lint.hold_wall(message)
+        self.assertEqual(str(refusal.exception),
+                         'Keep any new hold in one line, drop restated standing holds, '
+                         'and send what changed and the next action.')
 
-    def test_peer_html_code_stays_hidden(self):
-        for tag in ('code', 'pre'):
-            with self.subTest(tag=tag):
-                message = ('Facts: Checks pass.\n<' + tag + '>\ndeadline2026 by8November00\n</'
-                           + tag + '>\nDecision: Continue.\nNext: Resume.')
-                text_lint.check(message, 'peer')
+    def test_peer_paths_stay_whole_tokens(self):
+        message = ('Facts: Read /home/user/.scratch/deadline2026/by8November00.md\n'
+                   'Decision: Continue.\nNext: Resume.')
+        text_lint.check(message, 'peer')
 
     def test_decision_sections_use_visible_text_only(self):
         message = ('<h2>What is wrong</h2><h2>Why now</h2><h2>Options</h2>'
