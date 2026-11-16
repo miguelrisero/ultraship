@@ -781,6 +781,9 @@ class WriterGitHubGuardTests(unittest.TestCase):
             'env \'--s=GIT_EDITOR="g""h issue close 1" git commit -e -m x\'',
             'GIT_CONFIG_PARAMETERS="\'core.editor=gh issue close 1\'" git commit --allow-empty -e -m x',
             'GIT_CONFIG_PARAMETERS="\'core.editor\'=\'gh issue close 1\'" git commit --allow-empty -e -m x',
+            "GIT_EDITOR='gh>x issue close 1' git commit --allow-empty -e -m x",
+            "GH_PAGER='gh>x issue close 1' gh pr diff 1",
+            'GIT_CONFIG_PARAMETERS="\'credential.helper=!gh issue close 1\'" git fetch',
         )
         for command in commands:
             with self.subTest(command=command):
