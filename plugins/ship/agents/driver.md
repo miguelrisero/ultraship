@@ -151,6 +151,9 @@ Require the owner-scoped protected row access authority above and name this rout
 Require CoC approval of the exact row allowlist before any protected read or edit.
 Limit scope to CoC-named exact row-file paths and unique row IDs from the PR's own failing anchor CI evidence.
 Require the recorded base/head diff to show that the PR's own subject change breaks each named row. On the ordinary lane-derived route only, if the PR creates the row file absent at the CI base, use the last PR commit before the re-anchor as the before tree and row comparison base. Keep the original CI base for causality and evidence; preserve every other route condition.
+In that case, if only main merges into the PR branch changed the subject after the last PR-authored commit that edited the row file, use that commit as the before tree and row comparison base instead.
+Then require the recorded diff to show that no PR-authored commit after that tree changed the subject, so main merges alone broke each named row; this replaces only the PR's own subject change requirement.
+Rows in a row file that exists at the CI base keep every current rule.
 Permit the applying writer to locate each named row by its row ID inside its named file.
 Read only that row's lines; permit no whole-file parse, unnamed-row read, or search outside the named files.
 Replace only the paired `old` and `new` fields to match the subject's new source text.

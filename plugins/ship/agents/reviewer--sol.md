@@ -387,6 +387,9 @@ Under authority B, block every protected read on a missing record, missing field
 Require the CoC-approved exact allowlist of row-file paths and unique row IDs from the PR's own failing anchor CI evidence.
 Require the recorded base SHA, author head SHA, and frozen SHA after the edit before any protected read.
 Require the brief to name two read-only trees: one at the base SHA and one at the frozen SHA after the edit. On the ordinary lane-derived route only, if the PR creates the row file absent at the CI base, use the last PR commit before the re-anchor as the before tree and this section's row comparison base. Keep the original CI base for causality and evidence; preserve every other route condition.
+In that case, if only main merges into the PR branch changed the subject after the last PR-authored commit that edited the row file, use that commit as the before tree and this section's row comparison base instead.
+Then require the recorded diff to show that no PR-authored commit after that tree changed the subject, so main merges alone broke each named row; this replaces only the PR's own subject change requirement.
+Rows in a row file that exists at the CI base keep every current rule.
 Read rows only inside those two trees.
 Require every supplied diff to leave out the row-file hunks.
 Require the recorded diff between the base SHA and frozen SHA after the edit to show that the PR's own subject change breaks each named row.
