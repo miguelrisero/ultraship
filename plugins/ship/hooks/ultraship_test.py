@@ -1300,6 +1300,30 @@ class WriterGitHubGuardTests(unittest.TestCase):
                     self.assertIn('writers cannot send GraphQL requests; use a REST GET with the query in the path',
                                   result['hookSpecificOutput']['permissionDecisionReason'])
 
+    def test_writer_split_gh_write_with_unclosed_braces_is_refused_fast(self):
+        command = 'g' + '\\\n' + 'h issue close 1 ' + '{/' * 4500
+        started = time.monotonic()
+        result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
+        elapsed = time.monotonic() - started
+        print(f'{self._testMethodName}: {elapsed:.6f}s', flush=True)
+        self.assertTrue(denied(result))
+        self.assertIn('writer GitHub read-only rule', result['hookSpecificOutput']['permissionDecisionReason'])
+        self.assertLess(elapsed, 10)
+
+    def test_writer_git_unclosed_braces_finish_fast(self):
+        command = 'echo ' + '{/' * 4500
+        started = time.monotonic()
+        result = ultraship.writer_git_file_denial(command, str(self.repo))
+        elapsed = time.monotonic() - started
+        print(f'{self._testMethodName}: {elapsed:.6f}s', flush=True)
+        self.assertIsNone(result)
+        self.assertLess(elapsed, 10)
+
+    def test_writer_git_brace_slash_answers(self):
+        self.assertEqual(ultraship.writer_git_file_denial('echo {a/b,c}', str(self.repo)),
+                         'git control path brace slash rule')
+        self.assertIsNone(ultraship.writer_git_file_denial('echo {a,b}/c', str(self.repo)))
+
 
 if __name__ == '__main__':
     unittest.main()
