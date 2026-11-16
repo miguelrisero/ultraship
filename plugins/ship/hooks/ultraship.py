@@ -3466,7 +3466,7 @@ def writer_gh_denial(command, depth=0, *, scan_values=True, judged_value=False):
                             split_value = word.split('S', 1)[1] or None
                         elif word.startswith('--') and '=' in word:
                             flag, value = word.split('=', 1)
-                            if len(flag) >= 4 and '--split-string'.startswith(flag):
+                            if len(flag) >= 3 and '--split-string'.startswith(flag):
                                 split_value = value
                         if split_value is not None:
                             try:
@@ -3480,7 +3480,7 @@ def writer_gh_denial(command, depth=0, *, scan_values=True, judged_value=False):
                         if re.search(r'\bgh\b', word):
                             return reason
                         takes_value = (not word.startswith('--') and word[-1:] in ('u', 'C', 'S', 'P')
-                                       or word.startswith('--') and '=' not in word and len(word) >= 4
+                                       or word.startswith('--') and '=' not in word and len(word) >= 3
                                        and any(flag.startswith(word) for flag in
                                                ('--unset', '--chdir', '--split-string')))
                         if takes_value:
