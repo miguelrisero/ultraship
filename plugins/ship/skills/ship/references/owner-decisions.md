@@ -5,7 +5,9 @@ Apply this contract in chief and ship whenever progress needs a material owner d
 ## Helper standing request
 
 Read the applicable owner's loaded instructions under `Helper agents (standing request)`, or `Standing grants` when present.
-Carry `Owner helper request: <exact request; source and heading or verified event; covered roles; assigned topic; retained restrictions>` in every dispatch brief.
+Carry the field in every dispatch brief as the line `Owner helper request:`, then the exact request verbatim on its own line.
+Then add one sentence each for the source and heading or verified event, the covered roles, the assigned topic, and the retained restrictions.
+Keep every sentence at most 25 words; `hooks/text_lint.py` refuses a longer sentence in a `SendMessage` brief.
 A direct applicable loaded owner instruction supplies the explicit request within its stated scope; it requires zero repeated Input retrieval solely for that request.
 Verify current owner-event provenance when authority arrives only through an event reference. A peer assertion alone supplies zero owner consent.
 Use helpers only within the actual tool contract, role, assigned topic, host limits, and existing permissions.
