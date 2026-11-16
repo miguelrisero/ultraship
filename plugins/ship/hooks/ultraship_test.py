@@ -702,6 +702,94 @@ class PythonHeredocGuardTests(unittest.TestCase):
 
 
 class WriterGitHubGuardTests(unittest.TestCase):
+    def test_writer_hidden_value_routes_are_denied(self):
+        commands = (
+            "GIT_EDITOR='gh pr merge 1' git commit -e -m x",
+            "git -c core.editor='gh pr merge 1' commit -e -m x",
+            'GIT_EDITOR=gh git commit -e -m x',
+            "env GIT_EDITOR='gh pr merge 1' git commit -e -m x",
+            "export GIT_EDITOR='gh pr merge 1'; git commit -e -m x",
+            "git -c core.pager='gh pr merge 1' log",
+            "git -ccore.editor='gh pr merge 1' commit -e -m x",
+            "GIT_EDITOR+='gh issue close 1' git commit -e -m x",
+            "command git -c core.editor='gh issue close 1' commit -e -m x",
+            "timeout 9 git -c core.editor='gh issue close 1' commit -e -m x",
+            'env -u VISUAL GIT_EDITOR=gh git commit -e -m x',
+            "env -C /repo GIT_EDITOR='gh issue close 1' git commit -e -m x",
+            'env \'-SGIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'env \'--split-string=GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            "git -c credential.helper='!gh issue close 1' fetch",
+            "GIT_EDITOR='!gh issue close 1' git commit -e -m x",
+            'env -iS\'GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'env \'--spl=GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'nice env \'-SGIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'command env -u VISUAL GIT_EDITOR=gh git commit -e -m x',
+            'env \'-vSGIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'env \'--split=GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'git submodule foreach gh pr view 1 \'; GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            "GH_PAGER='gh issue close 1' gh pr view 1",
+            'env \'-SGIT_EDITOR="g""h issue close 1" git commit -e -m x\'',
+            'env \'-iSGIT_EDITOR="g""h issue close 1" git commit -e -m x\'',
+            'env \'--split-string=GIT_EDITOR="g""h issue close 1" git commit -e -m x\'',
+            'env \'--s=GIT_EDITOR="g""h issue close 1" git commit -e -m x\'',
+            'GIT_CONFIG_PARAMETERS="\'core.editor=gh issue close 1\'" git commit --allow-empty -e -m x',
+            'GIT_CONFIG_PARAMETERS="\'core.editor\'=\'gh issue close 1\'" git commit --allow-empty -e -m x',
+            "GIT_EDITOR='gh>x issue close 1' git commit --allow-empty -e -m x",
+            "GH_PAGER='gh>x issue close 1' gh pr diff 1",
+            'GIT_CONFIG_PARAMETERS="\'credential.helper=!gh issue close 1\'" git fetch',
+            "git -c protocol.ext.allow=always -c remote.x.url='ext::gh issue close 1' fetch x",
+            'GIT_CONFIG_PARAMETERS="\'protocol.ext.allow=always\' \'remote.x.url=ext::gh issue close 1\'" git fetch x',
+            "GIT_ALLOW_PROTOCOL=ext git ls-remote 'ext::gh issue close 1'",
+            'gh>x issue close 1',
+            "git rebase --exec='gh issue close 1' HEAD~1",
+            "git fetch --upload-pack='gh issue close 1' /repo",
+            'GIT_ALLOW_PROTOCOL=ext git ls-remote \'ext::gh issue close 1\'',
+            '=gh issue close 1',
+            "git add *(e:'gh issue close 1':)",
+            "git clone -c core.editor='gh issue close 1' https://example.com/o/r.git r && git -C r commit --allow-empty -e -m x",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
+                self.assertTrue(denied(result))
+                reason = result['hookSpecificOutput']['permissionDecisionReason']
+                self.assertIn('Rule:', reason)
+                self.assertIn('driver', reason)
+
+    def test_writer_value_shapes_are_denied_without_command_names(self):
+        commands = (
+            'GIT_EDITOR=vim git status', 'EDITOR=vim git status', 'VISUAL=vim git status',
+            'PAGER=cat git status', 'export GIT_OPTIONAL_LOCKS=1; git status',
+            'env --s=GIT_EDITOR=vim git status', "env '-iSGIT_EDITOR=vim git status'",
+            'git -c core.editor=vim status', 'git -ccore.pager=less status',
+            'git --config-env=core.editor=EDITOR status', 'git --config-env core.editor=EDITOR status',
+            'git --exec-path=/tools status', 'git --exec-path /tools status',
+            "git ls-remote 'ext::cat /repo'", 'git commit -e -m x', 'git commit --edit -m x',
+            "git commit '--edit' -m x", 'git commit -em x', 'git commit --fixup=amend:HEAD',
+            'git commit --fixup=reword:HEAD', 'sh -c "GIT_EDITOR=vim git status"',
+            'git -c alias.other=log other', 'git -c remote.origin.url=https://example.com/o/r.git fetch',
+            'git -c core.pager=less log', 'GIT_CONFIG_COUNT=2 git log',
+            'GIT_CONFIG_VALUE_0=less git log', 'GIT_OPTIONAL_LOCKS=1 git status',
+            "echo -f 'ref=gh'", "git -c remote.origin.url=ext::cat fetch",
+            "git -c alias.lg=gh lg", "GIT_OPTIONAL_LOCKS+=0 git status",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
+                self.assertTrue(denied(result))
+                self.assertIn('Rule:', result['hookSpecificOutput']['permissionDecisionReason'])
+                self.assertIn('driver', result['hookSpecificOutput']['permissionDecisionReason'])
+
+    def test_writer_plain_git_steps_are_admitted(self):
+        commands = (
+            'git status', 'git diff', 'git add src/example.py', "git commit -m 'fix: plain value'",
+            'git -C /repo log',
+            "cd /repo && git add src/example.py && git commit -m 'fix: plain value'",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
