@@ -3399,7 +3399,7 @@ def writer_gh_denial(command, depth=0, *, scan_values=True, judged_value=False):
         tokens = list(lexer)
     except ValueError as error:
         return 'unparsed shell syntax rule: ' + str(error)
-    if judged_value and any(os.path.basename(token) == 'gh' for token in tokens):
+    if judged_value and any(os.path.basename(token.rsplit('=', 1)[-1]) == 'gh' for token in tokens):
         return reason
     segments, segment = [], []
     for index, token in enumerate(tokens):
