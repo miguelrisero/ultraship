@@ -66,9 +66,9 @@ D6575, 2026-10-29: CoC coordination direction, separate from actual owner receip
 Task: <frozen goal, one paragraph>
 Repository: <owner/repo>   Worktree: <absolute path>   Branch: <name>   Base SHA: <sha>
 In scope: <files or areas>   Out of scope: <files or areas owned by other lanes>
-Readable files: <exact absolute paths or directories the agent may read; every other path is out of scope>
+Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
 A hook refusal is final: report it and stop.
-Never print a key value; never post outside bettergroupinc.
+Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 Depends on: <lanes or none>
 Done when: <acceptance checks and permitted test commands>

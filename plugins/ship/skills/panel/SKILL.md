@@ -22,11 +22,13 @@ Every initial, verification, and replacement brief lists permitted paths and exc
 Require this field and these sentences verbatim in every brief:
 
 ```text
-Readable files: <exact absolute paths or directories the agent may read; every other path is out of scope>
+Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
 A hook refusal is final: report it and stop.
-Never print a key value; never post outside bettergroupinc.
+Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 ```
+The stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.
+The formatting, coordination and method-only routes in [Loaded instructions and refusals](../ship/references/owner-decisions.md#loaded-instructions-and-refusals) stay.
 
 Scope every search call to the permitted paths.
 Exclude `tests/mutation/`, generated and vendored content, and any other brief exclusions.
@@ -44,7 +46,7 @@ An explicit repository-root path does not authorize broader discovery.
 1. Read `${CLAUDE_SKILL_DIR}/references/panels.md` for the seats and persona lenses.
 2. Read the selected `${CLAUDE_SKILL_DIR}/personas/<name>.md` files and `personas/_format.md`.
 3. Freeze the subject. For code, record the base SHA, head SHA, and diff. All seats get the same SHA.
-4. Build one self-contained brief: subject, type, lenses, constraints, required decision, the required `Readable files` field and three safety sentences above, SHAs, and the diff. Leave out your own conclusions and any other seat's output.
+4. Build one self-contained brief: subject, type, lenses, constraints, required decision, the required `Readable files` field and safety sentences above, absolute paths, SHAs, and the diff. Leave out your own conclusions and any other seat's output.
    Require flaky-risk findings with file, line, and mechanism for code subjects; use relevant evidence locations for plan subjects.
    Require explicit none with inspected scope when a seat finds no flaky risk.
 5. Launch one Agent call per seat, together in one message. Use the scoped `ship:reviewer--*` names and leave `model` unset.

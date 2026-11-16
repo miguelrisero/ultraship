@@ -106,28 +106,43 @@ class BriefSafetyTests(unittest.TestCase):
             ('plugins/chief/skills/run/references/dispatch.md', '## Brief template'),
             ('plugins/ship/skills/review/SKILL.md', '## Dispatch'),
             ('plugins/ship/skills/panel/SKILL.md', '## Dispatch'),
-            ('plugins/ship/skills/ship/references/pipeline.md', '# Ship pipeline'),
+            ('plugins/ship/skills/babysit/SKILL.md', '## Brief safety'),
             ('plugins/ship/skills/ship/references/owner-decisions.md', '## Helper standing request'),
         ):
             section = (ROOT / name).read_text().split(heading + '\n', 1)[1].split('\n## ', 1)[0]
             for requirement in (
-                'Readable files: <exact absolute paths or directories the agent may read; every other path is out of scope>',
+                'Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>',
                 'A hook refusal is final: report it and stop.',
-                'Never print a key value; never post outside bettergroupinc.',
+                'Never print a key value; never post outside bettergroupinc and miguelrisero.',
                 'Never chain a glob listing into a write command.',
             ):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, section)
             if heading != '## Brief template':
                 with self.subTest(path=name):
-                    self.assertRegex(section, r'Require this field and these sentences verbatim in every (?:dispatch )?brief:')
+                    self.assertIn('Require this field and these sentences verbatim in every brief:', section)
+                    self.assertIn('```\nThe stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.', section)
+                    target = '#loaded-instructions-and-refusals'
+                    if heading != '## Helper standing request':
+                        target = '../ship/references/owner-decisions.md' + target
+                    self.assertIn('The formatting, coordination and method-only routes in '
+                                  f'[Loaded instructions and refusals]({target}) stay.', section)
+            if heading == '## Brief safety':
+                self.assertIn('Apply this rule to every triage, writer and reviewer brief.', section)
+            if heading == '## Helper standing request':
+                self.assertLess(section.index('A direct applicable loaded owner instruction'),
+                                section.index('Require this field'))
 
     def test_dispatch_check_asks_for_readable_files(self):
         dispatch = (ROOT / 'plugins/chief/skills/run/references/dispatch.md').read_text()
         question = next(line for line in dispatch.splitlines() if line.startswith('2. **Contract.**'))
         self.assertIn('the readable files', question)
+        chief = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text()
+        driver_brief = chief.split('Each driver brief has:\n', 1)[1].split('```text', 1)[0]
+        self.assertIn('- The `Readable files` field and the safety sentences from the brief template.', driver_brief)
 
     def test_panel_build_step_includes_required_field_and_safety_sentences(self):
         panel = (ROOT / 'plugins/ship/skills/panel/SKILL.md').read_text()
         step = next(line for line in panel.splitlines() if line.startswith('4. Build one self-contained brief:'))
-        self.assertIn('the required `Readable files` field and three safety sentences above', step)
+        self.assertIn('the required `Readable files` field and safety sentences above', step)
+        self.assertIn('absolute paths', step)

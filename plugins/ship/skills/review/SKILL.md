@@ -42,11 +42,13 @@ Every initial, verification, and replacement brief lists permitted paths and exc
 Require this field and these sentences verbatim in every brief:
 
 ```text
-Readable files: <exact absolute paths or directories the agent may read; every other path is out of scope>
+Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
 A hook refusal is final: report it and stop.
-Never print a key value; never post outside bettergroupinc.
+Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 ```
+The stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.
+The formatting, coordination and method-only routes in [Loaded instructions and refusals](../ship/references/owner-decisions.md#loaded-instructions-and-refusals) stay.
 
 Scope every search call to the permitted paths.
 Exclude `tests/mutation/`, generated and vendored content, and any other brief exclusions.
