@@ -3404,7 +3404,7 @@ def load_ledger():
     return module
 
 
-# ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, Bash writes to gh configuration, glob `?` and writer-created file names, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
+# ponytail: this text guard misses credential-backed writes via env clearing, direct ssh, token HTTP, existing gh aliases and extensions, Bash writes to gh configuration, command words built from variables or bracket globs, bare repository configuration via `-C`, writer-created file names, and files written then run; upgrade to an isolated read-only credential.
 COMMIT_MESSAGE = re.compile(r"""((?:^|\s)(?:-[A-Za-z]*m|--message)(?:\s+|=))(?:'[^']*'|"[^$`\\"]*")+(?=\s|$)""")
 
 
@@ -3423,7 +3423,104 @@ def commit_message_removed(command):
     return bare
 
 
-def writer_gh_denial(command, depth=0):
+# Exact pairs preserve the existing admitted config and environment cases.
+WRITER_VALUE_ALLOWLIST = {
+    ('push.default', 'current'), ('core.pager', 'cat'), ('alias.lg', 'log'),
+    ('color.ui', 'never'), ('core.fsmonitor', 'false'),
+    ('remote.origin.url', 'https://github.com/o/gh-tools.git'),
+    ('GIT_OPTIONAL_LOCKS', '0'), ('GIT_CONFIG_COUNT', '1'),
+    ('GIT_CONFIG_KEY_0', 'core.pager'), ('GIT_CONFIG_VALUE_0', 'cat'),
+}
+
+
+def writer_git_control_path(path):
+    """Whether a literal or resolved path reaches Git state or external configuration."""
+    path = os.path.expanduser(path)
+    for candidate in (os.path.abspath(path), os.path.realpath(path)):
+        if re.search(r'/(?:\.git(?:/|$)|\.gitconfig(?:/|$)|\.config/git(?:/|$)|[^/]+\.git/(?:config(?:/|$)|hooks(?:/|$)))',
+                     candidate, re.I):
+            return True
+    return False
+
+
+WRITER_GIT_PATH_COMMAND_ALLOWLIST = set()
+
+
+def writer_git_component_pattern(component):
+    """Match brace alternatives without constructing expanded command words."""
+    pattern, depth = '', 0
+    for char in component:
+        if char == '{':
+            pattern += '(?:'
+            depth += 1
+        elif char == '}' and depth:
+            pattern += ')'
+            depth -= 1
+        elif char == ',' and depth:
+            pattern += '|'
+        else:
+            pattern += re.escape(char)
+    return not depth and re.fullmatch(pattern, '.git') is not None
+
+
+def writer_git_file_denial(command, cwd=None):
+    """Refuse Git path pieces independently of the program that receives them."""
+    if command in WRITER_GIT_PATH_COMMAND_ALLOWLIST:
+        return None
+    words = shell_raw_words(shell_without_heredoc_bodies(commit_message_removed(command)))
+    for raw, value, _, _ in words:
+        active = shell_brace_text(raw)
+        if re.search(r'\{[^}]*\/[^}]*\}', active):
+            return 'git control path brace slash rule'
+        for part in value.split('='):
+            part = re.sub(r'^-[a-z]+', '', part, flags=re.I)
+            if re.search(r'(?<![a-z0-9_-])\.git(?![a-z0-9_-])', part, re.I):
+                return 'git control path component rule'
+            for piece in re.split(r'''[\s,'"]+''', part):
+                if piece and writer_git_control_path(os.path.join(cwd or os.getcwd(), os.path.expanduser(piece))):
+                    return 'git control path resolved rule'
+            for component in part.casefold().split('/'):
+                if active and component.startswith('.') and fnmatch.fnmatchcase('.git', component):
+                    return 'git control path glob rule'
+                if '{' in active and ',' in active and writer_git_component_pattern(component):
+                    return 'git control path brace rule'
+    return None
+
+
+def writer_git_config_read(words):
+    """Admit only config read modes, location selectors and their literal operands."""
+    modes = {'--get', '--get-all', '--get-regexp', '--get-urlmatch', '--list', '-l',
+             '--get-color', '--get-colorbool', '--show-origin', '--show-scope', '--name-only', '-z', '--null',
+             '--includes', '--no-includes', '--global', '--local', '--system', '--worktree'}
+    values = {'--file', '-f', '--blob', '--type', '--default'}
+    operands, read_mode, skip = [], False, False
+    for word in words:
+        if skip:
+            skip = False
+            continue
+        if word in values:
+            skip = True
+        elif word in modes:
+            read_mode = read_mode or word.startswith('--get') or word in {'--list', '-l'}
+        elif word.startswith('-'):
+            if not any(word.startswith(option + '=') for option in values):
+                return False
+        else:
+            operands.append(word)
+    return not skip and (read_mode or len(operands) == 1 or operands[:1] in (['get'], ['list'])) and not any(
+        word in {'set', 'unset', 'rename-section', 'remove-section', 'edit'} for word in operands[:1])
+
+
+def writer_trigger_text(command):
+    """Keep shell quote joining and attached quoted operands visible to trigger checks."""
+    return re.sub(r'''['"\\]''', '', command) + '\n' + re.sub(r'''['"\\]''', ' ', command)
+
+
+def writer_repository_selector(option, value):
+    return option == '--work-tree' and value == '.'
+
+
+def writer_gh_denial_main(command, depth=0):
     if depth == 0:
         command = commit_message_removed(command)
     command = cat_heredoc_data(command).replace('\\\n', '')
@@ -3448,7 +3545,7 @@ def writer_gh_denial(command, depth=0):
         return 'unparsed shell syntax rule: ' + str(error)
     for token in tokens:
         if any(char.isspace() or char in ';&|()' for char in token):
-            nested = writer_gh_denial(token, depth + 1)
+            nested = writer_gh_denial_main(token, depth + 1)
             if nested:
                 return nested
     segments, segment = [], []
@@ -3478,6 +3575,248 @@ def writer_gh_denial(command, depth=0):
                 exempt = True
                 continue
             if any(char in word for char in '*[{'):
+                return reason
+        for index, word in enumerate(words):
+            if os.path.basename(word) != 'gh':
+                continue
+            if any(os.path.basename(previous) in ('xargs', 'parallel') for previous in words[:index]):
+                return reason
+            arguments = words[index + 1:]
+            cursor = 0
+            if arguments in (['--version'], ['--help']):
+                continue
+            if not arguments or arguments[0].startswith('-'):
+                return reason
+            group = arguments[cursor]
+            if group in ('search', 'version', 'help'):
+                continue
+            if group != 'api':
+                cursor += 1
+                if group not in reads or cursor == len(arguments) or arguments[cursor] not in reads[group]:
+                    return reason
+                continue
+            arguments = arguments[cursor:]
+            methods, fields, endpoints = [], False, []
+            cursor = 1
+            while cursor < len(arguments):
+                argument = arguments[cursor]
+                method = GH_METHOD.fullmatch(argument)
+                if method:
+                    value = method[1] if argument.startswith('--') else method[2]
+                    if value is None or value == '':
+                        cursor += 1
+                        value = arguments[cursor] if cursor < len(arguments) else ''
+                    methods.append(value.removeprefix('=').upper())
+                elif GH_FIELD.fullmatch(argument):
+                    fields = True
+                    if argument in ('-f', '-F', '--field', '--raw-field', '--input'):
+                        cursor += 1
+                elif argument in ('-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache',
+                                  '-p', '--preview'):
+                    cursor += 1
+                elif not argument.startswith('-'):
+                    endpoints.append(argument.strip('/'))
+                cursor += 1
+            if fields and 'graphql' in endpoints:
+                return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
+            if any(method not in ('GET', 'HEAD') for method in methods) or (
+                    fields and (not methods or any(method != 'GET' for method in methods))):
+                return 'Writers cannot send mutating GitHub API requests; use a REST GET.'
+    return None
+
+
+def writer_gh_denial(command, depth=0):
+    if depth == 0:
+        main_reason = writer_gh_denial_main(command)
+        if main_reason:
+            return main_reason
+        command = commit_message_removed(command)
+    command = cat_heredoc_data(command).replace('\\\n', '')
+    unquoted = writer_trigger_text(command)
+    if not re.search(r'\bgh\b|GIT_|\b(?:EDITOR|VISUAL|PAGER)\b|\bgit\b|ext::|-[iv0]*S|--s', unquoted):
+        return None
+    if depth >= 4:
+        return 'Writers cannot run deeply nested GitHub commands.'
+    reason = 'Writers may run only read-only gh commands.'
+    if re.search(r'\*\(e:', command):
+        return 'zsh executable glob qualifier rule'
+    reads = {'pr': ('view', 'list', 'checks', 'diff', 'status'),
+             'issue': ('view', 'list', 'status'), 'run': ('view', 'list', 'watch'),
+             'repo': ('view',), 'workflow': ('view', 'list')}
+    if re.search(r'\bgh\b', unquoted) and any(marker in command for marker in ('$(', '<(', '>(', '`')):
+        return reason
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        tokens = list(lexer)
+    except ValueError as error:
+        return 'unparsed shell syntax rule: ' + str(error)
+    quoted_tokens = [False] * len(tokens)
+    if re.search(r'\bgh\b', unquoted):
+        try:
+            raw_tokens = shell_raw_words(command)
+        except ValueError:
+            return reason
+        tokens = [value for _, value, _, _ in raw_tokens]
+        quoted_tokens = [bool(re.fullmatch(r"'[^']*'", raw, re.S)) for raw, _, _, _ in raw_tokens]
+    segments, segment, quoted_segments, quoted_segment = [], [], [], []
+    for index, token in enumerate(tokens):
+        redirect = (token == '&' and (segment and segment[-1].endswith(('<', '>'))
+                    or index + 1 < len(tokens) and tokens[index + 1].startswith('>')))
+        if token and all(char in ';&|\n()' for char in token) and not redirect:
+            segments.append(segment)
+            quoted_segments.append(quoted_segment)
+            segment, quoted_segment = [], []
+        else:
+            segment.append(token)
+            quoted_segment.append(quoted_tokens[index])
+    segments.append(segment)
+    quoted_segments.append(quoted_segment)
+    for words, quoted in zip(segments, quoted_segments):
+        # Resolve only known wrappers; a command argument named gh grants no data exemption.
+        command_index, wrapper, skip = None, None, False
+        for index, word in enumerate(words):
+            if skip:
+                skip = False
+                continue
+            if re.match(r'[A-Za-z_]\w*\+?=', word):
+                continue
+            if wrapper and word.startswith('-'):
+                skip = word in WRAPPERS[wrapper]
+                continue
+            if wrapper == 'timeout' and re.fullmatch(r'[\d.]+[smhd]?', word):
+                continue
+            base = os.path.basename(word)
+            if base in WRAPPERS:
+                wrapper = base
+                continue
+            command_index = index
+            break
+        if command_index is not None:
+            direct_git = re.fullmatch(r'git-([a-z][a-z0-9-]*)', os.path.basename(words[command_index]))
+            if direct_git:
+                words = words[:command_index] + ['git', direct_git[1]] + words[command_index + 1:]
+                quoted = quoted[:command_index] + [False, False] + quoted[command_index + 1:]
+        gh_index = (command_index if command_index is not None
+                    and os.path.basename(words[command_index]) == 'gh' else None)
+        if 'api' in words and any(word.strip('/') == 'graphql' for word in words) and any(
+                GH_FIELD.fullmatch(word) for word in words):
+            return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
+        data = set()
+        if gh_index is not None:
+            for index in range(gh_index + 1, len(words)):
+                if index in data:
+                    continue
+                if words[index] in ('-f', '-F', '--field', '--raw-field', '-q', '--jq',
+                                    '-t', '--template', '-H', '--header'):
+                    data.add(index + 1)
+                elif re.match(r'--(?:field|raw-field|jq|template|header)=|-[fFqtH].+', words[index]):
+                    data.add(index)
+        git_subcommand, git_value = None, None
+        env_command = any(os.path.basename(word) == 'env' for word in words)
+        for index, word in enumerate(words):
+            if index in data and ('-X' in word or '--method' in word):
+                return 'gh field method option rule'
+            if index in data:
+                if '\n' in word:
+                    return 'gh multiline data value rule'
+                if '$' in word or '`' in word or not quoted[index] and any(char in word for char in '*[{'):
+                    return reason
+                continue
+            if any(char.isspace() or char in ';&|()' for char in word):
+                nested = writer_gh_denial(word, depth + 1)
+                if nested:
+                    return nested
+            if re.fullmatch(r'GIT_\w*|EDITOR|VISUAL|PAGER', word):
+                return 'git guarded environment name rule'
+            assignment = re.match(r'(GIT_\w*|EDITOR|VISUAL|PAGER)(\+?=)(.*)\Z', word, re.S)
+            if assignment and (assignment[2] != '=' or (assignment[1], assignment[3]) not in WRITER_VALUE_ALLOWLIST):
+                return 'git editor/config environment rule'
+            if 'ext::' in word:
+                return 'git external transport rule'
+            if index != gh_index and any(os.path.basename(part.lstrip('!')) == 'gh'
+                                         for part in re.split(r'[=<>]', word)):
+                return 'hidden gh word-part rule'
+            if git_value:
+                if git_value == '-c' and tuple(word.split('=', 1)) not in WRITER_VALUE_ALLOWLIST:
+                    return 'git config value rule'
+                if git_value in {'--git-dir', '--work-tree'} and not writer_repository_selector(git_value, word):
+                    return 'git repository selector rule'
+                git_value = None
+                continue
+            if os.path.basename(word) == 'git':
+                git_subcommand = ''
+                continue
+            if git_subcommand is not None:
+                if word.startswith(('--template', '--separate-git-dir')):
+                    return 'git template or separate directory rule'
+                if git_subcommand == '' and word.startswith(('--git-dir=', '--work-tree=')):
+                    option, _, value = word.partition('=')
+                    if not writer_repository_selector(option, value):
+                        return 'git repository selector rule'
+                    continue
+                if word.startswith(('--config-env', '--exec-path')):
+                    return 'git config/exec path option rule'
+                if git_subcommand in ('', 'clone') and (word.startswith('-c') or word == '--config'
+                                                          or word.startswith('--config=')):
+                    if word in ('-c', '--config'):
+                        git_value = '-c'
+                    else:
+                        setting = word.partition('=')[2] if word.startswith('--') else word[2:]
+                        if tuple(setting.split('=', 1)) not in WRITER_VALUE_ALLOWLIST:
+                            return 'git config value rule'
+                    continue
+                if git_subcommand == '' and word == '--git-dir':
+                    return 'git repository selector rule'
+                if git_subcommand == '' and word in {'-C', '--work-tree', '--namespace',
+                                                      '--super-prefix', '--attr-source', '--shallow-file'}:
+                    git_value = word
+                    continue
+                if git_subcommand == '' and not word.startswith('-'):
+                    git_subcommand = word
+                    if word == 'config' and not writer_git_config_read(words[index + 1:]):
+                        return 'git stored config write rule'
+                    continue
+                # Editor flags are defense in depth beside the config and environment rules.
+                if git_subcommand and (
+                        word == '--edit' or git_subcommand not in {'grep', 'ls-files', 'clean'}
+                        and re.fullmatch(r'-[A-Za-z]*e[A-Za-z]*', word)
+                        or word.startswith(('--fixup=amend:', '--fixup=reword:'))):
+                    return 'git editor option rule'
+            nested_word = word
+            if env_command:
+                split_option, separator, split_value = word.partition('=')
+                split_short = re.match(r'-[iv0]*S(.*)\Z', word, re.S)
+                split_long = len(split_option) > 2 and '--split-string'.startswith(split_option)
+                if split_short or split_long:
+                    split_text = (split_short[1] if split_short else split_value) if split_short or separator else ''
+                    if not split_text and index + 1 < len(words):
+                        split_text = words[index + 1]
+                    if any(char in split_text for char in '\\$#'):
+                        return 'env split string escape rule'
+            if any(os.path.basename(previous) in SHELL_INTERPRETERS for previous in words[:index]):
+                shell_code = re.match(r'-[a-zA-Z]*c(.+)\Z', word, re.S)
+                if shell_code:
+                    nested_word = shell_code[1]
+            if env_command:
+                split = re.match(r'-[iv0]*S(.*)\Z', word, re.S)
+                option, separator, value = word.partition('=')
+                if split:
+                    nested_word = split[1]
+                elif separator and len(option) > 2 and '--split-string'.startswith(option):
+                    nested_word = value
+            if nested_word != word or any(char.isspace() or char in ';&|()' for char in nested_word):
+                nested = writer_gh_denial(nested_word, depth + 1)
+                if nested:
+                    return nested
+        if not any(re.search(r'\bgh\b', word) for word in words):
+            continue
+        for index, word in enumerate(words):
+            if any(char in word for char in '$`'):
+                return reason
+            if index not in data and any(char in word for char in '*[{'):
                 return reason
         for index, word in enumerate(words):
             if os.path.basename(word) != 'gh':
@@ -4032,9 +4371,10 @@ def pre(data):
                 match = WRITER_BASH.search(file_text_removed)
                 if match:
                     deny(publication_reason + ' Rule: WRITER_BASH ' + repr(match[2].strip()) + '.')
-                reason = writer_gh_denial(file_text_removed)
-                if reason:
-                    deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + reason)
+                names_gh = re.search(r'\bgh\b', writer_trigger_text(file_text_removed))
+                github_reason = writer_gh_denial(file_text_removed)
+                if names_gh and github_reason:
+                    deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + github_reason)
                 reason = process_heredoc_denial(command, readers=True)
                 if reason:
                     deny(classifier_reason + ' Rule: ' + reason + '.'
@@ -4059,9 +4399,17 @@ def pre(data):
                     if str(error) == 'shell substitution boundary':
                         deny(classifier_reason + ' Rule: inline interpreter code rule (substitution boundary).')
                     raise
+                reason = writer_git_file_denial(command, data.get('cwd'))
+                if reason:
+                    deny(publication_reason + ' Rule: ' + reason)
+                if not names_gh and github_reason:
+                    deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + github_reason)
             except Exception:
                 deny(classifier_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''
+        if tool in ('Edit', 'Write', 'NotebookEdit') and writer_git_control_path(
+                os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(target))):
+            deny('Writers do not edit Git configuration or hooks. Return this step to your driver. Rule: git control file write rule.')
         if tool in ('Edit', 'Write', 'NotebookEdit') and (
                 HARNESS_PATH.search(target) or target.startswith(str(Path.home() / '.claude') + '/')):
             deny('Writers do not edit harness configuration.')
