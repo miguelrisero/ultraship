@@ -100,7 +100,7 @@ class TextLintTests(unittest.TestCase):
         return self.event(message + '\n<!-- ultraship-receipt:' + receipt_id + ' -->')
 
     def test_subagent_format_refusal_has_resend_template(self):
-        """Catch a missing one-resend grant or a peer template sent to a child."""
+        """Catch a child resend shape that drops the required sections."""
         for recipient in ('main', 'a' + '0' * 16):
             for prose, error in (
                     (' '.join(['word'] * 26) + '.', 'Write at most 25 words per sentence.'),
@@ -112,7 +112,21 @@ class TextLintTests(unittest.TestCase):
                              'tool_input': {'to': recipient, 'message': message}}
                     self.assertEqual(self.hook_refusal(event),
                                      'Output contract: ' + error + self.RESEND
-                                     + text_lint.SUBAGENT_TEMPLATE)
+                                     + text_lint.PEER_TEMPLATE)
+
+    def test_one_refusal_names_format_and_section_findings(self):
+        for recipient in ('main', 'a' + '0' * 16, 'peer'):
+            with self.subTest(recipient=recipient):
+                event = {'session_id': recipient, 'tool_name': 'SendMessage',
+                         'tool_input': {'to': recipient, 'message': 'Send deadline2026 by8November00.'}}
+                reason = self.hook_refusal(event)
+                self.assertEqual(reason,
+                                 'Output contract: Separate glued words with spaces; remove compressed shorthand. '
+                                 'Missing section: Facts Missing section: Decision Missing section: Next'
+                                 + self.RESEND + text_lint.PEER_TEMPLATE)
+                self.assertIn('at most 25 words each, with a space between words', reason)
+                for heading in ('\nFacts\n', '\nDecision\n', '\nNext\n'):
+                    self.assertIn(heading, reason)
 
     def test_subagent_missing_section_refusal_has_peer_template(self):
         """Catch a child remedy that omits required peer headings."""
@@ -126,6 +140,186 @@ class TextLintTests(unittest.TestCase):
                 self.assertEqual(self.hook_refusal(event),
                                  'Output contract: ' + prefix + 'Missing section: Facts'
                                  + self.RESEND + text_lint.PEER_TEMPLATE)
+
+    def test_peer_owner_helper_label_keeps_sentence_limit(self):
+        for prefix in ('', '- '):
+            with self.subTest(prefix=prefix):
+                message = (prefix + 'Owner helper request: ' + ' '.join(['word'] * 40)
+                           + '\nFacts: Checks pass.\nDecision: Continue.\nNext: Resume.')
+                with self.assertRaises(text_lint.FormatError) as refusal:
+                    text_lint.check(message, 'peer')
+                self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+
+    def test_peer_owner_helper_request_on_its_own_line_passes(self):
+        message = ('Owner helper request:\n'
+                   'I explicitly request that chiefs, drivers and lanes start helper agents '
+                   '(writers, reviewers, verifiers, researchers, planners, council seats) '
+                   'whenever their assigned topic needs one.\n'
+                   'The source is the global CLAUDE.md under Helper agents (standing request).\n'
+                   'The covered roles are the driver, writer and reviewers.\n'
+                   'The assigned topic is text lint.\n'
+                   'Retain host limits and every permission, denial and gate.\n'
+                   'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.')
+        text_lint.check(message, 'peer')
+
+    def test_peer_sections_survive_tag_like_text(self):
+        for line in ("cat <<'PY'; x<y", 'cat <<EOF'):
+            with self.subTest(line=line):
+                message = ('Facts: Checks pass.\n' + line
+                           + '\nDecision: Continue.\nNext: Resume.')
+                text_lint.check(message, 'peer')
+
+    def test_peer_tag_like_text_keeps_missing_decision(self):
+        for line in ("cat <<'PY'; x<y", 'cat <<EOF'):
+            with self.subTest(line=line):
+                message = 'Facts: Checks pass.\n' + line + '\nNext: Resume.'
+                with self.assertRaises(text_lint.FormatError) as refusal:
+                    text_lint.check(message, 'peer')
+                self.assertEqual(refusal.exception.findings, ['Missing section: Decision'])
+
+    def test_peer_heredoc_keeps_later_sentence_limit(self):
+        message = ('Facts: Checks pass.\ncat <<EOF\n'
+                   'Owner helper request: one two three four five six seven eight nine ten '
+                   'eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen '
+                   'nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix.\n'
+                   'Decision: Continue.\nNext: Resume.')
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.check(message, 'peer')
+        self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+
+    def test_peer_bold_glued_words_keep_token_check(self):
+        message = ('Facts: <b>deadline2026</b> <b>by8November00</b>\n'
+                   'Decision: Continue.\nNext: Resume.')
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.check(message, 'peer')
+        self.assertEqual(refusal.exception.findings,
+                         ['Separate glued words with spaces; remove compressed shorthand.'])
+
+    def test_peer_entity_glued_words_keep_token_check(self):
+        message = ('Facts: deadline2026 by8November0&#48;\n'
+                   'Decision: Continue.\nNext: Resume.')
+        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'peer', 'message': message}}
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.outgoing(event)
+        self.assertEqual(refusal.exception.findings,
+                         ['Separate glued words with spaces; remove compressed shorthand.'])
+        event['tool_input']['message'] = message.replace('&#48;', '&amp;#48;')
+        text_lint.outgoing(event)
+
+    def test_peer_hold_wall_decodes_entities_once(self):
+        message = ('Facts: Preser&#118;e every ho&#108;d. Cus&#116;ody stays. '
+                   'Admi&#115;sion waits. Preser&#118;e the refu&#115;al.\n'
+                   'Decision: Wait.\nNext: Resume.')
+        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'chief', 'message': message}}
+        with self.assertRaises(text_lint.FindingsError) as refusal:
+            text_lint.outgoing(event)
+        self.assertEqual(refusal.exception.findings,
+                         ['Keep any new hold in one line, drop restated standing holds, '
+                          'and send what changed and the next action.'])
+        event['tool_input']['message'] = message.replace('&#', '&amp;#')
+        text_lint.outgoing(event)
+
+    def test_peer_hold_wall_reads_the_helper_label_raw(self):
+        message = ('Facts: Owner helper requ&#101;st: retained. Preserve every hold. '
+                   'Custody stays. Admission waits. Preserve the refusal.\n'
+                   'Decision: Wait.\nNext: Resume.')
+        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'chief', 'message': message}}
+        with self.assertRaises(text_lint.FindingsError) as refusal:
+            text_lint.outgoing(event)
+        self.assertEqual(refusal.exception.findings,
+                         ['Keep any new hold in one line, drop restated standing holds, '
+                          'and send what changed and the next action.'])
+        event['tool_input']['message'] = message.replace('requ&#101;st', 'request')
+        text_lint.outgoing(event)
+
+    def test_peer_hold_wall_counts_words_inside_tags(self):
+        message = ('Facts: <b>Preserve</b> every <b>hold</b>. <b>Custody</b> stays. '
+                   '<b>Admission</b> waits. <b>Preserve</b> the <b>refusal</b>.\n'
+                   'Decision: Wait.\nNext: Resume.')
+        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'chief', 'message': message}}
+        with self.assertRaises(text_lint.FindingsError) as refusal:
+            text_lint.outgoing(event)
+        self.assertEqual(refusal.exception.findings,
+                         ['Keep any new hold in one line, drop restated standing holds, '
+                          'and send what changed and the next action.'])
+
+    def test_peer_hold_wall_refuses_every_form_main_refuses(self):
+        """Main's hold wall refuses every form; the driver's census checks each form against main."""
+        labels = ('', 'Owner helper requ&#101;st: retained.\n',
+                  'Owner helper request&#58; retained.\n', 'Owner <b>helper</b> request: retained.\n')
+        wraps = (
+            ('bold', lambda w: f'<b>{w}</b>'),
+            ('span', lambda w: f'<span class="x">{w}</span>'),
+            ('link', lambda w: f'<a href="/x">{w}</a>'),
+            ('closed-break', lambda w: f'{w}<br/>'),
+            ('break', lambda w: f'{w}<br>'),
+            ('comment', lambda w: f'{w}<!-- c -->'),
+            ('in-word-empty-tag', lambda w: w[:2] + '<b></b>' + w[2:]),
+            ('in-word-tag', lambda w: w[:2] + '<b>' + w[2:] + '</b>'),
+            ('in-word-comment', lambda w: w[:2] + '<!-- c -->' + w[2:]),
+            ('decimal', lambda w: w[:2] + f'&#{ord(w[2])};' + w[3:]),
+            ('hex', lambda w: w[:2] + f'&#x{ord(w[2]):x};' + w[3:]),
+            ('bold-decimal', lambda w: '<b>' + w[:2] + f'&#{ord(w[2])};' + w[3:] + '</b>'),
+            ('path', lambda w: f'{w} /tmp/x'),
+            ('bold-path', lambda w: f'<b>{w}</b> /tmp/{w}'),
+        )
+        for label in labels:
+            for name, wrap in wraps:
+                with self.subTest(label=label, wrap=name):
+                    body = ' '.join(wrap(word) + '.' for word in
+                                    ('Preserve', 'hold', 'Custody', 'Admission', 'Preserve', 'refusal'))
+                    message = 'Facts: ' + label + body + '\nDecision: Wait.\nNext: Resume.'
+                    event = {'tool_name': 'SendMessage',
+                             'tool_input': {'to': 'chief', 'message': message}}
+                    with self.assertRaises(text_lint.FindingsError) as refusal:
+                        text_lint.outgoing(event)
+                    self.assertEqual(refusal.exception.findings,
+                                     ['Keep any new hold in one line, drop restated standing holds, '
+                                      'and send what changed and the next action.'])
+
+    def test_peer_token_checks_keep_main_html_view(self):
+        for message in (
+                'Facts: deadline<b></b>2026 release<b></b>2027\nDecision: Continue.\nNext: Resume.',
+                'Facts: abcdefghijklmnopqrstuv <b>one</b> <b>two</b> <b>three</b> <b>four</b>\n'
+                'Decision: Continue.\nNext: Resume.'):
+            with self.subTest(message=message):
+                event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'peer', 'message': message}}
+                with self.assertRaises(text_lint.FormatError) as refusal:
+                    text_lint.outgoing(event)
+                self.assertEqual(refusal.exception.findings,
+                                 ['Separate glued words with spaces; remove compressed shorthand.'])
+
+    def test_peer_sentence_check_keeps_main_html_view(self):
+        message = ('Facts: one two three four five six seven eight nine ten eleven twelve <!--\n--> '
+                   'thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone '
+                   'twentytwo twentythree twentyfour twentyfive twentysix.\n'
+                   'Decision: Continue.\nNext: Resume.')
+        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'peer', 'message': message}}
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.outgoing(event)
+        self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+
+    def test_peer_hold_wall_reads_text_after_tag_like_text(self):
+        message = ('Facts: Checks wait.\ncat <<EOF\n'
+                   'Preserve every hold. Custody stays. Admission waits. Preserve the refusal.\n'
+                   'Decision: Wait.\nNext: Resume.')
+        with self.assertRaises(ValueError) as refusal:
+            text_lint.hold_wall(message)
+        self.assertEqual(str(refusal.exception),
+                         'Keep any new hold in one line, drop restated standing holds, '
+                         'and send what changed and the next action.')
+
+    def test_peer_paths_stay_whole_tokens(self):
+        message = ('Facts: Read /home/user/.scratch/deadline2026/by8November00.md\n'
+                   'Decision: Continue.\nNext: Resume.')
+        text_lint.check(message, 'peer')
+
+    def test_decision_sections_use_visible_text_only(self):
+        message = ('<h2>What is wrong</h2><h2>Why now</h2><h2>Options</h2>'
+                   '<h2>If no answer</h2><script>\nRecommendation\n</script>')
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.check(message, 'decision')
+        self.assertEqual(refusal.exception.findings, ['Missing section: Recommendation'])
 
     def test_peer_refusal_has_resend_template(self):
         """Catch a peer formatting refusal that fails to permit one resend."""

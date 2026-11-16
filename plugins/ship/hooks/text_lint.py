@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
 import hmac
+import html
 from html.parser import HTMLParser
 import json
 import os
@@ -21,14 +22,15 @@ GLUE_EXEMPT = re.compile(r'[0-9a-f]+|b[a-z0-9]{8}|(sha|md)[0-9]*sum|python[0-9.]
 HOLD_WORDS = re.compile(r'\b(preserv\w*|holds?|custody|custodian|admission|admits?|admitted|provenance|refusals?)\b', re.I)
 # The harness addresses an in-session subagent by its agent ID and a background subagent's parent as `main`.
 SUBAGENT = re.compile(r'main|a[0-9a-f]{16}')
+RECEIPT_MARKER = re.compile(r'<!-- ultraship-receipt:[0-9a-f]{32} -->')
 PEER_TEMPLATE = """<Outcome in one sentence, and what it means for the recipient.>
 Facts
 - <Verified fact with its source: PR number, run ID or UTC time.>
 Decision
 - <The action you take or ask for, within existing authority.>
 Next
-- <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>."""
-SUBAGENT_TEMPLATE = '<The same message, one point per sentence, at most 25 words each, with a space between words.>'
+- <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>.
+<Every line: one point per sentence, at most 25 words each, with a space between words.>"""
 INPUT_TEMPLATE = '''Use exactly one output-kind meta tag: decision or result.
 Decision:
 <meta name="output-kind" content="decision">
@@ -101,26 +103,40 @@ def glued(tokens):
     return {w for w in words if len(w) >= 7 and w.isalnum() and GLUED.search(w) and not GLUE_EXEMPT.fullmatch(w)}
 
 
+def peer_text(text):
+    # A peer reads SendMessage text as plain text; main's HTML parse decoded references once.
+    return html.unescape(RECEIPT_MARKER.sub('', text))
+
+
 def hold_wall(text):
     """Six or more hold words in a status message restate standing holds; a brief carries its restrictions."""
     if 'Owner helper request:' in text:
         return
-    prose = re.sub(r'`[^`]*`', '', ''.join(VisibleText(text).parts))
-    words = ' '.join(t for t in prose.split() if not re.search(r'https?://|/', t))
-    if len(HOLD_WORDS.findall(words)) >= 6:
-        raise ValueError('Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.')
+    # Main's HTML view joins a word that a tag splits; the split view also reads text after a stray `<`.
+    for view in (re.sub(r'[<>]', ' ', peer_text(text)), ''.join(VisibleText(text).parts)):
+        prose = re.sub(r'`[^`]*`', '', view)
+        words = ' '.join(t for t in prose.split() if not re.search(r'https?://|/', t))
+        if len(HOLD_WORDS.findall(words)) >= 6:
+            raise ValueError('Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.')
 
 
 def check(text, kind='result'):
-    plain = ''.join(VisibleText(text).parts)
-    prose = re.sub(r'`[^`]*`', '', plain)
-    tokens = [t for t in prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
-    long = [t for t in tokens if len(t) >= 22]
+    visible = ''.join(VisibleText(text).parts)
+    plain = peer_text(text) if kind == 'peer' else visible
+    # A peer reads plain text; main's HTML view of the raw text keeps every word and sentence refusal main made.
+    views = (plain, visible) if kind == 'peer' else (plain,)
+    shorthand = long_sentence = False
+    for index, view in enumerate(views):
+        prose = re.sub(r'`[^`]*`', '', view)
+        token_prose = re.sub(r'[<>]', ' ', prose) if kind == 'peer' and index == 0 else prose
+        tokens = [t for t in token_prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
+        long = [t for t in tokens if len(t) >= 22]
+        shorthand |= len(long) >= 3 or bool(tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2
+        long_sentence |= any(len(s.split()) > 25 for s in re.split(r'(?<=[.!?])\s+|\n+', prose))
     errors = []
-    if len(long) >= 3 or (tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2:
+    if shorthand:
         errors.append('Separate glued words with spaces; remove compressed shorthand.')
-    sentences = re.split(r'(?<=[.!?])\s+|\n+', prose)
-    if any(len(s.split()) > 25 for s in sentences):
+    if long_sentence:
         errors.append('Write at most 25 words per sentence.')
     sections = ('Facts', 'Decision', 'Next') if kind == 'peer' else (
         ('What is wrong', 'Why now', 'Options', 'Recommendation', 'If no answer') if kind == 'decision' else ())
@@ -475,9 +491,7 @@ def hook(event, parse_error=None):
         if receipt['resend_allowed']:
             template = INPUT_TEMPLATE
             if event.get('tool_name') == 'SendMessage':
-                recipient = str((event.get('tool_input') or {}).get('to', '')).strip()
-                template = (SUBAGENT_TEMPLATE if SUBAGENT.fullmatch(recipient)
-                            and not any('Missing section: ' in finding for finding in findings) else PEER_TEMPLATE)
+                template = PEER_TEMPLATE
             reason += (' You may resend once with the same action, recipient, scope and content, changed only in format.'
                        + ' Resend with this shape:\n' + template)
         else:
