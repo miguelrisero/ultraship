@@ -3370,7 +3370,7 @@ COMMIT_MESSAGE = re.compile(r"""((?:^|\s)(?:-[A-Za-z]*m|--message)(?:\s+|=))(?:'
 def commit_message_removed(command):
     """Blank each quoted -m/--message value of a plain `git add`/`git commit` chain; return other commands unchanged."""
     bare = COMMIT_MESSAGE.sub(r"\1''", command)
-    words = re.sub(r"'[^']*'|" r'"[^$`\\"]*"', "''", bare)
+    words = re.sub(r"'[^']*'|" r'"[^$`\\"]*"', "''", command)
     steps = words.split('&&')
     if re.fullmatch(r'\s*cd\s+\S+\s*', steps[0]):
         steps = steps[1:]

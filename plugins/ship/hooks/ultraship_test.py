@@ -763,6 +763,9 @@ class WriterGitHubGuardTests(unittest.TestCase):
             "git commit -m 'gh issue close 1' > out.txt",
             "git add 'gh issue close 1' && git commit -m x",
             "git commit -m x 'gh issue close 1'",
+            "git commit 'x -m '; gh issue close 1; ' y'",
+            'git commit "x -m "; gh issue close 1; " y"',
+            'git commit -m "prefix -m \'$(gh issue close 1)\'"',
         )
         for command in commands:
             with self.subTest(command=command):
