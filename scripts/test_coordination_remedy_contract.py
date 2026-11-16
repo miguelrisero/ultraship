@@ -101,7 +101,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
         for requirement in (
             'Method-only denial (owner Input e6ba1705-42f2-491c-ac0b-43ae191596b6, choice B): '
             'a refusal naming only the method, never the content, permits one native Edit retry.',
-            'The method-only rule applies only to ordinary files and never to a protected-row operation.',
+            'The method-only rule applies only to ordinary files and to the granted protected-row re-anchor below; '
+            'it never covers any other protected-row operation.',
             'A fresh writer applies the already-approved edit text exactly once with native Edit; '
             'the commit stays a separate step.',
             'The method ban and every content, scope, protected-access and publication denial stay final.',
@@ -110,6 +111,87 @@ class CoordinationRemedyContractTests(unittest.TestCase):
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, self.refusals)
+
+    def test_protected_row_method_only_retry_admits_one_native_edit_on_the_named_row(self):
+        for requirement in (
+            "When that re-anchor is on the explicit-pair or lane-derived route that its verified owner grant covers, "
+            "one fresh writer applies that route's approved edit once with native Edit and `replace_all=false`.",
+            'The brief names the CI-named row file and the unique row ID.',
+            "The edit changes only that row's paired `old` and `new` fields with the identical mutant edit: "
+            "the CoC-approved pair on the explicit-pair route, or the subject's new source text on the lane-derived route.",
+            "Require that route's independent not-weaker review before the push.",
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.refusals)
+
+    def test_protected_row_method_only_retry_refuses_wider_or_repeated_edits(self):
+        refusal = self.refusals.split(
+            'Refuse a native Edit outside the named file, row or paired fields', 1
+        )[1].split('.', 1)[0]
+        for case in ('a second attempt', 'a denial of the native Edit itself',
+                     'every content, scope or protected-access denial'):
+            with self.subTest(case=case):
+                self.assertIn(case, refusal)
+
+    def test_reviewer_form_admits_one_fresh_reviewer_for_the_same_frozen_subject(self):
+        for requirement in (
+            'Reviewer form: the fresh-brief and final corrected brief routes also admit one fresh reviewer '
+            'as their one new recipient, of the same reviewer agent type, for the same frozen subject SHA, '
+            'review step and scope.',
+            'That reviewer gets the same brief content, changed only in format, under the same receipt, '
+            'consumed-attempt record, exclusive custody and run-board rules.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.refusals)
+
+    def test_reviewer_form_refuses_non_formatting_refusals_and_a_second_reviewer(self):
+        self.assertIn(
+            'Refuse the reviewer form after any non-formatting, mixed or ambiguous refusal, '
+            'and refuse a second fresh reviewer for the same original call.', self.refusals)
+
+    def test_receiptless_form_admits_one_fresh_brief_and_keeps_its_refusal_final(self):
+        for requirement in (
+            "Receiptless form: when the loaded hook version's `text_lint.py` writes no receipt "
+            '(ship 1.10.37 to 1.10.47), the coordinator may use the fresh-brief route once if every finding '
+            'in the recorded refusal text matches a known `text_lint.py` formatting message.',
+            'Record the full refusal text and the hook version on the run board in place of the receipt id; '
+            'on this form only, they stand in for the receipt.',
+            'A refusal of that fresh brief is final; the receiptless form admits no resend and no final corrected brief.',
+            'A hook version that writes receipts still requires its receipt.',
+            'No form resets a consumed attempt.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.refusals)
+
+    def test_writer_and_driver_receipt_lines_include_the_receiptless_fresh_brief(self):
+        receipt = ('when every returned finding matches a known `text_lint.py` formatting message and, '
+                   'for a `text_lint.py` refusal, a resend cites its hook receipt '
+                   'and a fresh brief records it on the run board.')
+        exception = ('Its fresh-brief route also admits one fresh reviewer, and a receiptless hook version '
+                     'records the full refusal text and hook version in place of the receipt id.')
+        for name in ('driver.md', 'driver--sol.md', 'writer--sol.md',
+                     'writer--sonnet.md', 'writer--fable52.md'):
+            with self.subTest(carrier=name):
+                text = (ROOT / 'plugins/ship/agents' / name).read_text()
+                self.assertIn(receipt + '\n' + exception, text)
+
+    def test_lane_derived_route_names_the_granted_re_anchor_exception(self):
+        for name in (
+            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/writer--fable52.md', 'plugins/ship/agents/driver.md',
+            'plugins/ship/agents/driver--sol.md', 'plugins/ship/skills/ship/SKILL.md',
+        ):
+            text = (ROOT / name).read_text()
+            _, heading, after = text.partition('#### Lane-derived route\n')
+            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after,
+                             maxsplit=1, flags=re.MULTILINE)[0]
+            with self.subTest(path=name):
+                self.assertTrue(heading)
+                self.assertIn(
+                    "After a hook denies only the method of this route's row edit, apply the owner-decisions "
+                    'granted protected-row re-anchor; it is the one exception to the alternate-form sentence below.',
+                    route,
+                )
 
     def test_contract_scopes_message_format_refusals_and_fresh_instructions(self):
         for requirement in (
