@@ -112,6 +112,7 @@ def hold_wall(text):
 
 
 def check(text, kind='result'):
+    text = re.sub(r'<(?!!--)', '&lt;', text) if kind == 'peer' else text
     plain = ''.join(VisibleText(text).parts)
     prose = re.sub(r'`[^`]*`', '', plain)
     tokens = [t for t in prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
@@ -124,9 +125,8 @@ def check(text, kind='result'):
         errors.append('Write at most 25 words per sentence.')
     sections = ('Facts', 'Decision', 'Next') if kind == 'peer' else (
         ('What is wrong', 'Why now', 'Options', 'Recommendation', 'If no answer') if kind == 'decision' else ())
-    section_text = plain + '\n' + text if kind == 'peer' else plain
     for section in sections:
-        if not re.search(r'^\s*(?:#{1,6}\s*)?' + re.escape(section) + r'\b', section_text, re.M | re.I):
+        if not re.search(r'^\s*(?:#{1,6}\s*)?' + re.escape(section) + r'\b', plain, re.M | re.I):
             errors.append('Missing section: ' + section)
     if errors:
         raise FormatError(errors)

@@ -163,6 +163,22 @@ class TextLintTests(unittest.TestCase):
                     text_lint.check(message, 'peer')
                 self.assertEqual(refusal.exception.findings, ['Missing section: Decision'])
 
+    def test_peer_commented_decision_keeps_missing_section(self):
+        message = ('Facts: Checks pass.\n<!--\nDecision: Continue.\n-->\nNext: Resume.')
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.check(message, 'peer')
+        self.assertEqual(refusal.exception.findings, ['Missing section: Decision'])
+
+    def test_peer_heredoc_keeps_later_sentence_limit(self):
+        message = ('Facts: Checks pass.\ncat <<EOF\n'
+                   'Owner helper request: one two three four five six seven eight nine ten '
+                   'eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen '
+                   'nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix.\n'
+                   'Decision: Continue.\nNext: Resume.')
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.check(message, 'peer')
+        self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+
     def test_decision_sections_use_visible_text_only(self):
         message = ('<h2>What is wrong</h2><h2>Why now</h2><h2>Options</h2>'
                    '<h2>If no answer</h2><script>\nRecommendation\n</script>')
