@@ -2016,6 +2016,15 @@ class WriterHeredocTests(unittest.TestCase):
                    ' && git diff --name-only HEAD origin/main -- migrations > /workspace/paths.txt')
         self.assertFalse(self.denied(command), self.reason)
 
+    def test_literal_rg_and_ls_files_chain_is_admitted(self):
+        command = ("cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meta-approval && rg -n '_APPROVAL_READY|_sign_in_observation|approval_ready|push_approval|chromium' backend/api/tools/native/browser_sign_in_code.py backend/api/tools/native/browser_sign_in_tool.py backend/api/tools/native/browser_sign_in_input.py backend/api/tools/native/browser.py backend/api/tests/test_browser_sign_in_codes.py backend/api/tests/test_browser_sign_ins.py backend/api/tests/test_browser_sign_in_inputs.py backend/api/tests/test_browser_sign_in_transitions.py && git ls-files 'backend/api/CLAUDE.md' 'backend/api/AGENTS.md'")
+        self.assertFalse(self.denied(command), self.reason)
+
+    def test_plugin_glob_keeps_verbatim_search_chain_denied(self):
+        command = ("cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meta-approval && rg -n '_APPROVAL_READY|_sign_in_observation|approval_ready|push_approval|chromium' backend/api/tools/native/browser_sign_in_code.py backend/api/tools/native/browser_sign_in_tool.py backend/api/tools/native/browser_sign_in_input.py backend/api/tools/native/browser.py backend/api/tests/test_browser_sign_in_codes.py backend/api/tests/test_browser_sign_ins.py backend/api/tests/test_browser_sign_in_inputs.py backend/api/tests/test_browser_sign_in_transitions.py && git ls-files 'backend/api/CLAUDE.md' 'backend/api/AGENTS.md' && ls -d /home/miguel/projects/runflow-monorepo /home/miguel/.claude/plugins/cache/*/ship/* 2>/dev/null")
+        self.assertTrue(self.denied(command))
+        self.assertIn('git writer expansion or glob rule', self.reason)
+
     def test_google_conflict_lookup_is_literal_search_data(self):
         command = ('cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/b8fe-chief-coc-27-oct/'
                    'wt-google-confirm-evidence && git status --short'
