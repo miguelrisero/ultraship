@@ -240,6 +240,20 @@ REFUSE = (
     'sudo . /home/u/ws/x; gh pr view 7',
     "cat <<<'EOF' /home/u/ws/x\nbash -c x\nEOF\ngh pr view 7",
     "cat <<<'EOF'\nbash -c x\nEOF\ngh pr view 7",
+    "command -p . /dev/stdin <<<'gh api repos/o/r/pulls/7/comments -f body=x'",
+    'time -p . /home/u/ws/x; gh pr view 7',
+    ">/dev/null . /dev/stdin <<<'gh api repos/o/r/pulls/7/comments -f body=x'",
+    '2>/dev/null . /home/u/ws/x; gh pr view 7',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x" | >/dev/null . /dev/stdin',
+    'command -- . /home/u/ws/x; gh pr view 7',
+    "echo 'gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123' | parallel",
+    '{ echo "gh api repos/o/r/pulls/7/comments -f body=x"; } | parallel',
+    '(echo "gh api repos/o/r/pulls/7/comments -f body=x") |& parallel',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x" | xargs env',
+    "echo \"gh api repos/o/r/pulls/7/comments -f body=x\" | awk '{system($0)}'",
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x" > >(parallel)',
+    '{ echo "gh api repos/o/r/pulls/7/comments -f body=x" >&2; } 2>&1 | parallel',
+    r'''trap 'c=${BASH_COMMAND#echo }; eval ${c//\"/}' DEBUG; echo "gh api repos/o/r/pulls/7/comments -f body=x"''',
 )
 
 ADMIT = (
@@ -345,6 +359,13 @@ echo "$(date -u +%FT%TZ) REFUSAL: ship thread guard ('review-thread guard parse 
     'grep -c . /home/u/ws/x.log; gh pr view 7',
     'echo "head $(gh pr view 7 --json headRefOid -q .headRefOid)"',
     "cat > /home/u/ws/x.md <<'EOF'\na . b\nEOF\ngh pr view 7",
+    'grep -R time .; gh pr view 7',
+    'echo "gh api repos/o/r/pulls/7/comments" > /home/u/ws/note.md | cat',
+    '{ echo "gh api repos/o/r/pulls/7/comments"; } > /home/u/ws/note.md',
+    'echo "gh x $(date -u +%F)" || true',
+    "if true; then echo 'gh api repos/o/r/pulls/7/comments -f body=x'; fi",
+    'for f in a; do echo "gh $f"; done',
+    'if false; then :; else echo "gh api x"; fi',
 )
 
 
