@@ -151,6 +151,10 @@ Require the owner-scoped protected row access authority above and name this rout
 Require CoC approval of the exact row allowlist before any protected read or edit.
 Limit scope to CoC-named exact row-file paths and unique row IDs from the PR's own failing anchor CI evidence.
 Require the recorded base/head diff to show that the PR's own subject change breaks each named row. On the ordinary lane-derived route only, if the PR creates the row file absent at the CI base, use the last PR commit before the re-anchor as the before tree and row comparison base. Keep the original CI base for causality and evidence; preserve every other route condition.
+In that case, if only main merges into the PR branch changed the subject after the last PR-authored commit before the re-anchor that edited the row file, use that commit as the before tree and row comparison base instead.
+Then require the recorded diff to show that no PR-authored commit after that tree changed the subject, so main merges alone broke each named row; this replaces only the PR's own subject change requirement.
+A merge commit changes the subject as a PR-authored commit unless its subject blob equals the subject blob of the clean automatic merge of its parents.
+Rows in a row file that exists at the CI base keep every current rule.
 Permit the applying writer to locate each named row by its row ID inside its named file.
 Read only that row's lines; permit no whole-file parse, unnamed-row read, or search outside the named files.
 Replace only the paired `old` and `new` fields to match the subject's new source text.
@@ -204,6 +208,11 @@ Require CoC approval of that review receipt before publication.
 Changed source, scope, authority or evidence invalidates the receipt and approval.
 An exact written CoC decision naming the repository, PR, row-file paths and unique row IDs authorizes retirement, designated-test change and mutant change for those rows.
 That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.
+The decision may instead cite the owner standing grant as its authority for retirement, designated-test change and mutant change.
+For that grant, directly verify ~/.claude/CLAUDE.md, heading CoC decisions (standing grant), and these exact sentences: The CoC decides CI/CD, testing and tooling items for me. It also includes adapting those rows when the diff makes the old mutant impossible: retiring a row whose target code the PR deletes, or changing its designated test or mutant, each with an independent not-weaker review and a follow-up row for the new code. The CoC owns these changes; no per-row owner event is needed.
+Refuse a missing, unreadable or mismatched grant; accept zero relay for this verification.
+Under that grant, require the PR's own diff to break each named row and make its old mutant impossible, and retire only a row whose target code the PR deletes.
+That grant supplies zero claim or subject change authority and waives no other requirement of this route.
 Require an independent not-weaker review of every row change by a reviewer who differs from the PR author and the applying writer.
 When the PR adds new code in place of the guarded behavior, require a follow-up row that guards the new code.
 Preserve every existing retirement route and its authority unchanged.
@@ -317,13 +326,18 @@ Name the applying writer, permitted protected reads, exact retirement, independe
 End the retirement-only authority block; apply every subsequent shared requirement to both branches unless explicitly scoped.
 An exact written CoC decision naming the repository, PR, row-file paths and unique row IDs authorizes retirement, designated-test change and mutant change for those rows.
 That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.
+The decision may instead cite the owner standing grant as its authority for retirement, designated-test change and mutant change.
+For that grant, directly verify ~/.claude/CLAUDE.md, heading CoC decisions (standing grant), and these exact sentences: The CoC decides CI/CD, testing and tooling items for me. It also includes adapting those rows when the diff makes the old mutant impossible: retiring a row whose target code the PR deletes, or changing its designated test or mutant, each with an independent not-weaker review and a follow-up row for the new code. The CoC owns these changes; no per-row owner event is needed.
+Refuse a missing, unreadable or mismatched grant; accept zero relay for this verification.
+Under that grant, require the PR's own diff to break each named row and make its old mutant impossible, and retire only a row whose target code the PR deletes.
+That grant supplies zero claim or subject change authority and waives no other requirement of this route.
 For changed mutant semantics, require that decision to name the exact protected reads, semantic adaptation and permitted gates.
 Require that decision and the admitted gates to cover independent applied review at the final commit.
-Verify the cited owner event's Input, workspace, current version, event id and hash, `event_type=answer_submitted`, `actor_kind=owner_ui` and answer text.
-That event delegates authority to the CoC; the exact CoC decision supplies the exact rows, fields and adaptation scope.
+When the decision cites that owner event, verify its Input, workspace, current version, event id and hash, `event_type=answer_submitted`, `actor_kind=owner_ui` and answer text.
+That event or the standing grant delegates authority to the CoC; the exact CoC decision supplies the exact rows, fields and adaptation scope.
 Preserve every historical fixed-event comparator unchanged within its existing standing branch only.
-Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
-An authoritative mismatch blocks access and application without fallback.
+When the decision cites that owner event, use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
+When the decision cites that owner event, an authoritative mismatch blocks access and application without fallback.
 Require an independent not-weaker review of every row change by a reviewer who differs from the PR author and the applying writer.
 When the PR adds new code in place of the guarded behavior, require a follow-up row that guards the new code.
 Require a current task-specific owner event for any claim change.

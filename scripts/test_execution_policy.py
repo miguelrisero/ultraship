@@ -1043,6 +1043,17 @@ class ReviewerSearchTests(unittest.TestCase):
 
 
 class ExecutionPolicyTests(unittest.TestCase):
+    def test_each_writer_requires_plain_checks_and_preserves_retirement_heredocs(self):
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+            text = read('plugins/ship/agents/' + name)
+            admission = text.partition('### Execution admission and cleanup\n')[2].split('\n### ', 1)[0]
+            for requirement in (
+                'Run each check as its own plain command, with no inline interpreter code.',
+                'The named `python3 -I -` heredocs of the retirement routes stay as each route specifies.',
+            ):
+                with self.subTest(path=name, requirement=requirement):
+                    self.assertEqual(admission.splitlines().count(requirement), 1)
+
     def test_each_writer_distinguishes_ordinary_admission_from_special_gos(self):
         for name in ('writer--sol.md', 'writer--sonnet.md'):
             text = read('plugins/ship/agents/' + name)
