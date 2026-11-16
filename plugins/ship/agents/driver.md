@@ -266,6 +266,62 @@ Preserve zero writer publication authority, effective refusals, tool and hook de
 Prepare the retirement writer brief with the CoC decision, named row-file paths and row IDs, quoted CI log lines, recorded base/head diff, and each PR-body reason.
 Put the retirement commit SHA and its content-free line counts for each named file in the reviewer brief.
 
+### False-claim retirement route
+
+Use this route only when the brief names the False-claim retirement route.
+It retires an active protected row whose claim the PR's own design makes false at the final code.
+A brief that names this route uses it in place of every other retirement and row review route.
+Refuse a row that CI reports `in the base file, missing at HEAD`; that row uses the Removed-behavior retirement route.
+Refuse a row that is absent at the base SHA.
+Keep every other retirement route, its CI-line requirement and its authority unchanged.
+Require the PR body to name each row ID and its claim, and to quote the claim.
+Require the PR body to state why each claim is false at the final code, citing `file:line` at the PR head.
+Require the PR body to state the intended behavior change; a claim that a defect made false never qualifies.
+Require the PR's own base/head diff to change the subject file that each named row names.
+Refuse a row whose subject file the PR leaves unchanged.
+Require a CoC decision file that the brief names by absolute path and SHA256.
+Require that file to bind the repository, PR, author head SHA, row-file path and each exact unique row ID.
+The loaded edit authority is that decision file, under the owner grant: "The CoC decides CI/CD, testing and tooling items for me."
+Owner-scoped protected row access grants nothing on this route.
+Before any protected read, verify the file SHA256 and every binding.
+Refuse a SHA256 mismatch, a missing or different binding, a passed expiry that the file states, and a branch head other than the bound author head SHA before the edit.
+Permit the applying writer to locate each named row by its row ID inside its named file.
+Read only that row's table lines, including its owned child tables.
+Forbid whole-file parsing, adjacent-row reads, unnamed-row reads and broader protected searches.
+Replace only each named row's table with exactly one `[[retired]]` table that carries its exact ID.
+Allow only `id` and `reason` in that table; copy `reason` verbatim from the PR body's statement for that row.
+Encode the reason as a TOML basic string with backslash, quote and every control character escaped.
+Use native Edit with replace_all=false; require old_string to cover the full row table extent, including all owned child tables and the unique row ID.
+Refuse unclear extent, missing or multiple matches, and any unapproved neighboring content.
+Change nothing else in the named file: no other line, row, field, pin, or table.
+Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.
+Commit the retirement alone; check it only with content-free `git diff --numstat` counts for each named file.
+Before the push, require an independent reviewer who differs from the PR author and the applying writer.
+Require the brief to supply read-only trees at the base SHA and at the frozen commit after the edit.
+Admit each reviewer row read with the driver's reviewer admission record for protected row reads.
+Require the reviewer to read each retired row's lines at the base SHA and confirm its row ID, subject file and claim.
+Require the reviewer to confirm that the PR body quotes that claim exactly and that the PR's own diff changes that subject file.
+Require the reviewer to read the cited final code at the frozen commit and to search non-row source and test files for the claimed behavior.
+Require the reviewer to confirm that the claim is false at the final code and that the final code implements the stated behavior change.
+Agreement with the PR body alone supplies zero confirmation.
+Require the reviewer to confirm that the retirement commit replaces only the named row tables, each with one `[[retired]]` table.
+Require a follow-up row that guards the new behavior, in this PR or in a follow-up PR that this PR body names by direct URL.
+Create the follow-up row only under its own applicable route; this route grants zero row-creation authority.
+Require the same reviewer to read the follow-up row at its frozen commit and confirm that it is not weaker than the retired row.
+Not weaker means that the follow-up row guards the new behavior at least as tightly as the retired row guarded the old behavior.
+For a follow-up PR, run this PR's post-merge battery only after the follow-up PR merges with that verdict, at a commit that contains both.
+Until then, report the open follow-up row on this PR.
+Refuse the retirement when the claim is still true at the final code, or when the reviewer cannot confirm any requirement.
+Refuse on any doubt about any requirement.
+Bind the review receipt to reviewer identity, approving verdict, decision file SHA256, frozen commit SHA, row-file paths, row IDs, cited `file:line` and follow-up row ID.
+Require CoC approval of that review receipt before the push; changed source, decision file or evidence invalidates the receipt and approval.
+Keep messages, briefs and PR bodies free of pair bytes and row TOML text; the quoted claim is the only exception.
+Identify each edit only by path, row ID and the `[[retired]]` table.
+Beyond the reads above, this route grants zero TOML search or parse authority, protected reads, or anchor extraction.
+Require separate admission for every mutation or checker execution; keep mutation proof after merge.
+Hook, permission and tool denials and every earlier refusal stay final; this route lifts none of them.
+The driver applies zero protected edits; preserve zero writer publication authority, protected holds, and Peral's CI-runner and merge-queue authority.
+
 ### New lane-owned row review route
 
 Use this route only when the brief explicitly selects the new lane-owned row review route.
