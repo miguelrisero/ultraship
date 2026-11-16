@@ -340,6 +340,7 @@ Verify ~/.claude/CLAUDE.md directly under heading CoC decisions (standing grant)
 Require the exact sentence: The CoC decides CI/CD, testing and tooling items for me.
 Refuse missing, unreadable or mismatched delegation before any write; accept zero relay for this direct verification.
 Require an exact CoC creation decision naming the applying writer, repository, PR, base SHA, author head SHA, new row-file path and each unique new row ID.
+Require scoped creation authority for the author and applying writer as separate recorded evidence.
 Require the driver's recorded lawful content-free evidence of lane ownership and absence of the new file and each new ID at the base.
 Reject an existing file, existing IDs, unnamed rows and stale evidence.
 Take every row field only from the brief or the files it names outside tests/mutation.
