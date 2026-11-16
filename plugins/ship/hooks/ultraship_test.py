@@ -703,11 +703,25 @@ class PythonHeredocGuardTests(unittest.TestCase):
 
 
 class WriterGitHubGuardTests(unittest.TestCase):
+    def test_writer_main_refused_data_shapes_remain_denied(self):
+        for command in ("gh pr view 1 '--jq=[{title: .title}]'",
+                        "gh pr view 1 '--template={{.title}}'", "gh api -X GET search/issues -f 'ref=*'"):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_comment_continuation_cannot_hide_next_command(self):
+        command = 'gh pr view 1 # comment ' + '\\' + '\n' + 'gh repo sync o/r'
+        result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
+        self.assertTrue(denied(result))
+        self.assertIn('Writers may run only read-only gh commands.',
+                      result['hookSpecificOutput']['permissionDecisionReason'])
+
     def test_writer_heredoc_quote_cannot_hide_following_command_in_data(self):
         command = "tee <<EOF\ngh pr view 1 -q '\nEOF\ngh issue close 1 # '\n"
         result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
         self.assertTrue(denied(result))
-        self.assertIn('gh multiline data value rule', result['hookSpecificOutput']['permissionDecisionReason'])
+        self.assertIn('Writers may run only read-only gh commands.',
+                      result['hookSpecificOutput']['permissionDecisionReason'])
 
     def test_writer_redirect_data_and_nested_git_words_cannot_hide_commands(self):
         for command in ('gh pr view 1 & >-q gh issue close 1',
@@ -843,8 +857,7 @@ class WriterGitHubGuardTests(unittest.TestCase):
                         'gh api -X GET repos/o/r/contents/env --field=ref=gh',
                         'gh api -X GET repos/o/r/contents/env -fref=gh',
                         'gh api -X GET repos/o/r/contents/env --raw-field=ref=gh',
-                        "gh pr view 1 '--jq=[{title: .title}]'", 'gh pr view 1 -q.title',
-                        "gh pr view 1 '--template={{.title}}'", "gh pr view 1 '--header=ref=gh'"):
+                        'gh pr view 1 -q.title', "gh pr view 1 '--header=ref=gh'"):
             with self.subTest(command=command):
                 self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
 
@@ -912,7 +925,7 @@ class WriterGitHubGuardTests(unittest.TestCase):
     def test_writer_git_config_reads_and_quoted_filters_are_admitted(self):
         for command in ('git config --get user.name', 'git config --get-all core.pager',
                         'git config --list', 'git config -l',
-                        "gh api -X GET search/issues -f 'ref=*'", "gh pr view 1 --jq '.[].title'",
+                        "gh pr view 1 --jq '.[].title'",
                         "gh pr view 1 -q '[{title: .title}]'",
                         'git clone --config core.pager=cat https://example.com/o/r.git'):
             with self.subTest(command=command):

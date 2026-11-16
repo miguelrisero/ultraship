@@ -3479,8 +3479,116 @@ def writer_repository_selector(option, value):
     return option == '--work-tree' and value == '.'
 
 
+def writer_gh_denial_main(command, depth=0):
+    if depth == 0:
+        command = commit_message_removed(command)
+    command = cat_heredoc_data(command).replace('\\\n', '')
+    unquoted = re.sub(r'''['"\\]''', '', command)
+    if not re.search(r'\bgh\b', unquoted):
+        return None
+    if depth >= 4:
+        return 'Writers cannot run deeply nested GitHub commands.'
+    reason = 'Writers may run only read-only gh commands.'
+    reads = {'pr': ('view', 'list', 'checks', 'diff', 'status'),
+             'issue': ('view', 'list', 'status'), 'run': ('view', 'list', 'watch'),
+             'repo': ('view',), 'workflow': ('view', 'list')}
+    if any(marker in command for marker in ('$(', '<(', '>(', '`')):
+        return reason
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        tokens = list(lexer)
+    except ValueError as error:
+        return 'unparsed shell syntax rule: ' + str(error)
+    for token in tokens:
+        if any(char.isspace() or char in ';&|()' for char in token):
+            nested = writer_gh_denial_main(token, depth + 1)
+            if nested:
+                return nested
+    segments, segment = [], []
+    for index, token in enumerate(tokens):
+        redirect = (token == '&' and (segment and segment[-1].endswith(('<', '>'))
+                    or index + 1 < len(tokens) and tokens[index + 1].startswith('>')))
+        if token and all(char in ';&|\n()' for char in token) and not redirect:
+            segments.append(segment)
+            segment = []
+        else:
+            segment.append(token)
+    segments.append(segment)
+    for words in segments:
+        if not any(re.search(r'\bgh\b', word) for word in words):
+            continue
+        if 'api' in words and any(word.strip('/') == 'graphql' for word in words) and any(
+                GH_FIELD.fullmatch(word) for word in words):
+            return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
+        exempt = False
+        for word in words:
+            if any(char in word for char in '$`'):
+                return reason
+            if exempt:
+                exempt = False
+                continue
+            if word in ('-q', '--jq', '-t', '--template', '-H', '--header'):
+                exempt = True
+                continue
+            if any(char in word for char in '*[{'):
+                return reason
+        for index, word in enumerate(words):
+            if os.path.basename(word) != 'gh':
+                continue
+            if any(os.path.basename(previous) in ('xargs', 'parallel') for previous in words[:index]):
+                return reason
+            arguments = words[index + 1:]
+            cursor = 0
+            if arguments in (['--version'], ['--help']):
+                continue
+            if not arguments or arguments[0].startswith('-'):
+                return reason
+            group = arguments[cursor]
+            if group in ('search', 'version', 'help'):
+                continue
+            if group != 'api':
+                cursor += 1
+                if group not in reads or cursor == len(arguments) or arguments[cursor] not in reads[group]:
+                    return reason
+                continue
+            arguments = arguments[cursor:]
+            methods, fields, endpoints = [], False, []
+            cursor = 1
+            while cursor < len(arguments):
+                argument = arguments[cursor]
+                method = GH_METHOD.fullmatch(argument)
+                if method:
+                    value = method[1] if argument.startswith('--') else method[2]
+                    if value is None or value == '':
+                        cursor += 1
+                        value = arguments[cursor] if cursor < len(arguments) else ''
+                    methods.append(value.removeprefix('=').upper())
+                elif GH_FIELD.fullmatch(argument):
+                    fields = True
+                    if argument in ('-f', '-F', '--field', '--raw-field', '--input'):
+                        cursor += 1
+                elif argument in ('-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache',
+                                  '-p', '--preview'):
+                    cursor += 1
+                elif not argument.startswith('-'):
+                    endpoints.append(argument.strip('/'))
+                cursor += 1
+            if fields and 'graphql' in endpoints:
+                return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
+            if any(method not in ('GET', 'HEAD') for method in methods) or (
+                    fields and (not methods or any(method != 'GET' for method in methods))):
+                return 'Writers cannot send mutating GitHub API requests; use a REST GET.'
+    return None
+
+
 def writer_gh_denial(command, depth=0):
     if depth == 0:
+        main_reason = writer_gh_denial_main(command)
+        if main_reason:
+            return main_reason
         command = commit_message_removed(command)
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = writer_trigger_text(command)
