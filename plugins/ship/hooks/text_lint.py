@@ -328,6 +328,16 @@ def pending_entry(identity):
     return None
 
 
+def mark_consumed(receipt_id):
+    path = store_dir() / 'receipts' / (receipt_id + '.consumed')
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        return False
+    os.close(fd)
+    return True
+
+
 def check_pending(event):
     args = event.get('tool_input') or {}
     tool = event.get('tool_name', '')
@@ -346,18 +356,16 @@ def check_pending(event):
     entry = pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **input_identity(event)})
     if entry and entry['state'] == 'open':
         receipt_id = entry['id']
-        path = store_dir() / 'receipts' / (receipt_id + '.consumed')
+        pending_message = ('A formatting-only refusal to this recipient is pending. Cite its receipt `'
+                           + receipt_id + '` with `<!-- ultraship-receipt:' + receipt_id + ' -->` in this message.')
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        except FileExistsError:
-            pass
+            if not mark_consumed(receipt_id):
+                return
         except OSError:
-            raise ValueError('A formatting-only refusal to this recipient is pending. Cite its receipt `'
-                             + receipt_id + '` with `<!-- ultraship-receipt:' + receipt_id + ' -->` in this message.') from None
-        else:
-            os.close(fd)
+            raise ValueError(pending_message) from None
         raise ValueError('Receipt `' + receipt_id + '` is now spent. '
-                         'Its message stays refused. Later messages need no citation.')
+                         'The message refused under receipt `' + receipt_id + '` stays refused. '
+                         'Later messages need no citation.')
 
 
 def write_receipt(event, findings, formatting_only, parent, resend_refused=False):
@@ -464,11 +472,8 @@ def consume_receipt(receipt_id, event):
             raise ValueError('Receipt expires after 24 hours.')
         if created > now():
             raise ValueError('Receipt creation is in the future.')
-        try:
-            fd = os.open(path.with_suffix('.consumed'), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        except FileExistsError:
-            raise ValueError('Receipt is consumed.') from None
-        os.close(fd)
+        if not mark_consumed(receipt_id):
+            raise ValueError('Receipt is consumed.')
         return receipt
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise ValueError('Invalid receipt citation: ' + str(exc)) from None
@@ -508,6 +513,9 @@ def hook(event, parse_error=None):
             reason += ' This refusal is not formatting-only, so no resend of this message is allowed in any form.' if not formatting_only else ''
             if parent:
                 reason += ' Its receipt is used and no further resend of this message is allowed.'
+            elif formatting_only and isinstance(event.get('session_id'), str) and event['session_id']:
+                reason += (' This refusal permits no resend, because a receipt to this recipient '
+                           'was spent within 24 hours.')
         reason += ' Receipt: `' + receipt['id'] + '`.'
         if receipt['resend_allowed']:
             reason += ' To resend, put `<!-- ultraship-receipt:' + receipt['id'] + ' -->` in the resent prose.'
