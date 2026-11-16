@@ -1786,6 +1786,64 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied('$P -c x'))
         self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
 
+    def test_test_command_operands_are_data(self):
+        """Catch comparisons on variables refused as inline code."""
+        workspace = '/home/miguel/.vk-worktrees/.bettercoding-workspaces/ada6-pati-teams-parit'
+        scratch = workspace + '/.scratch/s2-desktop-signin'
+        battery = scratch + '/battery-s2f3-frontend-install.sh'
+        gate = '/home/miguel/.claude/plugins/cache/better-plugin/chief-of-chiefs/1.85.0/skills/run/scripts/slot_gate.sh'
+        live_command = (
+            f'cd {workspace}/lanes/s2-desktop-signin && chmod 700 {battery} && '
+            'date -u +%FT%TZ && df -h / && cat /proc/loadavg && '
+            "disk=$(df --output=pcent / | tail -n 1 | tr -d ' %') && "
+            'read load rest < /proc/loadavg && '
+            r'''if [ "$disk" -ge 93 ]; then printf 'STOP disk=%s%%\n' "$disk"; exit 75; elif [ "${load%%.*}" -ge 40 ]; then printf 'HOLD load1=%s\n' "$load"; exit 75; fi && '''
+            f'{gate} {battery} > {scratch}/f3-frontend-install.log 2>&1; rc=$?; '
+            r'''printf 'frontend-install exit=%s\n' "$rc"; exit "$rc"'''
+        )
+        for command in (
+            live_command,
+            'if [ "$x" -ge 93 ]; then exit 75; fi',
+            '[ "$x" -le 1 ]', '[ "$x" -ne 1 ]', '[ "$x" -eq 1 ]',
+            '[[ "$x" -ge 1 ]]', 'test "$x" -ge 1',
+            r'''if [ "$disk" -ge 93 ]; then printf 'STOP disk=%s%%\n' "$disk"; exit 75; elif [ "${load%%.*}" -ge 40 ]; then printf 'HOLD load1=%s\n' "$load"; exit 75; fi''',
+            'while [ "$x" -le 3 ]; do x=1; done', '! [ "$x" -ne 1 ]',
+            '[ "$x" -ge 1 ] && [ "$y" -le 2 ]',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+        for reason, commands in (
+            ('inline interpreter code rule (unresolved command word)', (
+                '$PY -e code', '$PY -c code', '[ x ] && $PY -c code',
+                '[ "$x" = 1 ] || $PY -e code', 'test x; $PY -c code',
+                'if [ x ]; then $PY -c code; fi', '[[ x ]] && $PY -c code',
+                '[ "$x" ] $PY -c code', 'env [ "$PY" -c code ]',
+                '"$W" test "$PY" -c code',
+                'function test { "$@"; }; test "$PY" -c code',
+                'alias test=eval; test "$PY" -c code',
+                'alias test=eval\ntest "$PY" -c code',
+                'enable -n test; test "$PY" -c code',
+                '[ () { "$@"; }; [ "$PY" -c code ]',
+                'test () { "$@"; }; test "$PY" -c code',
+                'other () { :; }; test "$PY" -c code',
+                'hash -p /x test; test "$PY" -c code',
+                'shopt -s expand_aliases; test "$PY" -c code',
+                'eval "$setup"; test "$PY" -c code',
+                'trap "$setup" DEBUG; test "$PY" -c code',
+                'source setup.sh; test "$PY" -c code',
+                '. setup.sh; test "$PY" -c code',
+            )),
+            ('unparsed shell syntax rule: word-internal shell group', (
+                '[() { "$@"; }; [ "$PY" -c code ]',
+                'test() { "$@"; }; test "$PY" -c code',
+            )),
+        ):
+            for command in commands:
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command))
+                    self.assertIn(reason, self.reason)
+
     def test_safe_path_prefix_admits_plain_commands(self):
         for command in (
             'PATH="/home/miguel/.local/share/uv-0.12/bin:$PATH" make openapi api-types preview-mask-sql',
