@@ -555,7 +555,9 @@ class ReceiptCustodyTests(unittest.TestCase):
                     "grep -Q 'text_lint hook' .", "grep -z 'text_lint hook' .",
                     'grep -n "text_lint.py hook" file.py',
                     'cd sub && python3 text_lint.py hook',
-                    'find . -name x && ' + hook_command]
+                    'find . -name x && ' + hook_command,
+                    'find . -name x -exec python3 text_lint.py hook +',
+                    "find . -fprint out -name 'text_lint hook'"]
         commands.extend(prefix + grep for prefix in ('env ', 'command '))
         commands.extend(grep.replace('grep', program, 1) for program in ('egrep', '/usr/bin/grep'))
         commands.extend(grep + before + separator + after + hook_command
@@ -573,6 +575,8 @@ class ReceiptCustodyTests(unittest.TestCase):
                     grep + shlex.quote(str(self.state / 'ultra*/t*/key')),
                     grep + shlex.quote('${XDG_STATE_HOME}/row-review'),
                     grep + shlex.quote('$HOME/.local/s*'),
+                    'ls ' + str(self.state) + '/ultra*/t*/key text_lint.py hook',
+                    'ls ' + str(self.cwd / '.local') + '/s* text_lint.py hook',
                     grep + str(self.cwd))
         for caller in ('', 'ship:driver', 'ship:writer--sol'):
             for command in commands:
