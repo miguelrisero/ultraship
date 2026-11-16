@@ -3221,7 +3221,8 @@ def literal_search_shell(command):
                 return False
         elif command == 'git':
             if (arguments[:1] != ['ls-files'] or len(arguments) < 2
-                    or not all(literal_path(word) for word in arguments[1:])):
+                    or not all(literal_path(word) and not word.lstrip("'").startswith(':')
+                               for word in arguments[1:])):
                 return False
         elif command == 'ls':
             cursor = 0

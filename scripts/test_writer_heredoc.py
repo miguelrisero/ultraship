@@ -2033,6 +2033,14 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied(command))
         self.assertIn('git writer expansion or glob rule', self.reason)
 
+    def test_ls_files_literal_rule_refuses_short_magic_pathspecs(self):
+        for path in ("':'", "':/'", "':/private'", ':/a.py'):
+            command = "rg -n 'push.*' a.py && git ls-files " + path
+            with self.subTest(path=path):
+                self.assertFalse(ultraship.literal_search_shell(command))
+                self.assertTrue(self.denied(command))
+                self.assertIn('git writer expansion or glob rule', self.reason)
+
     def test_ls_files_literal_rule_refuses_patterns_and_options(self):
         for arguments in ("'*.py'", "'a?.py'", "'[ab].py'", "':(literal)a.py'",
                           '--exclude a.py', '--exclude=a.py', '-x a.py', '-X patterns.txt',
