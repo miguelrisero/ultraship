@@ -346,8 +346,18 @@ def check_pending(event):
     entry = pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **input_identity(event)})
     if entry and entry['state'] == 'open':
         receipt_id = entry['id']
-        raise ValueError('A formatting-only refusal to this recipient is pending. Cite its receipt `'
-                         + receipt_id + '` with `<!-- ultraship-receipt:' + receipt_id + ' -->` in this message.')
+        path = store_dir() / 'receipts' / (receipt_id + '.consumed')
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        except FileExistsError:
+            pass
+        except OSError:
+            raise ValueError('A formatting-only refusal to this recipient is pending. Cite its receipt `'
+                             + receipt_id + '` with `<!-- ultraship-receipt:' + receipt_id + ' -->` in this message.') from None
+        else:
+            os.close(fd)
+        raise ValueError('Receipt `' + receipt_id + '` is now spent. '
+                         'Its message stays refused. Later messages need no citation.')
 
 
 def write_receipt(event, findings, formatting_only, parent, resend_refused=False):
