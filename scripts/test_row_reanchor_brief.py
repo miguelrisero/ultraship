@@ -101,6 +101,60 @@ class BriefTests(unittest.TestCase):
                 self.assertEqual(error.code, 0)
         return json.loads(output.getvalue())['hookSpecificOutput'] if output.getvalue() else {}
 
+    def test_filled_brief_long_values_and_twelve_word_headroom(self):
+        root = '/home/dev/workspaces/p25-warning-race-lane'
+        plugin_root = root + '/ultraship/plugins/ship'
+        row = root + '/repository/rows/warning-race.toml'
+        subject = root + '/repository/src/warning.py'
+        base = '9e14c2f80a6d37b5914e08c2d6f7a3b9051ce824'
+        head = 'a38d91e5c7b204f6d819ec03a7f52b6084de19c2'
+        documented = re.search(r'Use exactly `([^`]+)`', self.reference.split('## Row re-anchor tool admission record\n', 1)[1])[1]
+        command = documented.replace('<plugin root>', plugin_root).replace('<absolute path>', row)
+        command = command.replace('<id>', 'P25-warning-race').replace('<repository-relative path>', subject)
+        command = command.replace('<ref>', base, 1).replace('<ref>', head, 1)
+        values = {
+            'row ID': 'P25-warning-race', 'PR URL': 'https://github.com/example/repository/pull/7516',
+            'Input UUID': 'f39a1c87-62de-4b09-a153-7cd02e8916ab', 'version': '1',
+            'workspace UUID': 'e17d0c39-84a1-4f6b-b205-9c73a8de621f',
+            'event ID': '7c9e01a4-d628-43fb-9a16-0e8b27d5c391',
+            'event hash': '3b8f14e29cd065a781b9e40c6f2a8d3174e95bc0a6d723f8c109b5e467a2d8c3',
+            'verifier name': 'Flow, the chief that drives the P25 acceptance lane',
+            'verification time': '2026-11-16T05:30:00Z',
+            'decision file path': root + '/records/decision.md', 'decision file SHA256': 'c8' * 32,
+            'tool route decision path': root + '/records/tool-route.md',
+            'row file path': row, 'subject path': subject, 'run ID': '19874203156',
+            'attempt': '1', 'job ID': '67284901352', 'job name': 'mutation-anchors · changed anchor guard',
+            'job log URL': 'https://github.com/example/repository/actions/runs/19874203156/job/67284901352',
+            'count': '0', 'expected': '1', 'tested merge SHA': 'b4' * 20,
+            'tested merge tree SHA': 'c5' * 20, 'CI base SHA': base, 'author head SHA': head,
+            'subject commit SHA': 'd6' * 20, 'subject line range': '212 to 247',
+            'review time': '2026-11-16T05:45:00Z', 'added': '14', 'deleted': '8',
+            'tool base SHA': base,
+            'tool base reason': 'the CI base, because the row file and the row both exist there',
+            'method-only denials': 'one python3 heredoc denial, one script file denial, and one wrapper command denial',
+            'denial times': '04:41Z, 04:55Z and 05:12Z',
+            'denial record path': root + '/records/denial.jsonl', 'denial record lines': '3, 7 and 12',
+            'assigned topic': 'the P25 warning race row re-anchor for pull request 7516',
+            'plugin root': plugin_root, 'rule Input UUID': 'a5c2e8f1-3b74-4d09-96e0-1f8d27b4c053',
+            'rule event ID': '2d6f9b08-71ce-4a35-8e14-b09c53a7d6f2',
+            'rule event hash': '9a1e5c73d08b4f26a7e3910c5d8b6f42e0a7c319d5b86e24f1a03c7d9e58b2f6',
+            'rule verifier name': 'Flow, the chief that drives the P25 acceptance lane',
+            'rule verification time': '2026-11-16T05:30:00Z',
+            'earlier attempts': 'attempt 1 drew a heredoc denial, attempt 2 a script denial, and attempt 3 an output contract refusal',
+            'attempt record path': root + '/records/attempt.jsonl', 'expiry time': '2026-11-16T09:00:00Z',
+            'worktree path': root + '/repository', 'tool command': command,
+            'commit subject': 'test: re-anchor warning race', 'return time': '2026-11-16T08:15:00Z',
+            'decision file name': root + '/records/decision.md',
+        }
+        self.assertEqual(set(re.findall(r'<([^>]+)>', self.template)), set(values))
+        brief = re.sub(r'<([^>]+)>', lambda match: values[match[1]], self.template)
+        text_lint.check(brief, 'peer')
+        for placeholder in values:
+            with self.subTest(placeholder=placeholder):
+                brief = re.sub(r'<([^>]+)>', lambda match: ' '.join(['value'] * 12)
+                               if match[1] == placeholder else 'x', self.template)
+                text_lint.check(brief, 'peer')
+
     def test_filled_brief_passes_text_lint_and_command_admission(self):
         root, worktree, row, row_id, expiry, pr, command = self.prepare_admission()
         decision = self.hook_decision(root, worktree, command, pr=pr, row_file=str(row), row_id=row_id, expires_at=expiry)
