@@ -34,6 +34,10 @@ EXPECTED_LANE_REVIEW = [
     "Require the CoC-approved exact allowlist of row-file paths and unique row IDs from the PR's own failing anchor CI evidence.",
     'Require the recorded base SHA, author head SHA, and frozen SHA after the edit before any protected read.',
     "Require the brief to name two read-only trees: one at the base SHA and one at the frozen SHA after the edit. On the ordinary lane-derived route only, if the PR creates the row file absent at the CI base, use the last PR commit before the re-anchor as the before tree and this section's row comparison base. Keep the original CI base for causality and evidence; preserve every other route condition.",
+    "In that case, if only main merges into the PR branch changed the subject after the last PR-authored commit before the re-anchor that edited the row file, use that commit as the before tree and this section's row comparison base instead.",
+    "Then require the recorded diff to show that no PR-authored commit after that tree changed the subject, so main merges alone broke each named row; this replaces only the PR's own subject change requirement.",
+    'A merge commit changes the subject as a PR-authored commit unless its subject blob equals the subject blob of the clean automatic merge of its parents.',
+    'Rows in a row file that exists at the CI base keep every current rule.',
     'Read rows only inside those two trees.',
     'Require every supplied diff to leave out the row-file hunks.',
     "Require the recorded diff between the base SHA and frozen SHA after the edit to show that the PR's own subject change breaks each named row.",
@@ -204,6 +208,14 @@ EXPECTED_COC_ROW_DECISION = [
     'Require a current task-specific owner event for any claim change.',
 ]
 
+EXPECTED_STANDING_GRANT_DECISION = [
+    'The decision may instead cite the owner standing grant as its authority for retirement, designated-test change and mutant change.',
+    'For that grant, directly verify ~/.claude/CLAUDE.md, heading CoC decisions (standing grant), and these exact sentences: The CoC decides CI/CD, testing and tooling items for me. It also includes adapting those rows when the diff makes the old mutant impossible: retiring a row whose target code the PR deletes, or changing its designated test or mutant, each with an independent not-weaker review and a follow-up row for the new code. The CoC owns these changes; no per-row owner event is needed.',
+    'Refuse a missing, unreadable or mismatched grant; accept zero relay for this verification.',
+    "Under that grant, require the PR's own diff to break each named row and make its old mutant impossible, and retire only a row whose target code the PR deletes.",
+    'That grant supplies zero claim or subject change authority and waives no other requirement of this route.',
+]
+
 EXPECTED_SHARED_MUTANT_RULE = (
     'The ban on weakening a test and the independent not-weaker review still apply.\n'
     'Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route or Rewritten-code row route.\n'
@@ -229,13 +241,14 @@ EXPECTED_COMMON_DISPOSITION_AUTHORITY = [
     'Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.',
     'End the retirement-only authority block; apply every subsequent shared requirement to both branches unless explicitly scoped.',
     *EXPECTED_COC_ROW_DECISION[:2],
+    *EXPECTED_STANDING_GRANT_DECISION,
     'For changed mutant semantics, require that decision to name the exact protected reads, semantic adaptation and permitted gates.',
     'Require that decision and the admitted gates to cover independent applied review at the final commit.',
-    "Verify the cited owner event's Input, workspace, current version, event id and hash, `event_type=answer_submitted`, `actor_kind=owner_ui` and answer text.",
-    'That event delegates authority to the CoC; the exact CoC decision supplies the exact rows, fields and adaptation scope.',
+    'When the decision cites that owner event, verify its Input, workspace, current version, event id and hash, `event_type=answer_submitted`, `actor_kind=owner_ui` and answer text.',
+    'That event or the standing grant delegates authority to the CoC; the exact CoC decision supplies the exact rows, fields and adaptation scope.',
     'Preserve every historical fixed-event comparator unchanged within its existing standing branch only.',
-    'Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.',
-    'An authoritative mismatch blocks access and application without fallback.',
+    'When the decision cites that owner event, use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.',
+    'When the decision cites that owner event, an authoritative mismatch blocks access and application without fallback.',
     *EXPECTED_COC_ROW_DECISION[2:],
     'A fixed identical-operation grant supplies zero changed-semantic authority on this route.',
     'Keep read authority, proposal derivation, semantic approval and application authority separate.',
@@ -468,6 +481,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     'Before publication, require independent semantic review confirming the same claim, and a designated test and mutant no weaker.',
                     'Require CoC approval of that review receipt before publication.',
                     *EXPECTED_COC_ROW_DECISION,
+                    *EXPECTED_STANDING_GRANT_DECISION,
                     'Preserve every existing retirement route and its authority unchanged.',
                     'Preserve assertions, bounds, policy guarantees, pins and every unrelated field.',
                     'Keep mutation proof after merge under separate applicable execution admission.',
@@ -475,6 +489,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 ):
                     self.assertIn(phrase, route)
                 self.assertIn(EXPECTED_COC_ROW_DECISION[0], text)
+                self.assertIn('\n'.join([*EXPECTED_COC_ROW_DECISION[:2], *EXPECTED_STANDING_GRANT_DECISION]), route)
                 for removed in (
                     'Apply the task-specific owner-event verification contract to the cited owner event.',
                     'Permit only the exact approved mutant fields under the exact CoC decision and admitted private-proposal gates.',
@@ -510,6 +525,24 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 else:
                     self.assertIn('Grant zero reviewer edit, execution or publication authority; drivers apply zero protected edits.', route)
 
+    def test_standing_grant_authority_stays_in_rewritten_and_disposition_routes(self):
+        for name, text, _ in self.lane_owned_disposition_routes():
+            heading = ('## Owner-approved protected-row subject review' if 'reviewer--' in name else
+                       '### Owner-approved protected-row subject route')
+            self.assertEqual(text.splitlines().count(heading), 1)
+            _, _, after = text.partition(heading + '\n')
+            subject = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+            self.assertTrue(subject.strip())
+            with self.subTest(path=name):
+                self.assertEqual(text.count(EXPECTED_STANDING_GRANT_DECISION[0]), 2)
+                for phrase in EXPECTED_STANDING_GRANT_DECISION:
+                    self.assertNotIn(phrase, subject)
+                self.assertIn('Require a current task-specific owner event for any claim change.', text)
+        reference = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        for phrase in EXPECTED_STANDING_GRANT_DECISION:
+            with self.subTest(reference=phrase):
+                self.assertNotIn(phrase, reference)
+
     def test_pr_created_row_file_uses_pre_reanchor_comparison_without_changing_ci_base(self):
         carriers = (
             'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
@@ -528,6 +561,38 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertIn('Keep the original CI base for causality and evidence; '
                               'preserve every other route condition.', text)
                 self.assertEqual(text.count('last PR commit before the re-anchor'), 1)
+                self.assertEqual(text.count('last PR-authored commit before the re-anchor that edited'), 1)
+                if name.endswith('owner-decisions.md'):
+                    existing = ('For ordinary lane-derived review of a row file the PR creates absent at the CI base, '
+                                'use the last PR commit before the re-anchor as the before tree and row comparison base. '
+                                'Keep the original CI base for causality and evidence; preserve every other route condition.')
+                    sentence = ('If only main merges into the PR branch changed the subject after the last '
+                                'PR-authored commit before the re-anchor that edited that row file, use that commit as the before '
+                                'tree instead, and require that no PR-authored commit after it changed the subject. '
+                                'A merge commit changes the subject as a PR-authored commit unless its subject blob equals '
+                                'the subject blob of the clean automatic merge of its parents.')
+                    self.assertIn(existing + ' ' + sentence, text)
+                    self.assertEqual(text.count(existing + ' ' + sentence), 1)
+                else:
+                    reviewer = 'reviewer--' in name
+                    comparison = "this section's row comparison base" if reviewer else 'row comparison base'
+                    prefix = ('Require the brief to name two read-only trees: one at the base SHA and one at the frozen SHA after the edit.'
+                              if reviewer else "Require the recorded base/head diff to show that the PR's own subject change breaks each named row.")
+                    existing = (prefix + ' On the ordinary lane-derived route only, if the PR creates the row file '
+                                'absent at the CI base, use the last PR commit before the re-anchor as the before tree and '
+                                + comparison + '. Keep the original CI base for causality and evidence; preserve every other route condition.')
+                    lines = (
+                        'In that case, if only main merges into the PR branch changed the subject after the last '
+                        'PR-authored commit before the re-anchor that edited the row file, use that commit as the before tree and ' + comparison + ' instead.',
+                        'Then require the recorded diff to show that no PR-authored commit after that tree changed the subject, '
+                        "so main merges alone broke each named row; this replaces only the PR's own subject change requirement.",
+                        'A merge commit changes the subject as a PR-authored commit unless its subject blob equals '
+                        'the subject blob of the clean automatic merge of its parents.',
+                        'Rows in a row file that exists at the CI base keep every current rule.',
+                    )
+                    for line in lines:
+                        self.assertEqual(text.splitlines().count(line), 1)
+                    self.assertIn('\n'.join((existing, *lines)), text)
 
     def test_owner_approved_subject_route_keeps_authority_application_and_review_scoped(self):
         carriers = (
