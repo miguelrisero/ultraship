@@ -119,9 +119,7 @@ def check(text, kind='result'):
     errors = []
     if len(long) >= 3 or (tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2:
         errors.append('Separate glued words with spaces; remove compressed shorthand.')
-    sentence_prose = '\n'.join(line for line in prose.splitlines()
-                              if kind != 'peer' or not re.match(r'^[ \t]*(?:[-*][ \t]*)?Owner helper request:', line))
-    sentences = re.split(r'(?<=[.!?])\s+|\n+', sentence_prose)
+    sentences = re.split(r'(?<=[.!?])\s+|\n+', prose)
     if any(len(s.split()) > 25 for s in sentences):
         errors.append('Write at most 25 words per sentence.')
     sections = ('Facts', 'Decision', 'Next') if kind == 'peer' else (
