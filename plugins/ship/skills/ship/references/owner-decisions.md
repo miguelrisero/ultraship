@@ -155,7 +155,11 @@ Every route that needs row reads uses this flow: lane-derived, lane-owned, retir
 8. Delete the file when the review returns.
 
 In Bash, name the record by its literal absolute path for `chmod 600` and the final delete.
-The hook refuses a Bash command that names the state folder through `$`, `{` or `}`.
+The hook refuses a Bash command that names the state folder together with any of these triggers:
+- `$`, `{`, `}`, `*`, `?`, `[` or `]`;
+- a backtick;
+- `cd` or `pushd`;
+- the text `text`.
 This guidance grants no replay of an earlier refused command and no other tool route.
 
 The hook admits Read of one listed file, and Grep with one listed file as `path` and no `glob` or `type`.
@@ -176,8 +180,12 @@ The hook denies Write, Edit, and NotebookEdit to the record folder for every age
 9. Send the exact scoped brief, built from the [row re-anchor tool brief](#row-re-anchor-tool-brief), with SendMessage.
 10. Remove the record when the writer returns.
 
-In Bash, name the record by its literal absolute path for `chmod 600` and the final delete.
-The hook refuses a Bash command that names the state folder through `$`, `{` or `}`.
+In Bash, name the record by its literal absolute path for `chmod 600` and the final removal.
+The hook refuses a Bash command that names the state folder together with any of these triggers:
+- `$`, `{`, `}`, `*`, `?`, `[` or `]`;
+- a backtick;
+- `cd` or `pushd`;
+- the text `text`.
 This guidance grants no replay of an earlier refused command and no other tool route.
 
 The hook requires a regular record owned by its user, at most 64 KiB, without group or world write permission.

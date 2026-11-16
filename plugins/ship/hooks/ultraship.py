@@ -4199,21 +4199,17 @@ PRE_INPUT_INVALID = ('The ship hook could not read its input as a JSON object, s
                      'Report the blocked scope to the driver.')
 
 
-def plain_words(raw):
-    word = r'''(?:[A-Za-z0-9_./:@+,%-]|'[^'\r\n]*'|"[^"$`\\!\r\n]*"|\\')+'''
-    if re.fullmatch(word + r'(?:[ \t]+' + word + r')*', raw):
-        return shlex.split(raw)
-    return None
-
-
 def own_account_call(data, raw):
     agent_type = data.get('agent_type') or ''
     session = data.get('session_id')
     if (agent_type and not re.match(r'^(ship:)?driver(--|$)', agent_type)
             or not isinstance(session, str) or not session):
         return False
-    words = plain_words(raw)
-    if words is None or len(words) != 10:
+    word = r'''(?:[A-Za-z0-9_./:@+,%-]|'[^'\r\n]*'|"[^"$`\\!\r\n]*"|\\')+'''
+    if not re.fullmatch(word + r'(?:[ \t]+' + word + r')*', raw):
+        return False
+    words = shlex.split(raw)
+    if len(words) != 10:
         return False
     interpreter, script, command, pending, result, step, agent, sha, verdict, evidence = words
     return (interpreter == 'python3'
@@ -4284,7 +4280,6 @@ def receipt_custody(data, read_search=False):
     # shortcut: runtime path construction and rebuilt shell expansion escape Bash checks; upgrade to isolated state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
-        plain_grep = (plain_words(raw) or [None])[0] == 'grep'
         command = normalized(raw)
         raw_words = [word.translate(str.maketrans('', '', "\"'\\"))
                      for word in re.split(r'[\s;&|<>()]+', raw) if word]
@@ -4314,9 +4309,10 @@ def receipt_custody(data, read_search=False):
                        and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
                             or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
                        for word in raw_words)
-                or (not plain_grep and re.search(r'text_lint(\.py)?\s+hook\b', command))
-                or (not plain_grep and 'text_lint' in command and any(token in command for token in
-                    ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec(')))
+                # A literal search chain starts no program; its text_lint words are search data.
+                or ('text_lint' in command and not literal_search_shell(raw)
+                    and (re.search(r'text_lint(\.py)?\s+hook\b', command) or any(token in command for token in
+                         ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
                 or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
             deny(RECEIPT_CUSTODY)
 

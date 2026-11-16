@@ -519,9 +519,10 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assert_custody_denial({**event, 'cwd': str(state)})
 
     def test_plain_grep_text_lint_phrases_allow_every_caller(self):
-        commands = ("grep -rn 'Only the text_lint hook reads or writes refusal receipts (custody rule).' " + str(self.cwd),
-                    'grep -n "text_lint.py hook" ' + str(self.cwd / 'file.py'),
-                    "grep -rn 'import text_lint' " + str(self.cwd))
+        commands = ("grep -rn 'Only the text_lint hook reads or writes refusal receipts (custody rule).' .",
+                    "grep -n 'text_lint.py hook' file.py",
+                    "grep -rn 'import text_lint' .",
+                    "cd sub && grep -rn 'text_lint hook' .")
         for caller in ('', 'ship:driver', 'ship:writer--sol'):
             for command in commands:
                 with self.subTest(caller=caller, command=command):
@@ -546,7 +547,15 @@ class ReceiptCustodyTests(unittest.TestCase):
                     grep + ' > ' + str(self.cwd / 'output'),
                     'sh -c ' + shlex.quote(grep),
                     'rg --pre ' + shlex.quote(hook_command) + ' x',
-                    'git grep -O' + shlex.quote(hook_command) + ' x']
+                    'git grep -O' + shlex.quote(hook_command) + ' x',
+                    'grep ' + shlex.quote('--filter=json:' + hook_command) + ' x p.json',
+                    'grep --filter ' + shlex.quote('json:' + hook_command) + ' x p.json',
+                    "grep 'text_lint hook' . --filter=x",
+                    "grep --save-config=out -e 'text_lint hook' .",
+                    "grep -Q 'text_lint hook' .", "grep -z 'text_lint hook' .",
+                    'grep -n "text_lint.py hook" file.py',
+                    'cd sub && python3 text_lint.py hook',
+                    'find . -name x && ' + hook_command]
         commands.extend(prefix + grep for prefix in ('env ', 'command '))
         commands.extend(grep.replace('grep', program, 1) for program in ('egrep', '/usr/bin/grep'))
         commands.extend(grep + before + separator + after + hook_command
@@ -559,7 +568,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                                                'tool_input': {'command': command}})
 
     def test_plain_grep_preserves_other_custody_checks(self):
-        grep = 'grep -rn "text_lint.py hook" '
+        grep = "grep -rn 'text_lint.py hook' "
         commands = (grep + str(self.store / 'key'), grep + str(self.state),
                     grep + shlex.quote(str(self.state / 'ultra*/t*/key')),
                     grep + shlex.quote('${XDG_STATE_HOME}/row-review'),
