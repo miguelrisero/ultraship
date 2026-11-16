@@ -269,6 +269,34 @@ REFUSE = (
     "B=/home/u/ws/.scratch/body.md; cat > $B <<EOF\n$(gh api repos/o/r/pulls/7/comments -f body=x)\nEOF\ncd /home/u/ws/wt && gh pr create --draft --base main --head test/x --title \"test(x): add rows\" --body-file $B",
     "B=/home/u/ws/.scratch/body.md; cat > $B <<'EOF'\nresolveReviewThread\nEOF\ncd /home/u/ws/wt && gh pr create --draft --base main --head test/x --title \"test(x): add rows\" --body-file $B",
     "B=/home/u/ws/b; cat > $B <<'EOF'\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF\nbash $B",
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    "xargs '--arg-file=/home/u/ws/f' -L1 env",
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'xargs "-a" /home/u/ws/f -L1 env',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'xargs -ra /home/u/ws/f -L1 env',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'xargs --arg=/home/u/ws/f -L1 env',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'xargs -L1 env 0< /home/u/ws/f',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'cat /home/u/ws/f | xargs -L1 env',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'cat /home/u/ws/f | /usr/bin/xargs -L1 env',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    "cat /home/u/ws/f | 'xargs' -L1 env",
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'cat /home/u/ws/f | nice xargs -L1 env',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'cat /home/u/ws/f | xargs -L1 "env"',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'cat /home/u/ws/f | xargs -L1 $E',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'cat /home/u/ws/f | xargs -L1 timeout 5 env',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'cat /home/u/ws/f | xargs -L1 timeout -k 1 5 rm',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'cat /home/u/ws/f | xargs --unknown rm',
 )
 
 ADMIT = (
@@ -392,6 +420,8 @@ echo "$(date -u +%FT%TZ) REFUSAL: ship thread guard ('review-thread guard parse 
     'EOF\n'
     'cd /home/u/ws/wt && gh pr create --draft --base main --head test/x --title "test(x): add rows" --body-file $B',
     '''cd /home/u/ws && echo "$(date -u +%FT%TZ) 7 admission frozen abc (reviewer def, commit 123, integration GO). 8 rows 456 pushed; gh pr create heredoc refused by hook parse ('No closing quotation') -> Flow chief fix by 17:00Z, lane holds, same command once after fix. 9 v2 frozen 789 (writer aaa, DMD1/2/3/9). CI flakes chief: one X-1 writer Bash denial 13:18Z, not replayed, plugin item; 2a by 16:00Z." >> .scratch/coc/notes.md''',
+    '''awk '{print $1}' /home/u/ws/t.tsv | xargs -r timeout 300 docker volume rm; echo "gh $(df -h / | tail -1)"''',
+    'ls /home/u/ws | xargs -0 -I {} rm -f /home/u/ws/{}.tmp; echo "gh $(date -u +%F)"',
 )
 
 
