@@ -703,6 +703,45 @@ class PythonHeredocGuardTests(unittest.TestCase):
 
 
 class WriterGitHubGuardTests(unittest.TestCase):
+    def test_writer_final_control_path_shapes_are_denied(self):
+        for command in ('echo {x,.git/config}', 'echo {a/b,c}', "bash -c 'cat .git/config'",
+                        'echo a,.git,b', 'custom-write -xo.git/x', 'cat ~/.gitconfig',
+                        'echo x >> ~/.config/git/config', 'cp a /srv/r.git/hooks/pre-commit',
+                        'git init --template=/tmp/t',
+                        'git clone --separate-git-dir=/tmp/g https://example.com/o/r.git',
+                        'git-config alias.x log', 'git-commit -e', 'export GIT_EDITOR',
+                        'read GIT_EDITOR', 'printf -v EDITOR %s x', 'declare PAGER',
+                        'git --git-dir=/tmp/x status', 'git --git-dir . status',
+                        'git --work-tree=/tmp/w status', 'git --work-tree=./ status',
+                        "env -S 'a\\_b'", "env -S '${HOME}/x'", "env -S 'ls #x'",
+                        "env -iS'ls #x'", "env --spl='a\\_b'", "env -0S'${HOME}/x'"):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_native_external_config_and_sequencer_paths_are_denied(self):
+        for target in ('~/.gitconfig', '~/.config/git/config', '/srv/r.git/config',
+                       '.git/rebase-merge/git-rebase-todo', '.git/rebase-apply/patch', '.git/sequencer/todo'):
+            for tool in ('Edit', 'Write', 'NotebookEdit'):
+                key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+                with self.subTest(target=target, tool=tool):
+                    self.assertTrue(denied(hook('pre', {**self.writer, 'tool_name': tool,
+                                                      'cwd': str(self.repo), 'tool_input': {key: target}}, self.env)))
+
+    def test_writer_control_path_symlinks_use_input_cwd(self):
+        (self.repo / '.git').mkdir()
+        (self.repo / 'control-link').symlink_to(self.repo / '.git', target_is_directory=True)
+        result = hook('pre', {**self.writer, 'cwd': str(self.repo),
+                              'tool_input': {'command': 'cat control-link/config'}}, self.env)
+        self.assertTrue(denied(result))
+
+    def test_writer_final_shape_plain_controls_are_admitted(self):
+        for command in ('ls .gitignore', 'cat .github/workflows/validate.yml', 'ls /repo/*',
+                        'git --work-tree=. status',
+                        'git clone --config core.pager=cat https://example.com/o/r.git',
+                        'git rev-parse --git-dir', 'ls r.git', "echo '{a/b,c}'"):
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
     def test_writer_git_component_shapes_are_denied(self):
         for command in ('git status; git arbitrary-write .git/config',
                         'custom-write --output=.git/config', 'custom-write -o.git/x',
