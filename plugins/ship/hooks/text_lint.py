@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
 import hmac
+import html
 from html.parser import HTMLParser
 import json
 import os
@@ -28,8 +29,8 @@ Facts
 Decision
 - <The action you take or ask for, within existing authority.>
 Next
-- <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>."""
-SUBAGENT_TEMPLATE = '<The same message, one point per sentence, at most 25 words each, with a space between words.>'
+- <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>.
+<Every line: one point per sentence, at most 25 words each, with a space between words.>"""
 INPUT_TEMPLATE = '''Use exactly one output-kind meta tag: decision or result.
 Decision:
 <meta name="output-kind" content="decision">
@@ -113,8 +114,8 @@ def hold_wall(text):
 
 
 def check(text, kind='result'):
-    # A peer reads SendMessage text as plain text.
-    plain = RECEIPT_MARKER.sub('', text) if kind == 'peer' else ''.join(VisibleText(text).parts)
+    # A peer reads SendMessage text as plain text; main's visible text decoded entities once, so peer text does too.
+    plain = html.unescape(RECEIPT_MARKER.sub('', text)) if kind == 'peer' else ''.join(VisibleText(text).parts)
     prose = re.sub(r'`[^`]*`', '', plain)
     token_prose = re.sub(r'[<>]', ' ', prose) if kind == 'peer' else prose
     tokens = [t for t in token_prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
@@ -478,9 +479,7 @@ def hook(event, parse_error=None):
         if receipt['resend_allowed']:
             template = INPUT_TEMPLATE
             if event.get('tool_name') == 'SendMessage':
-                recipient = str((event.get('tool_input') or {}).get('to', '')).strip()
-                template = (SUBAGENT_TEMPLATE if SUBAGENT.fullmatch(recipient)
-                            and not any('Missing section: ' in finding for finding in findings) else PEER_TEMPLATE)
+                template = PEER_TEMPLATE
             reason += (' You may resend once with the same action, recipient, scope and content, changed only in format.'
                        + ' Resend with this shape:\n' + template)
         else:

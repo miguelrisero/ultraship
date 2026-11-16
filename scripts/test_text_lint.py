@@ -100,7 +100,7 @@ class TextLintTests(unittest.TestCase):
         return self.event(message + '\n<!-- ultraship-receipt:' + receipt_id + ' -->')
 
     def test_subagent_format_refusal_has_resend_template(self):
-        """Catch a missing one-resend grant or a peer template sent to a child."""
+        """Catch a child resend shape that drops the required sections."""
         for recipient in ('main', 'a' + '0' * 16):
             for prose, error in (
                     (' '.join(['word'] * 26) + '.', 'Write at most 25 words per sentence.'),
@@ -112,7 +112,21 @@ class TextLintTests(unittest.TestCase):
                              'tool_input': {'to': recipient, 'message': message}}
                     self.assertEqual(self.hook_refusal(event),
                                      'Output contract: ' + error + self.RESEND
-                                     + text_lint.SUBAGENT_TEMPLATE)
+                                     + text_lint.PEER_TEMPLATE)
+
+    def test_one_refusal_names_format_and_section_findings(self):
+        for recipient in ('main', 'a' + '0' * 16, 'peer'):
+            with self.subTest(recipient=recipient):
+                event = {'session_id': recipient, 'tool_name': 'SendMessage',
+                         'tool_input': {'to': recipient, 'message': 'Send deadline2026 by8November00.'}}
+                reason = self.hook_refusal(event)
+                self.assertEqual(reason,
+                                 'Output contract: Separate glued words with spaces; remove compressed shorthand. '
+                                 'Missing section: Facts Missing section: Decision Missing section: Next'
+                                 + self.RESEND + text_lint.PEER_TEMPLATE)
+                self.assertIn('at most 25 words each, with a space between words', reason)
+                for heading in ('\nFacts\n', '\nDecision\n', '\nNext\n'):
+                    self.assertIn(heading, reason)
 
     def test_subagent_missing_section_refusal_has_peer_template(self):
         """Catch a child remedy that omits required peer headings."""
@@ -180,6 +194,15 @@ class TextLintTests(unittest.TestCase):
             text_lint.check(message, 'peer')
         self.assertEqual(refusal.exception.findings,
                          ['Separate glued words with spaces; remove compressed shorthand.'])
+
+    def test_peer_entity_glued_words_keep_token_check(self):
+        message = ('Facts: deadline2026 by8November0&#48;\n'
+                   'Decision: Continue.\nNext: Resume.')
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.check(message, 'peer')
+        self.assertEqual(refusal.exception.findings,
+                         ['Separate glued words with spaces; remove compressed shorthand.'])
+        text_lint.check(message.replace('&#48;', '&amp;#48;'), 'peer')
 
     def test_peer_hold_wall_reads_text_after_tag_like_text(self):
         message = ('Facts: Checks wait.\ncat <<EOF\n'
