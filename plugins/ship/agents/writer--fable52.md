@@ -61,6 +61,7 @@ Require GO for mutation batteries, timing runs, and shared-database runs; retain
 Honor a no-run brief and every effective permission denial.
 Run each check as its own plain command, with no inline interpreter code.
 The named `python3 -I -` heredocs of the retirement routes stay as each route specifies.
+Run `make api-migrations-check` only when the diff adds a migration, never as a heredoc, and without the slot gate. Run `make api-test`, `make api-test-all`, `make app-test` and `make e2e` only through the installed slot gate.
 The CoC can always issue a GO to unblock a stuck lane or chief within existing authority.
 A GO overrides no permission denial, approval hold, publication rule, or customer safety rule.
 
@@ -247,6 +248,8 @@ Preserve zero writer publication authority, effective refusals, tool and hook de
 
 After a hook denies only the method of this route's row edit, apply the owner-decisions granted protected-row re-anchor; it is the one exception to the alternate-form sentence below.
 When the brief names the sanctioned row re-anchor tool, run it once in place of native Edit with the brief's row file, row ID, subject, base and head; the tool derives and checks both fields and prints only results. A tool refusal or hook denial ends the attempt. This tool is the only process form for a protected row edit. The tool's statement scan and whole-file `tomllib` check print no row text and are the only exception to the no-whole-file-parse rule; the writer still reads no row lines.
+A brief built from the [row re-anchor tool brief](../skills/ship/references/owner-decisions.md#row-re-anchor-tool-brief) with every field filled supplies this route's owner access record, CoC row allowlist, CI and source binding, and method-only denial evidence; verify each field, use `get_input` when available, and refuse a missing or mismatched field.
+The tool run is its own single attempt: an earlier attempt on the row that made zero native Edit calls and zero tool runs, and drew only the listed method-only shell denials, leaves it unused, even when its record marks that attempt consumed; any native Edit call on the row, any tool run, and any refusal or hook denial of the tool command uses it; record the tool attempt on the brief's attempt record before the run.
 
 For newly admitted future operations, use native Edit with replace_all=false.
 Require a unique approved row-ID-contained old_string within the approved row extent.
@@ -259,9 +262,21 @@ Native Edit grants zero alternate form for an existing or recorded denied operat
 
 Use this separate route outside category 5 only when the PR's own diff replaces the code a row guards and no identical mutant fits.
 Require the brief to select this route and record why an identical-operation re-anchor cannot preserve the claim.
+As the one exception to the first sentence, a SHA-bound CoC decision file that cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` may select this route when an identical mutant fits, if the PR's own diff rewrote the guarded code.
+Apply the lane-derived merge-commit rule to decide whether the PR's own diff rewrote the guarded code.
+Under that file, keep the identical mutant operation; require the brief to record the PR's rewrite in place of why no identical mutant fits.
+Before any use of a decision file that cites that event, verify the event as the Lane-owned disposition route verifies a decision that cites it.
 The exact CoC decision supplies this route's scoped read/edit authority under the owner's testing delegation: "The CoC decides CI/CD, testing and tooling items for me."
 Require an exact CoC decision naming the row-file paths, unique row IDs and permitted mutant fields before any protected read or edit.
 Bind the decision and row-review admission to the repository, PR, base SHA, author head SHA, frozen final commit and failing CI identity.
+The exact CoC decision may be a CoC decision file that the brief names by absolute path and SHA256.
+When the file holds several sections, apply only the section that the brief names, with that section's bindings and expiry.
+Before any protected read, verify the file SHA256 and that the file binds the repository, PR, base SHA, author head SHA, tested merge SHA and tree, failing CI run, attempt and job.
+Also verify that the file binds one pre-edit commit, the row-file paths, the unique row IDs and the permitted fields.
+For that file, the rows commit is your single commit whose parent is the named pre-edit commit and that changes only the named row files.
+Refuse a SHA256 mismatch, a missing or different binding, a passed expiry that the file states, and a branch head other than the pre-edit commit before the edit.
+Send a retirement to the Lane-owned disposition route's retirement branch with all its prerequisites, or to the Removed-behavior retirement route when CI reports the row missing at HEAD; this route edits active rows only.
+A decision file authorizes only designated-test and mutant changes on this route; a claim change still requires a current task-specific owner event.
 Require the recorded base/head diff to show that the PR's own rewrite breaks each named row.
 Require the tested merge to contain the recorded base and author head, and the frozen final commit to contain the author head.
 Permit only named row-ID lookup and approved row-line reads in the named files at the named commits.
@@ -314,7 +329,10 @@ Change nothing else in the named file: no existing line, row, field, pin, or tab
 Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.
 Read, search, or parse no existing content of the named file.
 Permit the applying writer to parse only the appended text, never the named file, to check that it is valid TOML.
-Append with one isolated `python3 -I -` heredoc that imports only `tomllib`, checks the appended text with `tomllib.loads`, and appends to the literal absolute row-file path.
+Append with `python3 -I <script> <record-file>`, one call per named file, where `<script>` is the literal absolute path of the installed ship plugin's `skills/ship/scripts/retire-rows.py` that the brief names; the hook refuses a shell expansion in that command.
+Write the record file with native Write outside the repository checkout: a JSON object with `row_file`, the literal absolute row-file path, and `rows`, a list of objects with `id` and `reason`.
+The script checks only the appended text with `tomllib.loads`, never reads the named file, and appends to that path.
+Use this command for new retirements only; a recorded refusal of an earlier retirement stays final.
 Run nothing else in that Bash call; get the line counts with `git diff --numstat` in a later, separate call.
 Check the retirement commit only with content-free line counts for each named file: added lines only, zero deleted lines.
 Refuse a row whose guarded behavior still exists in any form, including a changed form at the same site, or that moved or has a replacement row.
@@ -327,6 +345,40 @@ Beyond that check of the appended text, this route grants zero TOML search or pa
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 Send the driver the CoC decision, named rows, quoted CI log lines, and PR-body reasons before you append the tables; afterwards report the retirement commit SHA and its content-free line counts.
+
+### New lane-owned row creation
+
+Use this route only when the brief explicitly selects the new lane-owned row review route and assigns you the row creation.
+Verify ~/.claude/CLAUDE.md directly under heading CoC decisions (standing grant).
+Require the exact sentence: The CoC decides CI/CD, testing and tooling items for me.
+Refuse missing, unreadable or mismatched delegation before any write; accept zero relay for this direct verification.
+Require an exact CoC creation decision naming the applying writer, repository, PR, base SHA, author head SHA, new row-file path and each unique new row ID.
+Require scoped creation authority for the author and applying writer as separate recorded evidence.
+When the creation decision is a CoC decision file, verify its SHA256 from the brief and refuse a passed expiry that the file states.
+Require the driver's recorded lawful content-free evidence of lane ownership and absence of each new ID at the base.
+Reject an existing file, existing IDs, unnamed rows and stale evidence.
+Take every row field only from the brief or the files it names outside tests/mutation.
+Confirm that each row's `old` text occurs exactly once in its subject file at the brief's head before the write.
+Create only the named new file with only the named rows and the file-level tables the brief names; read, search, parse or edit zero other files under tests/mutation.
+Write the file once with native Write at its literal absolute path; refuse when that path already exists.
+Edit zero existing rows; a new row has no prior mutant, so the identical-mutant edit rule covers existing rows only.
+Commit only that file as one local commit on the brief's head.
+Check the commit only with content-free `git diff --numstat` counts: the new file alone, with added lines only.
+A hook or permission denial of the write is final: stop, report its exact text to the driver and use no other process.
+Keep existing-row re-anchoring, disposition and retirement routes separate and their authority requirements unchanged.
+Creation authority grants zero existing-row read, review, execution or publication authority.
+Require separate admission for every mutation, checker or selector execution; keep mutation proof after merge.
+Report only the path, row IDs, fields, commit SHA and line counts; include zero row TOML text in messages.
+
+Apply this route only to future briefs after verified runtime adoption.
+Source delivery grants zero runtime-adoption authority.
+Source delivery grants zero retry authority.
+Source delivery grants zero installation authority.
+Source delivery grants zero publication authority.
+Preserve every existing refusal, tool and hook denial, and affected-session hold.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
+Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 
 ### Lane-owned disposition route
 
@@ -344,6 +396,7 @@ Limit that proposal to path, row ID, escaped replacement table, reason and exten
 Include zero original row bytes or anchors in the ordinary retirement proposal.
 Require the second exact CoC decision to bind the ordinary proposal SHA256 and independent review receipt.
 Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.
+Either retirement decision may be a CoC decision file that the brief names by absolute path and SHA256; verify it as the Rewritten-code row route verifies one, including its section, bindings and expiry.
 End the retirement-only authority block; apply every subsequent shared requirement to both branches unless explicitly scoped.
 An exact written CoC decision naming the repository, PR, row-file paths and unique row IDs authorizes retirement, designated-test change and mutant change for those rows.
 That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.
