@@ -3470,7 +3470,7 @@ def writer_git_file_denial(command, cwd=None):
     words = shell_raw_words(shell_without_heredoc_bodies(commit_message_removed(command)))
     for raw, value, _, _ in words:
         active = shell_brace_text(raw)
-        if any(0 <= piece.find('{') < piece.rfind('/') for piece in active.split('}')[:-1]):
+        if any('/' in piece.partition('{')[2] for piece in active.split('}')[:-1]):
             return 'git control path brace slash rule'
         for part in value.split('='):
             part = re.sub(r'^-[a-z]+', '', part, flags=re.I)
@@ -3627,9 +3627,6 @@ def writer_gh_denial_main(command, depth=0):
 
 def writer_gh_denial(command, depth=0):
     if depth == 0:
-        main_reason = writer_gh_denial_main(command)
-        if main_reason:
-            return main_reason
         command = commit_message_removed(command)
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = writer_trigger_text(command)

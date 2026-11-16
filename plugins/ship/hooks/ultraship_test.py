@@ -1305,7 +1305,6 @@ class WriterGitHubGuardTests(unittest.TestCase):
         started = time.monotonic()
         result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
         elapsed = time.monotonic() - started
-        print(f'{self._testMethodName}: {elapsed:.6f}s', flush=True)
         self.assertTrue(denied(result))
         self.assertIn('writer GitHub read-only rule', result['hookSpecificOutput']['permissionDecisionReason'])
         self.assertLess(elapsed, 10)
@@ -1315,7 +1314,6 @@ class WriterGitHubGuardTests(unittest.TestCase):
         started = time.monotonic()
         result = ultraship.writer_git_file_denial(command, str(self.repo))
         elapsed = time.monotonic() - started
-        print(f'{self._testMethodName}: {elapsed:.6f}s', flush=True)
         self.assertIsNone(result)
         self.assertLess(elapsed, 10)
 
