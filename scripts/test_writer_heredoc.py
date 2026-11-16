@@ -78,6 +78,17 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
+    def test_redirected_openers_preserve_existing_arithmetic_refusals(self):
+        for command in (
+            '! >x if; ((i=0)); (( i ))',
+            'then >x if; ((i=0)); (( i ))',
+            'time >x if; ((i=0)); (( i ))',
+            '! >x while false; do :; ((i=0)); done; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
     def test_redirected_commands_keep_valid_numeric_proof(self):
         for command in (
             '((i=0)); if true; then >x echo hi; fi; (( i ))',
