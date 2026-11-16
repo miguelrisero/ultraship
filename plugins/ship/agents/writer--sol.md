@@ -61,6 +61,7 @@ Require GO for mutation batteries, timing runs, and shared-database runs; retain
 Honor a no-run brief and every effective permission denial.
 Run each check as its own plain command, with no inline interpreter code.
 The named `python3 -I -` heredocs of the retirement routes stay as each route specifies.
+Run `make api-migrations-check` only when the diff adds a migration, never as a heredoc, and without the slot gate. Run `make api-test`, `make api-test-all`, `make app-test` and `make e2e` only through the installed slot gate.
 The CoC can always issue a GO to unblock a stuck lane or chief within existing authority.
 A GO overrides no permission denial, approval hold, publication rule, or customer safety rule.
 
