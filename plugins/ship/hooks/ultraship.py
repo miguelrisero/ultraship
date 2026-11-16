@@ -2558,6 +2558,7 @@ def inline_interpreter_denial(command, cwd=None):
                 return subscript_reason
             pending, substitutions = substitutions, []
         text, inherited = pending.pop()
+        top_level = not seen
         text = shell_line_continuations(text)
         identity = (text, inherited)
         if identity in seen:
@@ -2653,16 +2654,44 @@ def inline_interpreter_denial(command, cwd=None):
             if subscript_reason is None:
                 subscript_reason = 'array subscript evaluation rule (parse error)'
         command_positions = shell_command_positions(tokens)
-        test_safe = (not any(value in {'alias', 'enable', 'hash', 'shopt', 'eval', 'trap', 'source',
-                                       'autoload', 'disable'}
-                             or re.match(r'(?:dis_)?(?:functions|aliases|galiases|saliases|builtins)(?:$|\[|\+?=)', value)
-                             for _, value, _, _ in tokens)
-                     and not any(value == '.' and start in command_positions
-                                 for _, value, start, _ in tokens)
-                     and not shell_defines_function(tokens, command_positions)
-                     and not any(start in command_positions and index + 2 < len(tokens)
-                                 and tokens[index + 1][0] == '(' and tokens[index + 2][0] == ')'
-                                 for index, (_, _, start, _) in enumerate(tokens)))
+        test_safe = top_level and not shell_defines_function(tokens, command_positions)
+        modifiers = {'noglob', 'nocorrect', '-', 'builtin', 'command', 'exec', 'time'}
+        unsafe_words = {
+            'alias', 'unalias', 'enable', 'disable', 'autoload', 'hash', 'unhash', 'rehash',
+            'shopt', 'setopt', 'unsetopt', 'emulate', 'eval', 'trap', 'source', 'sched', 'fc',
+            'r', 'zle', 'bindkey', 'zmodload', 'zcompile', 'typeset', 'declare', 'local',
+            'export', 'readonly', 'integer', 'float', 'private', 'functions', 'unfunction',
+            'function', 'getopts', 'mapfile', 'readarray', 'vared', 'getln', 'pushln', 'print',
+            'zparseopts', 'zregexparse', 'zstyle', 'zformat', 'strftime', 'zstat', 'sysread',
+            'zsystem', 'zselect', 'zsocket', 'ztcp', 'zpty', 'zcurses', 'ztie', 'zuntie',
+            'pcre_compile', 'pcre_match', 'compgen', 'complete', 'compctl',
+        }
+        modifier_target = False
+        for index, (raw, value, start, _) in enumerate(tokens):
+            command_word = start in command_positions or modifier_target
+            modifier_target = command_word and value in modifiers
+            if (value in unsafe_words
+                    or re.search(r'functions|aliases|builtins|reswords|bash_func|bash_env|bash_cmds', value, re.I)
+                    or '${(' in raw or '${!' in raw or re.search(r'\$\{[^}]*@[A-Za-z]}', raw)
+                    or command_word and (value == '.' or unresolved_shell_word(raw)
+                                         and raw not in {'[', '[[', '{'})
+                    or start in command_positions and index + 2 < len(tokens)
+                    and tokens[index + 1][0] == '(' and tokens[index + 2][0] == ')'):
+                test_safe = False
+            if value not in {'printf', 'read', 'set'}:
+                continue
+            arguments = []
+            for argument in shell_without_redirections(tokens[index + 1:]):
+                if argument[0] in {';', '&', '|', '(', ')', '`', '\n'}:
+                    break
+                arguments.append(argument)
+            if (value == 'printf' and (any(word[1].startswith('-') and 'v' in word[1] for word in arguments)
+                                       or arguments and unresolved_shell_word(arguments[0][0]))
+                    or value == 'read' and any(not re.fullmatch(r'-[A-Za-z]+|[A-Za-z_][A-Za-z0-9_]*', word[1])
+                                               for word in arguments)
+                    or value == 'set' and any(word[1].startswith('-') and 'A' in word[1]
+                                              or unresolved_shell_word(word[0]) for word in arguments)):
+                test_safe = False
         segments, words, piped = [], [], False
         for token in tokens:
             raw = token[0]
@@ -2712,22 +2741,29 @@ def inline_interpreter_denial(command, cwd=None):
             if (piped_input and first and first[0] != '[' and first[1] != '$?'
                     and unresolved_shell_word(first[0])):
                 return 'inline interpreter code rule (unresolved command word)'
-            test_operands, closing = set(), None
+            test_operands, test_commands, closing = set(), set(), None
             if test_safe:
-                for raw, value, start, _ in words:
+                reserved_prefix = True
+                for _, value, start, _ in words:
                     if closing is not None:
                         if closing and value == closing:
                             closing = None
                         else:
                             test_operands.add(start)
-                    elif start in command_positions and value in {'[', '[[', 'test'}:
-                        closing = {'[': ']', '[[': ']]', 'test': ''}[value]
+                    elif (reserved_prefix and start in command_positions
+                          and not any(tokens[left][2] < start < tokens[right][2]
+                                      for left, right in groups.items())):
+                        closing = {'[': ']', '[[': ']]', 'test': ''}.get(value)
+                        if closing is not None:
+                            test_commands.add(start)
+                    reserved_prefix = reserved_prefix and value in {
+                        'if', 'elif', 'while', 'until', 'then', 'do', 'else', '!', '{'}
             for index, (raw, value, start, end) in enumerate(words):
                 arguments = [word[1] for word in words[index + 1:]]
                 neutral = neutral_prefix and index < prefix_end and bool(re.fullmatch(
                     rf'[A-Za-z_][A-Za-z0-9_]*=("?){path_part}(?::{path_part})*\1', raw))
                 unresolved = (not neutral and raw != '[' and value != '$?' and start not in shell_programs
-                              and not (test_safe and start in command_positions and value == '[[')
+                              and start not in test_commands
                               and unresolved_shell_word(raw))
                 names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
                 joined_code = (not neutral and unresolved_shell_word(raw) and bool(re.search(
