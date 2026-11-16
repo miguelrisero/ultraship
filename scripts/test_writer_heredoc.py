@@ -254,6 +254,11 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
+    def test_ansi_c_quote_refusal_names_unparsed_shell_syntax(self):
+        self.assertTrue(self.denied("pat=$'x\\ny'; grep -c \"$pat\" notes.txt"))
+        self.assertIn('Rule: unparsed shell syntax rule: ANSI-C shell quote', self.reason)
+        self.assertNotIn('python -c', self.reason)
+
     def test_literal_eval_parenthesis_function_invalidates_numeric_proof(self):
         self.assertTrue(self.denied("i=0; eval 'f() { :; }'; f; (( i ))"))
         self.assertIn('process-capable python -c rule', self.reason)
