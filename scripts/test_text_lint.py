@@ -127,6 +127,70 @@ class TextLintTests(unittest.TestCase):
                                  'Output contract: ' + prefix + 'Missing section: Facts'
                                  + self.RESEND + text_lint.PEER_TEMPLATE)
 
+    def test_peer_owner_helper_request_allows_long_line(self):
+        for prefix in ('', '- ', '* ', '  \t- '):
+            with self.subTest(prefix=prefix):
+                message = (prefix + 'Owner helper request: ' + ' '.join(['word'] * 40)
+                           + '\nFacts: Checks pass.\nDecision: Continue.\nNext: Resume.')
+                text_lint.check(message, 'peer')
+
+    def test_peer_other_owner_prefix_keeps_sentence_limit(self):
+        for prefix in ('Owner helper note:', 'owner helper request:', 'Quote Owner helper request:'):
+            with self.subTest(prefix=prefix):
+                message = (prefix + ' ' + ' '.join(['word'] * 40)
+                           + '\nFacts: Checks pass.\nDecision: Continue.\nNext: Resume.')
+                with self.assertRaises(text_lint.FormatError) as refusal:
+                    text_lint.check(message, 'peer')
+                self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+
+    def test_peer_owner_helper_request_keeps_other_sentence_limit(self):
+        message = ('Owner helper request: ' + ' '.join(['word'] * 40)
+                   + '\n' + ' '.join(['word'] * 26)
+                   + '\nFacts: Checks pass.\nDecision: Continue.\nNext: Resume.')
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.check(message, 'peer')
+        self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+
+    def test_decision_owner_helper_request_keeps_sentence_limit(self):
+        message = ('<p>Owner helper request: ' + ' '.join(['word'] * 40)
+                   + '</p><h2>What is wrong</h2><h2>Why now</h2><h2>Options</h2>'
+                   '<h2>Recommendation</h2><h2>If no answer</h2>')
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.check(message, 'decision')
+        self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+
+    def test_peer_owner_helper_request_keeps_token_checks(self):
+        for tokens in ('deadline2026 by8November00', ' '.join(['z' * 22] * 3)):
+            with self.subTest(tokens=tokens):
+                message = ('Owner helper request: ' + tokens + ' ' + ' '.join(['word'] * 40)
+                           + '\nFacts: Checks pass.\nDecision: Continue.\nNext: Resume.')
+                with self.assertRaises(text_lint.FormatError) as refusal:
+                    text_lint.check(message, 'peer')
+                self.assertIn('Separate glued words with spaces; remove compressed shorthand.',
+                              refusal.exception.findings)
+
+    def test_peer_sections_survive_tag_like_text(self):
+        for line in ("cat <<'PY'; x<y", 'cat <<EOF'):
+            with self.subTest(line=line):
+                message = ('Facts: Checks pass.\n' + line
+                           + '\nDecision: Continue.\nNext: Resume.')
+                text_lint.check(message, 'peer')
+
+    def test_peer_tag_like_text_keeps_missing_decision(self):
+        for line in ("cat <<'PY'; x<y", 'cat <<EOF'):
+            with self.subTest(line=line):
+                message = 'Facts: Checks pass.\n' + line + '\nNext: Resume.'
+                with self.assertRaises(text_lint.FormatError) as refusal:
+                    text_lint.check(message, 'peer')
+                self.assertEqual(refusal.exception.findings, ['Missing section: Decision'])
+
+    def test_decision_sections_use_visible_text_only(self):
+        message = ('<h2>What is wrong</h2><h2>Why now</h2><h2>Options</h2>'
+                   '<h2>If no answer</h2><script>\nRecommendation\n</script>')
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.check(message, 'decision')
+        self.assertEqual(refusal.exception.findings, ['Missing section: Recommendation'])
+
     def test_peer_refusal_has_resend_template(self):
         """Catch a peer formatting refusal that fails to permit one resend."""
         event = self.event()
