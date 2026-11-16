@@ -3486,9 +3486,10 @@ def literal_read_gh(words):
 
 def data_heredoc_removed(command):
     lines = command.splitlines(keepends=True)
-    if not lines or lines[0].count('<<') != 1 or not data_reader_header(lines[0]):
+    if (not lines or '<<<' in lines[0] or lines[0].count('<<') != 1
+            or not data_reader_header(lines[0])):
         return command
-    match = re.search(r'''<<(-?)[ \t]*(['"])([A-Za-z0-9_]+)\2''', lines[0])
+    match = re.search(r'''(?<!<)<<(?!<)(-?)[ \t]*(['"])([A-Za-z0-9_]+)\2''', lines[0])
     if not match:
         return command
     for end in range(1, len(lines)):
@@ -3528,6 +3529,33 @@ def backtick_substitutions(command):
     return ''.join(kept)
 
 
+def quoted_command_substitutions(word):
+    spans, stack = [], []
+    single, double, escaped, index = False, False, False, 0
+    while index < len(word):
+        char = word[index]
+        if escaped:
+            escaped = False
+        elif char == '\\' and not single:
+            escaped = True
+        elif char == "'" and not double:
+            single = not single
+        elif char == '"' and not single:
+            double = not double
+        elif not single and word[index:index + 2] == '$(':
+            stack.append((index + 2, single, double))
+            single = double = False
+            index += 1
+        elif char == '(' and stack and not single and not double:
+            stack.append((None, single, double))
+        elif char == ')' and stack and not single and not double:
+            start, single, double = stack.pop()
+            if start is not None and not stack:
+                spans.append(word[start:index])
+        index += 1
+    return None if stack else spans
+
+
 # shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
 def review_thread_denial(command):
     if read_only_shell(command) or literal_search_shell(command):
@@ -3558,17 +3586,21 @@ def review_thread_denial(command):
     names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word)) == 'gh'
                    for word in re.split(r'[\s;&|()<>`]+', normalized))
     if names_gh:
-        seen_gh = False
+        seen_gh, command_position = False, True
+        prefixes = {'if', 'then', 'elif', 'else', 'do', 'while', 'until', '!', '{', 'time',
+                    'builtin', 'command', 'coproc', 'exec', 'env', 'xargs', 'sudo'}
         for index, token in enumerate(tokens):
             if token and all(char in ';&|\n()' for char in token):
-                seen_gh = False
+                seen_gh, command_position = False, True
                 continue
+            dot_command = token == '.' and command_position
+            command_position = token in prefixes or (command_position and bool(re.match(r'[A-Za-z_]\w*=', token)))
             if os.path.basename(token) == 'gh':
                 seen_gh = True
             if seen_gh:
                 continue
             shell = os.path.basename(token) in ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'busybox')
-            shell = shell or token in ('eval', 'source', '.')
+            shell = shell or token in ('eval', 'source') or dot_command
             if os.path.basename(token) in ('watch', 'ssh', 'su', 'script', 'runuser'):
                 return 'shell runner names gh'
             if os.path.basename(token) == 'env':
@@ -3585,21 +3617,45 @@ def review_thread_denial(command):
                 return 'shell runner names gh'
     # Keep quote boundaries: GraphQL variables are literal only inside a single-quoted query value.
     pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?<=(?<!\\)[<>])&|&(?=>)|(?<=(?<!\\)>)\||[^\s'"\\;&|()])+|(?:[;\n()]|(?<!(?<!\\)>)\||(?<!(?<!\\)[<>])&(?!>))+'''
-    segments, words = [], []
+    segments, words, parentheses = [], [], []
+    unmatched = False
+    data_arguments = not (re.search(r'\b(echo|printf)\s*\(', command)
+                          or re.search(r'\b(function|alias|enable|hash)\b', normalized))
     for match in re.finditer(pattern, command):
         raw = match[0]
         if all(char in ';&|\n()' for char in raw):
+            for offset, char in enumerate(raw):
+                if char == '(':
+                    position = match.start() + offset
+                    parentheses.append(any(parentheses) or (position > 0 and command[position - 1] in '$<>'))
+                elif char == ')':
+                    if parentheses:
+                        parentheses.pop()
+                    else:
+                        unmatched = True
             segments.append(words)
             words = []
             continue
         value = shlex.split(raw)[0]
-        words.append((value, raw))
+        first = 0
+        while first < len(words) and (words[first] == ('{', '{')
+                                     or re.match(r'[A-Za-z_]\w*=', words[first][0])):
+            first += 1
+        literal_output = (data_arguments and not unmatched and not any(parentheses)
+                          and first < len(words) and words[first] in (('echo', 'echo'), ('printf', 'printf')))
         if (any(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', token)[-1]).casefold() == 'gh'
                 for token in re.split(r'[\s;&|()<>`]+', re.sub(r'''['"\\]''', '', value)))
                 and value != raw):
-            reason = review_thread_denial(value)
-            if reason:
-                return reason
+            rescans = quoted_command_substitutions(raw) if literal_output else [value]
+            if rescans is None:
+                return 'review-thread guard parse failure'
+            for text in rescans:
+                reason = review_thread_denial(text)
+                if reason:
+                    return reason
+            if literal_output:
+                continue
+        words.append((value, raw))
     segments.append(words)
     for words in segments:
         command_words, skip_target = [], False

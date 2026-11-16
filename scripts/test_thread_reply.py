@@ -140,7 +140,6 @@ REFUSE = (
     r'if eval g\"h\" api repos/o/r/pulls/7/comments -f body=x; then :; fi',
     r'time eval g\"h\" api repos/o/r/pulls/7/comments -f body=x',
     'exec . /dev/stdin <<<\'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
-    'find . -name x && gh pr view 7',
     "watch -n 60 'query= gh api repos/o/r/pulls/7/comments --input reply.json'",
     "su -c 'query=1 gh api repos/o/r/pulls/7/comments -f body=x' miguel",
     'gh "api -X POST repos/o/r/pulls/7/comments -f body=x"',
@@ -202,6 +201,45 @@ REFUSE = (
     "echo \"\ncat <<'EOF'\n\"; gh api repos/o/r/pulls/7/comments -f body=x\nEOF",
     "cat > /home/u/ws/x.md <<'EOF'\nfoo\\\nEOF\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF",
     "cat > /home/u/ws/x.md <<'EOF'\ngh\\\nEOF\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF",
+    'echo "x $(gh api repos/o/r/pulls/7/comments -f body=x) y"',
+    '$(echo "gh api repos/o/r/pulls/7/comments -f body=x")',
+    'true; $(true; echo "gh api repos/o/r/pulls/7/comments -f body=x")',
+    '`echo "gh api repos/o/r/pulls/7/comments -f body=x"`',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x" | bash',
+    'source <(echo "gh api repos/o/r/pulls/7/comments -f body=x")',
+    'echo() { $1; }; echo "gh api repos/o/r/pulls/7/comments -f body=x"',
+    'alias echo=eval; echo "gh api repos/o/r/pulls/7/comments -f body=x"',
+    'tmux new "gh api repos/o/r/pulls/7/comments -f body=x"',
+    'command eval "gh api repos/o/r/pulls/7/comments -f body=x"',
+    r'''echo "$(gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"x\"}){thread{id}}}')"''',
+    'xargs . < /home/u/ws/list; gh pr view 7',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x" | sh',
+    'echo "`gh api repos/o/r/pulls/7/comments -f body=x`"',
+    '. /home/u/ws/x; gh pr view 7',
+    'true; . /home/u/ws/x; gh pr view 7',
+    'true && . /home/u/ws/x; gh pr view 7',
+    'true | . /home/u/ws/x; gh pr view 7',
+    '(. /home/u/ws/x); gh pr view 7',
+    'X=1 . /home/u/ws/x; gh pr view 7',
+    'X=1 Y=2 . /home/u/ws/x; gh pr view 7',
+    'if . /home/u/ws/x; then gh pr view 7; fi',
+    'if true; then . /home/u/ws/x; fi; gh pr view 7',
+    'if false; then :; elif . /home/u/ws/x; then :; fi; gh pr view 7',
+    'if false; then :; else . /home/u/ws/x; fi; gh pr view 7',
+    'for f in a; do . /home/u/ws/x; done; gh pr view 7',
+    'while . /home/u/ws/x; do :; done; gh pr view 7',
+    'until . /home/u/ws/x; do :; done; gh pr view 7',
+    '! . /home/u/ws/x; gh pr view 7',
+    '{ . /home/u/ws/x; }; gh pr view 7',
+    'time . /home/u/ws/x; gh pr view 7',
+    'builtin . /home/u/ws/x; gh pr view 7',
+    'command . /home/u/ws/x; gh pr view 7',
+    'coproc . /home/u/ws/x; gh pr view 7',
+    'exec . /home/u/ws/x; gh pr view 7',
+    'env . /home/u/ws/x; gh pr view 7',
+    'sudo . /home/u/ws/x; gh pr view 7',
+    "cat <<<'EOF' /home/u/ws/x\nbash -c x\nEOF\ngh pr view 7",
+    "cat <<<'EOF'\nbash -c x\nEOF\ngh pr view 7",
 )
 
 ADMIT = (
@@ -283,6 +321,30 @@ ADMIT = (
     'gh pr list --json number --jq .[].number',
     'gh pr status --json number --jq .currentBranch.statusCheckRollup[].name',
     'gh pr view 7 --json title --jq .title | grep -c x; echo "count `date -u +%F`"',
+    'find . -name x && gh pr view 7',
+    "gh api repos/o/r/actions/jobs/123/logs > /home/u/ws/.scratch/job-123.log 2>&1; grep -c . /home/u/ws/.scratch/job-123.log; grep -E 'S4[789]|bench-x' /home/u/ws/.scratch/job-123.log | cut -d' ' -f2- | cut -c1-260 | head -12",
+    '''cd /home/u/ws && echo "$(date -u +%FT%TZ) REFUSAL: ship PreToolUse hook (thread_reply rule, 'shell runner names gh') refused Bash that read PR 7 merge SHA and wrote rows decision. No rerun in any form; rows decision held until the hook fix + review." >> .scratch/delivery.md''',
+    '''S=/home/u/ws/.scratch/disk; L=$S/cleanup-$(date -u +%Y%m%dT%H%MZ).log; { echo "BEFORE $(df -h / | tail -1)"; find ~/.cache/gh -type f -mtime +1 -delete; echo "gh $(df -h / | tail -1)"; rm -rf /home/u/ws/node-compile-cache; echo "nodecache $(df -h / | tail -1)"; awk -F'\\t' '$2<"2026-11-13"{print $1}' $S/dangling-sized.tsv | xargs -r timeout 300 docker volume rm >/dev/null 2>&1; timeout 300 docker builder prune -f >/dev/null 2>&1; echo "docker $(df -h / | tail -1)"; lsof +D /home/u/ws/app/target 2>/dev/null | head -2; timeout 300 cargo clean --manifest-path /home/u/ws/app/Cargo.toml 2>&1 | tail -1; echo "cargo $(df -h / | tail -1)"; } > $L 2>&1; cat $L''',
+    r'''cd /home/u/ws && T=/home/u/ws/session.jsonl; python3 - "$T" <<'EOF'
+import json,sys
+ids={};cmd=err=None
+for l in open(sys.argv[1]):
+    try:d=json.loads(l)
+    except:continue
+    c=d.get('message',{}).get('content')
+    if not isinstance(c,list):continue
+    for b in c:
+        if b.get('type')=='tool_use' and 'node-compile-cache' in json.dumps(b.get('input',{})): ids[b['id']]=b['input'].get('command')
+        if b.get('type')=='tool_result' and b.get('tool_use_id') in ids:
+            cmd=ids[b['tool_use_id']];r=b.get('content');err=r if isinstance(r,str) else json.dumps(r)
+out='/home/u/ws/.scratch/refused-command.md'
+open(out,'w').write('# Refused command 6 (test string only, never run)\n\n```bash\n'+(cmd or 'NOT FOUND')+'\n```\n\n## Refusal\n\n```\n'+(err or '')+'\n```\n')
+print(out,bool(cmd))
+EOF
+echo "$(date -u +%FT%TZ) REFUSAL: ship thread guard ('review-thread guard parse failure') refused disk cleanup command (gh cache, node cache, docker volumes, cargo clean). No rerun in any form. Saved as refused command 6. Disk 92%; 93% = P0 owner Input. Survey: 43G safe (survey.md)." >> .scratch/delivery.md''',
+    'grep -c . /home/u/ws/x.log; gh pr view 7',
+    'echo "head $(gh pr view 7 --json headRefOid -q .headRefOid)"',
+    "cat > /home/u/ws/x.md <<'EOF'\na . b\nEOF\ngh pr view 7",
 )
 
 
