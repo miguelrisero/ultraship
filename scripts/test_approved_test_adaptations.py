@@ -115,7 +115,7 @@ EXPECTED_REMOVED_RETIREMENT_ROUTE = [
     'Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.',
     'Read, search, or parse no existing content of the named file.',
     'Permit the applying writer to parse only the appended text, never the named file, to check that it is valid TOML.',
-    'Append with `python3 -I "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/retire-rows.py" <record-file>`, one call per named file.',
+    "Append with `python3 -I <script> <record-file>`, one call per named file, where `<script>` is the literal absolute path of the installed ship plugin's `skills/ship/scripts/retire-rows.py` that the brief names; the hook refuses a shell expansion in that command.",
     'Write the record file with native Write outside the repository checkout: a JSON object with `row_file`, the literal absolute row-file path, and `rows`, a list of objects with `id` and `reason`.',
     'The script checks only the appended text with `tomllib.loads`, never reads the named file, and appends to that path.',
     'Use this command for new retirements only; a recorded refusal of an earlier retirement stays final.',

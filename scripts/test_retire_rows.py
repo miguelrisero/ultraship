@@ -23,7 +23,7 @@ class RetireRowsTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.directory = Path(temp.name)
+        self.directory = Path(os.path.realpath(temp.name))
         self.path = self.directory / 'tests/mutation/x.toml'
         self.path.parent.mkdir(parents=True)
         self.old = b'title = "existing"'
@@ -65,7 +65,11 @@ class RetireRowsTests(unittest.TestCase):
         outside.write_bytes(self.old)
         link = self.path.with_name('link.toml')
         link.symlink_to(self.path)
+        parent_link = self.path.parent / 'linked'
+        parent_link.symlink_to(self.path.parent, target_is_directory=True)
         records = [
+            {'row_file': str(self.path.parent) + '/../../outside.toml', 'rows': self.rows},
+            {'row_file': str(parent_link / self.path.name), 'rows': self.rows},
             {'row_file': 'tests/mutation/x.toml', 'rows': self.rows},
             {'row_file': str(outside), 'rows': self.rows},
             {'row_file': str(self.path.with_name('missing.toml')), 'rows': self.rows},
@@ -90,6 +94,27 @@ class RetireRowsTests(unittest.TestCase):
                 self.assertEqual(self.path.read_bytes(), self.old)
                 self.assertEqual(outside.read_bytes(), self.old)
         self.assertFalse(self.path.with_name('missing.toml').exists())
+
+    def test_linked_or_protected_records_refuse_without_writing(self):
+        protected = self.path.with_name('record.json')
+        protected.write_text(json.dumps(self.record), encoding='utf-8')
+        symlink = self.directory / 'symlink.json'
+        symlink.symlink_to(protected)
+        hardlink = self.directory / 'hardlink.json'
+        os.link(protected, hardlink)
+        single = self.path.with_name('single.json')
+        single.write_bytes(protected.read_bytes())
+        paths = (self.path, protected, symlink, hardlink, single)
+        before = {path: path.read_bytes() for path in paths}
+        for record_path in (symlink, hardlink, single):
+            with self.subTest(record_path=record_path):
+                result = subprocess.run(
+                    [sys.executable, '-I', str(SCRIPT), str(record_path)],
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertTrue(result.stderr.startswith('REFUSE '), result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual({path: path.read_bytes() for path in paths}, before)
 
     def test_unreadable_or_invalid_json_refuses_without_writing(self):
         for content in (None, '{', '[]'):

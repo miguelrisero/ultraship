@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Append validated retirement records without reading the row file."""
 import json
+import os
 from pathlib import Path
 import stat
 import sys
@@ -15,12 +16,23 @@ def basic(value):
     ) + '"'
 
 
+def canonical_regular_file(path):
+    if not os.path.isabs(path) or os.path.realpath(path) != path:
+        return False
+    metadata = os.lstat(path)
+    return stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1
+
+
 def main(args):
     if len(args) != 1:
         print('usage: retire-rows.py <record-file>', file=sys.stderr)
         return 2
     try:
-        record = json.loads(Path(args[0]).read_text(encoding='utf-8'))
+        record_path = Path(args[0])
+        if (('tests', 'mutation') in zip(record_path.parts, record_path.parts[1:])
+                or not canonical_regular_file(args[0])):
+            raise ValueError('record_file must be a canonical single-link regular file outside tests/mutation')
+        record = json.loads(record_path.read_text(encoding='utf-8'))
         if not isinstance(record, dict) or set(record) != {'row_file', 'rows'}:
             raise ValueError('record must contain exactly row_file and rows')
         if not isinstance(record['row_file'], str):
@@ -29,7 +41,7 @@ def main(args):
         if (not path.is_absolute() or path.suffix != '.toml'
                 or ('tests', 'mutation') not in zip(path.parts, path.parts[1:])):
             raise ValueError('row_file must be an absolute tests/mutation .toml path')
-        if not stat.S_ISREG(path.lstat().st_mode):
+        if not canonical_regular_file(record['row_file']):
             raise ValueError('row_file must be an existing regular file, not a symlink')
         rows = record['rows']
         if not isinstance(rows, list) or not rows:
