@@ -47,11 +47,14 @@ Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-s
 | Model guard | PreToolUse `Agent` | Denies a `model` override on a `ship:*` agent |
 | Role guard | PreToolUse `Bash`, `Edit`, `Write` | Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch. The ban covers every path. The hook denies common CLI forms and harness-config edits. |
 | Reviewer boundary | PreToolUse `Read`, `Grep`, `Glob`, `LSP`, `WebFetch`, `mcp__fff__*` | A reviewer passes exact canonical absolute paths and scopes every search. The hook denies `tests/mutation` paths, `.git` paths, Claude data under `~/.claude` and `CLAUDE_CONFIG_DIR` (except `CLAUDE.md`, `plugins/cache`, and `plugins/marketplaces`), and the `mcp__fff__*` tools and the three `mcp__bettercoding__` Input tools, the only `mcp__` tools the hook sees. A driver-written admission record admits Read or Grep of the exact row files it lists. |
+| Review-thread guard | PreToolUse `Bash`, every caller | Requires `thread_reply.py` for review-thread replies and resolves. The helper checks the thread's repository and PR number through GitHub. |
 | Research budget | PreToolUse discovery tools | Denies the 41st discovery call of a researcher |
 | Ledger owed | SubagentStop, Stop | Retains pending evidence; blocks once per canonical owed state; accounts each result against its agent ID |
 | Compact handoff | SessionStart `compact` | Prints the re-read instruction and the open ledger run |
 
 The ship hooks need Claude Code 2.1.295 or later.
+
+The review-thread guard scans command text. Script files run by path, `gh` aliases and extensions, and command words built from variables or globs escape its checks. It also misses opaque URLs in other clients and files written by Write or Edit then run. Interpreter scripts such as `python3 -c` or `node -e` can run `gh` outside this check. Shell runners can also build `gh` from escapes or expansions. The upgrade path is a GitHub token that the driver cannot use for review-thread writes.
 
 The reviewer boundary checks names and paths. It cannot see a copy of a protected row kept under another name, such as a scratch file. GitHub addresses content by ID, such as a blob or a `.diff`, with no path, so the hook denies reviewer `WebFetch` when the raw or decoded URL names `github.com`, `githubusercontent.com` or a subdomain after Unicode normalization, and denies any host that stays non-ASCII. A URL on another code host that addresses content by ID carries no path, so the hook cannot check it.
 
