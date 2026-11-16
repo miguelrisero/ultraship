@@ -3571,6 +3571,8 @@ def writer_gh_denial(command, depth=0):
             if index in data and ('-X' in word or '--method' in word):
                 return 'gh field method option rule'
             if index in data:
+                if '\n' in word:
+                    return 'gh multiline data value rule'
                 if '$' in word or '`' in word or not quoted[index] and any(char in word for char in '*[{'):
                     return reason
                 continue

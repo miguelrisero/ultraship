@@ -703,6 +703,12 @@ class PythonHeredocGuardTests(unittest.TestCase):
 
 
 class WriterGitHubGuardTests(unittest.TestCase):
+    def test_writer_heredoc_quote_cannot_hide_following_command_in_data(self):
+        command = "tee <<EOF\ngh pr view 1 -q '\nEOF\ngh issue close 1 # '\n"
+        result = hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)
+        self.assertTrue(denied(result))
+        self.assertIn('gh multiline data value rule', result['hookSpecificOutput']['permissionDecisionReason'])
+
     def test_writer_redirect_data_and_nested_git_words_cannot_hide_commands(self):
         for command in ('gh pr view 1 & >-q gh issue close 1',
                         "flock git --command 'gh issue close 1'",
