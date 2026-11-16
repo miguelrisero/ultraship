@@ -145,7 +145,7 @@ Return a ready PR to draft before any further push, then repeat the review and a
 The pre hook denies every reviewer read under a `tests/mutation` path unless the driver admits it first.
 Every route that needs row reads uses this flow: lane-derived, lane-owned, retirement, and owner-approved subject.
 
-1. Dispatch the reviewer. Make the first message ask it to return `ready` and read nothing.
+1. Dispatch a reviewer whose loaded definition implements the selected route. `ship:reviewer--sol` and `ship:reviewer--opus` implement every reviewer row route; `ship:reviewer--astra` implements only the new lane-owned row review route. Make the first message ask it to return `ready` and read nothing.
 2. Take the agent ID from the Agent tool result.
 3. Write `${XDG_STATE_HOME:-~/.local/state}/ultraship/row-review/<agent ID>.json` with native Write, with the full record as its content. In the file name, replace each character outside letters, digits, `_`, `.` and `-` with `_`.
 4. The record has four fields: `pr` (the PR URL), `agent_id` (the agent ID), `row_files` (the exact canonical absolute row-file paths) and `expires_at` (`YYYY-MM-DDTHH:MM:SSZ`, UTC, at most 4 hours ahead).

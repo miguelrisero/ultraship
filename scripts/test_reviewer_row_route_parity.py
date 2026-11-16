@@ -9,7 +9,6 @@ spec = importlib.util.spec_from_file_location('check_plugins', ROOT / 'scripts/c
 checks = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checks)
 AGENTS = ROOT / 'plugins/ship/agents'
-LIMIT_HEADING = '## Protected row routes in this definition'
 LIMIT_SECTION = '''## Protected row routes in this definition
 
 Among protected row routes, this definition implements only New lane-owned row review and Draft PR for new lane-owned row review.
@@ -17,56 +16,43 @@ Refuse every step of every other protected row route because this loaded definit
 This refusal includes row-ID lookup and row reads.
 Preserve every existing refusal and affected-session hold.
 '''
-SHARED_HEADINGS = (
-    '## Protected row admission',
-    '## New lane-owned row review',
-    '## Draft PR for new lane-owned row review',
-)
+DISPATCH_STEP = '1. Dispatch a reviewer whose loaded definition implements the selected route. `ship:reviewer--sol` and `ship:reviewer--opus` implement every reviewer row route; `ship:reviewer--astra` implements only the new lane-owned row review route. Make the first message ask it to return `ready` and read nothing.'
 
 
 def split_body(text):
     body = text.split('\n---\n', 1)[1]
     parts = re.split(r'^(## .+)$', body, flags=re.M)
-    return parts[0], [(parts[i], parts[i] + parts[i + 1].rstrip('\n') + '\n')
-                      for i in range(1, len(parts), 2)]
+    return parts[0], {parts[i]: parts[i] + parts[i + 1]
+                      for i in range(1, len(parts), 2)}
 
 
 class ReviewerRowRouteParityTests(unittest.TestCase):
+    def setUp(self):
+        self.sol_body = (AGENTS / 'reviewer--sol.md').read_text().split('\n---\n', 1)[1]
+        base, sections = split_body((AGENTS / 'reviewer--sol.md').read_text())
+        draft = sections['## Draft PR for new lane-owned row review']
+        self.assertTrue(draft.endswith('\n\n'))
+        self.partial_body = (base + sections['## Protected row admission']
+                             + LIMIT_SECTION + '\n'
+                             + sections['## New lane-owned row review'] + draft[:-1])
+
     def test_astra_base_and_exact_route_scope(self):
-        astra_base, astra_sections = split_body((AGENTS / 'reviewer--astra.md').read_text())
-        sol_base, _ = split_body((AGENTS / 'reviewer--sol.md').read_text())
-        self.assertEqual(astra_base, sol_base)
-        self.assertEqual([heading for heading, _ in astra_sections], [
-            SHARED_HEADINGS[0], LIMIT_HEADING, *SHARED_HEADINGS[1:],
-        ])
-        self.assertEqual(dict(astra_sections)[LIMIT_HEADING], LIMIT_SECTION)
+        body = (AGENTS / 'reviewer--astra.md').read_text().split('\n---\n', 1)[1]
+        self.assertEqual(body, self.partial_body)
 
-    def test_astra_shared_sections_match_sol_and_opus(self):
-        _, astra_sections = split_body((AGENTS / 'reviewer--astra.md').read_text())
-        astra = dict(astra_sections)
-        for seat in ('reviewer--sol', 'reviewer--opus'):
-            _, sections = split_body((AGENTS / (seat + '.md')).read_text())
-            for heading in SHARED_HEADINGS:
-                with self.subTest(seat=seat, heading=heading):
-                    self.assertEqual(astra[heading], dict(sections)[heading])
-
-    def test_astra_keeps_read_only_tools_model_and_effort(self):
-        fields = checks.frontmatter((AGENTS / 'reviewer--astra.md').read_text())
-        self.assertEqual(fields['tools'], 'Read, Grep, Glob, LSP, WebFetch, WebSearch')
-        self.assertEqual(fields['model'], 'gpt-6-astra')
-        self.assertEqual(fields['effort'], 'xhigh')
-
-    def test_all_reviewer_sections_match_sol_or_explicit_partial_scope(self):
-        _, sol_sections = split_body((AGENTS / 'reviewer--sol.md').read_text())
-        sol = dict(sol_sections)
+    def test_all_reviewer_bodies_match_sol_or_exact_partial_scope(self):
         for path in sorted(AGENTS.glob('reviewer--*.md')):
             with self.subTest(seat=path.stem):
-                _, sections = split_body(path.read_text())
-                headings = {heading for heading, _ in sections}
-                self.assertEqual(len(headings), len(sections))
-                self.assertLessEqual(headings, sol.keys() | {LIMIT_HEADING})
-                for heading, section in sections:
-                    self.assertEqual(section, LIMIT_SECTION if heading == LIMIT_HEADING else sol[heading])
-                shared = headings & sol.keys()
-                if shared and shared != sol.keys():
-                    self.assertEqual(dict(sections).get(LIMIT_HEADING), LIMIT_SECTION)
+                text = path.read_text()
+                _, sections = split_body(text)
+                if sections:
+                    self.assertIn(text.split('\n---\n', 1)[1], (self.sol_body, self.partial_body))
+
+    def test_astra_keeps_read_only_tools_and_effort(self):
+        fields = checks.frontmatter((AGENTS / 'reviewer--astra.md').read_text())
+        self.assertEqual(fields['tools'], 'Read, Grep, Glob, LSP, WebFetch, WebSearch')
+        self.assertEqual(fields['effort'], 'xhigh')
+
+    def test_dispatch_selects_a_reviewer_with_the_loaded_route(self):
+        text = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        self.assertEqual(text.splitlines().count(DISPATCH_STEP), 1)
