@@ -185,6 +185,10 @@ Native Edit grants zero alternate form for an existing or recorded denied operat
 
 Use this separate route outside category 5 only when the PR's own diff replaces the code a row guards and no identical mutant fits.
 Require the brief to select this route and record why an identical-operation re-anchor cannot preserve the claim.
+As the one exception to the first sentence, a SHA-bound CoC decision file that cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` may select this route when an identical mutant fits, if the PR's own diff rewrote the guarded code.
+Apply the lane-derived merge-commit rule to decide whether the PR's own diff rewrote the guarded code.
+Under that file, keep the identical mutant operation; require the brief to record the PR's rewrite in place of why no identical mutant fits.
+Before any use of a decision file that cites that event, verify the event as the Lane-owned disposition route verifies a decision that cites it.
 The exact CoC decision supplies this route's scoped writer read/edit and reviewer read authority under the owner's testing delegation.
 Require an exact CoC decision naming the row-file paths, unique row IDs and permitted mutant fields before any protected read or edit.
 Bind the decision and row-review admission to the repository, PR, base SHA, author head SHA, frozen final commit and failing CI identity.

@@ -258,19 +258,21 @@ Native Edit grants zero alternate form for an existing or recorded denied operat
 
 Use this separate route outside category 5 only when the PR's own diff replaces the code a row guards and no identical mutant fits.
 Require the brief to select this route and record why an identical-operation re-anchor cannot preserve the claim.
-A SHA-bound CoC decision file that cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` may also select this route when an identical mutant fits, if the PR's own diff rewrote the guarded code.
-Under that file, keep the identical mutant operation, and the brief records the PR's rewrite in place of why no identical mutant fits.
-Before that use, verify with get_input that the event is an `answer_submitted` event with `actor_kind=owner_ui` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5`.
+As the one exception to the first sentence, a SHA-bound CoC decision file that cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` may select this route when an identical mutant fits, if the PR's own diff rewrote the guarded code.
+Apply the lane-derived merge-commit rule to decide whether the PR's own diff rewrote the guarded code.
+Under that file, keep the identical mutant operation; require the brief to record the PR's rewrite in place of why no identical mutant fits.
+Before any use of a decision file that cites that event, verify the event as the Lane-owned disposition route verifies a decision that cites it.
 The exact CoC decision supplies this route's scoped read/edit authority under the owner's testing delegation: "The CoC decides CI/CD, testing and tooling items for me."
 Require an exact CoC decision naming the row-file paths, unique row IDs and permitted mutant fields before any protected read or edit.
 Bind the decision and row-review admission to the repository, PR, base SHA, author head SHA, frozen final commit and failing CI identity.
 The exact CoC decision may be a CoC decision file that the brief names by absolute path and SHA256.
+When the file holds several sections, apply only the section that the brief names, with that section's bindings and expiry.
 Before any protected read, verify the file SHA256 and that the file binds the repository, PR, base SHA, author head SHA, tested merge SHA and tree, failing CI run, attempt and job.
 Also verify that the file binds one pre-edit commit, the row-file paths, the unique row IDs and the permitted fields.
-For that file, the frozen final commit is your single commit whose parent is the named pre-edit commit and that changes only the named row files.
+For that file, the rows commit is your single commit whose parent is the named pre-edit commit and that changes only the named row files.
 Refuse a SHA256 mismatch, a missing or different binding, a passed expiry that the file states, and a branch head other than the pre-edit commit before the edit.
-For a retirement that the decision file names, apply the Lane-owned disposition route's retirement requirements to the named rows; the field limit below does not block that retirement.
-A decision file authorizes only retirement, designated-test and mutant changes; a claim change still requires a current task-specific owner event.
+Send a retirement to the Lane-owned disposition route's retirement branch with all its prerequisites, or to the Removed-behavior retirement route when CI reports the row missing at HEAD; this route edits active rows only.
+A decision file authorizes only designated-test and mutant changes on this route; a claim change still requires a current task-specific owner event.
 Require the recorded base/head diff to show that the PR's own rewrite breaks each named row.
 Require the tested merge to contain the recorded base and author head, and the frozen final commit to contain the author head.
 Permit only named row-ID lookup and approved row-line reads in the named files at the named commits.
@@ -348,11 +350,12 @@ Require the exact sentence: The CoC decides CI/CD, testing and tooling items for
 Refuse missing, unreadable or mismatched delegation before any write; accept zero relay for this direct verification.
 Require an exact CoC creation decision naming the applying writer, repository, PR, base SHA, author head SHA, new row-file path and each unique new row ID.
 Require scoped creation authority for the author and applying writer as separate recorded evidence.
-Require the driver's recorded lawful content-free evidence of lane ownership and absence of the new file and each new ID at the base.
+When the creation decision is a CoC decision file, verify its SHA256 from the brief and refuse a passed expiry that the file states.
+Require the driver's recorded lawful content-free evidence of lane ownership and absence of each new ID at the base.
 Reject an existing file, existing IDs, unnamed rows and stale evidence.
 Take every row field only from the brief or the files it names outside tests/mutation.
 Confirm that each row's `old` text occurs exactly once in its subject file at the brief's head before the write.
-Create only the named new file with only the named rows; read, search, parse or edit zero other files under tests/mutation.
+Create only the named new file with only the named rows and the file-level tables the brief names; read, search, parse or edit zero other files under tests/mutation.
 Write the file once with native Write at its literal absolute path; refuse when that path already exists.
 Edit zero existing rows; a new row has no prior mutant, so the identical-mutant edit rule covers existing rows only.
 Commit only that file as one local commit on the brief's head.
@@ -389,6 +392,7 @@ Limit that proposal to path, row ID, escaped replacement table, reason and exten
 Include zero original row bytes or anchors in the ordinary retirement proposal.
 Require the second exact CoC decision to bind the ordinary proposal SHA256 and independent review receipt.
 Name the applying writer, permitted protected reads, exact retirement, independent applied reviewer and final-commit read scope in that decision.
+Either retirement decision may be a CoC decision file that the brief names by absolute path and SHA256; verify it as the Rewritten-code row route verifies one, including its section, bindings and expiry.
 End the retirement-only authority block; apply every subsequent shared requirement to both branches unless explicitly scoped.
 An exact written CoC decision naming the repository, PR, row-file paths and unique row IDs authorizes retirement, designated-test change and mutant change for those rows.
 That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.
