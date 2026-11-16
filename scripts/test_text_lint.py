@@ -454,6 +454,72 @@ class TextLintTests(unittest.TestCase):
         self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
         self.assertIn('Receipt is consumed.', self.hook_refusal(self.resend(receipt_id)))
 
+    def assert_entrypoint_allows(self, event):
+        with self.assertRaises(json.JSONDecodeError) as empty_output:
+            self.entrypoint_output(json.dumps(event))
+        self.assertEqual(empty_output.exception.doc, '')
+
+    def test_relay_preserves_the_owners_single_resend(self):
+        result = self.entrypoint_output(json.dumps(self.event()))
+        receipt_id = re.search(r'Receipt: `([0-9a-f]{32})`', result['permissionDecisionReason'])[1]
+        path = self.state / 'receipts' / (receipt_id + '.json')
+        pending = {p.name: p.read_bytes() for p in (self.state / 'pending').iterdir()}
+        receipt_bytes = path.read_bytes()
+        relay = self.resend(receipt_id)
+        relay['agent_id'] = None
+        relay['tool_input']['to'] = 'agent-one'
+
+        self.assert_entrypoint_allows(relay)
+
+        self.assertEqual(path.read_bytes(), receipt_bytes)
+        self.assertFalse(path.with_suffix('.consumed').exists())
+        self.assertEqual({p.name: p.read_bytes() for p in (self.state / 'pending').iterdir()}, pending)
+        self.assert_entrypoint_allows(self.resend(receipt_id))
+        self.assertTrue(path.with_suffix('.consumed').exists())
+        result = self.entrypoint_output(json.dumps(self.resend(receipt_id)))
+        self.assertIn('Receipt is consumed.', result['permissionDecisionReason'])
+
+    def test_relay_refuses_a_different_recipient(self):
+        result = self.entrypoint_output(json.dumps(self.event()))
+        receipt_id = re.search(r'Receipt: `([0-9a-f]{32})`', result['permissionDecisionReason'])[1]
+        relay = self.resend(receipt_id)
+        relay['agent_id'] = None
+        relay['tool_input']['to'] = 'agent-one'
+        self.assert_entrypoint_allows(relay)
+        relay['tool_input']['to'] = 'agent-two'
+
+        result = self.entrypoint_output(json.dumps(relay))
+
+        self.assertEqual(result['permissionDecision'], 'deny')
+        self.assertIn('Receipt sender differs.', result['permissionDecisionReason'])
+        self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+
+    def test_relay_keeps_the_senders_pending_refusal_open(self):
+        result = self.entrypoint_output(json.dumps(self.event()))
+        receipt_id = re.search(r'Receipt: `([0-9a-f]{32})`', result['permissionDecisionReason'])[1]
+        sender = self.event(to='agent-one')
+        sender['agent_id'] = None
+        result = self.entrypoint_output(json.dumps(sender))
+        sender_id = re.search(r'Receipt: `([0-9a-f]{32})`', result['permissionDecisionReason'])[1]
+        pending = {p.name: p.read_bytes() for p in (self.state / 'pending').iterdir()}
+        relay = self.resend(receipt_id)
+        relay['agent_id'] = None
+        relay['tool_input']['to'] = 'agent-one'
+
+        result = self.entrypoint_output(json.dumps(relay))
+
+        self.assertEqual(result['permissionDecision'], 'deny')
+        reason = result['permissionDecisionReason']
+        self.assertIn('A formatting-only refusal to this recipient is pending.', reason)
+        self.assertIn('Cite its receipt `' + sender_id + '`', reason)
+        refusal_id = re.search(r'Receipt: `([0-9a-f]{32})`', reason)[1]
+        refusal = json.loads((self.state / 'receipts' / (refusal_id + '.json')).read_bytes())
+        self.assertIsNone(refusal['parent'])
+        self.assertFalse(refusal['resend_allowed'])
+        self.assertEqual({p.name: p.read_bytes() for p in (self.state / 'pending').iterdir()}, pending)
+        for unconsumed in (receipt_id, sender_id):
+            self.assertFalse((self.state / 'receipts' / (unconsumed + '.consumed')).exists())
+
     def test_session_recipient_tool_and_fields_are_bound(self):
         for field in ('session_id', 'recipient', 'tool_name', 'fields', 'null_session'):
             with self.subTest(field=field):
