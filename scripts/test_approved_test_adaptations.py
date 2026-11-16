@@ -419,9 +419,11 @@ EXPECTED_DISPOSITION_AUTHORITY = (
 EXPECTED_CONTRACT_GAP_RULE = [
     'A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.',
     'It made zero protected reads and named no content, scope, protected-access, hook, permission or tool finding.',
-    'Its cause resolves only when a new CoC decision, with a new SHA256, quotes the refusal verbatim and names that sole cause, and the next writer finds the selected route heading in its own loaded contract by native Read.',
-    'A refusal whose only reason is that an earlier contract-gap refusal stayed effective resolves with that refusal.',
-    'Hook, permission and tool denials, `REFUSED` tool results, and any refusal with another reason never qualify.',
+    'Its cause resolves only when a new CoC decision, with a new SHA256, quotes the refusal verbatim, names that sole cause and records its zero protected reads.',
+    'The next agent in the refusing role must also find the selected route heading in its own loaded contract by native Read, under a section that implements that route and does not refuse it.',
+    'A follow-on refusal is a refusal whose only reason is that an earlier refusal stayed effective; it also made zero protected reads.',
+    'A follow-on refusal resolves with that earlier refusal when this rule resolves the earlier one and the same CoC decision quotes the follow-on refusal verbatim.',
+    'Hook, permission and tool denials, `REFUSED` tool results, and any refusal with a reason outside these two definitions never qualify.',
     'The fresh disposition and every other route requirement still apply.',
 ]
 
@@ -519,7 +521,22 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
     def test_contract_gap_rule_follows_every_anchor_and_preserves_refusal_boundaries(self):
         anchor = 'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.'
         cause = 'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.'
-        carriers = {
+        found = {}
+        for path in (ROOT / 'plugins').rglob('*.md'):
+            lines = path.read_text().splitlines()
+            if not {anchor, *EXPECTED_CONTRACT_GAP_RULE} & set(lines):
+                continue
+            name = path.relative_to(ROOT).as_posix()
+            sites = [index for index, line in enumerate(lines) if line == anchor]
+            found[name] = len(sites)
+            with self.subTest(path=name):
+                self.assertEqual(lines.count(cause), 2)
+                for rule_line in EXPECTED_CONTRACT_GAP_RULE:
+                    self.assertEqual(lines.count(rule_line), len(sites))
+                for index in sites:
+                    self.assertEqual(lines[index + 1:index + 1 + len(EXPECTED_CONTRACT_GAP_RULE)],
+                                     EXPECTED_CONTRACT_GAP_RULE)
+        self.assertEqual(found, {
             'plugins/ship/agents/writer--sol.md': 2,
             'plugins/ship/agents/writer--sonnet.md': 2,
             'plugins/ship/agents/writer--fable52.md': 2,
@@ -529,24 +546,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             'plugins/ship/agents/reviewer--opus.md': 2,
             'plugins/ship/skills/ship/SKILL.md': 2,
             'plugins/ship/skills/ship/references/owner-decisions.md': 3,
-        }
-        for name, count in carriers.items():
-            with self.subTest(path=name):
-                lines = (ROOT / name).read_text().splitlines()
-                self.assertEqual(lines.count(anchor), count)
-                self.assertEqual(lines.count(cause), 2)
-                self.assertEqual(lines.count(EXPECTED_CONTRACT_GAP_RULE[0]), count)
-                for index, line in enumerate(lines):
-                    if line == anchor:
-                        self.assertEqual(
-                            lines[index + 1:index + 1 + len(EXPECTED_CONTRACT_GAP_RULE)],
-                            EXPECTED_CONTRACT_GAP_RULE,
-                        )
-        self.assertEqual(
-            {str(path.relative_to(ROOT)) for path in (ROOT / 'plugins').rglob('*.md')
-             if anchor in path.read_text().splitlines()},
-            set(carriers),
-        )
+        })
 
     def rewritten_code_route(self, name):
         text = (ROOT / name).read_text()
