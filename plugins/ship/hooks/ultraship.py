@@ -2994,6 +2994,246 @@ def writer_gh_denial(command, depth=0):
     return None
 
 
+# shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
+def review_thread_denial(command):
+    if read_only_shell(command) or literal_search_shell(command):
+        return None
+    if '$' not in command and re.fullmatch(
+            r"git commit(?: +-[A-Za-z]+| +--[a-z-]+)*(?: +-m +'[^']*'(?: +-[A-Za-z]+| +--[a-z-]+)*)+ *", command):
+        return None
+    command = command.replace('\\\n', '')
+    normalized = re.sub(r'''['"\\]''', '', command).casefold()
+    if re.search(r'\bgh\b', normalized) and '`' in outside_single_quotes(command):
+        return 'review-thread guard parse failure'
+    if (any(name in normalized for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
+                                            'resolvereviewthread'))
+            or re.search(r'comments/\S*/replies', normalized)):
+        return 'raw review-thread mutation'
+    command = cat_heredoc_data(command)
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        tokens = list(lexer)
+    except ValueError:
+        return 'review-thread guard parse failure' if re.search(r'\bgh\b', normalized) else None
+    names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word)) == 'gh'
+                   for word in re.split(r'[\s;&|()<>]+', normalized))
+    if names_gh:
+        seen_gh = False
+        for index, token in enumerate(tokens):
+            if token and all(char in ';&|\n()' for char in token):
+                seen_gh = False
+                continue
+            if os.path.basename(token) == 'gh':
+                seen_gh = True
+            if seen_gh:
+                continue
+            shell = os.path.basename(token) in ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'busybox')
+            shell = shell or token in ('eval', 'source', '.')
+            if os.path.basename(token) in ('watch', 'ssh', 'su', 'script', 'runuser'):
+                return 'shell runner names gh'
+            if os.path.basename(token) == 'env':
+                for later in tokens[index + 1:]:
+                    if later and all(char in ';&|\n()' for char in later):
+                        break
+                    split_option = later.split('=', 1)[0]
+                    if (later.startswith(('-S', '--split-string'))
+                            or len(split_option) >= 3 and '--split-string'.startswith(split_option)
+                            or later.startswith('-') and not later.startswith('--') and 'S' in later):
+                        return 'shell runner names gh'
+            if shell and not (index + 1 < len(tokens) and tokens[index + 1].endswith('.sh')
+                              and not tokens[index + 1].startswith(('/dev/', '/proc/'))):
+                return 'shell runner names gh'
+    # Keep quote boundaries: GraphQL variables are literal only inside a single-quoted query value.
+    pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?<=(?<!\\)[<>])&|&(?=>)|(?<=(?<!\\)>)\||[^\s'"\\;&|()])+|(?:[;\n()]|(?<!(?<!\\)>)\||(?<!(?<!\\)[<>])&(?!>))+'''
+    segments, words = [], []
+    for match in re.finditer(pattern, command):
+        raw = match[0]
+        if all(char in ';&|\n()' for char in raw):
+            segments.append(words)
+            words = []
+            continue
+        value = shlex.split(raw)[0]
+        words.append((value, raw))
+        if (any(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', token)[-1]).casefold() == 'gh'
+                for token in re.split(r'[\s;&|()<>]+', re.sub(r'''['"\\]''', '', value)))
+                and value != raw):
+            reason = review_thread_denial(value)
+            if reason:
+                return reason
+    segments.append(words)
+    for words in segments:
+        command_words, skip_target = [], False
+        for value, raw in words:
+            if skip_target:
+                skip_target = False
+                continue
+            redirect = re.match(r'^[0-9]*(?:&>>?|>\||[<>]+&?)', raw)
+            if redirect:
+                skip_target = redirect.end() == len(raw)
+                continue
+            command_words.append((value, raw))
+        if skip_target and names_gh:
+            return 'review-thread guard parse failure'
+        words = command_words
+        for index, (value, _) in enumerate(words[:-1]):
+            if os.path.basename(value) == 'gh':
+                subcommand, raw_subcommand = words[index + 1]
+                if (any(char.isspace() for char in subcommand)
+                        or re.search(r'[$`~*?\[{]', outside_single_quotes(raw_subcommand))):
+                    return 'review-thread guard parse failure'
+        if any(os.path.basename(value) == 'gh' for value, _ in words) and any(
+                re.search(r'[*?\[]|\{[^}]*?(?:,|\.\.)[^}]*\}',
+                          re.sub(r'''('([^']*)'|"(?:\\.|[^"\\])*")''', '', raw))
+                or re.search(r'''\$['"]''', outside_single_quotes(raw))
+                for _, raw in words):
+            return 'review-thread guard parse failure'
+        calls = [index for index, (value, _) in enumerate(words)
+                 if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
+        text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words))
+        hidden_words, skip_target = [], False
+        for token in re.findall(r'[0-9]*(?:&>>?|>\||[<>]+&?)[^\s;&|()]*|[^\s;&|()<>]+', text):
+            if skip_target:
+                skip_target = False
+                continue
+            redirect = re.match(r'^[0-9]*(?:&>>?|>\||[<>]+&?)', token)
+            if redirect:
+                skip_target = redirect.end() == len(token)
+                continue
+            hidden_words.append(token)
+        hidden_calls = sum(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', word)[-1]).casefold() == 'gh'
+                           and hidden_words[index + 1].casefold() == 'api'
+                           for index, word in enumerate(hidden_words[:-1]))
+        text = text.casefold()
+        if hidden_calls > len(calls):
+            return 'review-thread guard parse failure'
+        for index, (value, raw) in enumerate(words):
+            if (os.path.basename(value) == 'gh' or os.path.basename(re.sub(r'''['"\\]''', '', raw)) == 'gh') and any(
+                    os.path.basename(previous) in ('xargs', 'parallel')
+                    or previous in ('-exec', '-execdir', '-ok', '-okdir') for previous, _ in words[:index]):
+                return 'review-thread guard parse failure'
+        if ('api.github.com' in normalized and any(marker in normalized for marker in ('graphql', 'pulls', '%'))
+                and any(marker in text for marker in ('api.github.com', 'graphql', 'pulls', '%'))):
+            first = 0
+            while first < len(words) and re.match(r'[A-Za-z_]\w*=', words[first][0]):
+                first += 1
+            if first < len(words) and os.path.basename(words[first][0]) == 'env':
+                first += 1
+                while first < len(words) and re.match(r'[A-Za-z_]\w*=', words[first][0]):
+                    first += 1
+            if (first + 1 >= len(words) or os.path.basename(words[first][0]) != 'gh'
+                    or words[first + 1][0] != 'api'):
+                return 'GitHub API outside gh'
+        for index in calls:
+            if any(os.path.basename(value) in ('xargs', 'parallel') or value in ('-exec', '-execdir', '-ok', '-okdir')
+                   for value, _ in words[:index]):
+                return 'review-thread guard parse failure'
+            endpoint, fields, methods, query, inputs = None, False, [], None, False
+            arguments = words[index + 2:]
+            if any('$' in re.sub(r'''('([^']*)'|"(?:\\.|[^"\\])*")''', '', raw)
+                   for _, raw in arguments):
+                return 'review-thread guard parse failure'
+            cursor, parsed, options = 0, True, True
+            expanded_values = set()
+            value_options = {'-H', '-X', '-f', '-F', '-q', '-t', '-p', '--method', '--field', '--raw-field',
+                             '--input', '--header', '--jq', '--template', '--hostname', '--cache', '--preview'}
+            switches = {'--include', '--paginate', '--slurp', '--silent', '--verbose'}
+            while cursor < len(arguments):
+                value, raw = arguments[cursor]
+                option, attached = None, None
+                if options and value == '--':
+                    options = False
+                    cursor += 1
+                    continue
+                if options and value.startswith('--'):
+                    option = value.split('=', 1)[0]
+                    if '=' in value:
+                        attached = value.split('=', 1)[1]
+                        prefix = option + '='
+                elif options and value.startswith('-') and value != '-':
+                    letter = 1
+                    while letter < len(value):
+                        if value[letter] == 'i':
+                            letter += 1
+                            if value[letter:letter + 1] == '=':
+                                break
+                            continue
+                        option = '-' + value[letter]
+                        prefix = value[:letter + 1]
+                        attached = value[letter + 1:].removeprefix('=') or None
+                        break
+                if option in value_options:
+                    if attached is not None:
+                        option_value = attached
+                        option_raw = raw.removeprefix(prefix) if raw.startswith(prefix) else raw
+                        option_raw = option_raw.removeprefix('=')
+                    else:
+                        cursor += 1
+                        if cursor >= len(arguments):
+                            parsed = False
+                            break
+                        option_value, option_raw = arguments[cursor]
+                    expanded_values.add(cursor)
+                    if option in ('-X', '--method'):
+                        methods.append(option_value.upper())
+                    elif option in ('-f', '-F', '--field', '--raw-field', '--input'):
+                        fields = True
+                        inputs = inputs or option == '--input'
+                        if option_value.startswith('query='):
+                            query_value = option_value[6:]
+                            single = re.fullmatch(r"query='[^']*'|'query=[^']*'", option_raw) is not None
+                            query = bool(query_value) and not query_value.startswith('@') and (
+                                single or not any(char in option_raw for char in '$`\\'))
+                elif options and (value in switches or option is None and value.startswith('-i')):
+                    pass
+                elif options and value.startswith('-') or endpoint is not None:
+                    parsed = False
+                else:
+                    endpoint = value
+                    if value and value[0] not in '$-':
+                        expanded_values.add(cursor)
+                cursor += 1
+            if not parsed:
+                if any(re.match(r'-(?!-)[^\s]*[fFX]', value)
+                       or value.startswith(('--field', '--raw-field', '--input', '--method'))
+                       or '$' in outside_single_quotes(raw) for value, raw in arguments):
+                    return 'review-thread guard parse failure'
+                continue
+            if any('$' in outside_single_quotes(raw) and position not in expanded_values
+                   for position, (_, raw) in enumerate(arguments)):
+                return 'review-thread guard parse failure'
+            raw_endpoint = endpoint or ''
+            full_url = '://' in raw_endpoint
+            host = None
+            if full_url:
+                parsed = urllib.parse.urlsplit(raw_endpoint)
+                path, host = parsed.path, parsed.netloc.lower().removesuffix('.')
+            else:
+                path = re.split(r'[?#]', raw_endpoint, maxsplit=1)[0]
+            while True:
+                decoded = urllib.parse.unquote(path)
+                if decoded == path:
+                    break
+                path = decoded
+            route = posixpath.normpath('/' + path).strip('/').casefold()
+            if (route == 'graphql' or route.endswith('/graphql')) and (inputs or query is not True):
+                return 'opaque GraphQL query'
+            write = any(method not in ('GET', 'HEAD') for method in methods) or fields and 'GET' not in methods
+            visible = endpoint is not None and not any(char in raw_endpoint for char in '$`%')
+            if any(placeholder not in ('{owner}', '{repo}')
+                   for placeholder in re.findall(r'\{[^}]*\}', raw_endpoint)):
+                visible = False
+            if write and (not visible or full_url and host != 'api.github.com'
+                          or re.search(r'(?:^|/)pulls/[^/]+/comments(?:/|$)', route)):
+                return 'REST review-comment write or opaque endpoint'
+            method = methods[-1] if methods else ('POST' if fields else 'GET')
+            if method not in ('GET', 'HEAD'):
+                return 'gh api write outside the helper'
+    return None
+
+
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                    'Report the blocked scope to the driver.')
 RECEIPT_CUSTODY_FAILED = ('The ship hook could not check refusal-receipt custody, so it denies this call. '
@@ -3190,6 +3430,14 @@ def pre(data):
             destination = destination.resolve()
             if any(destination.is_relative_to(path.expanduser().resolve()) for path in gh_paths):
                 deny('Writers do not edit GitHub CLI configuration.')
+    if tool == 'Bash':
+        try:
+            reason = review_thread_denial(tin.get('command', ''))
+        except Exception:
+            reason = 'review-thread guard parse failure'
+        if reason:
+            deny("Ship replies to and resolves review threads only through `skills/babysit/scripts/thread_reply.py`, "
+                 "which first checks that the thread belongs to the PR's own repository and number. Rule: " + reason + '.')
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
         counter.parent.mkdir(parents=True, exist_ok=True)

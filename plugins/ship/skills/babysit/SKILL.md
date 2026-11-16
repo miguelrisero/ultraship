@@ -23,10 +23,15 @@ Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) durin
 3. **Collect.** Read one failed log once per failure with `gh run view <run-id> --log-failed`. List threads with `bash "${CLAUDE_SKILL_DIR}/scripts/threads.sh" <PR>`.
 4. **Triage.** Give the failures and threads to `ship:triage--sol`. It returns `real`, `false-positive`, `duplicate`, or `already-fixed` for each item, with evidence.
 5. **Fix.** Collect every failing check and every unresolved thread before the fix. Send all `real` items to `ship:writer--sol` as one batch. Rerun the affected tests, unless the brief bans local test execution; then CI reruns them. Push once for the round. Never push a partial batch.
-6. **Answer every thread.** Reply with the fix commit or the refuting evidence, then resolve the thread:
+6. **Answer every thread.** Reply with the fix commit or the refuting evidence, then resolve the thread.
+   Take each thread ID only from `threads.sh` output for this PR; never build or guess one.
+   Put the reply text in a file under the run scratch directory.
+   The helper reads the thread from GitHub and refuses unless it belongs to this PR's repository and number.
+   The ship hook refuses raw review-thread mutations and REST review-comment replies.
 
    ```bash
-   gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=<thread-id>
+   python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" reply <PR-URL> <thread-id> <run-scratch>/reply.md
+   python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" resolve <PR-URL> <thread-id>
    ```
 
 7. **Record.** Append `babysit` to the ledger with the head SHA and verdict `round-<n>`.
