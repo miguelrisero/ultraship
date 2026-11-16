@@ -2344,7 +2344,8 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                 continue
         time_prefix = False
         for index, word in enumerate(words):
-            if index and any(words[index - 1][3] <= token[2] < word[2] for token in tokens):
+            if (index and word[0] in {'fi', 'done', 'esac'}
+                    and any(words[index - 1][3] <= token[2] < word[2] for token in tokens)):
                 break
             if re.fullmatch(rf'{identifier}=.*', word[1], re.S):
                 break
