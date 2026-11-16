@@ -222,7 +222,14 @@ EXPECTED_REWRITTEN_DECISION_FILE = [
     'Also verify that the file binds one pre-edit commit, the row-file paths, the unique row IDs and the permitted fields.',
     'For that file, the frozen final commit is your single commit whose parent is the named pre-edit commit and that changes only the named row files.',
     'Refuse a SHA256 mismatch, a missing or different binding, a passed expiry that the file states, and a branch head other than the pre-edit commit before the edit.',
-    'A decision file authorizes only designated-test and mutant changes; a claim change still requires a current task-specific owner event.',
+    "For a retirement that the decision file names, apply the Lane-owned disposition route's retirement requirements to the named rows; the field limit below does not block that retirement.",
+    'A decision file authorizes only retirement, designated-test and mutant changes; a claim change still requires a current task-specific owner event.',
+]
+
+EXPECTED_REWRITTEN_IDENTICAL_FIT = [
+    "A SHA-bound CoC decision file that cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` may also select this route when an identical mutant fits, if the PR's own diff rewrote the guarded code.",
+    "Under that file, keep the identical mutant operation, and the brief records the PR's rewrite in place of why no identical mutant fits.",
+    'Before that use, verify with get_input that the event is an `answer_submitted` event with `actor_kind=owner_ui` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5`.',
 ]
 
 EXPECTED_SHARED_MUTANT_RULE = (
@@ -486,6 +493,30 @@ EXPECTED_NEW_ROW_BOUNDARY = [
 
 
 class ApprovedTestAdaptationsTests(unittest.TestCase):
+    def test_rewritten_code_writers_allow_identical_mutants_under_verified_decision_files(self):
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            _, heading, after = text.partition('#### Rewritten-code row route\n')
+            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+            with self.subTest(path=name):
+                self.assertTrue(heading)
+                self.assertIn("Use this separate route outside category 5 only when the PR's own diff replaces the code a row guards and no identical mutant fits.", route)
+                self.assertIn('\n'.join([
+                    'Require the brief to select this route and record why an identical-operation re-anchor cannot preserve the claim.',
+                    *EXPECTED_REWRITTEN_IDENTICAL_FIT,
+                ]), route)
+
+    def test_rewritten_code_writers_apply_disposition_requirements_to_named_retirements(self):
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            _, heading, after = text.partition('#### Rewritten-code row route\n')
+            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+            with self.subTest(path=name):
+                self.assertTrue(heading)
+                self.assertIn(EXPECTED_COC_ROW_DECISION[0], route)
+                self.assertIn(EXPECTED_REWRITTEN_DECISION_FILE[-2], route)
+                self.assertFalse(any('owner event' in line and 'retire' in line for line in route.splitlines()))
+
     def test_rewritten_code_writers_accept_sha_bound_decision_files(self):
         for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
             text = (ROOT / 'plugins/ship/agents' / name).read_text()
