@@ -47,6 +47,100 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied('if false; then >x fi; i=0; fi; (( i ))'))
         self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
+    def test_redirected_fi_cannot_restore_arithmetic_numeric_proof(self):
+        for command in (
+            'if false; then >x fi; ((i=0)); fi; (( i ))',
+            'if false; then 2>/dev/null fi; ((i=0)); fi; (( i ))',
+            'if false; then 2>&1 fi; ((i=0)); fi; (( i ))',
+            'if false; then &>x fi; ((i=0)); fi; (( i ))',
+            'if false; then <x fi; ((i=0)); fi; (( i ))',
+            'if false; then {fd}>x fi; ((i=0)); fi; (( i ))',
+            'if false; then >"$f" fi; ((i=0)); fi; (( i ))',
+            'if false; then :; else >x fi; ((i=0)); fi; (( i ))',
+            'if false; then ! >x fi; ((i=0)); fi; (( i ))',
+            'if false; then time >x fi; ((i=0)); fi; (( i ))',
+            'if false; then >x fi; ((i=0)); fi; echo $((i))',
+            'if false; then >x fi; ((i=0)); fi; let i',
+            'case a in b) :;; esac; if false; then >x fi; ((i=0)); fi; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirected_done_cannot_restore_arithmetic_numeric_proof(self):
+        for command in (
+            'while false; do >x done; ((i=0)); done; (( i ))',
+            'until true; do >x done; ((i=0)); done; (( i ))',
+            'for ((i=0;i<1;i++)); do >x done; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do 2>x done; done & (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirected_openers_preserve_existing_arithmetic_refusals(self):
+        for command in (
+            '! >x if; ((i=0)); (( i ))',
+            'then >x if; ((i=0)); (( i ))',
+            'time >x if; ((i=0)); (( i ))',
+            '! >x while false; do :; ((i=0)); done; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_false_closers_cannot_prove_arithmetic_numeric_names(self):
+        for command in (
+            'for ((i=0;i<1;i++)); do case x in x|done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in a) :;; done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in (done) :;; esac; done | cat; (( i ))',
+            'for x in $e; do >y done; ((i=0)); done; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_case_pattern_openers_cannot_hide_false_closers(self):
+        for command in (
+            'for ((i=0;i<1;i++)); do case x in x|if|done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in a) :;; x|esac|done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in a) :;; (if|done) :;; esac; done | cat; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_case_closers_and_nested_bodies_keep_valid_numeric_proof(self):
+        for command in (
+            '((n=0)); case x in a) :;; esac | cat; (( n++ ))',
+            '((n=0)); (case x in a) :;; esac); (( n++ ))',
+            'for ((i=0;i<3;i++)); do case $i in 1) if true; then echo $((i)); fi;; esac; done',
+            'for ((i=0;i<3;i++)); do case $i in 1) for x in a; do echo $((i)); done;; esac; done',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_case_and_subshell_commands_keep_valid_numeric_proof(self):
+        for command in (
+            'for ((i=0;i<3;i++)); do case $i in 1) echo $((i));; esac; done | cat',
+            '(for ((i=0;i<3;i++)); do echo $((i)); done)',
+            '((n=0)); case x in a) :;; esac; (( n++ ))',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_redirected_commands_keep_valid_numeric_proof(self):
+        for command in (
+            '((i=0)); if true; then >x echo hi; fi; (( i ))',
+            'for ((i=0;i<3;i++)); do >x echo $i; done',
+            'for ((i=0;i<3;i++)); do echo $i >x; done',
+            'for ((i=0;i<3;i++)); do 2>/dev/null echo $i; done',
+            '((i=0)); while false; do >x :; done; (( i ))',
+            'for ((i=0;i<3;i++)); do echo $i; done 2>/dev/null',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_redirect_prefixed_dot_invalidates_numeric_proof(self):
         self.assertTrue(self.denied('i=0; >x . ./s; (( i ))'))
         self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
