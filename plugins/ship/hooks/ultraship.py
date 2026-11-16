@@ -3888,8 +3888,8 @@ def review_thread_denial(command):
         tokens = list(lexer)
     except ValueError as error:
         return 'unparsed shell syntax rule: ' + str(error) if re.search(r'\bgh\b', normalized) else None
-    names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word)) == 'gh'
-                   for word in re.split(r'[\s;&|()<>]+', normalized))
+    names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word).lstrip('!')) == 'gh'
+                   for word in re.split(r'[\s;&|()<>`]+', normalized))
     if names_gh:
         seen_gh = False
         for index, token in enumerate(tokens):
@@ -3927,8 +3927,8 @@ def review_thread_denial(command):
             continue
         value = shlex.split(raw)[0]
         words.append((value, raw))
-        if (any(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', token)[-1]).casefold() == 'gh'
-                for token in re.split(r'[\s;&|()<>]+', re.sub(r'''['"\\]''', '', value)))
+        if (any(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', token)[-1]).lstrip('!').casefold() == 'gh'
+                for token in re.split(r'[\s;&|()<>`]+', re.sub(r'''['"\\]''', '', value)))
                 and value != raw):
             reason = review_thread_denial(value)
             if reason:
@@ -3963,22 +3963,24 @@ def review_thread_denial(command):
         calls = [index for index, (value, _) in enumerate(words)
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
         text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words))
-        hidden_words, skip_target = [], False
-        for token in re.findall(r'[0-9]*(?:&>>?|>\||[<>]+&?)[^\s;&|()]*|[^\s;&|()<>]+', text):
-            if skip_target:
-                skip_target = False
-                continue
-            redirect = re.match(r'^[0-9]*(?:&>>?|>\||[<>]+&?)', token)
-            if redirect:
-                skip_target = redirect.end() == len(token)
-                continue
-            hidden_words.append(token)
-        hidden_calls = sum(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', word)[-1]).casefold() == 'gh'
-                           and hidden_words[index + 1].casefold() == 'api'
-                           for index, word in enumerate(hidden_words[:-1]))
+        for hidden_pattern in (r'[0-9]*(?:&>>?|>\||[<>]+&?)[^\s;&|()]*|[^\s;&|()<>]+',
+                               r'[0-9]*(?:&>>?|>\||[<>]+&?)[^\s;&|()`]*|[^\s;&|()<>`]+'):
+            hidden_words, skip_target = [], False
+            for token in re.findall(hidden_pattern, text):
+                if skip_target:
+                    skip_target = False
+                    continue
+                redirect = re.match(r'^[0-9]*(?:&>>?|>\||[<>]+&?)', token)
+                if redirect:
+                    skip_target = redirect.end() == len(token)
+                    continue
+                hidden_words.append(token)
+            hidden_calls = sum(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', word)[-1]).lstrip('!').casefold() == 'gh'
+                               and hidden_words[index + 1].casefold() == 'api'
+                               for index, word in enumerate(hidden_words[:-1]))
+            if hidden_calls > len(calls):
+                return 'review-thread guard parse failure'
         text = text.casefold()
-        if hidden_calls > len(calls):
-            return 'review-thread guard parse failure'
         for index, (value, raw) in enumerate(words):
             if (os.path.basename(value) == 'gh' or os.path.basename(re.sub(r'''['"\\]''', '', raw)) == 'gh') and any(
                     os.path.basename(previous) in ('xargs', 'parallel')
@@ -4102,6 +4104,15 @@ def review_thread_denial(command):
             if method not in ('GET', 'HEAD'):
                 return 'gh api write outside the helper'
     return None
+
+
+def thread_command_config(command):
+    normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', ''))
+    for match in re.finditer(r'[^\s;&|(){}]+', normalized):
+        word = match[0]
+        if 'git_config' in word.casefold() and tuple(word.split('=', 1)) not in WRITER_VALUE_ALLOWLIST:
+            return True
+    return False
 
 
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
@@ -4427,7 +4438,20 @@ def pre(data):
                 deny('Writers do not edit GitHub CLI configuration.')
     if tool == 'Bash':
         try:
-            reason = review_thread_denial(tin.get('command', ''))
+            command = tin.get('command', '')
+            reason = review_thread_denial(command)
+            if reason is None:
+                separated = re.sub(r'''['"\\]''', ' ', command).casefold()
+                normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()
+                if re.search(r'\bgh\b', separated) and not re.search(r'\bgh\b', normalized):
+                    reason = 'quote-joined gh word'
+                elif (re.search(r'(?<!<)<<(?!<)', command) and '\\\n' in command
+                      and (re.search(r'\bgh\b', separated) or re.search(r'\bgh\b', normalized))):
+                    reason = 'heredoc with line continuation'
+                elif (thread_command_config(command) or '--config-env' in command
+                      or "$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
+                                             or re.search(r'\b(?:gh|api)\b', normalized))):
+                    reason = 'git config from the command line'
         except Exception:
             reason = 'review-thread guard parse failure'
         if reason:

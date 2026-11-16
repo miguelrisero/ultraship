@@ -181,6 +181,29 @@ REFUSE = (
     r'true x\<&gh api repos/o/r/pulls/7/comments -f body=x',
     r"tmux new 'true x\>|gh api repos/o/r/pulls/7/comments -f body=x'",
     r'true \\>|gh api repos/o/r/pulls/7/comments -f body=x',
+    r'''S=/home/u/ws/.scratch; for i in $(seq 1 60); do h=$(gh pr view 7 --json headRefOid -q .headRefOid 2>/dev/null); if [ "${h:0:12}" = "abc123abc123" ]; then r=$(gh run list --branch b --workflow ci --limit 5 --json databaseId,headSha -q ".[] | select(.headSha==\"$h\") | .databaseId" | head -1); if [ -n "$r" ]; then j=$(gh run view $r --json jobs -q '.jobs[] | select(.name | test("guard")) | "\(.databaseId) \(.status) \(.conclusion)"' 2>/dev/null); case "$j" in *completed*) id=${j%% *}; gh api repos/o/r/actions/jobs/$id/logs > $S/guard.log 2>&1; echo "head=$h"; exit 0;; esac; fi; fi; sleep 90; done''',
+    'gh api repos/o/r/pulls/7/comments --jq .[].id',
+    'gh pr comment 7 --body-file notes-[0-9].md',
+    'gh pr review 7 --approve --body-file r*.md',
+    "gh alias set pv 'pr view' && gh pv 7 --jq .[].x",
+    'gh $SUB view 7 --jq .[].x',
+    'gh {run,api} view 7',
+    '/usr/bin/[g]h api repos/o/r/pulls/7/comments -f body=x gh run view 7',
+    'echo x | xargs -I run gh run view 7 --jq .[].x',
+    "tmux new 'echo `gh api repos/o/r/pulls/7/comments -f body=x`'",
+    'bash -c "`gh api repos/o/r/pulls/7/comments --jq .[0].body`"',
+    r'echo `echo \`gh api repos/o/r/pulls/7/comments -f body=x\``',
+    'gh pr view `echo 7` "x',
+    "cat > /home/u/ws/x.md <<'EOF'\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF\ngh pr view 7",
+    "cat > /home/u/ws/x.md <<'EOF'\nresolveReviewThread\nEOF\ngh pr view 7",
+    "bash -c '`gh pr view 7 --json body --jq .body`'",
+    "bash <<'EOF'\necho `gh api repos/o/r/pulls/7/comments -f body=x`\nEOF",
+    "cat <<'EOF' | bash\ngh pr view `gh api repos/o/r/pulls/7/comments -f body=x`\nEOF",
+    "echo \"\ncat <<'EOF'\n\"; gh api repos/o/r/pulls/7/comments -f body=x\nEOF",
+    "cat > /home/u/ws/x.md <<'EOF'\nfoo\\\nEOF\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF",
+    "cat > /home/u/ws/x.md <<'EOF'\ngh\\\nEOF\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF",
+    "cat <<<'EOF' /home/u/ws/x\nbash -c x\nEOF\ngh pr view 7",
+    "cat <<<'EOF'\nbash -c x\nEOF\ngh pr view 7",
 )
 
 ADMIT = (
@@ -236,6 +259,7 @@ ADMIT = (
     'gh api repos/o/r/pulls/7 >| out.json',
     'gh pr view 7 >| out.txt',
     'gh api repos/o/r/pulls/7 | head',
+    'gh pr ready https://github.com/o/r/pull/7',
 )
 
 
@@ -386,6 +410,190 @@ class HookTests(unittest.TestCase):
             for command in ADMIT:
                 with self.subTest(agent_type=agent_type, command=command):
                     self.assertEqual(self.decision(command, agent_type), {})
+
+    def test_hidden_redirect_with_immediate_backtick_stays_refused(self):
+        command = "gh '>`' api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123"
+        self.assertEqual(self.decision(command, '').get('permissionDecision'), 'deny')
+
+    def test_hidden_redirect_with_backtick_target_stays_refused(self):
+        command = "gh '>x`y' api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123"
+        self.assertEqual(self.decision(command, '').get('permissionDecision'), 'deny')
+
+    def test_git_shell_aliases_stay_refused(self):
+        commands = (
+            "git -c alias.x='!gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123' x",
+            'git -c "alias.x=!gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" x',
+            "git -calias.x='!gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123' x",
+            'git --config-env=alias.x=V x',
+            'git --config-env alias.x=V x',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command, '').get('permissionDecision'), 'deny')
+
+    def test_git_config_key_assignment_stays_refused(self):
+        self.assertEqual(self.decision('GIT_CONFIG_KEY_0=alias.x git log -1', '').get('permissionDecision'), 'deny')
+        self.assertEqual(self.decision('GIT_CONFIG_KEY_1=include.path git log -1', '').get('permissionDecision'), 'deny')
+
+    def test_git_config_value_assignment_stays_refused(self):
+        self.assertEqual(self.decision("GIT_CONFIG_VALUE_0='!echo hi' git log -1", '').get('permissionDecision'), 'deny')
+
+    def test_git_config_parameters_stay_refused(self):
+        self.assertEqual(self.decision("GIT_CONFIG_PARAMETERS='alias.x=!echo hi' git log -1", '').get('permissionDecision'), 'deny')
+
+    def test_quoted_shell_alias_word_stays_refused(self):
+        command = "printf '%s' 'alias.x=!gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123'"
+        self.assertIsNotNone(ultraship.review_thread_denial(command))
+        self.assertEqual(self.decision(command, '').get('permissionDecision'), 'deny')
+
+    def test_git_config_count_stays_refused(self):
+        command = "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!gh api repos/o/r/pulls/7/comments -f body=x' git x"
+        self.assertEqual(self.decision(command, '').get('permissionDecision'), 'deny')
+
+    def test_config_assignment_after_separator_stays_refused(self):
+        self.assertEqual(self.decision('true;GIT_CONFIG_KEY_0=alias.x git x', '').get('permissionDecision'), 'deny')
+
+    def test_config_assignment_inside_group_stays_refused(self):
+        self.assertEqual(self.decision('(GIT_CONFIG_GLOBAL=/tmp/x git status)', '').get('permissionDecision'), 'deny')
+
+    def test_nonallowlisted_config_count_stays_refused(self):
+        self.assertEqual(self.decision('GIT_CONFIG_COUNT=2 git status', '').get('permissionDecision'), 'deny')
+
+    def test_global_config_path_stays_refused(self):
+        self.assertEqual(self.decision('GIT_CONFIG_GLOBAL=/tmp/x git status', '').get('permissionDecision'), 'deny')
+
+    def test_exported_config_key_stays_refused(self):
+        self.assertEqual(self.decision('export GIT_CONFIG_KEY_0', '').get('permissionDecision'), 'deny')
+
+    def test_declared_config_key_stays_refused(self):
+        self.assertEqual(self.decision('declare -x GIT_CONFIG_KEY_0=alias.x', '').get('permissionDecision'), 'deny')
+
+    def test_git_config_export_stays_refused(self):
+        self.assertEqual(self.decision('export GIT_CONFIG_PARAMETERS', '').get('permissionDecision'), 'deny')
+
+    def test_special_shell_quote_stays_refused(self):
+        command = r"$'\x67h' api repos/o/r/pulls/7/comments -f body=x"
+        self.assertEqual(self.decision(command, '').get('permissionDecision'), 'deny')
+
+    def test_existing_literal_config_forms_stay_admitted(self):
+        for command in ('git -c alias.lg=log lg',
+                        'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=cat git log -1',
+                        '/usr/bin/bash -c \'W=/w/wt; git -c core.fsmonitor=false -C "$W" rev-parse HEAD; git -C $W status --short\''):
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command, ''), {})
+
+    def test_git_directory_option_stays_admitted(self):
+        self.assertEqual(self.decision('git -C /tmp/x status', ''), {})
+
+    def test_git_literal_pager_stays_admitted(self):
+        self.assertEqual(self.decision('git -c core.pager=cat log -1', ''), {})
+
+    def test_driver_count_and_shell_options_stay_admitted(self):
+        for command in ("grep -c 'FAIL backend' f.log", "jq -c '.[]' f.json", "timeout 60 bash -c 'echo hi'"):
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command, ''), {})
+
+    def assert_round_one_refused(self, command):
+        self.assertEqual(self.decision(command, '').get('permissionDecision'), 'deny', command)
+
+    def test_round_one_slice_heredoc_continuation(self):
+        self.assert_round_one_refused("cat <<EOF\nE\\\nOF\ngh api -X DELETE repos/o/r/pulls/comments/123\nEOF")
+
+    def test_round_one_slice_xargs_find(self):
+        self.assert_round_one_refused("printf '%s\\n' '-maxdepth 0 -exec gh api -X DELETE repos/o/r/pulls/comments/123 ;' | xargs find")
+
+    def test_round_one_slice_editor(self):
+        self.assert_round_one_refused("GIT_EDITOR='gh api -X DELETE repos/o/r/pulls/comments/123 #' git config --local --edit")
+
+    def test_round_one_c_stdbuf(self):
+        self.assert_round_one_refused("echo 'gh api -X DELETE repos/o/r/pulls/comments/123' | stdbuf -oL bash")
+
+    def test_round_one_c_noglob(self):
+        self.assert_round_one_refused("echo 'gh api -X DELETE repos/o/r/pulls/comments/123' | noglob bash")
+
+    def test_round_one_c_nocorrect(self):
+        self.assert_round_one_refused("echo 'gh api -X DELETE repos/o/r/pulls/comments/123' | nocorrect bash")
+
+    def test_round_one_c_dash(self):
+        self.assert_round_one_refused("echo 'gh api -X DELETE repos/o/r/pulls/comments/123' | - bash")
+
+    def test_round_one_c_flock(self):
+        self.assert_round_one_refused("echo 'gh api -X DELETE repos/o/r/pulls/comments/123' | flock /tmp/x bash")
+
+    def test_round_one_c_assignment(self):
+        self.assert_round_one_refused("echo 'gh api -X DELETE repos/o/r/pulls/comments/123' | X+=1 bash")
+
+    def test_round_one_c_env_assignment(self):
+        self.assert_round_one_refused("echo 'gh api -X DELETE repos/o/r/pulls/comments/123' | env X+=1 bash")
+
+    def test_round_one_c_xargs_xargs(self):
+        self.assert_round_one_refused("echo gh api -X DELETE repos/o/r/pulls/comments/123 | xargs xargs")
+
+    def test_round_one_c_xargs_stdbuf(self):
+        self.assert_round_one_refused("echo gh api -X DELETE repos/o/r/pulls/comments/123 | xargs stdbuf -oL")
+
+    def test_round_one_deep_parameter_single_quote(self):
+        self.assert_round_one_refused("echo ${x:-'}'};gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123;echo '\\'")
+
+    def test_round_one_deep_parameter_double_quote(self):
+        self.assert_round_one_refused("echo \"${x:-\"}\"}\";gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123;echo '\"\\'")
+
+    def test_round_one_deep_heredoc_continuation(self):
+        self.assert_round_one_refused("cat <<EOF\nEO\\\nF\ngh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123\nEOF")
+
+    def test_round_one_deep_quoted_heredoc_group(self):
+        self.assert_round_one_refused("cat <<'EOF'; (true\nEOF\n)\ngh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123\nEOF")
+
+    def test_round_one_deep_delimiter_continuation(self):
+        self.assert_round_one_refused("cat <<E\\\nOF\n$(gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123)\nEOF")
+
+    def test_round_one_deep_stdbuf_xargs(self):
+        self.assert_round_one_refused("echo -f body=x -F in_reply_to=123 | stdbuf -oL xargs gh api repos/o/r/pulls/7/comments")
+
+    def test_round_one_deep_assignment_xargs(self):
+        self.assert_round_one_refused("echo -f body=x -F in_reply_to=123 | A+=1 xargs gh api repos/o/r/pulls/7/comments")
+
+    def test_round_one_deep_stdbuf_shell(self):
+        self.assert_round_one_refused("echo 'gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123' | stdbuf -oL sh")
+
+    def test_round_one_deep_python_pipe(self):
+        self.assert_round_one_refused("echo 'import os; os.system(\"gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123\")' | python3")
+
+    def test_round_one_deep_perl_xargs(self):
+        self.assert_round_one_refused("printf '%s' 'system \"gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123\"' | xargs -0 perl -e")
+
+    def test_round_one_deep_saved_shell(self):
+        self.assert_round_one_refused("echo 'gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123' > /tmp/x.sh; bash /tmp/x.sh")
+
+    def test_round_one_deep_zsh_redirect(self):
+        self.assert_round_one_refused("gh >! api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123")
+
+    def test_round_one_b_heredoc_group(self):
+        self.assert_round_one_refused("cat <<EOF; (true\nEOF\n)\ngh api repos/o/r/issues/1/comments -f body=x\nEOF")
+
+    def test_round_one_b_delimiter_continuation(self):
+        self.assert_round_one_refused("cat <<EO\\\nF\n$(gh api repos/o/r/issues/1/comments -f body=x)\nEOF")
+
+    def test_round_one_b_heredoc_carriage_return(self):
+        self.assert_round_one_refused("cat <<EOF\r\nEOF\r\ngh api repos/o/r/issues/1/comments -f body=x\nEOF")
+
+    def test_round_one_b_comment_carriage_return(self):
+        self.assert_round_one_refused("true\r#;gh api repos/o/r/issues/1/comments -f body=x")
+
+    def test_round_one_b_perl_heredoc(self):
+        self.assert_round_one_refused("perl <<'EOF'\n`gh api repos/o/r/issues/1/comments -f body=x`\nEOF")
+
+    def test_round_one_b_python_fstring(self):
+        self.assert_round_one_refused("python3 - <<'EOF'\nimport os; os.system(f\"gh api repos/o/r/issues/1/comments -f body=x\")\nEOF")
+
+    def test_round_one_b_saved_group(self):
+        self.assert_round_one_refused("cat > x.sh <<'EOF'\ngh api repos/o/r/issues/1/comments -f body=x\nEOF\n(bash x.sh)")
+
+    def test_round_one_b_saved_backticks(self):
+        self.assert_round_one_refused("cat > x.sh <<EOF\n\\`gh api repos/o/r/issues/1/comments -f body=x\\`\nEOF\nbash x.sh")
+
+    def test_base_pr_ready_decision(self):
+        self.assertIsNone(ultraship.review_thread_denial('gh pr ready https://github.com/o/r/pull/7'))
 
     def test_guard_exception_denies_every_caller(self):
         with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):
