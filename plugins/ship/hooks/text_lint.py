@@ -112,7 +112,7 @@ def hold_wall(text):
 
 
 def check(text, kind='result'):
-    text = re.sub(r'<(?!!--)', '&lt;', text) if kind == 'peer' else text
+    text = re.sub(r'<(?!!--|/?[A-Za-z][A-Za-z0-9]*(?:[ \t][^<>\n]*)?/?>)', '&lt;', text) if kind == 'peer' else text
     plain = ''.join(VisibleText(text).parts)
     prose = re.sub(r'`[^`]*`', '', plain)
     tokens = [t for t in prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]

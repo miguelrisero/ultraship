@@ -179,6 +179,28 @@ class TextLintTests(unittest.TestCase):
             text_lint.check(message, 'peer')
         self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
 
+    def test_peer_bold_glued_words_keep_token_check(self):
+        message = ('Facts: <b>deadline2026</b> <b>by8November00</b>\n'
+                   'Decision: Continue.\nNext: Resume.')
+        with self.assertRaises(text_lint.FormatError) as refusal:
+            text_lint.check(message, 'peer')
+        self.assertEqual(refusal.exception.findings,
+                         ['Separate glued words with spaces; remove compressed shorthand.'])
+
+    def test_peer_html_blocks_keep_section_breaks(self):
+        for message in (
+                '<p>Facts: Checks pass.</p><p>Decision: Continue.</p><p>Next: Resume.</p>',
+                'Facts: Checks pass.<br>Decision: Continue.<br>Next: Resume.'):
+            with self.subTest(message=message):
+                text_lint.check(message, 'peer')
+
+    def test_peer_html_code_stays_hidden(self):
+        for tag in ('code', 'pre'):
+            with self.subTest(tag=tag):
+                message = ('Facts: Checks pass.\n<' + tag + '>\ndeadline2026 by8November00\n</'
+                           + tag + '>\nDecision: Continue.\nNext: Resume.')
+                text_lint.check(message, 'peer')
+
     def test_decision_sections_use_visible_text_only(self):
         message = ('<h2>What is wrong</h2><h2>Why now</h2><h2>Options</h2>'
                    '<h2>If no answer</h2><script>\nRecommendation\n</script>')
