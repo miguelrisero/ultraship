@@ -136,7 +136,6 @@ class EnvDirectoryTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('inline interpreter code rule (program from a pipe): relative script after an unproven directory change', self.reason)
 
-
     def test_env_directory_requires_first_segment_and_existing_target(self):
         with tempfile.TemporaryDirectory() as directory:
             for command in (
@@ -181,14 +180,12 @@ class EnvDirectoryTests(unittest.TestCase):
                 self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
         for command in (
             'python3 scripts/x.py > out.json',
-            'python3 scripts/x.py; rm -f out.json',
             'true; python3 scripts/x.py',
             'echo ready; python3 scripts/x.py',
             'printf ready; python3 scripts/x.py',
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
-
 
     def test_relative_scripts_refuse_unlisted_writers(self):
         for command in (
@@ -218,6 +215,84 @@ class EnvDirectoryTests(unittest.TestCase):
         command = 'printf code >&x.py; python3 x.py'
         self.assertTrue(self.denied(command))
         self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_scripts_refuse_runtime_reordering(self):
+        for command in (
+            "true () ( node x.js ); ln -sfn /dev/stdin x.js; printf 'console.log(1)' | true",
+            "until python3 x.py; do printf 'print(1)' > x.py; done",
+            "python3 x.py | (mkfifo x.py; printf 'print(1)' > x.py)",
+            "python3 x.py & printf 'print(1)' > x.py",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_stderr_piped_groups_keep_input(self):
+        for command in (
+            'printf x |& (true; node scripts/x.js)',
+            'printf x |& ( (true; node scripts/x.js) )',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        with tempfile.TemporaryDirectory() as directory:
+            sub = Path(directory) / 'sub'
+            sub.mkdir()
+            (sub / 'fd').symlink_to('/dev/fd', target_is_directory=True)
+            command = "printf 'print(1)' |& (cd sub && python3 fd/0)"
+            self.assertTrue(self.denied(command, cwd=directory))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_directory_target_script_symlinks_are_denied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sub = Path(directory) / 'sub'
+            sub.mkdir()
+            (sub / 'fd').symlink_to('/dev/fd', target_is_directory=True)
+            for command in ('cd sub && python3 fd/0', 'pushd sub && python3 fd/0'):
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command, cwd=directory))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+            (sub / 'x.js').symlink_to('/dev/stdin')
+            self.assertTrue(self.denied(f'cd {sub} && node x.js', cwd=directory))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_trap_code_cannot_supply_interpreter_programs(self):
+        # Process-capable payloads are classifier input only; these tests never execute them.
+        for command in (
+            "trap 'python3 -c \"import os; os.system(chr(103))\"' EXIT",
+            "trap -- 'python3 -c \"import os; os.system(chr(103))\"' EXIT",
+            "printf 'print(1)' | (trap 'cd /proc/self/fd; python3 0' EXIT; true)",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('process-capable python -c rule' if 'python3 -c' in command
+                              else 'inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_existing_env_targets_keep_wrapper_refusals(self):
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            for command in (
+                f'env -C {a} env -C {b} python3 x.py',
+                f'env -C {a} -C {b} python3 x.py',
+                f'env -C {a} sh -c "env -C {b} python3 x.py"',
+                f'env -C {a} sudo --unknownopt python3 x.py',
+                f'env -C {a} -S "python3 x.py"',
+                f'env -C {a} --split-string="python3 x.py"',
+            ):
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_read_only_segments_and_boolean_or_remain_admitted(self):
+        for command in (
+            'set -euo pipefail; python3 scripts/x.py',
+            'python3 scripts/x.py | grep ok',
+            'python3 scripts/x.py 2>&1 | tail -n 20',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+        with tempfile.TemporaryDirectory() as directory:
+            command = f'true || (cd {directory} && python3 scripts/x.py)'
+            self.assertFalse(self.denied(command), self.reason)
 
 
 if __name__ == '__main__':
