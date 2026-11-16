@@ -59,6 +59,8 @@ Admit every run through the installed, checksum-pinned `slot_gate.sh` implementa
 Preserve load, capacity, RAM, disk, runtime caps, timing exclusion, isolated stacks, and cleanup requirements.
 Require GO for mutation batteries, timing runs, and shared-database runs; retain paid-run GOs and spending caps.
 Honor a no-run brief and every effective permission denial.
+Run each check as its own plain command, with no inline interpreter code.
+The named `python3 -I -` heredocs of the retirement routes stay as each route specifies.
 The CoC can always issue a GO to unblock a stuck lane or chief within existing authority.
 A GO overrides no permission denial, approval hold, publication rule, or customer safety rule.
 
