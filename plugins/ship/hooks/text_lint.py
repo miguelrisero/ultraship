@@ -424,7 +424,7 @@ def citation(event):
     return markers[0]
 
 
-def consume_receipt(receipt_id, event):
+def read_receipt(receipt_id):
     try:
         path = store_dir() / 'receipts' / (receipt_id + '.json')
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -440,6 +440,15 @@ def consume_receipt(receipt_id, event):
             raise ValueError('Invalid receipt body.')
         if not hmac.compare_digest(receipt['mac'], signature(receipt, receipt_key())):
             raise ValueError('Invalid receipt mac.')
+        return receipt
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise ValueError('Invalid receipt citation: ' + str(exc)) from None
+
+
+def consume_receipt(receipt_id, event):
+    receipt = read_receipt(receipt_id)
+    try:
+        path = store_dir() / 'receipts' / (receipt_id + '.json')
         if receipt.get('id') != receipt_id or receipt.get('resend_allowed') is not True:
             raise ValueError('Receipt does not permit a resend.')
         if not event.get('session_id') or receipt.get('session_id') != event['session_id']:
@@ -471,7 +480,13 @@ def hook(event, parse_error=None):
             raise parse_error
         parent = citation(event)
         if parent:
-            consumed = consume_receipt(parent, event)
+            receipt = read_receipt(parent)
+            owner = receipt.get('agent_id')
+            if (receipt.get('id') == parent and isinstance(owner, str)
+                    and owner == input_identity(event)['recipient'] and owner != event.get('agent_id')):
+                parent = None
+            else:
+                consumed = consume_receipt(parent, event)
         if event.get('tool_name') not in ('Agent', 'Task'):
             if not parent:
                 check_pending(event)
