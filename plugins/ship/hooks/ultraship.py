@@ -2540,6 +2540,182 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
     return None
 
 
+# Lowercase zsh 5.9 special parameters: `${(ko)parameters[(R)*special*]}` with every module loaded.
+ZSH_SPECIAL_PARAMETERS = frozenset((
+    '_ aliases argv builtins cdpath commands dirstack dis_aliases dis_builtins dis_functions '
+    'dis_functions_source dis_galiases dis_patchars dis_reswords dis_saliases epochtime errnos fignore '
+    'fpath funcfiletrace funcsourcetrace funcstack functions functions_source functrace galiases '
+    'histchars history historywords jobdirs jobstates jobtexts keymaps langinfo mailpath manpath mapfile '
+    'module_path modules nameddirs options parameters patchars path pipestatus prompt psvar reswords '
+    'saliases status sysparams termcap terminfo userdirs usergroups watch widgets zcurses_attrs '
+    'zcurses_colors zcurses_keycodes zcurses_windows zsh_eval_context zsh_scheduled_events').split())
+TEST_SHAPE_COMMANDS = frozenset((
+    '[', 'test', 'cd', 'chmod', 'date', 'df', 'cat', 'head', 'tail', 'tr', 'wc', 'read', 'printf', 'echo',
+    'exit', 'true', 'false', 'set'))
+TEST_SHAPE_PLAIN = re.compile(r'[A-Za-z0-9_./%:+=,@-]+')
+TEST_SHAPE_DOLLAR = re.compile(
+    r'''\$(?:[?#]|[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*(?:(?:%%?|##?)[^$`(){}'"\\]*)?\})''')
+TEST_SHAPE_PATH = re.compile(r'/[A-Za-z0-9_./@%+,-]*')
+TEST_SHAPE_ASSIGNMENT = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)=')
+TEST_SHAPE_SET = re.compile(r'[-+][euxo]+|pipefail|errexit|nounset|xtrace')
+TEST_SHAPE_NAME_DENIED = re.compile(r'functions|aliases|builtins|reswords|commands|options|parameters|bash_|env', re.I)
+TEST_SHAPE_REDEFINE = re.compile(r'alias|function|disable|enable|hash|builtin', re.I)
+TEST_SHAPE_OPERATORS = frozenset({';', '&', '|', '(', ')', '`', '\n', '<', '>'})
+
+
+def test_shape_name(name):
+    return bool(re.fullmatch(r'[a-z_][a-z0-9_]*', name) and name not in ZSH_SPECIAL_PARAMETERS
+                and not TEST_SHAPE_NAME_DENIED.search(name))
+
+
+def test_shape_word(raw, group=False):
+    """True when a raw word is plain text, quotes and allowed `$` forms; `group` lets a final `$` open `$(`."""
+    index = 0
+    while index < len(raw):
+        match = TEST_SHAPE_PLAIN.match(raw, index)
+        if match:
+            index = match.end()
+        elif raw[index] == "'":
+            index = raw.find("'", index + 1) + 1
+            if not index:
+                return False
+        elif raw[index] == '"':
+            index += 1
+            while index < len(raw) and raw[index] != '"':
+                if raw[index] in '\\`':
+                    return False
+                if raw[index] != '$':
+                    index += 1
+                    continue
+                match = TEST_SHAPE_DOLLAR.match(raw, index)
+                if match:
+                    index = match.end()
+                    continue
+                if not raw.startswith('$(', index) or raw.startswith('$((', index):
+                    return False
+                depth, index = 0, index + 1
+                while index < len(raw) and raw[index] != '"':
+                    depth += (raw[index] == '(') - (raw[index] == ')')
+                    index += 1
+                    if not depth:
+                        break
+                if depth:
+                    return False
+            if index >= len(raw):
+                return False
+            index += 1
+        elif raw[index] == '$':
+            match = TEST_SHAPE_DOLLAR.match(raw, index)
+            if match:
+                index = match.end()
+            elif group and index == len(raw) - 1:
+                index += 1
+            else:
+                return False
+        else:
+            return False
+    return True
+
+
+def test_operand_shape(tokens, groups):
+    """True only for the command shape whose `[` and `test` operands count as data; any other word fails it."""
+    count = len(tokens)
+
+    def touching(index):
+        return index + 1 < count and tokens[index][3] == tokens[index + 1][2]
+
+    def word_end(index):
+        """Index after the word at `index` and its `$(...)` group; None when the word fails the shape."""
+        group = tokens[index][0].endswith('$') and touching(index) and tokens[index + 1][0] == '('
+        if not test_shape_word(tokens[index][0], group):
+            return None
+        if not group:
+            return index + 1
+        closing = groups.get(index + 1)
+        if closing is None or touching(index + 1) and tokens[index + 2][0] == '(':
+            return None
+        if closing + 1 < count and touching(closing) and tokens[closing + 1][0] not in TEST_SHAPE_OPERATORS:
+            return None
+        return closing + 1
+
+    def fresh():
+        return {'command': None, 'args': [], 'assigned': False, 'position': True,
+                'bracket': False, 'closed': False, 'fi': False}
+
+    def complete(segment):
+        args = segment['args']
+        if segment['bracket'] and not segment['closed']:
+            return False
+        if segment['command'] == 'printf':
+            return not args or args[0].lstrip('"\'')[:1] not in {'-', '$'}
+        if segment['command'] == 'read':
+            return all(word == '-r' or test_shape_name(word) for word in args)
+        if segment['command'] == 'set':
+            return all(TEST_SHAPE_SET.fullmatch(word) for word in args)
+        return True
+
+    segment, index, descriptor = fresh(), 0, False
+    while index < count:
+        raw = tokens[index][0]
+        if raw in {';', '\n', '|', '&'}:
+            if raw == '&' or raw == '|' and touching(index) and tokens[index + 1][0] in {'|', '&'}:
+                if not (touching(index) and tokens[index + 1][0] == raw):
+                    return False
+                index += 1
+            if not complete(segment):
+                return False
+            segment, index = fresh(), index + 1
+        elif raw in {'(', ')', '`'}:
+            return False
+        elif raw in {'<', '>'}:
+            end = index + 1 + (raw == '>' and touching(index) and tokens[index + 1][0] == '>')
+            follows = end < count and touching(end - 1)
+            if descriptor and end == index + 1 and follows and tokens[end][0] == '&':
+                if not (end + 1 < count and touching(end) and tokens[end + 1][0] == '1'):
+                    return False
+                index, descriptor = end + 2, False
+                continue
+            if end >= count or tokens[end][0] in TEST_SHAPE_OPERATORS:
+                return False
+            descriptor = False
+            index = word_end(end)
+            if index is None:
+                return False
+        elif raw == '2' and touching(index) and tokens[index + 1][0] == '>':
+            descriptor, index = True, index + 1
+        elif segment['fi'] or segment['closed']:
+            return False
+        elif segment['position']:
+            assignment = TEST_SHAPE_ASSIGNMENT.match(raw)
+            if not segment['assigned'] and raw in {'if', 'then', 'elif', 'else', '!'}:
+                index += 1
+            elif not segment['assigned'] and raw == 'fi':
+                segment['fi'], segment['position'] = True, False
+                index += 1
+            elif assignment:
+                if not test_shape_name(assignment.group(1)):
+                    return False
+                index = word_end(index)
+                if index is None:
+                    return False
+                segment['assigned'] = True
+            elif segment['assigned'] or raw not in TEST_SHAPE_COMMANDS and not TEST_SHAPE_PATH.fullmatch(raw):
+                return False
+            else:
+                segment['command'], segment['position'] = raw, False
+                segment['bracket'] = raw == '['
+                index += 1
+        elif raw == ']' and segment['bracket']:
+            segment['closed'] = True
+            index += 1
+        else:
+            segment['args'].append(raw)
+            index = word_end(index)
+            if index is None:
+                return False
+    return complete(segment)
+
+
 def inline_interpreter_denial(command, cwd=None):
     chdir_wrapper = chdir_wrapper_present(command)
     safe_directory = not chdir_wrapper and safe_directory_state(command, cwd)
@@ -2656,44 +2832,8 @@ def inline_interpreter_denial(command, cwd=None):
             if subscript_reason is None:
                 subscript_reason = 'array subscript evaluation rule (parse error)'
         command_positions = shell_command_positions(tokens)
-        test_safe = top_level and not shell_defines_function(tokens, command_positions)
-        modifiers = {'noglob', 'nocorrect', '-', 'builtin', 'command', 'exec', 'time'}
-        unsafe_words = {
-            'alias', 'unalias', 'enable', 'disable', 'autoload', 'hash', 'unhash', 'rehash',
-            'shopt', 'setopt', 'unsetopt', 'emulate', 'eval', 'trap', 'source', 'sched', 'fc',
-            'r', 'zle', 'bindkey', 'zmodload', 'zcompile', 'typeset', 'declare', 'local',
-            'export', 'readonly', 'integer', 'float', 'private', 'functions', 'unfunction',
-            'function', 'getopts', 'mapfile', 'readarray', 'vared', 'getln', 'pushln', 'print',
-            'zparseopts', 'zregexparse', 'zstyle', 'zformat', 'strftime', 'zstat', 'sysread',
-            'zsystem', 'zselect', 'zsocket', 'ztcp', 'zpty', 'zcurses', 'ztie', 'zuntie',
-            'pcre_compile', 'pcre_match', 'compgen', 'complete', 'compctl',
-        }
-        modifier_target = False
-        for index, (raw, value, start, _) in enumerate(tokens):
-            command_word = start in command_positions or modifier_target
-            modifier_target = command_word and value in modifiers
-            if (value in unsafe_words
-                    or re.search(r'functions|aliases|builtins|reswords|bash_func|bash_env|bash_cmds', value, re.I)
-                    or '${(' in raw or '${!' in raw or re.search(r'\$\{[^}]*@[A-Za-z]}', raw)
-                    or command_word and (value == '.' or unresolved_shell_word(raw)
-                                         and raw not in {'[', '[[', '{'})
-                    or start in command_positions and index + 2 < len(tokens)
-                    and tokens[index + 1][0] == '(' and tokens[index + 2][0] == ')'):
-                test_safe = False
-            if value not in {'printf', 'read', 'set'}:
-                continue
-            arguments = []
-            for argument in shell_without_redirections(tokens[index + 1:]):
-                if argument[0] in {';', '&', '|', '(', ')', '`', '\n'}:
-                    break
-                arguments.append(argument)
-            if (value == 'printf' and (any(word[1].startswith('-') and 'v' in word[1] for word in arguments)
-                                       or arguments and unresolved_shell_word(arguments[0][0]))
-                    or value == 'read' and any(not re.fullmatch(r'-[A-Za-z]+|[A-Za-z_][A-Za-z0-9_]*', word[1])
-                                               for word in arguments)
-                    or value == 'set' and any(word[1].startswith('-') and 'A' in word[1]
-                                              or unresolved_shell_word(word[0]) for word in arguments)):
-                test_safe = False
+        test_safe = (top_level and not TEST_SHAPE_REDEFINE.search(command)
+                     and test_operand_shape(tokens, groups))
         segments, words, piped = [], [], False
         for token in tokens:
             raw = token[0]
