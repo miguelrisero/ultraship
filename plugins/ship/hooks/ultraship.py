@@ -2359,7 +2359,13 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
             if word[0] not in {'then', 'do', 'else', '{', '!', 'if', 'elif', 'time'}:
                 break
     open_kinds = []
-    for raw, _, _, _ in sorted(control_words, key=lambda word: word[2]):
+    for raw, _, start, end in sorted(control_words, key=lambda word: word[2]):
+        before = next((token for token in reversed(tokens) if token[2] < start), ('',))
+        after = next((token for token in tokens if token[2] >= end), ('',))
+        if (raw in {'if', 'while', 'until', 'case', 'for', 'select', 'fi', 'done', 'esac'}
+                and 'case' in open_kinds and after[0] in {'|', ')'}
+                and not (raw == 'esac' and open_kinds[-1] == 'case' and before[0] not in {'|', '('})):
+            false_closer = True
         if raw in {'if', 'while', 'until', 'case', 'for', 'select'}:
             open_kinds.append(raw)
         elif raw in {'fi', 'done'} and open_kinds and open_kinds[-1] == 'case':
