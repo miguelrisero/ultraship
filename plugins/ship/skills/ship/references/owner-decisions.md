@@ -154,6 +154,10 @@ Every route that needs row reads uses this flow: lane-derived, lane-owned, retir
 7. Send the review brief to the reviewer with SendMessage.
 8. Delete the file when the review returns.
 
+In Bash, name the record by its literal absolute path for `chmod 600` and the final delete.
+The hook refuses a Bash command that names the state folder through `$`, `{` or `}`.
+This guidance grants no replay of an earlier refused command and no other tool route.
+
 The hook admits Read of one listed file, and Grep with one listed file as `path` and no `glob` or `type`.
 Glob, LSP, and every other read under `tests/mutation` stay denied.
 The reviewer reads only the named row lines.
@@ -171,6 +175,10 @@ The hook denies Write, Edit, and NotebookEdit to the record folder for every age
 8. Record the ready result with `ledger.py append row-reanchor-ready <agent-type>@<agent-id> <sha> ready`.
 9. Send the exact scoped brief, built from the [row re-anchor tool brief](#row-re-anchor-tool-brief), with SendMessage.
 10. Remove the record when the writer returns.
+
+In Bash, name the record by its literal absolute path for `chmod 600` and the final delete.
+The hook refuses a Bash command that names the state folder through `$`, `{` or `}`.
+This guidance grants no replay of an earlier refused command and no other tool route.
 
 The hook requires a regular record owned by its user, at most 64 KiB, without group or world write permission.
 Only the driver and the main session write admission records.
