@@ -1541,8 +1541,8 @@ def python_inline_denial(command):
         seen.add(identity)
         try:
             tokens = shell_raw_words(text)
-        except ValueError:
-            return 'process-capable python -c rule'
+        except ValueError as error:
+            return 'unparsed shell syntax rule: ' + str(error)
         if nested_work_exceeded(tokens, seen):
             return 'process-capable python -c rule (nesting limit)'
         segments, current = [], []
@@ -2565,8 +2565,8 @@ def inline_interpreter_denial(command, cwd=None):
         seen.add(identity)
         try:
             tokens = shell_raw_words(text)
-        except ValueError:
-            return 'inline interpreter code rule (unresolved command word)'
+        except ValueError as error:
+            return 'unparsed shell syntax rule: ' + str(error)
         if nested_work_exceeded(tokens, seen):
             return 'inline interpreter code rule (nesting limit)'
         nested = list(nested_shell_strings(tokens))
@@ -2996,12 +2996,12 @@ def shell_git_push(command):
             lexer.whitespace_split = True
             lexer.commenters = ''
             tokens = list(lexer)
-        except ValueError:
+        except ValueError as error:
             # The text cannot be split, so `git` with a writer word or any expansion or escape denies.
             if re.search(r'\bgit\b', text) and (
                     re.search(r'\b(?:push|send-pack|http-push)\b', text.translate(str.maketrans('', '', '$`*?[]{},')))
                     or re.search(r'[$`\\]', text)):
-                return 'git unparseable writer or expansion rule'
+                return 'unparsed shell syntax rule: ' + str(error)
             continue
         # An expansion or glob can assemble the executable (`$'git' $'push'`), so with any
         # `push` spelling it denies. Exclude only the literal receipt keys `pushed:` and `pushes:` before
@@ -3182,8 +3182,8 @@ def writer_gh_denial(command, depth=0):
         lexer.whitespace_split = True
         lexer.commenters = ''
         tokens = list(lexer)
-    except ValueError:
-        return reason
+    except ValueError as error:
+        return 'unparsed shell syntax rule: ' + str(error)
     for token in tokens:
         if any(char.isspace() or char in ';&|()' for char in token):
             nested = writer_gh_denial(token, depth + 1)
@@ -3288,8 +3288,8 @@ def review_thread_denial(command):
         lexer.whitespace_split = True
         lexer.commenters = ''
         tokens = list(lexer)
-    except ValueError:
-        return 'review-thread guard parse failure' if re.search(r'\bgh\b', normalized) else None
+    except ValueError as error:
+        return 'unparsed shell syntax rule: ' + str(error) if re.search(r'\bgh\b', normalized) else None
     names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word)) == 'gh'
                    for word in re.split(r'[\s;&|()<>]+', normalized))
     if names_gh:
