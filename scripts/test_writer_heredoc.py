@@ -1893,6 +1893,53 @@ class WriterHeredocTests(unittest.TestCase):
                     self.assertIn(reason, self.reason)
         self.assertTrue(self.denied('''functions[test]='"$@"'; test "$PY" -c code'''))
 
+    def test_checksum_comparison_before_launcher_keeps_operands_as_data(self):
+        """Catch checksum operands refused as command words before a later launcher."""
+        digest = 'a' * 64
+        operands = "\"$(sha256sum /opt/tools/run/gate.sh | cut -d ' ' -f1)\" = " + digest
+        check = 'test ' + operands
+        launch = ('env -u GATE_LOAD bash /opt/tools/run/gate.sh --deadline 1900000000 '
+                  '/work/scratch/battery-checks.sh')
+        for command in (
+            check + ' && ' + launch,
+            'cd /work/lane && ' + check + ' && chmod +x /work/scratch/battery-checks.sh && '
+            + launch + ' > /work/scratch/checks.log 2>&1; result=$?; '
+            'tail -n 30 /work/scratch/checks.log; exit "$result"',
+            '[ ' + operands + ' ] && ' + launch,
+            'if ' + check + '; then ' + launch + '; fi',
+            'sha256sum --check /work/scratch/gate.sha256 && env -u GATE_LOAD bash '
+            '/opt/tools/run/gate.sh --deadline "$(date -u -d \'+600 seconds\' +%s)" '
+            '/work/scratch/battery-checks.sh',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+        for reason, commands in (
+            ('inline interpreter code rule (unresolved command word)', (
+                launch + '; ' + check,
+                'alias test=eval; ' + check + ' && ' + launch,
+                'test () { "$@"; }; ' + check + ' && ' + launch,
+                'while ' + check + '; do ' + launch + '; done',
+                check + ' && $CMD -c code',
+                check + ' && ' + launch + ' && "$PY" -c code',
+                'test "$($PY -c code)" = ' + digest + ' && ' + launch,
+            )),
+            ('array subscript evaluation rule (arithmetic)', (
+                check + ' && env -u GATE_LOAD bash /opt/tools/run/gate.sh '
+                '--deadline "$(( $(date +%s) + 600 ))" /work/scratch/battery-checks.sh',
+            )),
+            ('inline interpreter code rule (node)', (
+                check + ' && node -e code',
+            )),
+            ('inline interpreter code rule (program from a pipe)', (
+                check + ' && cat /work/scratch/x.sh | python3',
+            )),
+        ):
+            for command in commands:
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command))
+                    self.assertIn(reason, self.reason)
+
     def test_safe_path_prefix_admits_plain_commands(self):
         for command in (
             'PATH="/home/miguel/.local/share/uv-0.12/bin:$PATH" make openapi api-types preview-mask-sql',
