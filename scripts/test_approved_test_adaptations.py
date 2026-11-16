@@ -411,6 +411,28 @@ EXPECTED_LANE_NATIVE_EDIT = [
 ]
 
 
+EXPECTED_NEW_ROW_CREATION = [
+    'Use this route only when the brief explicitly selects the new lane-owned row review route and assigns you the row creation.',
+    'Verify ~/.claude/CLAUDE.md directly under heading CoC decisions (standing grant).',
+    'Require the exact sentence: The CoC decides CI/CD, testing and tooling items for me.',
+    'Refuse missing, unreadable or mismatched delegation before any write; accept zero relay for this direct verification.',
+    'Require an exact CoC creation decision naming the applying writer, repository, PR, base SHA, author head SHA, new row-file path and each unique new row ID.',
+    "Require the driver's recorded lawful content-free evidence of lane ownership and absence of the new file and each new ID at the base.",
+    'Reject an existing file, existing IDs, unnamed rows and stale evidence.',
+    'Take every row field only from the brief or the files it names outside tests/mutation.',
+    "Confirm that each row's `old` text occurs exactly once in its subject file at the brief's head before the write.",
+    'Create only the named new file with only the named rows; read, search, parse or edit zero other files under tests/mutation.',
+    'Write the file once with native Write at its literal absolute path; refuse when that path already exists.',
+    'Edit zero existing rows; a new row has no prior mutant, so the identical-mutant edit rule covers existing rows only.',
+    "Commit only that file as one local commit on the brief's head.",
+    'Check the commit only with content-free `git diff --numstat` counts: the new file alone, with added lines only.',
+    'A hook or permission denial of the write is final: stop, report its exact text to the driver and use no other process.',
+    'Keep existing-row re-anchoring, disposition and retirement routes separate and their authority requirements unchanged.',
+    'Creation authority grants zero existing-row read, review, execution or publication authority.',
+    'Require separate admission for every mutation, checker or selector execution; keep mutation proof after merge.',
+    'Report only the path, row IDs, fields, commit SHA and line counts; include zero row TOML text in messages.',
+]
+
 EXPECTED_NEW_ROW_REVIEW = [
     'Use this route only when the brief explicitly selects the new lane-owned row review route.',
     'Verify ~/.claude/CLAUDE.md directly under heading CoC decisions (standing grant).',
@@ -1358,6 +1380,34 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertEqual(prefix, writers[0][1])
                 self.assertEqual(suffix, writers[0][2])
         self.assertEqual(reviewers[0], reviewers[1])
+
+    def test_new_lane_owned_row_creation_matches_writers_and_review_authority(self):
+        selection = EXPECTED_NEW_ROW_REVIEW[0]
+        self.assertTrue(EXPECTED_NEW_ROW_CREATION[0].startswith(selection[:-1]))
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md',
+                     'driver.md', 'driver--sol.md', 'reviewer--sol.md', 'reviewer--opus.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            writer = name.startswith('writer--')
+            heading = ('### New lane-owned row creation' if writer else
+                       '### New lane-owned row review route' if name.startswith('driver') else
+                       '## New lane-owned row review')
+            with self.subTest(path=name):
+                self.assertEqual(text.splitlines().count(heading), 1)
+                _, _, after = text.partition(heading + '\n')
+                route = re.split(r'^ {0,3}#{1,3}(?:[ \t]+|$)', after,
+                                 maxsplit=1, flags=re.MULTILINE)[0]
+                lines = [line for line in route.splitlines() if line]
+                self.assertEqual(lines[-len(EXPECTED_NEW_ROW_BOUNDARY):], EXPECTED_NEW_ROW_BOUNDARY)
+                if writer:
+                    self.assertEqual(lines, EXPECTED_NEW_ROW_CREATION + EXPECTED_NEW_ROW_BOUNDARY)
+                    self.assertLess(text.index('#### Removed-behavior retirement route\n'),
+                                    text.index(heading + '\n'))
+                    self.assertLess(text.index(heading + '\n'),
+                                    text.index('### Lane-owned disposition route\n'))
+                else:
+                    for phrase in (selection, *EXPECTED_NEW_ROW_CREATION[1:3],
+                                   'Require scoped creation authority for the author and applying writer as separate recorded evidence.'):
+                        self.assertIn(phrase, lines)
 
     def test_new_lane_owned_row_review_requires_exact_authority_and_receipt_contract(self):
         for name in ('reviewer--sol.md', 'reviewer--opus.md'):
