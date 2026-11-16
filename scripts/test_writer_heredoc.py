@@ -2018,67 +2018,12 @@ class WriterHeredocTests(unittest.TestCase):
 
     def test_literal_rg_and_ls_files_chain_is_admitted(self):
         command = ("cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meta-approval && rg -n '_APPROVAL_READY|_sign_in_observation|approval_ready|push_approval|chromium' backend/api/tools/native/browser_sign_in_code.py backend/api/tools/native/browser_sign_in_tool.py backend/api/tools/native/browser_sign_in_input.py backend/api/tools/native/browser.py backend/api/tests/test_browser_sign_in_codes.py backend/api/tests/test_browser_sign_ins.py backend/api/tests/test_browser_sign_in_inputs.py backend/api/tests/test_browser_sign_in_transitions.py && git ls-files 'backend/api/CLAUDE.md' 'backend/api/AGENTS.md'")
-        self.assertTrue(ultraship.literal_search_shell(command))
         self.assertFalse(self.denied(command), self.reason)
 
     def test_plugin_glob_keeps_verbatim_search_chain_denied(self):
         command = ("cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meta-approval && rg -n '_APPROVAL_READY|_sign_in_observation|approval_ready|push_approval|chromium' backend/api/tools/native/browser_sign_in_code.py backend/api/tools/native/browser_sign_in_tool.py backend/api/tools/native/browser_sign_in_input.py backend/api/tools/native/browser.py backend/api/tests/test_browser_sign_in_codes.py backend/api/tests/test_browser_sign_ins.py backend/api/tests/test_browser_sign_in_inputs.py backend/api/tests/test_browser_sign_in_transitions.py && git ls-files 'backend/api/CLAUDE.md' 'backend/api/AGENTS.md' && ls -d /home/miguel/projects/runflow-monorepo /home/miguel/.claude/plugins/cache/*/ship/* 2>/dev/null")
-        self.assertFalse(ultraship.literal_search_shell(command))
         self.assertTrue(self.denied(command))
         self.assertIn('git writer expansion or glob rule', self.reason)
-
-    def test_new_literal_reads_keep_companion_globs_denied(self):
-        command = "rg -n 'push_approval' a.py && git ls-files 'a.py' && ls -d plugins/*/ship/*"
-        self.assertFalse(ultraship.literal_search_shell(command))
-        self.assertTrue(self.denied(command))
-        self.assertIn('git writer expansion or glob rule', self.reason)
-
-    def test_ls_files_literal_rule_refuses_short_magic_pathspecs(self):
-        for path in ("':'", "':/'", "':/private'", ':/a.py'):
-            command = "rg -n 'push.*' a.py && git ls-files " + path
-            with self.subTest(path=path):
-                self.assertFalse(ultraship.literal_search_shell(command))
-                self.assertTrue(self.denied(command))
-                self.assertIn('git writer expansion or glob rule', self.reason)
-
-    def test_ls_files_literal_rule_refuses_patterns_and_options(self):
-        for arguments in ("'*.py'", "'a?.py'", "'[ab].py'", "':(literal)a.py'",
-                          '--exclude a.py', '--exclude=a.py', '-x a.py', '-X patterns.txt',
-                          '--exclude-from patterns.txt', '--exclude-from=patterns.txt',
-                          '--exclude-per-directory patterns.txt', '--exclude-per-directory=patterns.txt',
-                          '--others -X patterns.txt', '--others --exclude-from patterns.txt',
-                          '--with-tree=HEAD a.py', '--format=a.py a.py'):
-            command = "rg -n 'push.*' a.py && git ls-files " + arguments
-            with self.subTest(arguments=arguments):
-                self.assertFalse(ultraship.literal_search_shell(command))
-                self.assertTrue(self.denied(command))
-                self.assertIn('git writer expansion or glob rule', self.reason)
-
-    def test_rg_literal_rule_refuses_helpers_configs_and_file_lists(self):
-        for option in ('--pre helper', '--pre=helper', '--pre-glob a.py', '-z', '--search-zip',
-                       '--hostname-bin helper', '--type-add custom:*.py', '--ignore-file patterns.txt',
-                       '-f patterns.txt', '--glob a.py', '--config-path config.txt'):
-            command = "rg " + option + " 'push.*' a.py && git ls-files 'a.py'"
-            with self.subTest(option=option):
-                self.assertFalse(ultraship.literal_search_shell(command))
-                self.assertTrue(self.denied(command))
-                self.assertIn('git writer expansion or glob rule', self.reason)
-
-    def test_rg_literal_rule_requires_literal_paths(self):
-        for path in ("'*.py'", "'a?.py'", "'[ab].py'", 'a*.py', "'-f'", '--pre=helper'):
-            command = "rg -n 'push.*' " + path + " && git ls-files 'a.py'"
-            with self.subTest(path=path):
-                self.assertFalse(ultraship.literal_search_shell(command))
-                self.assertTrue(self.denied(command))
-                self.assertIn('git writer expansion or glob rule', self.reason)
-
-    def test_rg_literal_rule_admits_fixed_no_value_options(self):
-        for option in ('-n', '-i', '-l', '-w', '-F', '--line-number', '--ignore-case',
-                       '--files-with-matches', '--word-regexp', '--fixed-strings'):
-            command = "rg " + option + " 'push.*' 'a.py' && git ls-files 'a.py'"
-            with self.subTest(option=option):
-                self.assertTrue(ultraship.literal_search_shell(command))
-                self.assertFalse(self.denied(command), self.reason)
 
     def test_google_conflict_lookup_is_literal_search_data(self):
         command = ('cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/b8fe-chief-coc-27-oct/'

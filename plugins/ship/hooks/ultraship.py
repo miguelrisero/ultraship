@@ -3143,7 +3143,7 @@ def git_read_words(words):
 
 
 def literal_search_shell(command):
-    """Recognize literal cd/find/grep/rg/ls/git ls-files chains without process or write options."""
+    """Recognize one literal cd/find/grep/ls chain without granting any process or write option."""
     text = command.removesuffix('\n')
     if not text or '\n' in text:
         return False
@@ -3175,8 +3175,6 @@ def literal_search_shell(command):
     plain = lambda word: re.fullmatch(r'[\w./:@%+,-]+', word) is not None
     path = lambda word: plain(word) and not word.startswith('-')
     value = lambda word: plain(word) or len(word) >= 2 and word[0] == word[-1] == "'"
-    literal_path = lambda word: path(word[1:-1] if len(word) >= 2 and word[0] == word[-1] == "'" else word)
-    literal_reads = any(words[0] in {'rg', 'git'} for words in segments)
     for words in segments:
         command, arguments = words[0], words[1:]
         if command == 'cd':
@@ -3208,22 +3206,6 @@ def literal_search_shell(command):
                     or arguments[cursor].startswith("'-")
                     or not all(path(word) for word in arguments[cursor + 1:])):
                 return False
-        elif command == 'rg':
-            cursor = 0
-            while cursor < len(arguments) and arguments[cursor].startswith('-'):
-                if arguments[cursor] not in {'-n', '-i', '-l', '-w', '-F', '--line-number', '--ignore-case',
-                                              '--files-with-matches', '--word-regexp', '--fixed-strings'}:
-                    return False
-                cursor += 1
-            if (cursor + 1 >= len(arguments) or not value(arguments[cursor])
-                    or arguments[cursor].startswith("'-")
-                    or not all(literal_path(word) for word in arguments[cursor + 1:])):
-                return False
-        elif command == 'git':
-            if (arguments[:1] != ['ls-files'] or len(arguments) < 2
-                    or not all(literal_path(word) and not word.lstrip("'").startswith(':')
-                               for word in arguments[1:])):
-                return False
         elif command == 'ls':
             cursor = 0
             while cursor < len(arguments) and arguments[cursor].startswith('-'):
@@ -3233,9 +3215,6 @@ def literal_search_shell(command):
             if cursor == len(arguments) or not all(
                     not word.startswith('-') and re.fullmatch(r'[\w./:@%+,*?-]+', word)
                     for word in arguments[cursor:]):
-                return False
-            # The new literal reads must not exempt a companion shell glob from the writer scan.
-            if literal_reads and not all(literal_path(word) for word in arguments[cursor:]):
                 return False
         else:
             return False
