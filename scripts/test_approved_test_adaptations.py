@@ -115,7 +115,10 @@ EXPECTED_REMOVED_RETIREMENT_ROUTE = [
     'Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.',
     'Read, search, or parse no existing content of the named file.',
     'Permit the applying writer to parse only the appended text, never the named file, to check that it is valid TOML.',
-    'Append with one isolated `python3 -I -` heredoc that imports only `tomllib`, checks the appended text with `tomllib.loads`, and appends to the literal absolute row-file path.',
+    "Append with `python3 -I <script> <record-file>`, one call per named file, where `<script>` is the literal absolute path of the installed ship plugin's `skills/ship/scripts/retire-rows.py` that the brief names; the hook refuses a shell expansion in that command.",
+    'Write the record file with native Write outside the repository checkout: a JSON object with `row_file`, the literal absolute row-file path, and `rows`, a list of objects with `id` and `reason`.',
+    'The script checks only the appended text with `tomllib.loads`, never reads the named file, and appends to that path.',
+    'Use this command for new retirements only; a recorded refusal of an earlier retirement stays final.',
     'Run nothing else in that Bash call; get the line counts with `git diff --numstat` in a later, separate call.',
     'Check the retirement commit only with content-free line counts for each named file: added lines only, zero deleted lines.',
     'Refuse a row whose guarded behavior still exists in any form, including a changed form at the same site, or that moved or has a replacement row.',
@@ -214,6 +217,24 @@ EXPECTED_STANDING_GRANT_DECISION = [
     'Refuse a missing, unreadable or mismatched grant; accept zero relay for this verification.',
     "Under that grant, require the PR's own diff to break each named row and make its old mutant impossible, and retire only a row whose target code the PR deletes.",
     'That grant supplies zero claim or subject change authority and waives no other requirement of this route.',
+]
+
+EXPECTED_REWRITTEN_DECISION_FILE = [
+    'The exact CoC decision may be a CoC decision file that the brief names by absolute path and SHA256.',
+    "When the file holds several sections, apply only the section that the brief names, with that section's bindings and expiry.",
+    'Before any protected read, verify the file SHA256 and that the file binds the repository, PR, base SHA, author head SHA, tested merge SHA and tree, failing CI run, attempt and job.',
+    'Also verify that the file binds one pre-edit commit, the row-file paths, the unique row IDs and the permitted fields.',
+    'For that file, the rows commit is your single commit whose parent is the named pre-edit commit and that changes only the named row files.',
+    'Refuse a SHA256 mismatch, a missing or different binding, a passed expiry that the file states, and a branch head other than the pre-edit commit before the edit.',
+    "Send a retirement to the Lane-owned disposition route's retirement branch with all its prerequisites, or to the Removed-behavior retirement route when CI reports the row missing at HEAD; this route edits active rows only.",
+    'A decision file authorizes only designated-test and mutant changes on this route; a claim change still requires a current task-specific owner event.',
+]
+
+EXPECTED_REWRITTEN_IDENTICAL_FIT = [
+    "As the one exception to the first sentence, a SHA-bound CoC decision file that cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` may select this route when an identical mutant fits, if the PR's own diff rewrote the guarded code.",
+    "Apply the lane-derived merge-commit rule to decide whether the PR's own diff rewrote the guarded code.",
+    "Under that file, keep the identical mutant operation; require the brief to record the PR's rewrite in place of why no identical mutant fits.",
+    'Before any use of a decision file that cites that event, verify the event as the Lane-owned disposition route verifies a decision that cites it.',
 ]
 
 EXPECTED_SHARED_MUTANT_RULE = (
@@ -387,7 +408,13 @@ EXPECTED_WRITER_DISPOSITION_RECEIPTS = [
     'These receipt duties grant zero execution or publication authority.',
     'Reviewer inspection requires separately admitted receipt and content scope.',
 ]
-EXPECTED_DISPOSITION_AUTHORITY = EXPECTED_COMMON_DISPOSITION_AUTHORITY + EXPECTED_WRITER_DISPOSITION_RECEIPTS
+EXPECTED_RETIREMENT_DECISION_FILE = 'Either retirement decision may be a CoC decision file that the brief names by absolute path and SHA256; verify it as the Rewritten-code row route verifies one, including its section, bindings and expiry.'
+EXPECTED_DISPOSITION_AUTHORITY = (
+    EXPECTED_COMMON_DISPOSITION_AUTHORITY[:14]
+    + [EXPECTED_RETIREMENT_DECISION_FILE]
+    + EXPECTED_COMMON_DISPOSITION_AUTHORITY[14:]
+    + EXPECTED_WRITER_DISPOSITION_RECEIPTS
+)
 
 EXPECTED_DISPOSITION_BOUNDARY = [
     'Apply this route only to future briefs after verified runtime adoption.',
@@ -410,6 +437,30 @@ EXPECTED_LANE_NATIVE_EDIT = [
     'Native Edit grants zero alternate form for an existing or recorded denied operation.',
 ]
 
+
+EXPECTED_NEW_ROW_CREATION = [
+    'Use this route only when the brief explicitly selects the new lane-owned row review route and assigns you the row creation.',
+    'Verify ~/.claude/CLAUDE.md directly under heading CoC decisions (standing grant).',
+    'Require the exact sentence: The CoC decides CI/CD, testing and tooling items for me.',
+    'Refuse missing, unreadable or mismatched delegation before any write; accept zero relay for this direct verification.',
+    'Require an exact CoC creation decision naming the applying writer, repository, PR, base SHA, author head SHA, new row-file path and each unique new row ID.',
+    'Require scoped creation authority for the author and applying writer as separate recorded evidence.',
+    'When the creation decision is a CoC decision file, verify its SHA256 from the brief and refuse a passed expiry that the file states.',
+    "Require the driver's recorded lawful content-free evidence of lane ownership and absence of each new ID at the base.",
+    'Reject an existing file, existing IDs, unnamed rows and stale evidence.',
+    'Take every row field only from the brief or the files it names outside tests/mutation.',
+    "Confirm that each row's `old` text occurs exactly once in its subject file at the brief's head before the write.",
+    'Create only the named new file with only the named rows and the file-level tables the brief names; read, search, parse or edit zero other files under tests/mutation.',
+    'Write the file once with native Write at its literal absolute path; refuse when that path already exists.',
+    'Edit zero existing rows; a new row has no prior mutant, so the identical-mutant edit rule covers existing rows only.',
+    "Commit only that file as one local commit on the brief's head.",
+    'Check the commit only with content-free `git diff --numstat` counts: the new file alone, with added lines only.',
+    'A hook or permission denial of the write is final: stop, report its exact text to the driver and use no other process.',
+    'Keep existing-row re-anchoring, disposition and retirement routes separate and their authority requirements unchanged.',
+    'Creation authority grants zero existing-row read, review, execution or publication authority.',
+    'Require separate admission for every mutation, checker or selector execution; keep mutation proof after merge.',
+    'Report only the path, row IDs, fields, commit SHA and line counts; include zero row TOML text in messages.',
+]
 
 EXPECTED_NEW_ROW_REVIEW = [
     'Use this route only when the brief explicitly selects the new lane-owned row review route.',
@@ -454,6 +505,61 @@ EXPECTED_NEW_ROW_BOUNDARY = [
 
 
 class ApprovedTestAdaptationsTests(unittest.TestCase):
+    def rewritten_code_route(self, name):
+        text = (ROOT / name).read_text()
+        heading = '## Rewritten-code row route' if 'reviewer--' in name else '#### Rewritten-code row route'
+        self.assertEqual(text.splitlines().count(heading), 1)
+        _, _, after = text.partition(heading + '\n')
+        return re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+
+    def test_rewritten_code_carriers_allow_identical_mutants_under_verified_decision_files(self):
+        carriers = (
+            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/writer--fable52.md', 'plugins/ship/agents/reviewer--sol.md',
+            'plugins/ship/agents/reviewer--opus.md', 'plugins/ship/agents/driver.md',
+            'plugins/ship/agents/driver--sol.md', 'plugins/ship/skills/ship/SKILL.md',
+        )
+        for name in carriers:
+            with self.subTest(path=name):
+                route = self.rewritten_code_route(name)
+                expected = EXPECTED_REWRITTEN_IDENTICAL_FIT.copy()
+                if 'reviewer--' in name:
+                    expected[-1] = expected[-1].replace('Lane-owned disposition route', 'Lane-owned disposition review')
+                self.assertIn("Use this separate route outside category 5 only when the PR's own diff replaces the code a row guards and no identical mutant fits.", route)
+                self.assertIn('\n'.join([
+                    'Require the brief to select this route and record why an identical-operation re-anchor cannot preserve the claim.',
+                    *expected,
+                ]), route)
+
+    def test_rewritten_code_writers_apply_disposition_requirements_to_named_retirements(self):
+        for name, _, lines in self.lane_owned_disposition_routes():
+            if not Path(name).name.startswith('writer--'):
+                continue
+            with self.subTest(path=name):
+                route = self.rewritten_code_route(name)
+                self.assertIn(EXPECTED_COC_ROW_DECISION[0], route)
+                self.assertIn(EXPECTED_REWRITTEN_DECISION_FILE[-2], route)
+                self.assertNotRegex(route, re.compile(r'task-specific owner[- ]event for (?:any )?retir', re.IGNORECASE))
+                self.assertIn(EXPECTED_RETIREMENT_DECISION_FILE, lines)
+
+    def test_rewritten_code_writers_accept_sha_bound_decision_files(self):
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+            with self.subTest(path=name):
+                route = self.rewritten_code_route('plugins/ship/agents/' + name)
+                self.assertIn('\n'.join([
+                    'Bind the decision and row-review admission to the repository, PR, base SHA, author head SHA, frozen final commit and failing CI identity.',
+                    *EXPECTED_REWRITTEN_DECISION_FILE,
+                ]), route)
+                self.assertIn('Change only the paired `old` and `new` fields, exact CoC-approved mutant fields and any designated-test change the exact CoC decision names.', route)
+
+    def test_rewritten_code_decision_files_keep_claim_changes_owner_only(self):
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+            with self.subTest(path=name):
+                route = self.rewritten_code_route('plugins/ship/agents/' + name)
+                self.assertIn('Keep row ID and claim unchanged; change the designated test only when the exact CoC decision names that change.', route)
+                self.assertIn('Require a current task-specific owner event for any claim change.', route)
+                self.assertIn(EXPECTED_REWRITTEN_DECISION_FILE[-1], route)
+
     def test_rewritten_code_rows_require_exact_coc_scope_and_independent_semantic_review(self):
         carriers = (
             'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
@@ -1235,8 +1341,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         if name in ('plugins/ship/agents/reviewer--sol.md', 'plugins/ship/agents/reviewer--opus.md'):
             return (EXPECTED_REVIEWER_DISPOSITION_AUTHORITY, EXPECTED_REVIEWER_DISPOSITION_RETIREMENT,
                     EXPECTED_REVIEWER_DISPOSITION_SURVIVING)
-        return (EXPECTED_DISPOSITION_AUTHORITY, EXPECTED_DISPOSITION_RETIREMENT,
-                EXPECTED_DISPOSITION_SURVIVING)
+        authority = (EXPECTED_DISPOSITION_AUTHORITY if Path(name).name.startswith('writer--') else
+                     EXPECTED_COMMON_DISPOSITION_AUTHORITY + EXPECTED_WRITER_DISPOSITION_RECEIPTS)
+        return (authority, EXPECTED_DISPOSITION_RETIREMENT, EXPECTED_DISPOSITION_SURVIVING)
 
     def test_lane_owned_disposition_requires_separate_authorities_and_frozen_review(self):
         for name, text, lines in self.lane_owned_disposition_routes():
@@ -1358,6 +1465,34 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertEqual(prefix, writers[0][1])
                 self.assertEqual(suffix, writers[0][2])
         self.assertEqual(reviewers[0], reviewers[1])
+
+    def test_new_lane_owned_row_creation_matches_writers_and_review_authority(self):
+        selection = EXPECTED_NEW_ROW_REVIEW[0]
+        self.assertTrue(EXPECTED_NEW_ROW_CREATION[0].startswith(selection[:-1]))
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md',
+                     'driver.md', 'driver--sol.md', 'reviewer--sol.md', 'reviewer--opus.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            writer = name.startswith('writer--')
+            heading = ('### New lane-owned row creation' if writer else
+                       '### New lane-owned row review route' if name.startswith('driver') else
+                       '## New lane-owned row review')
+            with self.subTest(path=name):
+                self.assertEqual(text.splitlines().count(heading), 1)
+                _, _, after = text.partition(heading + '\n')
+                route = re.split(r'^ {0,3}#{1,3}(?:[ \t]+|$)', after,
+                                 maxsplit=1, flags=re.MULTILINE)[0]
+                lines = [line for line in route.splitlines() if line]
+                self.assertEqual(lines[-len(EXPECTED_NEW_ROW_BOUNDARY):], EXPECTED_NEW_ROW_BOUNDARY)
+                if writer:
+                    self.assertEqual(lines, EXPECTED_NEW_ROW_CREATION + EXPECTED_NEW_ROW_BOUNDARY)
+                    self.assertLess(text.index('#### Removed-behavior retirement route\n'),
+                                    text.index(heading + '\n'))
+                    self.assertLess(text.index(heading + '\n'),
+                                    text.index('### Lane-owned disposition route\n'))
+                else:
+                    for phrase in (selection, *EXPECTED_NEW_ROW_CREATION[1:3],
+                                   'Require scoped creation authority for the author and applying writer as separate recorded evidence.'):
+                        self.assertIn(phrase, lines)
 
     def test_new_lane_owned_row_review_requires_exact_authority_and_receipt_contract(self):
         for name in ('reviewer--sol.md', 'reviewer--opus.md'):

@@ -186,6 +186,10 @@ Native Edit grants zero alternate form for an existing or recorded denied operat
 
 Use this separate route outside category 5 only when the PR's own diff replaces the code a row guards and no identical mutant fits.
 Require the brief to select this route and record why an identical-operation re-anchor cannot preserve the claim.
+As the one exception to the first sentence, a SHA-bound CoC decision file that cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` may select this route when an identical mutant fits, if the PR's own diff rewrote the guarded code.
+Apply the lane-derived merge-commit rule to decide whether the PR's own diff rewrote the guarded code.
+Under that file, keep the identical mutant operation; require the brief to record the PR's rewrite in place of why no identical mutant fits.
+Before any use of a decision file that cites that event, verify the event as the Lane-owned disposition route verifies a decision that cites it.
 The exact CoC decision supplies this route's scoped writer read/edit and reviewer read authority under the owner's testing delegation.
 Require an exact CoC decision naming the row-file paths, unique row IDs and permitted mutant fields before any protected read or edit.
 Bind the decision and row-review admission to the repository, PR, base SHA, author head SHA, frozen final commit and failing CI identity.
@@ -242,7 +246,10 @@ Change nothing else in the named file: no existing line, row, field, pin, or tab
 Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.
 Read, search, or parse no existing content of the named file.
 Permit the applying writer to parse only the appended text, never the named file, to check that it is valid TOML.
-Append with one isolated `python3 -I -` heredoc that imports only `tomllib`, checks the appended text with `tomllib.loads`, and appends to the literal absolute row-file path.
+Append with `python3 -I <script> <record-file>`, one call per named file, where `<script>` is the literal absolute path of the installed ship plugin's `skills/ship/scripts/retire-rows.py` that the brief names; the hook refuses a shell expansion in that command.
+Write the record file with native Write outside the repository checkout: a JSON object with `row_file`, the literal absolute row-file path, and `rows`, a list of objects with `id` and `reason`.
+The script checks only the appended text with `tomllib.loads`, never reads the named file, and appends to that path.
+Use this command for new retirements only; a recorded refusal of an earlier retirement stays final.
 Run nothing else in that Bash call; get the line counts with `git diff --numstat` in a later, separate call.
 Check the retirement commit only with content-free line counts for each named file: added lines only, zero deleted lines.
 Refuse a row whose guarded behavior still exists in any form, including a changed form at the same site, or that moved or has a replacement row.
