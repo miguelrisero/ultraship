@@ -70,6 +70,7 @@ Readable files: <exact absolute paths or directories in backticks that the agent
 A hook refusal is final: report it and stop.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
+The stop covers the refused call; the loaded formatting, coordination and method-only resend routes stay.
 Depends on: <lanes or none>
 Done when: <acceptance checks and permitted test commands>
 Mutation boundary: Execute mutation checks, anchor checks, and selectors only in the admitted battery STATIC part at the frozen head after GO; keep execution commands out of this brief.

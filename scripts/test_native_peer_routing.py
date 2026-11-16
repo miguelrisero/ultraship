@@ -118,7 +118,9 @@ class BriefSafetyTests(unittest.TestCase):
             ):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, section)
-            if heading != '## Brief template':
+            if heading == '## Brief template':
+                self.assertIn('The stop covers the refused call; the loaded formatting, coordination and method-only resend routes stay.', section)
+            else:
                 with self.subTest(path=name):
                     self.assertIn('Require this field and these sentences verbatim in every brief:', section)
                     self.assertIn('```\nThe stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.', section)
