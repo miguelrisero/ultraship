@@ -1635,14 +1635,13 @@ def unsafe_script_path(value, base):
     return path in {'/proc', '/dev'} or path.startswith(('/proc/', '/dev/'))
 
 
-def chdir_wrapper_present(command, env_directories=None):
+def chdir_wrapper_present(command, env_directories):
     pending, seen = [shell_without_heredoc_bodies(command)], set()
     targets = []
-    directory_change = split_string = repeated = False
+    directory_change = split_string = False
     while pending:
         text = shell_line_continuations(pending.pop())
         if text in seen:
-            repeated = True
             continue
         seen.add(text)
         try:
@@ -1673,8 +1672,7 @@ def chdir_wrapper_present(command, env_directories=None):
                         break
                     if option == '--':
                         break
-                    if name == 'env' and (option in {'-C', '--chdir'}
-                            or option.startswith(('-C', '--chdir='))):
+                    if name == 'env' and (option == '--chdir' or option.startswith(('-C', '--chdir='))):
                         separate = option in {'-C', '--chdir'}
                         if separate:
                             if cursor + 1 >= len(tokens):
@@ -1721,7 +1719,7 @@ def chdir_wrapper_present(command, env_directories=None):
         except ValueError:
             return True
     if targets:
-        if env_directories is None or len(targets) != 1 or directory_change or split_string or repeated:
+        if len(targets) != 1 or directory_change or split_string:
             return True
         env_directories.extend(targets)
     return False
@@ -2743,6 +2741,10 @@ def test_operand_shape(tokens, groups):
     return complete(segment)
 
 
+UNPROVEN_DIRECTORY_LABEL = ('inline interpreter code rule (program from a pipe)'
+                            ': relative script after an unproven directory change')
+
+
 def inline_interpreter_denial(command, cwd=None):
     env_directories = []
     chdir_wrapper = chdir_wrapper_present(command, env_directories)
@@ -2904,8 +2906,7 @@ def inline_interpreter_denial(command, cwd=None):
             reads_pipe = inherited[0] or piped or any(word[0] == '<' for word in words)
             unproven_directory = chdir_wrapper or directory and not safe_directory
             segment_relative_denied = redirected or not safe_base or unproven_directory or reads_pipe
-            directory_label = ('inline interpreter code rule (program from a pipe)'
-                               ': relative script after an unproven directory change')
+            directory_only = unproven_directory and safe_base and not reads_pipe
             prefix_end = next((index for index, word in enumerate(words)
                                if not re.match(r'[A-Za-z_][A-Za-z0-9_]*=', word[1])), len(words))
             first = words[prefix_end] if prefix_end < len(words) else None
@@ -2975,10 +2976,9 @@ def inline_interpreter_denial(command, cwd=None):
                             or (segment_relative_denied or piped) and not os.path.isabs(script)
                             or not re.fullmatch(r'[\w./:@%+,-]+', words[index + 1][0])):
                         if (script and not script.startswith('-') and not os.path.isabs(script)
-                                and unproven_directory and safe_base and not unsafe_script
-                                and not stdin_program_path(script) and not piped_input and not reads_pipe
+                                and directory_only and not unsafe_script and not stdin_program_path(script)
                                 and re.fullmatch(r'[\w./:@%+,-]+', words[index + 1][0])):
-                            return directory_label
+                            return UNPROVEN_DIRECTORY_LABEL
                         return ('inline interpreter code rule (program from a pipe)' if piped_input or stdin_program_path(script) or unsafe_script
                                 or (segment_relative_denied or piped) and script and not os.path.isabs(script)
                                 else f'inline interpreter code rule ({name})')
@@ -2990,9 +2990,8 @@ def inline_interpreter_denial(command, cwd=None):
                         script = arguments[operand]
                         unsafe_script = any(unsafe_script_path(script, base) for base in bases)
                         if (segment_relative_denied or piped) and not os.path.isabs(script) or unsafe_script:
-                            if (not os.path.isabs(script) and unproven_directory and safe_base
-                                    and not unsafe_script and not piped_input and not reads_pipe):
-                                return directory_label
+                            if not os.path.isabs(script) and directory_only and not unsafe_script:
+                                return UNPROVEN_DIRECTORY_LABEL
                             return 'inline interpreter code rule (program from a pipe)'
                     if (piped_input or piped) and (kind not in {'c', 'm', 'script'} or operand >= len(arguments)
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):

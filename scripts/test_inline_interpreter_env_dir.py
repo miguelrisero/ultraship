@@ -47,7 +47,7 @@ class EnvDirectoryTests(unittest.TestCase):
     def test_env_directory_script_symlinks_into_proc_are_denied(self):
         with tempfile.TemporaryDirectory() as directory:
             (Path(directory) / 'link').symlink_to('/proc/self/fd', target_is_directory=True)
-            for script in ('python3 link/0', 'node ./link'):
+            for script in ('python3 link', 'node ./link'):
                 with self.subTest(script=script):
                     self.assertTrue(self.denied(f'env -C {directory} {script}'))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
@@ -55,7 +55,7 @@ class EnvDirectoryTests(unittest.TestCase):
     def test_env_directory_original_cwd_script_symlinks_are_denied(self):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as cwd:
             (Path(cwd) / 'link').symlink_to('/proc/self/fd', target_is_directory=True)
-            for script in ('python3 link/0', 'node ./link'):
+            for script in ('python3 link', 'node ./link'):
                 with self.subTest(script=script):
                     self.assertTrue(self.denied(f'env -C {directory} {script}', cwd=cwd))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
@@ -67,8 +67,6 @@ class EnvDirectoryTests(unittest.TestCase):
             'env -C /safe/../other python3 x.py',
             'env -C /safe env -C /other python3 x.py',
             'env -C /safe -C /other python3 x.py',
-            'cd /safe; env -C /other python3 x.py',
-            'env -C /safe sh -c "cd /other; python3 x.py"',
             'env -C /safe sh -c "env -C /other python3 x.py"',
             'env -C /safe sudo --unknownopt python3 x.py',
             'env -C /safe -S "python3 x.py"',
@@ -101,9 +99,33 @@ class EnvDirectoryTests(unittest.TestCase):
                 self.assertTrue(self.denied(f'env -C {directory} node 0'))
                 self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
+    def test_env_directory_with_real_cd_is_denied(self):
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            for command in (f'cd {a}; env -C {b} python3 x.py',
+                            f'env -C {a} sh -c "cd {b}; python3 x.py"'):
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command))
+                    self.assertIn(': relative script after an unproven directory change', self.reason)
+
+    def test_env_directory_repeated_nested_text_is_admitted(self):
+        with tempfile.TemporaryDirectory() as a:
+            command = f'env -C {a} python3 scripts/report.py --from "$(date +%F)" --to "$(date +%F)"'
+            self.assertFalse(self.denied(command), self.reason)
+
+    def test_env_directory_input_pipe_keeps_the_pipe_label(self):
+        for command in ('printf x | env -C "$D" python3 x.py',
+                        'printf x | env -C "$D" node x.js'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+                self.assertNotIn(': relative script after an unproven directory change', self.reason)
+
     def test_env_directory_unproven_change_label_names_the_check(self):
         for command in ('cd $X && python3 scripts/x.py',
-                        'env -C "$D" python3 scripts/x.py'):
+                        'env -C "$D" python3 scripts/x.py',
+                        'env -C "$D" node x.js',
+                        'env -C "$D" python3 scripts/x.py | tail -n 20',
+                        'printf x | cat; cd "$X"; python3 x.py'):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
                 self.assertIn('inline interpreter code rule (program from a pipe): relative script after an unproven directory change', self.reason)
