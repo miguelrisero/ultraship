@@ -297,6 +297,15 @@ REFUSE = (
     'cat /home/u/ws/f | xargs -L1 timeout -k 1 5 rm',
     'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
     'cat /home/u/ws/f | xargs --unknown rm',
+    '''S=/home/u/ws/.scratch/disk; L=$S/cleanup-$(date -u +%Y%m%dT%H%MZ).log; { echo "BEFORE $(df -h / | tail -1)"; find ~/.cache/gh -type f -mtime +1 -delete; echo "gh $(df -h / | tail -1)"; rm -rf /home/u/ws/node-compile-cache; echo "nodecache $(df -h / | tail -1)"; awk -F'\\t' '$2<"2026-11-13"{print $1}' $S/dangling-sized.tsv | xargs -r timeout 300 docker volume rm >/dev/null 2>&1; timeout 300 docker builder prune -f >/dev/null 2>&1; echo "docker $(df -h / | tail -1)"; lsof +D /home/u/ws/app/target 2>/dev/null | head -2; timeout 300 cargo clean --manifest-path /home/u/ws/app/Cargo.toml 2>&1 | tail -1; echo "cargo $(df -h / | tail -1)"; } > $L 2>&1; cat $L''',
+    '''awk '{print $1}' /home/u/ws/t.tsv | xargs -r timeout 300 docker volume rm; echo "gh $(df -h / | tail -1)"''',
+    'ls /home/u/ws | xargs -0 -I {} rm -f /home/u/ws/{}.tmp; echo "gh $(date -u +%F)"',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    "cut -d ' ' -f1 /home/u/ws/f | xargs -I rm rm api repos/o/r/pulls/7/comments -f body=x",
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'cat /home/u/ws/f | xargs -L1 docker run --rm --env GH_TOKEN img',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
+    'cat /home/u/ws/f | xargs --max-lines env',
 )
 
 ADMIT = (
@@ -381,7 +390,6 @@ ADMIT = (
     'find . -name x && gh pr view 7',
     "gh api repos/o/r/actions/jobs/123/logs > /home/u/ws/.scratch/job-123.log 2>&1; grep -c . /home/u/ws/.scratch/job-123.log; grep -E 'S4[789]|bench-x' /home/u/ws/.scratch/job-123.log | cut -d' ' -f2- | cut -c1-260 | head -12",
     '''cd /home/u/ws && echo "$(date -u +%FT%TZ) REFUSAL: ship PreToolUse hook (thread_reply rule, 'shell runner names gh') refused Bash that read PR 7 merge SHA and wrote rows decision. No rerun in any form; rows decision held until the hook fix + review." >> .scratch/delivery.md''',
-    '''S=/home/u/ws/.scratch/disk; L=$S/cleanup-$(date -u +%Y%m%dT%H%MZ).log; { echo "BEFORE $(df -h / | tail -1)"; find ~/.cache/gh -type f -mtime +1 -delete; echo "gh $(df -h / | tail -1)"; rm -rf /home/u/ws/node-compile-cache; echo "nodecache $(df -h / | tail -1)"; awk -F'\\t' '$2<"2026-11-13"{print $1}' $S/dangling-sized.tsv | xargs -r timeout 300 docker volume rm >/dev/null 2>&1; timeout 300 docker builder prune -f >/dev/null 2>&1; echo "docker $(df -h / | tail -1)"; lsof +D /home/u/ws/app/target 2>/dev/null | head -2; timeout 300 cargo clean --manifest-path /home/u/ws/app/Cargo.toml 2>&1 | tail -1; echo "cargo $(df -h / | tail -1)"; } > $L 2>&1; cat $L''',
     r'''cd /home/u/ws && T=/home/u/ws/session.jsonl; python3 - "$T" <<'EOF'
 import json,sys
 ids={};cmd=err=None
@@ -420,8 +428,6 @@ echo "$(date -u +%FT%TZ) REFUSAL: ship thread guard ('review-thread guard parse 
     'EOF\n'
     'cd /home/u/ws/wt && gh pr create --draft --base main --head test/x --title "test(x): add rows" --body-file $B',
     '''cd /home/u/ws && echo "$(date -u +%FT%TZ) 7 admission frozen abc (reviewer def, commit 123, integration GO). 8 rows 456 pushed; gh pr create heredoc refused by hook parse ('No closing quotation') -> Flow chief fix by 17:00Z, lane holds, same command once after fix. 9 v2 frozen 789 (writer aaa, DMD1/2/3/9). CI flakes chief: one X-1 writer Bash denial 13:18Z, not replayed, plugin item; 2a by 16:00Z." >> .scratch/coc/notes.md''',
-    '''awk '{print $1}' /home/u/ws/t.tsv | xargs -r timeout 300 docker volume rm; echo "gh $(df -h / | tail -1)"''',
-    'ls /home/u/ws | xargs -0 -I {} rm -f /home/u/ws/{}.tmp; echo "gh $(date -u +%F)"',
 )
 
 

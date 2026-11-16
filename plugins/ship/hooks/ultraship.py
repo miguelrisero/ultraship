@@ -3586,55 +3586,12 @@ def quoted_command_substitutions(word):
     return None if stack else spans
 
 
-def xargs_echo_data_safe(segment):
-    words = [(raw, shlex.split(raw)[0]) for raw in segment]
-    commands = {'rm', 'rmdir', 'docker', 'kill', 'ls', 'du', 'stat', 'cat', 'grep', 'wc',
-                'head', 'tail', 'sha256sum', 'touch', 'mkdir', 'basename', 'dirname',
-                'realpath', 'readlink', 'file', 'echo', 'printf'}
-    switches = {'--null', '--no-run-if-empty', '--verbose', '--interactive', '--exit', '--open-tty'}
-    arguments = {'--max-args', '--max-lines', '--max-procs', '--delimiter', '--replace', '--max-chars', '--eof'}
-    for index, (_, value) in enumerate(words):
-        if os.path.basename(value) != 'xargs':
-            continue
-        if any('<' in outside_single_quotes(raw) for raw, _ in words):
-            return False
-        cursor = index + 1
-        while cursor < len(words) and words[cursor][1].startswith('-'):
-            option = words[cursor][1]
-            name, equals, _ = option.partition('=')
-            if (option.startswith('-a') or option.startswith('-') and not option.startswith('--') and 'a' in option
-                    or len(name) >= 3 and '--arg-file'.startswith(name)):
-                return False
-            if option in switches or re.fullmatch(r'-[0rtpxo]+', option):
-                cursor += 1
-                continue
-            if name in arguments:
-                cursor += 1 if equals else 2
-            elif len(option) >= 2 and option[1] in 'ILnPdsE' and not option.startswith('--'):
-                cursor += 2 if len(option) == 2 else 1
-            else:
-                return False
-            if cursor > len(words):
-                return False
-        if cursor == len(words):
-            continue
-        raw, value = words[cursor]
-        if raw != value or not re.fullmatch(r'[A-Za-z0-9_./+-]+', raw):
-            return False
-        if os.path.basename(value) == 'timeout':
-            cursor += 1
-            if cursor + 1 >= len(words) or not re.fullmatch(r'[0-9.]+[smhd]?', words[cursor][1]):
-                return False
-            raw, value = words[cursor + 1]
-        if raw != value or not re.fullmatch(r'[A-Za-z0-9_./+-]+', raw) or os.path.basename(value) not in commands:
-            return False
-    return True
-
-
 def echo_data_allowed(command, normalized, parts):
     if (re.search(r'[<>]\(', outside_single_quotes(command))
-            or re.search(r'\b(parallel|coproc|exec|mkfifo|trap|shopt|function|alias|enable|hash)\b', normalized)
-            or re.search(r'\b(echo|printf)\s*\(', command)):
+            or re.search(r'\b(parallel|coproc|exec|mkfifo|trap|shopt|function|alias|enable|hash|xargs)\b', normalized)
+            or re.search(r'\b(echo|printf)\s*\(', command)
+            or any(os.path.basename(shlex.split(raw)[0]) == 'xargs' for raw in parts
+                   if not all(char in ';&|\n()' for char in raw))):
         return False
     shell_words = {'echo', 'printf', '{', '}', '(', ')', 'if', 'then', 'elif', 'else',
                    'fi', 'do', 'done', 'while', 'until', 'for', 'case', 'esac', 'select', '!'}
@@ -3647,8 +3604,6 @@ def echo_data_allowed(command, normalized, parts):
             words = segment[first:]
             if raw in ('|', '|&') and (not words or not re.fullmatch(r'[A-Za-z0-9_./+-]+', words[0])
                                       or words[0] in shell_words):
-                return False
-            if not xargs_echo_data_safe(segment):
                 return False
             segment = []
         else:
