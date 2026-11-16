@@ -518,6 +518,83 @@ class ReceiptCustodyTests(unittest.TestCase):
                 self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(words)}})
         self.assert_custody_denial({**event, 'cwd': str(state)})
 
+    def test_plain_grep_text_lint_phrases_allow_every_caller(self):
+        commands = ("grep -rn 'Only the text_lint hook reads or writes refusal receipts (custody rule).' .",
+                    "grep -n 'text_lint.py hook' file.py",
+                    "grep -rn 'import text_lint' .",
+                    "grep -rn 'text_lint hook' sub")
+        for caller in ('', 'ship:driver', 'ship:writer--sol'):
+            for command in commands:
+                with self.subTest(caller=caller, command=command):
+                    output = io.StringIO()
+                    with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                        self.assertIsNone(ultraship.guarded_pre(
+                            {'cwd': str(self.cwd), 'agent_type': caller, 'tool_name': 'Bash',
+                             'tool_input': {'command': command}}))
+                    self.assertEqual(output.getvalue(), '')
+
+    def test_text_lint_execution_and_nonplain_grep_deny_every_caller(self):
+        script = str(self.cwd / 'text_lint.py')
+        hook_command = 'python3 ' + script + ' hook'
+        grep = 'grep -n "text_lint.py hook" ' + str(self.cwd / 'file.py')
+        commands = ['python3 "' + script + '" hook', hook_command, 'python3 -m text_lint hook',
+                    'python3 ' + script + ' "ho"ok',
+                    'cd ' + str(self.cwd) + ' && python3 text_lint.py hook',
+                    'cat payload.json | ' + hook_command,
+                    'python3 -c "import runpy; runpy.run_path(\'' + script + '\')"',
+                    'grep -n "$(' + hook_command + ')" ' + str(self.cwd),
+                    'grep -n "`' + hook_command + '`" ' + str(self.cwd),
+                    grep + ' > ' + str(self.cwd / 'output'),
+                    'sh -c ' + shlex.quote(grep),
+                    'rg --pre ' + shlex.quote(hook_command) + ' x',
+                    'git grep -O' + shlex.quote(hook_command) + ' x',
+                    'grep ' + shlex.quote('--filter=json:' + hook_command) + ' x p.json',
+                    'grep --filter ' + shlex.quote('json:' + hook_command) + ' x p.json',
+                    "grep 'text_lint hook' . --filter=x",
+                    "grep --save-config=out -e 'text_lint hook' .",
+                    "grep -Q 'text_lint hook' .", "grep -z 'text_lint hook' .",
+                    'grep -n "text_lint.py hook" file.py',
+                    'cd sub && python3 text_lint.py hook',
+                    'find . -name x && ' + hook_command,
+                    'find . -name x -exec python3 text_lint.py hook +',
+                    "find . -fprint out -name 'text_lint hook'",
+                    "cd sub && grep -rn 'text_lint hook' .",
+                    "find . -name x && grep -rn 'text_lint hook' .",
+                    "grep -rn 'text_lint hook' . && ls .",
+                    "grep -rn 'a && b text_lint hook' .",
+                    'ls text_lint.py hook',
+                    "find . -name 'text_lint hook'",
+                    'grep\xa0/usr/bin/python3 ' + script + ' hook',
+                    "grep\xa0-rn 'text_lint hook' .",
+                    "grep -rn 'text_lint hook'\N{IDEOGRAPHIC SPACE}.",
+                    "grep -rn 'text_lint hook' .\r"]
+        commands.extend(prefix + grep for prefix in ('env ', 'command '))
+        commands.extend(grep.replace('grep', program, 1) for program in ('egrep', '/usr/bin/grep'))
+        commands.extend(grep + before + separator + after + hook_command
+                        for separator in (';', '&&', '|', '\n')
+                        for before, after in (('', ''), (' ', ' ')))
+        for caller in ('', 'ship:driver', 'ship:writer--sol'):
+            for command in commands:
+                with self.subTest(caller=caller, command=command):
+                    self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                               'tool_input': {'command': command}})
+
+    def test_plain_grep_preserves_other_custody_checks(self):
+        grep = "grep -rn 'text_lint.py hook' "
+        commands = (grep + str(self.store / 'key'), grep + str(self.state),
+                    grep + shlex.quote(str(self.state / 'ultra*/t*/key')),
+                    grep + shlex.quote('${XDG_STATE_HOME}/row-review'),
+                    grep + shlex.quote('$HOME/.local/s*'),
+                    'ls ' + str(self.state) + '/ultra*/t*/key text_lint.py hook',
+                    'ls ' + str(self.cwd / '.local') + '/s* text_lint.py hook',
+                    grep + str(self.cwd))
+        for caller in ('', 'ship:driver', 'ship:writer--sol'):
+            for command in commands:
+                cwd = self.state if command == commands[-1] else self.cwd
+                with self.subTest(caller=caller, command=command, cwd=cwd):
+                    self.assert_custody_denial({'cwd': str(cwd), 'agent_type': caller, 'tool_name': 'Bash',
+                                               'tool_input': {'command': command}})
+
     def test_bash_store_glob_prefixes_deny_every_caller(self):
         patterns = ('ultra*/t*/pending/[0-9a-f]*',
                     'ultra*/t*/receipts/' + '?' * 32 + '.json',
