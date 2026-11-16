@@ -67,6 +67,7 @@ class BriefTests(unittest.TestCase):
             'plugin root': plugin_root, 'rule Input UUID': 'a5c2e8f1-3b74-4d09-96e0-1f8d27b4c053',
             'rule event ID': '2d6f9b08-71ce-4a35-8e14-b09c53a7d6f2',
             'rule event hash': '9a1e5c73d08b4f26a7e3910c5d8b6f42e0a7c319d5b86e24f1a03c7d9e58b2f6',
+            'rule verifier name': 'Coordinator', 'rule verification time': '2026-11-16T10:00:00Z',
             'earlier attempts': 'one heredoc attempt',
             'attempt record path': str(root / 'attempt.jsonl'),
             'expiry time': expiry, 'worktree path': str(worktree), 'tool command': command,
@@ -154,6 +155,7 @@ class BriefTests(unittest.TestCase):
             ('Method-only denials:', "After a hook denies only the method of this route's row edit"),
             ('Tool route:', 'When the brief names the sanctioned row re-anchor tool'),
             ('Standing rule:', 'cites this owner rule'),
+            ('Standing rule event:', 'records in the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name'),
             ('zero tool runs', 'The tool run is its own single attempt'),
             ('- Attempt record:', "record the tool attempt on the brief's attempt record before the run"),
             ('- Worktree:', "with the brief's row file, row ID, subject, base and head"),
@@ -164,6 +166,9 @@ class BriefTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertIn(field, self.template)
                 self.assertIn(rule, writer)
+        standing_event = next(line for line in self.template.splitlines() if line.startswith('- Standing rule event:'))
+        self.assertIn('`answer_submitted`', standing_event)
+        self.assertIn('`owner_ui`', standing_event)
         self.assertIn('A content, scope or protected-access denial blocks the tool run', self.template)
         self.assertIn('every content, scope or protected-access denial', self.reference)
 

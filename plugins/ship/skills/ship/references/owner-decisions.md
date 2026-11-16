@@ -191,7 +191,8 @@ Never chain a glob listing into a write command.
 
 Facts:
 - Route: lane-derived, with the sanctioned row re-anchor tool.
-- Standing rule: category 5 of owner rule Input `<rule Input UUID>` in workspace `<workspace UUID>`, event `<rule event ID>`, hash `<rule event hash>`, choice `plugin_rule`.
+- Standing rule: category 5 of owner rule Input `<rule Input UUID>` in workspace `<workspace UUID>`, choice `plugin_rule`.
+- Standing rule event: `<rule event ID>`, hash `<rule event hash>`, `answer_submitted`, `owner_ui`; <rule verifier name> read it with `get_input` at <rule verification time>.
 - Owner access: Input `<Input UUID>` version <version>, workspace `<workspace UUID>`, choice B, answer text null.
 - Owner event: `<event ID>`, hash `<event hash>`, `answer_submitted`, `owner_ui`, `no_answer_yet` false.
 - Verifier: <verifier name> read the event with `get_input` at <verification time>.
