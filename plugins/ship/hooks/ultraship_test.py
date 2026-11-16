@@ -703,6 +703,13 @@ class PythonHeredocGuardTests(unittest.TestCase):
 
 
 class WriterGitHubGuardTests(unittest.TestCase):
+    def test_writer_redirect_data_and_nested_git_words_cannot_hide_commands(self):
+        for command in ('gh pr view 1 & >-q gh issue close 1',
+                        "flock git --command 'gh issue close 1'",
+                        "parallel git ';gh issue close 1 #' ::: x"):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
     def test_writer_final_control_path_shapes_are_denied(self):
         for command in ('echo {x,.git/config}', 'echo {a/b,c}', "bash -c 'cat .git/config'",
                         'echo a,.git,b', 'custom-write -xo.git/x', 'cat ~/.gitconfig',

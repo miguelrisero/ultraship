@@ -3574,6 +3574,10 @@ def writer_gh_denial(command, depth=0):
                 if '$' in word or '`' in word or not quoted[index] and any(char in word for char in '*[{'):
                     return reason
                 continue
+            if any(char.isspace() or char in ';&|()' for char in word):
+                nested = writer_gh_denial(word, depth + 1)
+                if nested:
+                    return nested
             if re.fullmatch(r'GIT_\w*|EDITOR|VISUAL|PAGER', word):
                 return 'git guarded environment name rule'
             assignment = re.match(r'(GIT_\w*|EDITOR|VISUAL|PAGER)(\+?=)(.*)\Z', word, re.S)
@@ -3664,7 +3668,7 @@ def writer_gh_denial(command, depth=0):
             if index not in data and any(char in word for char in '*[{'):
                 return reason
         for index, word in enumerate(words):
-            if index in data or os.path.basename(word) != 'gh':
+            if os.path.basename(word) != 'gh':
                 continue
             if any(os.path.basename(previous) in ('xargs', 'parallel') for previous in words[:index]):
                 return reason
