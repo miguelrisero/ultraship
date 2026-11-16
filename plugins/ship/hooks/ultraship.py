@@ -2342,13 +2342,17 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
             previous = next((token for token in reversed(tokens) if token[2] < words[0][2]), None)
             if previous is not None and previous[0] not in {';', '&', '|', '(', ')', '`', '\n'}:
                 continue
+        time_prefix = False
         for word in words:
             if re.fullmatch(rf'{identifier}=.*', word[1], re.S):
                 break
             if word[0] != word[1]:
                 break
+            if time_prefix and word[0] in {'-p', '--'}:
+                continue
+            time_prefix = word[0] == 'time'
             control_words.append(word)
-            if word[0] not in {'then', 'do', 'else', '{', '!', 'if', 'elif'}:
+            if word[0] not in {'then', 'do', 'else', '{', '!', 'if', 'elif', 'time'}:
                 break
     loop_ends, loop_stack = {}, []
     for raw, _, start, end in sorted(control_words, key=lambda word: word[2]):

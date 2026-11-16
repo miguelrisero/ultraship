@@ -117,6 +117,26 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied('((i=0)) 2>&1 & (( i ))'))
         self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
+    def test_time_prefix_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('time for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_time_portable_option_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('time -p for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_time_option_end_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('time -- for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_time_group_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('time { for ((i=0; i<3; i++)); do echo "$i"; done; }'), self.reason)
+
+    def test_time_pipeline_loop_cannot_prove_parent_numeric_name(self):
+        self.assertTrue(self.denied('time for ((i=0; i<1; i++)); do :; done | cat; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_time_conditional_loop_cannot_prove_parent_numeric_name(self):
+        self.assertTrue(self.denied('if false; then time for ((i=0; i<1; i++)); do :; done; fi; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
     def test_if_body_keeps_literal_loop_proof(self):
         self.assertFalse(self.denied('if [ -f x ]; then for ((i=0; i<3; i++)); do echo "$i"; done; fi'), self.reason)
 
