@@ -4309,8 +4309,9 @@ def receipt_custody(data, read_search=False):
                        and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
                             or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
                        for word in raw_words)
-                # A literal search chain starts no program; its text_lint words are search data.
-                or ('text_lint' in command and not literal_search_shell(raw)
+                # One literal grep starts no program; its text_lint words are search data.
+                or ('text_lint' in command and not (
+                    literal_search_shell(raw) and raw.split()[0] == 'grep' and '&&' not in raw.split())
                     and (re.search(r'text_lint(\.py)?\s+hook\b', command) or any(token in command for token in
                          ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
                 or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):

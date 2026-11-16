@@ -522,7 +522,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         commands = ("grep -rn 'Only the text_lint hook reads or writes refusal receipts (custody rule).' .",
                     "grep -n 'text_lint.py hook' file.py",
                     "grep -rn 'import text_lint' .",
-                    "cd sub && grep -rn 'text_lint hook' .")
+                    "grep -rn 'text_lint hook' sub")
         for caller in ('', 'ship:driver', 'ship:writer--sol'):
             for command in commands:
                 with self.subTest(caller=caller, command=command):
@@ -557,7 +557,13 @@ class ReceiptCustodyTests(unittest.TestCase):
                     'cd sub && python3 text_lint.py hook',
                     'find . -name x && ' + hook_command,
                     'find . -name x -exec python3 text_lint.py hook +',
-                    "find . -fprint out -name 'text_lint hook'"]
+                    "find . -fprint out -name 'text_lint hook'",
+                    "cd sub && grep -rn 'text_lint hook' .",
+                    "find . -name x && grep -rn 'text_lint hook' .",
+                    "grep -rn 'text_lint hook' . && ls",
+                    "grep -rn 'a && b text_lint hook' .",
+                    'ls text_lint.py hook',
+                    "find . -name 'text_lint hook'"]
         commands.extend(prefix + grep for prefix in ('env ', 'command '))
         commands.extend(grep.replace('grep', program, 1) for program in ('egrep', '/usr/bin/grep'))
         commands.extend(grep + before + separator + after + hook_command
