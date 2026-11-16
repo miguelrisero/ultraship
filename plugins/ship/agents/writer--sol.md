@@ -350,8 +350,8 @@ Require that decision and the admitted gates to cover independent applied review
 When the decision cites that owner event, verify its Input, workspace, current version, event id and hash, `event_type=answer_submitted`, `actor_kind=owner_ui` and answer text.
 That event or the standing grant delegates authority to the CoC; the exact CoC decision supplies the exact rows, fields and adaptation scope.
 Preserve every historical fixed-event comparator unchanged within its existing standing branch only.
-Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
-An authoritative mismatch blocks access and application without fallback.
+When the decision cites that owner event, use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.
+When the decision cites that owner event, an authoritative mismatch blocks access and application without fallback.
 Require an independent not-weaker review of every row change by a reviewer who differs from the PR author and the applying writer.
 When the PR adds new code in place of the guarded behavior, require a follow-up row that guards the new code.
 Require a current task-specific owner event for any claim change.

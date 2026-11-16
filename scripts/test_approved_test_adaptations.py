@@ -243,8 +243,8 @@ EXPECTED_COMMON_DISPOSITION_AUTHORITY = [
     'When the decision cites that owner event, verify its Input, workspace, current version, event id and hash, `event_type=answer_submitted`, `actor_kind=owner_ui` and answer text.',
     'That event or the standing grant delegates authority to the CoC; the exact CoC decision supplies the exact rows, fields and adaptation scope.',
     'Preserve every historical fixed-event comparator unchanged within its existing standing branch only.',
-    'Use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.',
-    'An authoritative mismatch blocks access and application without fallback.',
+    'When the decision cites that owner event, use get_input directly when available; accept complete verified driver or CoC relay only after tool absence or auth/tool error.',
+    'When the decision cites that owner event, an authoritative mismatch blocks access and application without fallback.',
     *EXPECTED_COC_ROW_DECISION[2:],
     'A fixed identical-operation grant supplies zero changed-semantic authority on this route.',
     'Keep read authority, proposal derivation, semantic approval and application authority separate.',
@@ -522,18 +522,13 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     self.assertIn('Grant zero reviewer edit, execution or publication authority; drivers apply zero protected edits.', route)
 
     def test_standing_grant_authority_stays_in_rewritten_and_disposition_routes(self):
-        carriers = (
-            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
-            'plugins/ship/agents/writer--fable52.md', 'plugins/ship/agents/driver.md',
-            'plugins/ship/agents/driver--sol.md', 'plugins/ship/agents/reviewer--sol.md',
-            'plugins/ship/agents/reviewer--opus.md', 'plugins/ship/skills/ship/SKILL.md',
-        )
-        for name in carriers:
-            text = (ROOT / name).read_text()
+        for name, text, _ in self.lane_owned_disposition_routes():
             heading = ('## Owner-approved protected-row subject review' if 'reviewer--' in name else
                        '### Owner-approved protected-row subject route')
+            self.assertEqual(text.splitlines().count(heading), 1)
             _, _, after = text.partition(heading + '\n')
             subject = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after, maxsplit=1, flags=re.MULTILINE)[0]
+            self.assertTrue(subject.strip())
             with self.subTest(path=name):
                 self.assertEqual(text.count(EXPECTED_STANDING_GRANT_DECISION[0]), 2)
                 for phrase in EXPECTED_STANDING_GRANT_DECISION:
