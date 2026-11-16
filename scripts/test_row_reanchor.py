@@ -236,7 +236,8 @@ class ToolTests(unittest.TestCase):
         argv = [str(TOOL), '--row-file', str(self.row), '--row-id', 'target', '--subject', 'subject.txt',
                 '--base', self.base, '--head', self.head_sha]
         output = io.StringIO()
-        with patch('sys.argv', argv), patch.object(reanchor.os, 'fsync', side_effect=OSError(SENTINEL)), \
+        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
+                patch('sys.argv', argv), patch.object(reanchor.os, 'fsync', side_effect=OSError(SENTINEL)), \
                 contextlib.redirect_stdout(output):
             self.assertEqual(reanchor.main(), 2)
         self.assertEqual(output.getvalue(), 'REFUSED: OSError\n')
@@ -333,6 +334,10 @@ class HookTests(unittest.TestCase):
         for command in (self.command.replace('--row-file', '--"row-file"'),
                         self.command.replace('--row-file', r'--row\-file'),
                         self.command.replace(str(TOOL), '/another/copied.py'),
+                        self.command.replace(str(TOOL), '/another/copied.py')
+                        .replace('--row-file', '--"row-file"').replace('--row-id', '--"row-id"'),
+                        self.command.replace(str(TOOL), '/another/copied.py')
+                        .replace('--row-file', r'--\row-file').replace('--row-id', r'--\row-id'),
                         'python3 -I /another/copied.py --row-id target'):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))

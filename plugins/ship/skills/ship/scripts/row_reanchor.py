@@ -225,10 +225,10 @@ def run(args):
         require(staged.read_bytes() == result, 'staged write read-back differs')
         require(row_file.read_bytes() == original, 'row file changed during staged write')
         os.replace(staged, row_file)
-    finally:
+    except BaseException:
         if created and staged.exists():
             staged.unlink()
-    require(row_file.read_bytes() == result, 'write read-back differs')
+        raise
     print('PASS')
     print('row_file=' + str(row_file))
     print('row_id=' + args.row_id)
