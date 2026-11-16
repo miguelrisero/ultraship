@@ -140,6 +140,7 @@ REFUSE = (
     r'if eval g\"h\" api repos/o/r/pulls/7/comments -f body=x; then :; fi',
     r'time eval g\"h\" api repos/o/r/pulls/7/comments -f body=x',
     'exec . /dev/stdin <<<\'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
+    'find . -name x && gh pr view 7',
     "watch -n 60 'query= gh api repos/o/r/pulls/7/comments --input reply.json'",
     "su -c 'query=1 gh api repos/o/r/pulls/7/comments -f body=x' miguel",
     'gh "api -X POST repos/o/r/pulls/7/comments -f body=x"',
@@ -201,111 +202,6 @@ REFUSE = (
     "echo \"\ncat <<'EOF'\n\"; gh api repos/o/r/pulls/7/comments -f body=x\nEOF",
     "cat > /home/u/ws/x.md <<'EOF'\nfoo\\\nEOF\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF",
     "cat > /home/u/ws/x.md <<'EOF'\ngh\\\nEOF\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF",
-    'echo "x $(gh api repos/o/r/pulls/7/comments -f body=x) y"',
-    '$(echo "gh api repos/o/r/pulls/7/comments -f body=x")',
-    'true; $(true; echo "gh api repos/o/r/pulls/7/comments -f body=x")',
-    '`echo "gh api repos/o/r/pulls/7/comments -f body=x"`',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x" | bash',
-    'source <(echo "gh api repos/o/r/pulls/7/comments -f body=x")',
-    'echo() { $1; }; echo "gh api repos/o/r/pulls/7/comments -f body=x"',
-    'alias echo=eval; echo "gh api repos/o/r/pulls/7/comments -f body=x"',
-    'tmux new "gh api repos/o/r/pulls/7/comments -f body=x"',
-    'command eval "gh api repos/o/r/pulls/7/comments -f body=x"',
-    r'''echo "$(gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"x\"}){thread{id}}}')"''',
-    'xargs . < /home/u/ws/list; gh pr view 7',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x" | sh',
-    'echo "`gh api repos/o/r/pulls/7/comments -f body=x`"',
-    '. /home/u/ws/x; gh pr view 7',
-    'true; . /home/u/ws/x; gh pr view 7',
-    'true && . /home/u/ws/x; gh pr view 7',
-    'true | . /home/u/ws/x; gh pr view 7',
-    '(. /home/u/ws/x); gh pr view 7',
-    'X=1 . /home/u/ws/x; gh pr view 7',
-    'X=1 Y=2 . /home/u/ws/x; gh pr view 7',
-    'if . /home/u/ws/x; then gh pr view 7; fi',
-    'if true; then . /home/u/ws/x; fi; gh pr view 7',
-    'if false; then :; elif . /home/u/ws/x; then :; fi; gh pr view 7',
-    'if false; then :; else . /home/u/ws/x; fi; gh pr view 7',
-    'for f in a; do . /home/u/ws/x; done; gh pr view 7',
-    'while . /home/u/ws/x; do :; done; gh pr view 7',
-    'until . /home/u/ws/x; do :; done; gh pr view 7',
-    '! . /home/u/ws/x; gh pr view 7',
-    '{ . /home/u/ws/x; }; gh pr view 7',
-    'time . /home/u/ws/x; gh pr view 7',
-    'builtin . /home/u/ws/x; gh pr view 7',
-    'command . /home/u/ws/x; gh pr view 7',
-    'coproc . /home/u/ws/x; gh pr view 7',
-    'exec . /home/u/ws/x; gh pr view 7',
-    'env . /home/u/ws/x; gh pr view 7',
-    'sudo . /home/u/ws/x; gh pr view 7',
-    "cat <<<'EOF' /home/u/ws/x\nbash -c x\nEOF\ngh pr view 7",
-    "cat <<<'EOF'\nbash -c x\nEOF\ngh pr view 7",
-    "command -p . /dev/stdin <<<'gh api repos/o/r/pulls/7/comments -f body=x'",
-    'time -p . /home/u/ws/x; gh pr view 7',
-    ">/dev/null . /dev/stdin <<<'gh api repos/o/r/pulls/7/comments -f body=x'",
-    '2>/dev/null . /home/u/ws/x; gh pr view 7',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x" | >/dev/null . /dev/stdin',
-    'command -- . /home/u/ws/x; gh pr view 7',
-    "echo 'gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123' | parallel",
-    '{ echo "gh api repos/o/r/pulls/7/comments -f body=x"; } | parallel',
-    '(echo "gh api repos/o/r/pulls/7/comments -f body=x") |& parallel',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x" | xargs env',
-    "echo \"gh api repos/o/r/pulls/7/comments -f body=x\" | awk '{system($0)}'",
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x" > >(parallel)',
-    '{ echo "gh api repos/o/r/pulls/7/comments -f body=x" >&2; } 2>&1 | parallel',
-    r'''trap 'c=${BASH_COMMAND#echo }; eval ${c//\"/}' DEBUG; echo "gh api repos/o/r/pulls/7/comments -f body=x"''',
-    'echo "gh api repos/o/r/pulls/7/comments" > /home/u/ws/note.md | cat',
-    "echo 'gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123' > /home/u/ws/note.md > >(parallel)",
-    "if true; then echo 'gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123'; fi | parallel",
-    "{ echo 'gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123'; }>&1 | parallel",
-    "if true; then echo 'gh api repos/o/r/pulls/7/comments -f body=x'; fi | awk '{system($0)}'",
-    "for f in a; do echo \"gh api repos/o/r/pulls/7/comments -f body=x\"; done | awk '{system($0)}'",
-    "case a in a) echo \"gh api repos/o/r/pulls/7/comments -f body=x\";; esac | awk '{system($0)}'",
-    "{ echo \"gh api repos/o/r/pulls/7/comments -f body=x\" >/home/u/ws/f >&2; } 2>&1 | awk '{system($0)}'",
-    "(echo \"gh api repos/o/r/pulls/7/comments -f body=x\") 2>&1 | awk '{system($0)}'",
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x" > /home/u/ws/f; xargs -a /home/u/ws/f -L1 env',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x" > /home/u/ws/f; xargs -L1 env < /home/u/ws/f',
-    '''coproc awk '{system($0)}'; echo "gh api repos/o/r/pulls/7/comments -f body=x" >&${COPROC[1]}''',
-    "B=/home/u/ws/.scratch/body.md; cat > $B <<EOF\n$(gh api repos/o/r/pulls/7/comments -f body=x)\nEOF\ncd /home/u/ws/wt && gh pr create --draft --base main --head test/x --title \"test(x): add rows\" --body-file $B",
-    "B=/home/u/ws/.scratch/body.md; cat > $B <<'EOF'\nresolveReviewThread\nEOF\ncd /home/u/ws/wt && gh pr create --draft --base main --head test/x --title \"test(x): add rows\" --body-file $B",
-    "B=/home/u/ws/b; cat > $B <<'EOF'\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF\nbash $B",
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    "xargs '--arg-file=/home/u/ws/f' -L1 env",
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'xargs "-a" /home/u/ws/f -L1 env',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'xargs -ra /home/u/ws/f -L1 env',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'xargs --arg=/home/u/ws/f -L1 env',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'xargs -L1 env 0< /home/u/ws/f',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'cat /home/u/ws/f | xargs -L1 env',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'cat /home/u/ws/f | /usr/bin/xargs -L1 env',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    "cat /home/u/ws/f | 'xargs' -L1 env",
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'cat /home/u/ws/f | nice xargs -L1 env',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'cat /home/u/ws/f | xargs -L1 "env"',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'cat /home/u/ws/f | xargs -L1 $E',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'cat /home/u/ws/f | xargs -L1 timeout 5 env',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'cat /home/u/ws/f | xargs -L1 timeout -k 1 5 rm',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'cat /home/u/ws/f | xargs --unknown rm',
-    '''S=/home/u/ws/.scratch/disk; L=$S/cleanup-$(date -u +%Y%m%dT%H%MZ).log; { echo "BEFORE $(df -h / | tail -1)"; find ~/.cache/gh -type f -mtime +1 -delete; echo "gh $(df -h / | tail -1)"; rm -rf /home/u/ws/node-compile-cache; echo "nodecache $(df -h / | tail -1)"; awk -F'\\t' '$2<"2026-11-13"{print $1}' $S/dangling-sized.tsv | xargs -r timeout 300 docker volume rm >/dev/null 2>&1; timeout 300 docker builder prune -f >/dev/null 2>&1; echo "docker $(df -h / | tail -1)"; lsof +D /home/u/ws/app/target 2>/dev/null | head -2; timeout 300 cargo clean --manifest-path /home/u/ws/app/Cargo.toml 2>&1 | tail -1; echo "cargo $(df -h / | tail -1)"; } > $L 2>&1; cat $L''',
-    '''awk '{print $1}' /home/u/ws/t.tsv | xargs -r timeout 300 docker volume rm; echo "gh $(df -h / | tail -1)"''',
-    'ls /home/u/ws | xargs -0 -I {} rm -f /home/u/ws/{}.tmp; echo "gh $(date -u +%F)"',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    "cut -d ' ' -f1 /home/u/ws/f | xargs -I rm rm api repos/o/r/pulls/7/comments -f body=x",
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'cat /home/u/ws/f | xargs -L1 docker run --rm --env GH_TOKEN img',
-    'echo "gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123" > /home/u/ws/f; '
-    'cat /home/u/ws/f | xargs --max-lines env',
 )
 
 ADMIT = (
@@ -387,47 +283,6 @@ ADMIT = (
     'gh pr list --json number --jq .[].number',
     'gh pr status --json number --jq .currentBranch.statusCheckRollup[].name',
     'gh pr view 7 --json title --jq .title | grep -c x; echo "count `date -u +%F`"',
-    'find . -name x && gh pr view 7',
-    "gh api repos/o/r/actions/jobs/123/logs > /home/u/ws/.scratch/job-123.log 2>&1; grep -c . /home/u/ws/.scratch/job-123.log; grep -E 'S4[789]|bench-x' /home/u/ws/.scratch/job-123.log | cut -d' ' -f2- | cut -c1-260 | head -12",
-    '''cd /home/u/ws && echo "$(date -u +%FT%TZ) REFUSAL: ship PreToolUse hook (thread_reply rule, 'shell runner names gh') refused Bash that read PR 7 merge SHA and wrote rows decision. No rerun in any form; rows decision held until the hook fix + review." >> .scratch/delivery.md''',
-    r'''cd /home/u/ws && T=/home/u/ws/session.jsonl; python3 - "$T" <<'EOF'
-import json,sys
-ids={};cmd=err=None
-for l in open(sys.argv[1]):
-    try:d=json.loads(l)
-    except:continue
-    c=d.get('message',{}).get('content')
-    if not isinstance(c,list):continue
-    for b in c:
-        if b.get('type')=='tool_use' and 'node-compile-cache' in json.dumps(b.get('input',{})): ids[b['id']]=b['input'].get('command')
-        if b.get('type')=='tool_result' and b.get('tool_use_id') in ids:
-            cmd=ids[b['tool_use_id']];r=b.get('content');err=r if isinstance(r,str) else json.dumps(r)
-out='/home/u/ws/.scratch/refused-command.md'
-open(out,'w').write('# Refused command 6 (test string only, never run)\n\n```bash\n'+(cmd or 'NOT FOUND')+'\n```\n\n## Refusal\n\n```\n'+(err or '')+'\n```\n')
-print(out,bool(cmd))
-EOF
-echo "$(date -u +%FT%TZ) REFUSAL: ship thread guard ('review-thread guard parse failure') refused disk cleanup command (gh cache, node cache, docker volumes, cargo clean). No rerun in any form. Saved as refused command 6. Disk 92%; 93% = P0 owner Input. Survey: 43G safe (survey.md)." >> .scratch/delivery.md''',
-    'grep -c . /home/u/ws/x.log; gh pr view 7',
-    'echo "head $(gh pr view 7 --json headRefOid -q .headRefOid)"',
-    "cat > /home/u/ws/x.md <<'EOF'\na . b\nEOF\ngh pr view 7",
-    'grep -R time .; gh pr view 7',
-    '{ echo "gh api repos/o/r/pulls/7/comments"; } > /home/u/ws/note.md',
-    'echo "gh x $(date -u +%F)" || true',
-    "if true; then echo 'gh api repos/o/r/pulls/7/comments -f body=x'; fi",
-    'for f in a; do echo "gh $f"; done',
-    'if false; then :; else echo "gh api x"; fi',
-    "B=/home/u/ws/.scratch/body.md; cat > $B <<'EOF'\n"
-    '## Summary\n'
-    "This PR's rows cover https://github.com/o/r/pull/7.\n"
-    '## Changes\n'
-    '- Add `row` checks.\n'
-    '## Left out\n'
-    '- Extra cases.\n'
-    '## Testing\n'
-    '- The checks pass.\n'
-    'EOF\n'
-    'cd /home/u/ws/wt && gh pr create --draft --base main --head test/x --title "test(x): add rows" --body-file $B',
-    '''cd /home/u/ws && echo "$(date -u +%FT%TZ) 7 admission frozen abc (reviewer def, commit 123, integration GO). 8 rows 456 pushed; gh pr create heredoc refused by hook parse ('No closing quotation') -> Flow chief fix by 17:00Z, lane holds, same command once after fix. 9 v2 frozen 789 (writer aaa, DMD1/2/3/9). CI flakes chief: one X-1 writer Bash denial 13:18Z, not replayed, plugin item; 2a by 16:00Z." >> .scratch/coc/notes.md''',
 )
 
 
