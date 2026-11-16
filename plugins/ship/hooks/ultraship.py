@@ -3609,6 +3609,95 @@ def receipt_custody(data, read_search=False):
             deny(RECEIPT_CUSTODY)
 
 
+def canonical_row_path(value):
+    if (not isinstance(value, str) or not value.startswith('/')
+            or re.search(r'\A[\s\N{ZERO WIDTH NO-BREAK SPACE}]|[\s\N{ZERO WIDTH NO-BREAK SPACE}]\Z', value)
+            or unicodedata.normalize('NFC', value) != value):
+        return False
+    parts = value[1:].split('/') if value != '/' else []
+    return not {'', '.', '..'} & set(parts) and os.path.realpath(value) == value
+
+
+def row_record(data, folder, workspace_fallback=False):
+    """Read the driver's bounded, private admission record for this agent."""
+    agent_id = data.get('agent_id')
+    if not isinstance(agent_id, str) or not agent_id:
+        return None, 'No admission record can match because the hook payload has no agent_id.'
+    record = STATE / folder / (re.sub(r'[^\w.-]', '_', agent_id) + '.json')
+    workspace_record = False
+    if workspace_fallback and not os.path.lexists(record):
+        cwd = Path(os.path.realpath(data.get('cwd') or os.getcwd()))
+        for workspace in (cwd, *cwd.parents):
+            if (workspace / '.scratch').is_dir():
+                candidate = workspace / '.scratch/ultraship' / folder / record.name
+                if os.path.lexists(candidate):
+                    record, workspace_record = candidate, True
+                break
+    unmet = f'Admission record {record} must exist and meet this condition: '
+    if workspace_record:
+        try:
+            if (os.path.realpath(record.parent) != os.path.abspath(record.parent)
+                    or os.stat(record.parent).st_uid != os.getuid()):
+                return None, unmet + 'the record parent has no symlink components and belongs to your UID.'
+        except OSError:
+            return None, unmet + 'the record parent must exist and belong to your UID.'
+    try:
+        # O_NONBLOCK keeps a named pipe from hanging the hook.
+        descriptor = os.open(record, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None, unmet + 'the record is missing or is a link.'
+    with os.fdopen(descriptor, 'rb') as handle:
+        status = os.fstat(descriptor)
+        if (not stat.S_ISREG(status.st_mode) or status.st_uid != os.getuid()
+                or status.st_mode & 0o022 or status.st_size > 65536):
+            return None, unmet + 'it is a regular file that you own, not group or world writable, at most 64 KiB.'
+        try:
+            fields = json.loads(handle.read(65537))
+        except Exception:
+            fields = None
+    if not isinstance(fields, dict):
+        return None, unmet + 'it is a JSON object.'
+    if not isinstance(fields.get('pr'), str) or not ROW_REVIEW_PR.fullmatch(fields['pr']):
+        return None, unmet + '`pr` is a GitHub pull request URL.'
+    if fields.get('agent_id') != agent_id:
+        return None, unmet + '`agent_id` equals your agent ID.'
+    expires = fields.get('expires_at')
+    try:
+        if not isinstance(expires, str) or not re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', expires, re.ASCII):
+            raise ValueError(expires)
+        deadline = calendar.timegm(time.strptime(expires, '%Y-%m-%dT%H:%M:%SZ'))
+    except ValueError:
+        return None, unmet + '`expires_at` is a UTC time `YYYY-MM-DDTHH:MM:SSZ`.'
+    now = time.time()
+    if not now < deadline <= now + ROW_REVIEW_MAX_AHEAD:
+        return None, unmet + '`expires_at` is later than now and at most 4 hours ahead.'
+    return fields, unmet
+
+
+def row_reanchor_gate(data, command):
+    tool = str(Path(__file__).resolve().parents[1] / 'skills/ship/scripts/row_reanchor.py')
+    form = ('python3 -I ' + tool + ' --row-file <abs> --row-id <id> --subject <rel> --base <ref> --head <ref>')
+    reason = 'Row re-anchor gate requires exactly `' + form + '` and a matching driver-written row-reanchor admission record. '
+    word = r'[A-Za-z0-9_./:@+,-]+'
+    match = re.fullmatch(r'python3 -I (' + word + r') --row-file (' + word + r') --row-id (' + word
+                         + r') --subject (' + word + r') --base (' + word + r') --head (' + word + ')', command)
+    if not role(data, 'writer') or not match or match[1] != tool:
+        deny(reason)
+    fields, unmet = row_record(data, 'row-reanchor')
+    if fields is None:
+        deny(reason + unmet)
+    target = fields.get('row_file')
+    if (not canonical_row_path(target) or not re.search(r'(?<![\w.-])tests/mutation(/|$)', target, re.I)
+            or target != match[2] or not isinstance(fields.get('row_id'), str) or fields['row_id'] != match[3]):
+        deny(reason + unmet + '`row_file` and `row_id` match the canonical protected path and row ID.')
+    try:
+        regular = stat.S_ISREG(os.lstat(target).st_mode)
+    except OSError:
+        regular = False
+    if not regular or match[4].startswith('/') or '..' in match[4].split('/'):
+        deny(reason + unmet + 'the row file is regular and the subject is repository-relative.')
+
+
 def pre(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     try:
@@ -3624,18 +3713,25 @@ def pre(data):
         if tool in ('Edit', 'Write', 'NotebookEdit'):
             written = tin.get('file_path') or tin.get('notebook_path')
             if isinstance(written, str) and written:
-                records = os.path.realpath(STATE / 'row-review').casefold()
                 written = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(written))
-                for path in (os.path.abspath(written).casefold(), os.path.realpath(written).casefold()):
-                    if (path == records or path.startswith(records + '/')
-                            or re.search(r'/\.scratch/ultraship/row-review(?:/|$)', path)):
-                        deny('Only the driver and the main session write row-review admission records. '
-                             'Report the blocked scope to the driver.')
+                for folder in ('row-review', 'row-reanchor'):
+                    records = os.path.realpath(STATE / folder).casefold()
+                    for path in (os.path.abspath(written).casefold(), os.path.realpath(written).casefold()):
+                        if (path == records or path.startswith(records + '/')
+                                or re.search(r'/\.scratch/ultraship/' + folder + r'(?:/|$)', path)):
+                            deny('Only the driver and the main session write ' + folder + ' admission records. '
+                                 'Report the blocked scope to the driver.')
         # shortcut: Bash matches state and workspace paths as text, so a path built from pieces slips past it.
         # Upgrade path: record folders that non-driver agents cannot reach.
-        if tool == 'Bash' and 'ultraship/row-review' in str(tin.get('command', '')).casefold():
-            deny('Only the driver and the main session touch row-review admission records (custody rule). '
-                 'Report the blocked scope to the driver.')
+        if tool == 'Bash':
+            for folder in ('row-review', 'row-reanchor'):
+                if 'ultraship/' + folder in str(tin.get('command', '')).casefold():
+                    deny('Only the driver and the main session touch ' + folder + ' admission records (custody rule). '
+                         'Report the blocked scope to the driver.')
+    if tool == 'Bash':
+        command = str(tin.get('command', ''))
+        if 'row_reanchor' in command.casefold() and '--row-' in command:
+            row_reanchor_gate(data, command)
     if role(data, 'writer'):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
                     'mcp__bettercoding__set_input_status'):
@@ -3770,14 +3866,7 @@ def pre(data):
             def normalize(value):
                 return os.path.realpath(value)
 
-            def canonical(value):
-                # Claude Code and this hook must read one path: no trim, expansion, normalization or link step may differ.
-                if (re.search(r'\A[\s\N{ZERO WIDTH NO-BREAK SPACE}]|[\s\N{ZERO WIDTH NO-BREAK SPACE}]\Z', value)
-                        or not value.startswith('/')
-                        or unicodedata.normalize('NFC', value) != value):
-                    return False
-                parts = value[1:].split('/') if value != '/' else []
-                return not {'', '.', '..'} & set(parts) and os.path.realpath(value) == value
+            canonical = canonical_row_path
 
             home = normalize(str(Path.home()))
             cwd = normalize(data.get('cwd') or str(Path.cwd()))
@@ -3819,67 +3908,18 @@ def pre(data):
 
             def row_admission():
                 """Return the unmet condition, or None when the driver admitted this exact row-file read."""
-                agent_id = data.get('agent_id')
-                if not isinstance(agent_id, str) or not agent_id:
-                    return 'No admission record can match because the hook payload has no agent_id.'
-                record = STATE / 'row-review' / (re.sub(r'[^\w.-]', '_', agent_id) + '.json')
-                workspace_record = False
-                if not os.path.lexists(record):
-                    for workspace in (Path(cwd), *Path(cwd).parents):
-                        if (workspace / '.scratch').is_dir():
-                            candidate = workspace / '.scratch/ultraship/row-review' / record.name
-                            if os.path.lexists(candidate):
-                                record = candidate
-                                workspace_record = True
-                            break
-                unmet = f'Admission record {record} must exist and meet this condition: '
+                fields, unmet = row_record(data, 'row-review', workspace_fallback=True)
+                if fields is None:
+                    return unmet
                 target = tin.get('file_path') if tool == 'Read' else tin.get('path') if tool == 'Grep' else None
                 if paths != [target] or 'glob' in tin or 'type' in tin:
                     return unmet + ('only Read of a listed row file, or Grep with a listed row file as `path` '
                                     'and no `glob` or `type`, can be admitted.')
-                if workspace_record:
-                    try:
-                        if (os.path.realpath(record.parent) != os.path.abspath(record.parent)
-                                or os.stat(record.parent).st_uid != os.getuid()):
-                            return unmet + 'the record parent has no symlink components and belongs to your UID.'
-                    except OSError:
-                        return unmet + 'the record parent must exist and belong to your UID.'
-                try:
-                    # O_NONBLOCK: opening a named pipe must not hang the hook.
-                    descriptor = os.open(record, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-                except OSError:
-                    return unmet + 'the record is missing or is a link.'
-                with os.fdopen(descriptor, 'rb') as handle:
-                    status = os.fstat(descriptor)
-                    if (not stat.S_ISREG(status.st_mode) or status.st_uid != os.getuid()
-                            or status.st_mode & 0o022 or status.st_size > 65536):
-                        return unmet + ('it is a regular file that you own, not group or world writable, '
-                                        'at most 64 KiB.')
-                    try:
-                        fields = json.loads(handle.read(65537))
-                    except Exception:
-                        fields = None
-                if not isinstance(fields, dict):
-                    return unmet + 'it is a JSON object.'
-                if not isinstance(fields.get('pr'), str) or not ROW_REVIEW_PR.fullmatch(fields['pr']):
-                    return unmet + '`pr` is a GitHub pull request URL.'
-                if fields.get('agent_id') != agent_id:
-                    return unmet + '`agent_id` equals your agent ID.'
                 files = fields.get('row_files')
                 if (not isinstance(files, list) or not files
                         or any(not isinstance(item, str) or not canonical(item)
                                or not re.search(protected, item, re.IGNORECASE) for item in files)):
                     return unmet + '`row_files` lists canonical absolute paths that contain tests/mutation.'
-                expires = fields.get('expires_at')
-                try:
-                    if not isinstance(expires, str) or not re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', expires, re.ASCII):
-                        raise ValueError(expires)
-                    deadline = calendar.timegm(time.strptime(expires, '%Y-%m-%dT%H:%M:%SZ'))
-                except ValueError:
-                    return unmet + '`expires_at` is a UTC time `YYYY-MM-DDTHH:MM:SSZ`.'
-                now = time.time()
-                if not now < deadline <= now + ROW_REVIEW_MAX_AHEAD:
-                    return unmet + '`expires_at` is later than now and at most 4 hours ahead.'
                 if target not in files:
                     return unmet + 'the path equals one `row_files` entry.'
                 try:

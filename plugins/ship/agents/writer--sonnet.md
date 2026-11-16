@@ -246,6 +246,7 @@ Require separate admission for every mutation or checker execution; keep mutatio
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 
 After a hook denies only the method of this route's row edit, apply the owner-decisions granted protected-row re-anchor; it is the one exception to the alternate-form sentence below.
+When the brief names the sanctioned row re-anchor tool, run it once in place of native Edit with the brief's row file, row ID, subject, base and head; the tool derives and checks both fields and prints only results. A tool refusal or hook denial ends the attempt. This tool is the only process form for a protected row edit.
 
 For newly admitted future operations, use native Edit with replace_all=false.
 Require a unique approved row-ID-contained old_string within the approved row extent.
