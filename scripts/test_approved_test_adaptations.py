@@ -517,7 +517,130 @@ EXPECTED_NEW_ROW_BOUNDARY = [
 ]
 
 
+EXPECTED_FALSE_CLAIM_ROUTE = [
+    'Use this route only when the brief names the False-claim retirement route.',
+    "It retires an active protected row whose claim the PR's own design makes false at the final code.",
+    'A brief that names this route uses it in place of every other retirement and row review route.',
+    'This route is an exception to the identical-mutant edit rule and to the rule that sends every other row change to Lane-derived row review.',
+    'Its named row-ID lookups and row-line reads are an exception to the mutation TOML search prohibition.',
+    'Refuse a row that CI reports `in the base file, missing at HEAD`; that row uses the Removed-behavior retirement route.',
+    'Refuse a row that is absent at the base SHA.',
+    'Refuse a row whose lines at the author head SHA differ from its lines at the base SHA.',
+    'Keep every other retirement route, its CI-line requirement and its authority unchanged.',
+    'Require the PR body to name each row ID and its claim, and to quote the claim.',
+    "Require the PR body to state why each claim is false at the final code, citing `file:line` at the PR head.",
+    'Require the PR body to state the intended behavior change; a claim that a defect made false never qualifies.',
+    "Require the PR's own base/head diff to change the subject file that each named row names.",
+    'Refuse a row whose subject file the PR leaves unchanged.',
+    'Require a hunk that a PR-authored commit wrote in that subject file to make the claim false; a main merge alone never qualifies.',
+    'A merge commit counts as PR-authored unless its subject blob equals the subject blob of the clean automatic merge of its parents.',
+    "Refuse when any part of the claim still holds at the final code; that row uses the lane-derived route or the Lane-owned disposition route's surviving-claim adaptation.",
+    'Require a CoC decision file that the brief names by absolute path and SHA256.',
+    'Require that file to bind the repository, PR, base SHA, author head SHA, row-file path and each exact unique row ID.',
+    "Require that file to state that the CoC accepts the behavior change as the PR's intended design.",
+    "That file cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority; it is this route's loaded edit authority.",
+    'Verify that event as the Lane-owned disposition route verifies a decision that cites it; the standing grant alone supplies zero authority on this route.',
+    'Owner-scoped protected row access grants nothing on this route.',
+    'Before any protected read, the driver or writer verifies the file SHA256 and every binding.',
+    "A reviewer checks the driver's recorded SHA256 and bindings and runs zero digest commands.",
+    'Refuse a SHA256 mismatch, a missing or different binding, a passed expiry that the file states, and a branch head other than the bound author head SHA before the edit.',
+    'Permit the applying writer to locate each named row by its row ID inside its named file.',
+    "Read only that row's table lines, including its owned child tables.",
+    'Forbid whole-file parsing, adjacent-row reads, unnamed-row reads and broader protected searches.',
+    "Replace only each named row's table with exactly one `[[retired]]` table that carries its exact ID.",
+    "Allow only `id` and `reason` in that table; copy `reason` verbatim from the PR body's statement for that row.",
+    'Encode the reason as a TOML basic string with backslash, quote and every control character escaped.',
+    'Before the edit, validate only the generated `[[retired]]` text through one quoted-delimiter `python3 -I -` heredoc importing only `tomllib`.',
+    'Run that inert parse alone in its Bash call; read zero files and write zero files.',
+    'Use native Edit with replace_all=false; require old_string to cover the full row table extent, including all owned child tables and the unique row ID.',
+    'Refuse unclear extent, missing or multiple matches, and any unapproved neighboring content.',
+    'Change nothing else in the named file: no other line, row, field, pin, or table.',
+    'Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.',
+    'Commit the retirement alone, with one native Edit per named row.',
+    "Check it only with content-free `git diff --numstat` counts for each named file against the retirement commit's parent.",
+    'Let s be the lines that a row table and its `[[retired]]` table share, such as the `id` line.',
+    'Require the deleted lines to equal the row table lines minus s, and the added lines to equal the `[[retired]]` table lines minus s, summed over the named rows.',
+    'Refuse any other count.',
+    'Before the push, require an independent reviewer who differs from the PR author and the applying writer.',
+    'Require the brief to supply read-only trees at the base SHA, the author head SHA and the frozen commit after the edit, with the retirement commit SHA and its line counts.',
+    'Require the frozen commit to contain the author head SHA and the retirement commit.',
+    "Admit each reviewer row read with the driver's reviewer admission record for protected row reads.",
+    'Permit the reviewer to locate each named row ID and read only its row lines at the base SHA and the author head SHA, and its `[[retired]]` table at the frozen commit.',
+    "Permit the reviewer to read the follow-up row's lines by its row ID at its frozen commit; the admission record lists that row file.",
+    "Require the reviewer to read each retired row's lines at the base SHA and confirm its row ID, subject file and claim.",
+    'Require the reviewer to confirm that the claim held at the base SHA.',
+    "Require the reviewer to confirm that the PR body quotes that claim exactly and that the PR's own diff changes that subject file.",
+    'Require the reviewer to cite the PR-authored hunk that makes the claim false.',
+    'Require the reviewer to read the cited final code at the frozen commit and to search non-row source and test files for the claimed behavior.',
+    'Require the reviewer to confirm that no part of the claim holds at the final code and that the final code implements the stated behavior change.',
+    'Agreement with the PR body alone supplies zero confirmation.',
+    'Require the reviewer to confirm that the retirement commit replaces only the named row tables, each with one `[[retired]]` table, and that the line counts match the lines it read.',
+    'Require the reviewer to confirm one `[[retired]]` entry and zero active entries for each named row ID at the frozen commit.',
+    'Require a follow-up row that guards the new behavior, in this PR or in a follow-up PR that this PR body names by direct URL.',
+    'Create the follow-up row only under its own applicable route; this route grants zero row-creation authority.',
+    'Require the same reviewer to read the follow-up row at its frozen commit and confirm that it is not weaker than the retired row.',
+    'Not weaker means that the follow-up row guards the new behavior at least as tightly as the retired row guarded the old behavior.',
+    'For a follow-up PR, bind its URL, head SHA, row-file path and row ID in the review receipt; a later follow-up head needs a new verdict.',
+    "A later head that only merges main keeps the verdict when the follow-up row's lines, its subject file and its designated test file stay byte-identical; judge each merge commit by the merge-commit rule above, applied to those files.",
+    "Run this PR's post-merge battery after that follow-up PR merges at a head that keeps the verdict, at a commit that contains both.",
+    'If the follow-up PR has not merged 24 hours after this PR merges, run the battery then and report the retired claim to the CoC as unguarded.',
+    'After that report, the CoC has the follow-up row merged or the retirement reverted; a retirement never stays on main without a merged follow-up row.',
+    'Refuse the retirement when the claim is still true at the final code, or when the reviewer cannot confirm any requirement.',
+    'Refuse on any doubt about any requirement.',
+    'Bind the review receipt to reviewer identity, approving verdict, decision file SHA256, frozen commit SHA, row-file paths, row IDs, cited `file:line`, cited hunk and follow-up row ID.',
+    'Require CoC approval of that review receipt before the push; changed source, decision file or evidence invalidates the receipt and approval.',
+    'Keep messages, briefs and PR bodies free of pair bytes and row TOML text; the quoted claim is the only exception.',
+    'Identify each edit only by path, row ID and the `[[retired]]` table.',
+    'Beyond the reads above, this route grants zero TOML search or parse authority, protected reads, or anchor extraction.',
+    'This route grants a reviewer zero edit, execution, mutation or checker authority.',
+    'Require separate admission for every mutation or checker execution; keep mutation proof after merge.',
+    'Hook, permission and tool denials and every earlier refusal stay effective under their existing rules; this route lifts none of them by itself.',
+    "The driver applies zero protected edits; preserve zero writer publication authority, protected holds, and Peral's CI-runner and merge-queue authority.",
+]
+
+FALSE_CLAIM_CARRIERS = (
+    ('plugins/ship/agents/writer--sol.md', '### False-claim retirement route', '### New lane-owned row creation'),
+    ('plugins/ship/agents/writer--sonnet.md', '### False-claim retirement route', '### New lane-owned row creation'),
+    ('plugins/ship/agents/writer--fable52.md', '### False-claim retirement route', '### New lane-owned row creation'),
+    ('plugins/ship/agents/driver.md', '### False-claim retirement route', '### New lane-owned row review route'),
+    ('plugins/ship/agents/driver--sol.md', '### False-claim retirement route', '### New lane-owned row review route'),
+    ('plugins/ship/agents/reviewer--sol.md', '## False-claim retirement route', '## Removed-behavior retirement review'),
+    ('plugins/ship/agents/reviewer--opus.md', '## False-claim retirement route', '## Removed-behavior retirement review'),
+    ('plugins/ship/skills/ship/SKILL.md', '### False-claim retirement route', '### New lane-owned row review route'),
+    ('plugins/ship/skills/ship/references/owner-decisions.md', '## False-claim retirement route', '## Lane-owned disposition route'),
+)
+
+
 class ApprovedTestAdaptationsTests(unittest.TestCase):
+    def test_false_claim_retirement_route_is_identical_in_every_copy(self):
+        for name, heading, following_heading in FALSE_CLAIM_CARRIERS:
+            with self.subTest(path=name):
+                text = (ROOT / name).read_bytes().decode('utf-8')
+                self.assertEqual(text.splitlines().count(heading), 1)
+                _, _, after = text.partition(heading + '\n')
+                section = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after,
+                                   maxsplit=1, flags=re.MULTILINE)[0]
+                self.assertEqual(section, '\n' + '\n'.join(EXPECTED_FALSE_CLAIM_ROUTE) + '\n\n')
+                self.assertEqual(after[len(section):].splitlines()[0], following_heading)
+
+    def test_false_claim_route_refuses_true_claims_untouched_subjects_and_skipped_follow_up_rows(self):
+        for line in (
+            'Refuse the retirement when the claim is still true at the final code, or when the reviewer cannot confirm any requirement.',
+            "Refuse when any part of the claim still holds at the final code; that row uses the lane-derived route or the Lane-owned disposition route's surviving-claim adaptation.",
+            'Refuse a row whose subject file the PR leaves unchanged.',
+            'Require a hunk that a PR-authored commit wrote in that subject file to make the claim false; a main merge alone never qualifies.',
+            'Refuse a row that CI reports `in the base file, missing at HEAD`; that row uses the Removed-behavior retirement route.',
+            'Require the PR body to state the intended behavior change; a claim that a defect made false never qualifies.',
+            'Require a follow-up row that guards the new behavior, in this PR or in a follow-up PR that this PR body names by direct URL.',
+            'Require the same reviewer to read the follow-up row at its frozen commit and confirm that it is not weaker than the retired row.',
+            "Run this PR's post-merge battery after that follow-up PR merges at a head that keeps the verdict, at a commit that contains both.",
+            'If the follow-up PR has not merged 24 hours after this PR merges, run the battery then and report the retired claim to the CoC as unguarded.',
+            'After that report, the CoC has the follow-up row merged or the retirement reverted; a retirement never stays on main without a merged follow-up row.',
+            'Agreement with the PR body alone supplies zero confirmation.',
+        ):
+            with self.subTest(requirement=line):
+                self.assertIn(line, EXPECTED_FALSE_CLAIM_ROUTE)
+
     def test_contract_gap_rule_follows_every_anchor_and_preserves_refusal_boundaries(self):
         anchor = 'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.'
         cause = 'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.'
