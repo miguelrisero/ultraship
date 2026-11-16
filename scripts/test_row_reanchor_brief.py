@@ -37,8 +37,13 @@ class BriefTests(unittest.TestCase):
         row.write_text('synthetic')
         base, head = '9e14c2f80a6d37b5914e08c2d6f7a3b9051ce824', 'a38d91e5c7b204f6d819ec03a7f52b6084de19c2'
         row_id, subject = 'P25-warning-race', 'src/warning.py'
-        command = ('python3 -I ' + str(TOOL) + ' --row-file ' + str(row)
-                   + ' --row-id ' + row_id + ' --subject ' + subject + ' --base ' + base + ' --head ' + head)
+        plugin_root = str(ROOT / 'plugins/ship')
+        documented = re.search(r'Use exactly `([^`]+)`', self.reference.split('## Row re-anchor tool admission record\n', 1)[1])[1]
+        command = documented.replace('<plugin root>', plugin_root).replace('<absolute path>', str(row))
+        command = command.replace('<id>', row_id).replace('<repository-relative path>', subject)
+        command = command.replace('<ref>', base, 1).replace('<ref>', head, 1)
+        self.assertEqual(command, 'python3 -I ' + str(TOOL) + ' --row-file ' + str(row)
+                         + ' --row-id ' + row_id + ' --subject ' + subject + ' --base ' + base + ' --head ' + head)
         expiry = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 3600))
         values = {
             'row ID': row_id, 'PR URL': 'https://github.com/example/repo/pull/25',
@@ -57,7 +62,11 @@ class BriefTests(unittest.TestCase):
             'subject commit SHA': 'd6' * 20, 'subject line range': '41-58', 'review time': '2026-11-16T09:30:00Z',
             'added': '4', 'deleted': '2', 'tool base SHA': base, 'tool base reason': 'the CI base',
             'method-only denials': 'a `python3` heredoc and a `sed` unescape of the row fields',
-            'denial record path': str(root / 'denial.jsonl'),
+            'denial times': '08:10Z and 08:12Z', 'denial record path': str(root / 'denial.jsonl'),
+            'denial record lines': '3 and 4', 'assigned topic': 'the warning race rows',
+            'plugin root': plugin_root, 'rule Input UUID': 'a5c2e8f1-3b74-4d09-96e0-1f8d27b4c053',
+            'rule event ID': '2d6f9b08-71ce-4a35-8e14-b09c53a7d6f2',
+            'rule event hash': '9a1e5c73d08b4f26a7e3910c5d8b6f42e0a7c319d5b86e24f1a03c7d9e58b2f6',
             'earlier attempts': 'one heredoc attempt on the row',
             'attempt record path': str(root / 'attempt.jsonl'),
             'expiry time': expiry, 'worktree path': str(worktree), 'tool command': command,
@@ -109,8 +118,10 @@ class BriefTests(unittest.TestCase):
     def test_template_dispatch_lines(self):
         lines = (
             'Owner helper request: the owner\'s global CLAUDE.md, heading "Helper agents (standing request)", '
-            'requests helper agents for this topic.\n'
-            'Readable files: `<worktree path>`, `<decision file path>`, `<tool route decision path>`, '
+            'requests helper agents. Covered role: writer. Topic: <assigned topic>. '
+            'Every permission, denial and gate stays in force.\n'
+            'Readable files: `<worktree path>`, `<plugin root>/skills/ship/references/owner-decisions.md`, '
+            '`<decision file path>`, `<tool route decision path>`, '
             '`<denial record path>`, `<attempt record path>`; every other path is out of scope\n'
             'A hook refusal is final: report it and stop.\n'
             'Never print a key value; never post outside bettergroupinc and miguelrisero.\n'
@@ -138,7 +149,11 @@ class BriefTests(unittest.TestCase):
             ('Same operation:', 'The CoC reviews the same-operation, same-claim reason'),
             ('Method-only denials:', "After a hook denies only the method of this route's row edit"),
             ('Tool route:', 'When the brief names the sanctioned row re-anchor tool'),
-            ('made zero native Edit calls', 'The tool run is its own single attempt'),
+            ('Standing rule:', 'cites this owner rule'),
+            ('zero tool runs', 'The tool run is its own single attempt'),
+            ('- Attempt record:', "record the tool attempt on the brief's attempt record before the run"),
+            ('- Worktree:', "with the brief's row file, row ID, subject, base and head"),
+            ('- On `REFUSED` or any denial, stop.', 'A tool refusal or hook denial ends the attempt.'),
             ('run once, alone:', 'When the brief names the sanctioned row re-anchor tool, run it once'),
         )
         for field, rule in requirements:
@@ -160,8 +175,9 @@ class BriefTests(unittest.TestCase):
                 "this route's owner access record, CoC row allowlist, CI and source binding, and method-only denial evidence; "
                 'verify each field, use `get_input` when available, and refuse a missing or mismatched field.\n'
                 'The tool run is its own single attempt: an earlier attempt on the row that made zero native Edit calls '
-                'leaves it unused, even when its record marks that attempt consumed; any native Edit call on the row, '
-                'a tool run, a tool refusal or a hook denial uses it; '
+                'and zero tool runs, and drew only the listed method-only shell denials, leaves it unused, '
+                'even when its record marks that attempt consumed; any native Edit call on the row, '
+                'any tool run, and any refusal or hook denial of the tool command uses it; '
                 "record the tool attempt on the brief's attempt record before the run."
             )
             text = (ROOT / carrier).read_text()
@@ -173,8 +189,9 @@ class BriefTests(unittest.TestCase):
         self.assertIn('9. Send the exact scoped brief, built from the [row re-anchor tool brief]'
                       '(#row-re-anchor-tool-brief), with SendMessage.', self.reference)
         self.assertIn('The [row re-anchor tool brief](#row-re-anchor-tool-brief) lists the fields that supply this evidence; '
-                      'the tool run is its own single attempt, unused by an earlier attempt that made zero native Edit calls, '
-                      'and used by any native Edit call on the row.', self.reference)
+                      'the tool run is its own single attempt, unused by an earlier attempt that made zero native Edit calls '
+                      'and zero tool runs, and used by any native Edit call on the row, any tool run, '
+                      'and any refusal or hook denial of the tool command.', self.reference)
 
 
 if __name__ == '__main__':
