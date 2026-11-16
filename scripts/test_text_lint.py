@@ -198,11 +198,26 @@ class TextLintTests(unittest.TestCase):
     def test_peer_entity_glued_words_keep_token_check(self):
         message = ('Facts: deadline2026 by8November0&#48;\n'
                    'Decision: Continue.\nNext: Resume.')
+        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'peer', 'message': message}}
         with self.assertRaises(text_lint.FormatError) as refusal:
-            text_lint.check(message, 'peer')
+            text_lint.outgoing(event)
         self.assertEqual(refusal.exception.findings,
                          ['Separate glued words with spaces; remove compressed shorthand.'])
-        text_lint.check(message.replace('&#48;', '&amp;#48;'), 'peer')
+        event['tool_input']['message'] = message.replace('&#48;', '&amp;#48;')
+        text_lint.outgoing(event)
+
+    def test_peer_hold_wall_decodes_entities_once(self):
+        message = ('Facts: Preser&#118;e every ho&#108;d. Cus&#116;ody stays. '
+                   'Admi&#115;sion waits. Preser&#118;e the refu&#115;al.\n'
+                   'Decision: Wait.\nNext: Resume.')
+        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'chief', 'message': message}}
+        with self.assertRaises(text_lint.FindingsError) as refusal:
+            text_lint.outgoing(event)
+        self.assertEqual(refusal.exception.findings,
+                         ['Keep any new hold in one line, drop restated standing holds, '
+                          'and send what changed and the next action.'])
+        event['tool_input']['message'] = message.replace('&#', '&amp;#')
+        text_lint.outgoing(event)
 
     def test_peer_hold_wall_reads_text_after_tag_like_text(self):
         message = ('Facts: Checks wait.\ncat <<EOF\n'

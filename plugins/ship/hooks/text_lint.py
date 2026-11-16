@@ -103,19 +103,23 @@ def glued(tokens):
     return {w for w in words if len(w) >= 7 and w.isalnum() and GLUED.search(w) and not GLUE_EXEMPT.fullmatch(w)}
 
 
+def peer_text(text):
+    # A peer reads SendMessage text as plain text; main's HTML parse decoded references once.
+    return html.unescape(RECEIPT_MARKER.sub('', text))
+
+
 def hold_wall(text):
     """Six or more hold words in a status message restate standing holds; a brief carries its restrictions."""
     if 'Owner helper request:' in text:
         return
-    prose = re.sub(r'`[^`]*`', '', RECEIPT_MARKER.sub('', text))
+    prose = re.sub(r'`[^`]*`', '', text)
     words = ' '.join(t for t in prose.split() if not re.search(r'https?://|/', t))
     if len(HOLD_WORDS.findall(words)) >= 6:
         raise ValueError('Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.')
 
 
 def check(text, kind='result'):
-    # A peer reads SendMessage text as plain text; main's visible text decoded entities once, so peer text does too.
-    plain = html.unescape(RECEIPT_MARKER.sub('', text)) if kind == 'peer' else ''.join(VisibleText(text).parts)
+    plain = text if kind == 'peer' else ''.join(VisibleText(text).parts)
     prose = re.sub(r'`[^`]*`', '', plain)
     token_prose = re.sub(r'[<>]', ' ', prose) if kind == 'peer' else prose
     tokens = [t for t in token_prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
@@ -153,6 +157,7 @@ def outgoing(event):
         if tool == 'SendMessage':
             text = args.get('message') or args.get('content') or ''
             if text:  # Native subscriptions and lifecycle controls can have no prose body.
+                text = peer_text(text)
                 collect(check, text, 'peer')
                 if not SUBAGENT.fullmatch(str(args.get('to', '')).strip()):  # A brief to a child carries its restrictions.
                     collect(hold_wall, text)
@@ -544,4 +549,6 @@ if __name__ == '__main__':
         else:
             hook(event)
     else:
-        check(sys.stdin.read(), sys.argv[1] if len(sys.argv) > 1 else 'result')
+        kind = sys.argv[1] if len(sys.argv) > 1 else 'result'
+        text = sys.stdin.read()
+        check(peer_text(text) if kind == 'peer' else text, kind)
