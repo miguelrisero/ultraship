@@ -35,7 +35,7 @@ Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable
 
 Reviewers, triage and verifiers skip this order. They use Grep and Glob on an exact canonical absolute path, and Read for files.
 
-Planners, researchers, writers and the driver search in this order.
+Every other role searches in this order.
 
 1. LSP for definitions and references.
 2. `mcp__fff__multi_grep` to batch related patterns in one call.
