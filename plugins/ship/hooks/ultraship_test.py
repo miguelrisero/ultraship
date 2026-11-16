@@ -397,6 +397,127 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assertEqual(result['permissionDecision'], 'deny')
         self.assertEqual(result['permissionDecisionReason'], reason)
 
+    def own_account_event(self):
+        os.environ.pop('XDG_STATE_HOME', None)
+        state = Path(os.environ['HOME']) / '.local/state/ultraship'
+        self.enterContext(patch.object(ultraship, 'STATE', state))
+        self.account_words = ['python3', str(LEDGER), 'account', str(state / 'owed/session-context.tsv'),
+                              '12345678-1234-1234-1234-123456789abc', 'slice-review',
+                              'ship:reviewer--sol@reviewer-a', 'abcdef1', 'pass', 'reviewed context, [P2] nit']
+        return {'session_id': 'session-context', 'agent_type': '', 'tool_name': 'Bash',
+                'tool_input': {'command': shlex.join(self.account_words)}}
+
+    def test_own_account_call_allows_main_and_driver(self):
+        event = self.own_account_event()
+        for caller in ('', 'ship:driver', 'driver', 'ship:driver--sol'):
+            for ledger in (str(LEDGER), '"' + str(LEDGER) + '"'):
+                command = shlex.join(self.account_words).replace(str(LEDGER), ledger, 1)
+                with self.subTest(caller=caller, ledger=ledger):
+                    output = io.StringIO()
+                    with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                        self.assertIsNone(ultraship.guarded_pre(
+                            {'cwd': str(self.cwd), **event, 'agent_type': caller,
+                             'tool_input': {'command': command}}))
+                    self.assertEqual(output.getvalue(), '')
+
+        for evidence in ('"reviewed context, [P2] nit"', r"'Reviewer'\''s [P2] context'"):
+            command = shlex.join(self.account_words[:-1]) + ' ' + evidence
+            with self.subTest(evidence=evidence):
+                output = io.StringIO()
+                with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                    self.assertIsNone(ultraship.guarded_pre(
+                        {'cwd': str(self.cwd), **event, 'tool_input': {'command': command}}))
+                self.assertEqual(output.getvalue(), '')
+
+    def test_stop_account_diagnostic_admits_quoted_paths(self):
+        event = self.own_account_event()
+        home = Path(os.environ['HOME']) / 'home with space'
+        state = home / '.local/state/ultraship'
+        script = self.cwd / 'plugin with space/ledger.py'
+        with patch.dict(os.environ, {'HOME': str(home)}), \
+                patch.object(ultraship, 'STATE', state), \
+                patch.object(ultraship, 'ledger_script', return_value=script), \
+                patch.object(ultraship, 'load_ledger', return_value=None), \
+                patch.object(ultraship, 'account', side_effect=ValueError('synthetic missing review')):
+            pending = ultraship.owed_file(event)
+            pending.parent.mkdir(parents=True)
+            pending.write_text('100\tship:reviewer--sol\t' + str(self.cwd) + '\t' +
+                               json.dumps({'id': self.account_words[4], 'v': 2}) + '\n')
+            output = io.StringIO()
+            with redirect_stdout(output):
+                ultraship.stop(event)
+            diagnostic = json.loads(output.getvalue())
+            self.assertEqual(diagnostic['decision'], 'block')
+            commands = re.findall(r'`([^`]* account [^`]*)`', diagnostic['reason'])
+            self.assertEqual(len(commands), 1)
+            command = commands[0]
+            for placeholder, value in zip(('<result-id>', '<step>', '<agent>', '<sha>', '<verdict>', '<evidence>'),
+                                          self.account_words[4:]):
+                command = command.replace(placeholder, value)
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                self.assertIsNone(ultraship.guarded_pre(
+                    {'cwd': str(self.cwd), **event, 'tool_input': {'command': command}}))
+            self.assertEqual(output.getvalue(), '')
+
+    def test_own_account_call_denies_other_commands_and_callers(self):
+        event = self.own_account_event()
+        command = event['tool_input']['command']
+        commands = [command.replace('session-context.tsv', 'sibling-context.tsv'),
+                    command.replace(str(LEDGER), str(self.cwd / 'ledger.py')),
+                    shlex.join(self.account_words[:-1]), command + ' extra',
+                    'cd ' + str(self.cwd) + ' && ' + command]
+        commands.extend(command.replace('python3', interpreter, 1)
+                        for interpreter in ('python', 'python3 -I', 'env python3', 'bash -c'))
+        commands.extend(command + suffix for suffix in
+                        ('; echo done', ' && echo done', ' | cat', ' > output', '\necho done', '\n'))
+        commands.extend(command.replace("'reviewed context, [P2] nit'", evidence) for evidence in
+                        ('"$(echo context)"', '"`echo context`"', '"${HOME} context"', '$HOME',
+                         'context*', 'context?', 'context[ab]', 'context{a,b}', 'context\\ text',
+                         '"context!"', '"context\\text"', '"context\ntext"', "'context\ntext'"))
+        commands.extend(shlex.join(self.account_words[:-1]) + ' ' + evidence for evidence in
+                        ("'reviewed context';id", "'reviewed context'&&id", "'reviewed context'|cat",
+                         "'reviewed context'>out", "'reviewed context'<in", "'reviewed context'(id)",
+                         "\n'reviewed context'", '=ls'))
+        commands.extend(command.replace(' account ', ' ' + subcommand + ' ', 1)
+                        for subcommand in ('correct-binding', 'run-start'))
+        for invalid in commands:
+            with self.subTest(command=invalid):
+                self.assert_custody_denial({**event, 'tool_input': {'command': invalid}})
+        for caller in ('ship:writer--sol', 'ship:reviewer--sol', 'ship:driver-extra'):
+            with self.subTest(caller=caller):
+                self.assert_custody_denial({**event, 'agent_type': caller})
+
+    def test_own_account_call_requires_session_and_valid_fields(self):
+        event = self.own_account_event()
+        for session in (None, '', 1):
+            command = event['tool_input']['command']
+            if session is None or session == '':
+                command = command.replace('session-context.tsv', 'unknown.tsv')
+            with self.subTest(session=session):
+                self.assert_custody_denial({**event, 'session_id': session,
+                                           'tool_input': {'command': command}})
+        invalid_fields = ((4, '12345678-1234-1234-1234-123456789abC'), (4, 'invalid'),
+                          (5, 'Slice-review'), (5, 'slice_review'), (6, 'reviewer@a@b'),
+                          (7, 'abcdef'), (7, 'a' * 41), (7, 'ABCDEF1'),
+                          (8, 'owed'), (8, 'pass!'), (9, ''))
+        for index, value in invalid_fields:
+            words = self.account_words.copy()
+            words[index] = value
+            with self.subTest(index=index, value=value):
+                self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(words)}})
+
+    def test_own_account_call_preserves_other_custody_checks(self):
+        event = self.own_account_event()
+        state = Path(os.environ['HOME']) / '.local/state'
+        for evidence in (str(state / 'ultraship/text-lint/key'), 'ultraship/text-lint',
+                         str(state), str(state / 'ultraship'), str(state / 'ultra*/t*/key'),
+                         'text_lint hook', 'import text_lint'):
+            words = [*self.account_words[:-1], evidence]
+            with self.subTest(evidence=evidence):
+                self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(words)}})
+        self.assert_custody_denial({**event, 'cwd': str(state)})
+
     def test_bash_store_glob_prefixes_deny_every_caller(self):
         patterns = ('ultra*/t*/pending/[0-9a-f]*',
                     'ultra*/t*/receipts/' + '?' * 32 + '.json',
