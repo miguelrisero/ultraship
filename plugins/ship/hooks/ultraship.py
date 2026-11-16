@@ -3467,6 +3467,67 @@ def writer_gh_denial(command, depth=0):
     return None
 
 
+READ_ONLY_GH = {('run', 'view'), ('run', 'watch'), ('run', 'list'), ('pr', 'checks'),
+                ('pr', 'view'), ('pr', 'diff'), ('pr', 'list'), ('pr', 'status')}
+
+
+def literal_read_gh(words):
+    calls = [index for index, (value, _) in enumerate(words) if os.path.basename(value) == 'gh']
+    if not calls:
+        return False
+    expansions = '$`*?[]{}\\~'
+    if any(char in raw for _, raw in words[:calls[0] + 1] for char in expansions):
+        return False
+    return all(index + 2 < len(words)
+               and (words[index + 1][0], words[index + 2][0]) in READ_ONLY_GH
+               and not any(char in raw for _, raw in words[index + 1:index + 3] for char in expansions)
+               for index in calls)
+
+
+def data_heredoc_removed(command):
+    lines = command.splitlines(keepends=True)
+    if not lines or lines[0].count('<<') != 1 or not data_reader_header(lines[0]):
+        return command
+    match = re.search(r'''<<(-?)[ \t]*(['"])([A-Za-z0-9_]+)\2''', lines[0])
+    if not match:
+        return command
+    for end in range(1, len(lines)):
+        candidate = lines[end].lstrip('\t') if match[1] else lines[end]
+        if candidate.removesuffix('\n') == match[3]:
+            body = re.sub(r'''['"\\]''', '', ''.join(lines[1:end])).casefold()
+            if re.search(r'\bgh\b', body):
+                return command
+            return lines[0][:match.start()] + lines[0][match.end():] + ''.join(lines[end + 1:])
+    return command
+
+
+def backtick_substitutions(command):
+    kept, single, double, escaped, index = [], False, False, False, 0
+    while index < len(command):
+        char = command[index]
+        if single:
+            single = char != "'"
+        elif escaped:
+            escaped = False
+        elif char == '\\':
+            escaped = True
+        elif char == '"':
+            double = not double
+        elif char == "'" and not double:
+            single = True
+        elif char == '`':
+            end = command.find('`', index + 1)
+            if end == -1 or any(char in command[index + 1:end] for char in '\\' + "'\""):
+                return None
+            # Without a backslash or quote inside, backquotes match $(...), which the guard already scans.
+            kept.append('$(' + command[index + 1:end] + ')')
+            index = end + 1
+            continue
+        kept.append(char)
+        index += 1
+    return ''.join(kept)
+
+
 # shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
 def review_thread_denial(command):
     if read_only_shell(command) or literal_search_shell(command):
@@ -3474,15 +3535,18 @@ def review_thread_denial(command):
     if '$' not in command and re.fullmatch(
             r"git commit(?: +-[A-Za-z]+| +--[a-z-]+)*(?: +-m +'[^']*'(?: +-[A-Za-z]+| +--[a-z-]+)*)+ *", command):
         return None
+    data = cat_heredoc_data(data_heredoc_removed(command))
     command = command.replace('\\\n', '')
     normalized = re.sub(r'''['"\\]''', '', command).casefold()
-    if re.search(r'\bgh\b', normalized) and '`' in outside_single_quotes(command):
-        return 'review-thread guard parse failure'
     if (any(name in normalized for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
                                             'resolvereviewthread'))
             or re.search(r'comments/\S*/replies', normalized)):
         return 'raw review-thread mutation'
-    command = cat_heredoc_data(command)
+    converted = backtick_substitutions(data.replace('\\\n', ''))
+    if converted is None and re.search(r'\bgh\b', normalized):
+        return 'review-thread guard parse failure'
+    command = converted if converted is not None else data.replace('\\\n', '')
+    normalized = re.sub(r'''['"\\]''', '', command).casefold()
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace = ' \t\r'
@@ -3492,7 +3556,7 @@ def review_thread_denial(command):
     except ValueError as error:
         return 'unparsed shell syntax rule: ' + str(error) if re.search(r'\bgh\b', normalized) else None
     names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word)) == 'gh'
-                   for word in re.split(r'[\s;&|()<>]+', normalized))
+                   for word in re.split(r'[\s;&|()<>`]+', normalized))
     if names_gh:
         seen_gh = False
         for index, token in enumerate(tokens):
@@ -3531,7 +3595,7 @@ def review_thread_denial(command):
         value = shlex.split(raw)[0]
         words.append((value, raw))
         if (any(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', token)[-1]).casefold() == 'gh'
-                for token in re.split(r'[\s;&|()<>]+', re.sub(r'''['"\\]''', '', value)))
+                for token in re.split(r'[\s;&|()<>`]+', re.sub(r'''['"\\]''', '', value)))
                 and value != raw):
             reason = review_thread_denial(value)
             if reason:
@@ -3548,7 +3612,7 @@ def review_thread_denial(command):
                 skip_target = redirect.end() == len(raw)
                 continue
             command_words.append((value, raw))
-        if skip_target and names_gh:
+        if skip_target and names_gh and not literal_read_gh(command_words):
             return 'review-thread guard parse failure'
         words = command_words
         for index, (value, _) in enumerate(words[:-1]):
@@ -3557,11 +3621,13 @@ def review_thread_denial(command):
                 if (any(char.isspace() for char in subcommand)
                         or re.search(r'[$`~*?\[{]', outside_single_quotes(raw_subcommand))):
                     return 'review-thread guard parse failure'
+        if (any(os.path.basename(value) == 'gh' for value, _ in words) and not literal_read_gh(words)
+                and any(re.search(r'[*?\[]|\{[^}]*?(?:,|\.\.)[^}]*\}',
+                                  re.sub(r'''('([^']*)'|"(?:\\.|[^"\\])*")''', '', raw))
+                        for _, raw in words)):
+            return 'review-thread guard parse failure'
         if any(os.path.basename(value) == 'gh' for value, _ in words) and any(
-                re.search(r'[*?\[]|\{[^}]*?(?:,|\.\.)[^}]*\}',
-                          re.sub(r'''('([^']*)'|"(?:\\.|[^"\\])*")''', '', raw))
-                or re.search(r'''\$['"]''', outside_single_quotes(raw))
-                for _, raw in words):
+                re.search(r'''\$['"]''', outside_single_quotes(raw)) for _, raw in words):
             return 'review-thread guard parse failure'
         calls = [index for index, (value, _) in enumerate(words)
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']

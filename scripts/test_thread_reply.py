@@ -181,6 +181,27 @@ REFUSE = (
     r'true x\<&gh api repos/o/r/pulls/7/comments -f body=x',
     r"tmux new 'true x\>|gh api repos/o/r/pulls/7/comments -f body=x'",
     r'true \\>|gh api repos/o/r/pulls/7/comments -f body=x',
+    r'''S=/home/u/ws/.scratch; for i in $(seq 1 60); do h=$(gh pr view 7 --json headRefOid -q .headRefOid 2>/dev/null); if [ "${h:0:12}" = "abc123abc123" ]; then r=$(gh run list --branch b --workflow ci --limit 5 --json databaseId,headSha -q ".[] | select(.headSha==\"$h\") | .databaseId" | head -1); if [ -n "$r" ]; then j=$(gh run view $r --json jobs -q '.jobs[] | select(.name | test("guard")) | "\(.databaseId) \(.status) \(.conclusion)"' 2>/dev/null); case "$j" in *completed*) id=${j%% *}; gh api repos/o/r/actions/jobs/$id/logs > $S/guard.log 2>&1; echo "head=$h"; exit 0;; esac; fi; fi; sleep 90; done''',
+    'gh api repos/o/r/pulls/7/comments --jq .[].id',
+    'gh pr comment 7 --body-file notes-[0-9].md',
+    'gh pr review 7 --approve --body-file r*.md',
+    "gh alias set pv 'pr view' && gh pv 7 --jq .[].x",
+    'gh $SUB view 7 --jq .[].x',
+    'gh {run,api} view 7',
+    '/usr/bin/[g]h api repos/o/r/pulls/7/comments -f body=x gh run view 7',
+    'echo x | xargs -I run gh run view 7 --jq .[].x',
+    "tmux new 'echo `gh api repos/o/r/pulls/7/comments -f body=x`'",
+    'bash -c "`gh api repos/o/r/pulls/7/comments --jq .[0].body`"',
+    r'echo `echo \`gh api repos/o/r/pulls/7/comments -f body=x\``',
+    'gh pr view `echo 7` "x',
+    "cat > /home/u/ws/x.md <<'EOF'\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF\ngh pr view 7",
+    "cat > /home/u/ws/x.md <<'EOF'\nresolveReviewThread\nEOF\ngh pr view 7",
+    "bash -c '`gh pr view 7 --json body --jq .body`'",
+    "bash <<'EOF'\necho `gh api repos/o/r/pulls/7/comments -f body=x`\nEOF",
+    "cat <<'EOF' | bash\ngh pr view `gh api repos/o/r/pulls/7/comments -f body=x`\nEOF",
+    "echo \"\ncat <<'EOF'\n\"; gh api repos/o/r/pulls/7/comments -f body=x\nEOF",
+    "cat > /home/u/ws/x.md <<'EOF'\nfoo\\\nEOF\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF",
+    "cat > /home/u/ws/x.md <<'EOF'\ngh\\\nEOF\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF",
 )
 
 ADMIT = (
@@ -236,6 +257,32 @@ ADMIT = (
     'gh api repos/o/r/pulls/7 >| out.json',
     'gh pr view 7 >| out.txt',
     'gh api repos/o/r/pulls/7 | head',
+    "cat > /home/u/ws/.scratch/receipt.md <<'EOF'\n"
+    '# Review receipt\n'
+    '\n'
+    '- Verdict: `PASS`.\n'
+    '- Scope: the saved recipe.\n'
+    '- Authority: `~/.claude/CLAUDE.md`.\n'
+    '- Source: `abc123`.\n'
+    '- Check: the row\'s field (literal text).\n'
+    '- Evidence: `def456`.\n'
+    '\n'
+    '| Check | Result |\n'
+    '|---|---|\n'
+    '| Same operation (fixed input) | PASS |\n'
+    '\n'
+    'EOF\n'
+    'sha256sum /home/u/ws/.scratch/receipt.md; git -C /home/u/ws/wt rev-parse HEAD; gh pr view 7 --json headRefOid -q .headRefOid',
+    '''printf '\\n**Review-thread guard misfire (11-16, 2 refusals):** a long compound Bash command with `gh run`/`gh api` plus a heredoc or a loop got "review-thread guard parse failure". Each refusal ended a task step. Use one short gh call per Bash call, and write files with native Write.\\n' >> /home/u/ws/memory/note.md''',
+    'gh run view 123 --json jobs --jq .jobs[].databaseId',
+    'gh run watch "$(gh run list --limit 1 --json databaseId --jq .[0].databaseId)" --exit-status',
+    'gh run list --json databaseId --jq .[].databaseId',
+    'gh pr checks 7 --json name --jq .[].name',
+    'gh pr view 7 --json files --jq .files[].path',
+    'gh pr diff "$(gh pr list --head b --json number --jq .[0].number)" --name-only',
+    'gh pr list --json number --jq .[].number',
+    'gh pr status --json number --jq .currentBranch.statusCheckRollup[].name',
+    'gh pr view 7 --json title --jq .title | grep -c x; echo "count `date -u +%F`"',
 )
 
 
