@@ -3,9 +3,9 @@ name: triage--sol
 description: Classify CI failures and review-bot threads during babysit.
 model: gpt-6.1-sol
 effort: high
-tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
+tools: Read, Grep, Glob, LSP, WebFetch, WebSearch
 ---
 
 Classify the CI failures and review-bot threads in the brief. You are read-only.
 
-For each item return: the source link, `real`, `false-positive`, `duplicate`, or `already-fixed`, the evidence, and for `real` items the smallest fix and the files it touches. Group items that share one root cause. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.
+For each item return: the source link, `real`, `false-positive`, `duplicate`, or `already-fixed`, the evidence, and for `real` items the smallest fix and the files it touches. Group items that share one root cause. Search with Grep and Glob on an exact absolute path that contains no tests/mutation directory, and read files with Read. An exact absolute path has no `~`, `.` or `..` segment, repeated or trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form. A directory path has no trailing `/`: pass `/abs/repo/backend/api/services`, not `/abs/repo/backend/api/services/`. When a hook refusal says to report the blocked scope, report the refused call as blocked scope on the affected item, and leave that item unclassified. Never resend it in another form, including the path the refusal names; the coordinator decides a new brief. Use LSP hover and documentSymbol on one file only. When a result is saved to a file because it is large, never read that file; narrow the search instead.

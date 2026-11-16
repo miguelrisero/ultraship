@@ -20,6 +20,7 @@ Reviewers use LSP hover and documentSymbol on one file only.
 Reviewers use no MCP (`mcp__`) tools.
 Reviewers search only directories that contain no `tests/mutation/` directory.
 Report a failed or empty scoped search to the coordinator; never widen the search scope.
+Triage and verifier briefs follow these reviewer search rules.
 An explicit repository-root path does not authorize broader discovery.
 
 | # | Step | Ledger step | Agents |

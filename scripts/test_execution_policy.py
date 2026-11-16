@@ -16,6 +16,8 @@ ultraship = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ultraship)
 
 ROOT = Path(__file__).resolve().parents[1]
+LEDGER_AGENTS = sorted(path for path in (ROOT / 'plugins/ship/agents').glob('*.md')
+                       if ultraship.LEDGER_ROLES.match(path.stem))
 
 
 def read(name):
@@ -59,6 +61,33 @@ class ReviewerSearchTests(unittest.TestCase):
 
     def assert_not_canonical(self, tool, arguments, **event):
         self.assert_rule(tool, arguments, 'exact absolute path', **event)
+
+    def test_triage_and_verifiers_share_the_reviewer_search_boundary(self):
+        cases = (
+            ('Grep', {'path': self.root + '/backend', 'glob': '!tests/mutation/**',
+                      'pattern': 'identifier'}, 'cannot access explicit tests/mutation/'),
+            ('Grep', {'path': self.root + '/backend', 'pattern': 'identifier'},
+             'cannot access explicit tests/mutation/'),
+            ('Read', {'file_path': self.root + '/tests/mutation/x.txt'},
+             'cannot access explicit tests/mutation/'),
+            ('Grep', {'pattern': 'identifier'}, 'scope searches to an explicit path'),
+            ('mcp__fff__grep', {'query': 'identifier'}, 'cannot use mcp__ tools'),
+        )
+        for tool, arguments, rule in cases:
+            reviewer = self.decision(tool, arguments)
+            self.assertEqual(reviewer.get('permissionDecision'), 'deny')
+            self.assertIn(rule, reviewer['permissionDecisionReason'])
+            for path in LEDGER_AGENTS:
+                for prefix in ('', 'ship:'):
+                    agent = prefix + path.stem
+                    with self.subTest(agent=agent, tool=tool, arguments=arguments):
+                        self.assertEqual(self.decision(tool, arguments, agent), reviewer)
+        for path in LEDGER_AGENTS:
+            for prefix in ('', 'ship:'):
+                agent = prefix + path.stem
+                with self.subTest(agent=agent, scope='ordinary'):
+                    self.assertEqual(self.decision('Grep', {'path': self.root + '/src',
+                                                           'pattern': 'identifier'}, agent), {})
 
     def test_explicit_protected_paths_in_each_tool_argument(self):
         for protected in (self.root + '/tests/mutation/x.txt',
@@ -920,7 +949,7 @@ class ReviewerSearchTests(unittest.TestCase):
         reason = decision['permissionDecisionReason']
         self.assertTrue(reason.endswith('NFC form. Report the blocked scope to the coordinator.'), reason)
         rule = reason[reason.index('no `~`'):reason.index(' Report the blocked scope')]
-        agents = sorted((ROOT / 'plugins/ship/agents').glob('reviewer--*.md'))
+        agents = LEDGER_AGENTS
         self.assertTrue(agents)
         for path in agents + [ROOT / 'plugins/ship/skills/review/SKILL.md',
                               ROOT / 'plugins/ship/skills/panel/SKILL.md',
@@ -998,7 +1027,7 @@ class ReviewerSearchTests(unittest.TestCase):
         self.assertIn('search scope validation fails', decision['permissionDecisionReason'])
 
     def test_every_reviewer_suffix_uses_the_shared_role_boundary(self):
-        suffixes = [path.stem for path in (ROOT / 'plugins/ship/agents').glob('reviewer--*.md')]
+        suffixes = [path.stem for path in LEDGER_AGENTS]
         self.assertTrue(suffixes)
         for suffix in suffixes:
             for prefix in ('', 'ship:'):

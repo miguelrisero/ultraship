@@ -26,14 +26,14 @@ Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable
 
 ## Tools
 
-- Read-only roles except reviewers: `Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch`.
-- Reviewers: `Read, Grep, Glob, LSP, WebFetch, WebSearch`. A reviewer uses LSP hover and documentSymbol only.
+- Planners and researchers: `Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch`.
+- Reviewers, triage and verifiers: `Read, Grep, Glob, LSP, WebFetch, WebSearch`. These agents use LSP hover and documentSymbol only.
 - Writers: every tool except `Agent`. Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch. A hook denies harness-config edits.
 - Driver: every tool.
 
 ## Search order
 
-Reviewers skip this order. They use Grep and Glob on an exact canonical absolute path, and Read for files.
+Reviewers, triage and verifiers skip this order. They use Grep and Glob on an exact canonical absolute path, and Read for files.
 
 Every other role searches in this order.
 
