@@ -213,10 +213,14 @@ class BriefTests(unittest.TestCase):
             ('Standing rule event:', 'records in the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name'),
             ('zero tool runs', 'The tool run is its own single attempt'),
             ("ended only in a tool error under another head's grant",
-             'a new CoC grant bound to a different head SHA, one with no used attempt, gets one fresh attempt'),
+             'a new CoC grant bound to a head SHA with no used attempt on the row gets one fresh attempt'),
+            ('None drew `REFUSED` or a hook or permission refusal or denial other than the listed method-only denials',
+             'no earlier attempt on the row drew `REFUSED` or a hook or permission refusal or denial other than the listed method-only shell denials'),
             ('its SHA256 and `<author head SHA>` in the attempt record',
-             "with the grant's CoC decision file, its SHA256 and the head SHA"),
-            ('- Attempt record:', "record the tool attempt, with the grant's CoC decision file, its SHA256 and the head SHA, on the brief's attempt record before the run"),
+             "with the grant's CoC decision file, its SHA256 and the head SHA before the call"),
+            ("It names each earlier attempt's decision file, SHA256, head SHA and outcome.", 'and its outcome after it'),
+            ("Record the run's outcome in the attempt record before any other step.", 'and its outcome after it'),
+            ('- Attempt record:', "record each native Edit call and tool run on the row on the brief's attempt record"),
             ('- Worktree:', "with the brief's row file, row ID, subject, base and head"),
             ('- On `REFUSED` or any denial, stop.', 'A tool refusal or hook denial ends the attempt.'),
             ('run once, alone:', 'When the brief names the sanctioned row re-anchor tool, run it once'),
@@ -247,16 +251,19 @@ class BriefTests(unittest.TestCase):
                 'and drew only the listed method-only shell denials, leaves it unused, '
                 'even when its record marks that attempt consumed; any native Edit call on the row, '
                 'any tool run, and any refusal or hook denial of the tool command uses it; '
-                'a new CoC grant bound to a different head SHA, one with no used attempt, gets one fresh attempt '
-                'only when every earlier used attempt on the row ended only in a tool error, '
-                'such as no match or a changed file, with no hook refusal, hook denial or `REFUSED`; '
-                'a second grant for a head that already used its attempt frees nothing; '
-                "record the tool attempt, with the grant's CoC decision file, its SHA256 and the head SHA, "
-                "on the brief's attempt record before the run."
+                'a new CoC grant bound to a head SHA with no used attempt on the row gets one fresh attempt '
+                'only when every earlier used attempt ended only in a tool error, '
+                'such as a native Edit no-match or file-changed error, '
+                'and no earlier attempt on the row drew `REFUSED` or a hook or permission refusal or denial '
+                'other than the listed method-only shell denials; '
+                'any other grant for a head that already used its attempt frees nothing; '
+                "record each native Edit call and tool run on the row on the brief's attempt record, "
+                "with the grant's CoC decision file, its SHA256 and the head SHA before the call and its outcome after it."
             )
             text = (ROOT / carrier).read_text()
             with self.subTest(carrier=carrier):
                 self.assertIn(lines, text)
+                self.assertEqual(text.count('The tool run is its own single attempt'), 1)
                 route = text.split('#### Lane-derived route\n', 1)[1]
                 route = re.split(r'\n#{1,4} ', route, maxsplit=1)[0]
                 self.assertIn('A tool refusal or hook denial ends the attempt.', route)
@@ -267,10 +274,14 @@ class BriefTests(unittest.TestCase):
                       'unused by an earlier attempt that made zero native Edit calls and zero tool runs, '
                       'and used by any native Edit call on the row, any tool run, '
                       'and any refusal or hook denial of the tool command. '
-                      'A new CoC grant bound to a different head SHA, one with no used attempt, gets one fresh attempt '
-                      'only when every earlier used attempt on the row ended only in a tool error, '
-                      'with no hook refusal, hook denial or `REFUSED`; '
-                      'a second grant for a head that already used its attempt frees nothing.', self.reference)
+                      'A new CoC grant bound to a head SHA with no used attempt on the row gets one fresh attempt '
+                      'only when every earlier used attempt ended only in a tool error, '
+                      'such as a native Edit no-match or file-changed error, '
+                      'and no earlier attempt on the row drew `REFUSED` or a hook or permission refusal or denial '
+                      'other than the listed method-only shell denials; '
+                      'any other grant for a head that already used its attempt frees nothing. '
+                      "The attempt record names each native Edit call and tool run on the row with the grant's "
+                      'CoC decision file, its SHA256, the head SHA and its outcome.', self.reference)
 
 
 if __name__ == '__main__':
