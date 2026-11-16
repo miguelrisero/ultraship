@@ -254,6 +254,21 @@ REFUSE = (
     'echo "gh api repos/o/r/pulls/7/comments -f body=x" > >(parallel)',
     '{ echo "gh api repos/o/r/pulls/7/comments -f body=x" >&2; } 2>&1 | parallel',
     r'''trap 'c=${BASH_COMMAND#echo }; eval ${c//\"/}' DEBUG; echo "gh api repos/o/r/pulls/7/comments -f body=x"''',
+    'echo "gh api repos/o/r/pulls/7/comments" > /home/u/ws/note.md | cat',
+    "echo 'gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123' > /home/u/ws/note.md > >(parallel)",
+    "if true; then echo 'gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123'; fi | parallel",
+    "{ echo 'gh api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123'; }>&1 | parallel",
+    "if true; then echo 'gh api repos/o/r/pulls/7/comments -f body=x'; fi | awk '{system($0)}'",
+    "for f in a; do echo \"gh api repos/o/r/pulls/7/comments -f body=x\"; done | awk '{system($0)}'",
+    "case a in a) echo \"gh api repos/o/r/pulls/7/comments -f body=x\";; esac | awk '{system($0)}'",
+    "{ echo \"gh api repos/o/r/pulls/7/comments -f body=x\" >/home/u/ws/f >&2; } 2>&1 | awk '{system($0)}'",
+    "(echo \"gh api repos/o/r/pulls/7/comments -f body=x\") 2>&1 | awk '{system($0)}'",
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x" > /home/u/ws/f; xargs -a /home/u/ws/f -L1 env',
+    'echo "gh api repos/o/r/pulls/7/comments -f body=x" > /home/u/ws/f; xargs -L1 env < /home/u/ws/f',
+    '''coproc awk '{system($0)}'; echo "gh api repos/o/r/pulls/7/comments -f body=x" >&${COPROC[1]}''',
+    "B=/home/u/ws/.scratch/body.md; cat > $B <<EOF\n$(gh api repos/o/r/pulls/7/comments -f body=x)\nEOF\ncd /home/u/ws/wt && gh pr create --draft --base main --head test/x --title \"test(x): add rows\" --body-file $B",
+    "B=/home/u/ws/.scratch/body.md; cat > $B <<'EOF'\nresolveReviewThread\nEOF\ncd /home/u/ws/wt && gh pr create --draft --base main --head test/x --title \"test(x): add rows\" --body-file $B",
+    "B=/home/u/ws/b; cat > $B <<'EOF'\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF\nbash $B",
 )
 
 ADMIT = (
@@ -360,12 +375,23 @@ echo "$(date -u +%FT%TZ) REFUSAL: ship thread guard ('review-thread guard parse 
     'echo "head $(gh pr view 7 --json headRefOid -q .headRefOid)"',
     "cat > /home/u/ws/x.md <<'EOF'\na . b\nEOF\ngh pr view 7",
     'grep -R time .; gh pr view 7',
-    'echo "gh api repos/o/r/pulls/7/comments" > /home/u/ws/note.md | cat',
     '{ echo "gh api repos/o/r/pulls/7/comments"; } > /home/u/ws/note.md',
     'echo "gh x $(date -u +%F)" || true',
     "if true; then echo 'gh api repos/o/r/pulls/7/comments -f body=x'; fi",
     'for f in a; do echo "gh $f"; done',
     'if false; then :; else echo "gh api x"; fi',
+    "B=/home/u/ws/.scratch/body.md; cat > $B <<'EOF'\n"
+    '## Summary\n'
+    "This PR's rows cover https://github.com/o/r/pull/7.\n"
+    '## Changes\n'
+    '- Add `row` checks.\n'
+    '## Left out\n'
+    '- Extra cases.\n'
+    '## Testing\n'
+    '- The checks pass.\n'
+    'EOF\n'
+    'cd /home/u/ws/wt && gh pr create --draft --base main --head test/x --title "test(x): add rows" --body-file $B',
+    '''cd /home/u/ws && echo "$(date -u +%FT%TZ) 7 admission frozen abc (reviewer def, commit 123, integration GO). 8 rows 456 pushed; gh pr create heredoc refused by hook parse ('No closing quotation') -> Flow chief fix by 17:00Z, lane holds, same command once after fix. 9 v2 frozen 789 (writer aaa, DMD1/2/3/9). CI flakes chief: one X-1 writer Bash denial 13:18Z, not replayed, plugin item; 2a by 16:00Z." >> .scratch/coc/notes.md''',
 )
 
 

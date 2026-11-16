@@ -3506,8 +3506,15 @@ def literal_read_gh(words):
 
 def data_heredoc_removed(command):
     lines = command.splitlines(keepends=True)
-    if (not lines or '<<<' in lines[0] or lines[0].count('<<') != 1
-            or not data_reader_header(lines[0])):
+    if not lines or '<<<' in lines[0] or lines[0].count('<<') != 1:
+        return command
+    tail_start = 0
+    for token in re.finditer(r'''"(?:\\.|[^"\\])*"|'[^']*'|\\.|&&|;''', lines[0]):
+        if token[0] in (';', '&&'):
+            tail_start = token.end()
+    header = re.sub(r'''(>>?[ \t]*)(?:"\$[A-Za-z_]\w*"|\$\{[A-Za-z_]\w*\}|\$[A-Za-z_]\w*)(?=[ \t\n]|$)''',
+                    r'\1x', lines[0][tail_start:])
+    if not data_reader_header(header):
         return command
     match = re.search(r'''(?<!<)<<(?!<)(-?)[ \t]*(['"])([A-Za-z0-9_]+)\2''', lines[0])
     if not match:
@@ -3579,31 +3586,31 @@ def quoted_command_substitutions(word):
     return None if stack else spans
 
 
-def echo_output_is_data(parts, index, parents, closing):
-    group = parents[index]
-    while True:
-        cursor = index + 1
-        while cursor < len(parts):
-            raw = parts[cursor]
-            if raw in ('|', '|&'):
+def echo_data_allowed(command, normalized, parts):
+    if (re.search(r'[<>]\(', outside_single_quotes(command))
+            or re.search(r'\b(parallel|coproc|exec|mkfifo|trap|shopt|function|alias|enable|hash)\b', normalized)
+            or re.search(r'\b(echo|printf)\s*\(', command)):
+        return False
+    shell_words = {'echo', 'printf', '{', '}', '(', ')', 'if', 'then', 'elif', 'else',
+                   'fi', 'do', 'done', 'while', 'until', 'for', 'case', 'esac', 'select', '!'}
+    segment = []
+    for raw in parts + [';']:
+        if raw and all(char in ';&|\n()' for char in raw):
+            first = 0
+            while first < len(segment) and re.match(r'[A-Za-z_]\w*=', segment[first]):
+                first += 1
+            words = segment[first:]
+            if raw in ('|', '|&') and (not words or not re.fullmatch(r'[A-Za-z0-9_./+-]+', words[0])
+                                      or words[0] in shell_words):
                 return False
-            if raw in (';', '\n', '&', '&&', '||', ')', '}'):
-                break
-            redirect = re.fullmatch(r'(?:1)?(?:>>?|>\|)(.*)', raw)
-            if redirect:
-                target = redirect[1]
-                if not target and cursor + 1 < len(parts):
-                    cursor += 1
-                    target = parts[cursor]
-                if target == '>' and cursor + 1 < len(parts) and parts[cursor + 1] == '(':
-                    return False
-                if re.fullmatch(r'[A-Za-z0-9_./-]+', target) and not target.startswith(('/dev/', '/proc/')):
-                    return True
-            cursor += 1
-        if group is None or group not in closing:
-            return True
-        index = closing[group]
-        group = parents[group]
+            if words and os.path.basename(words[0]) == 'xargs' and any(
+                    word.startswith('-a') or word == '--arg-file' or word.startswith('--arg-file=')
+                    or '<' in word for word in words[1:]):
+                return False
+            segment = []
+        else:
+            segment.append(raw)
+    return True
 
 
 # shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
@@ -3691,17 +3698,9 @@ def review_thread_denial(command):
         else:
             parts.append(match[0])
             offsets.append(match.start())
-    parents, closing, groups = {}, {}, []
-    for index, raw in enumerate(parts):
-        parents[index] = groups[-1] if groups else None
-        if raw in ('(', '{'):
-            groups.append(index)
-        elif raw in (')', '}') and groups:
-            closing[groups.pop()] = index
     segments, words, parentheses = [], [], []
     unmatched, command_word = False, None
-    data_arguments = not (re.search(r'\b(echo|printf)\s*\(', command)
-                          or re.search(r'\b(function|alias|enable|hash|trap|shopt)\b', normalized))
+    data_arguments = echo_data_allowed(command, normalized, parts)
     for part_index, raw in enumerate(parts):
         if all(char in ';&|\n()' for char in raw):
             for offset, char in enumerate(raw):
@@ -3719,8 +3718,7 @@ def review_thread_denial(command):
             continue
         value = shlex.split(raw)[0]
         literal_output = (data_arguments and not unmatched and not (parentheses and parentheses[-1])
-                          and command_word in (('echo', 'echo'), ('printf', 'printf'))
-                          and echo_output_is_data(parts, part_index, parents, closing))
+                          and command_word in (('echo', 'echo'), ('printf', 'printf')))
         if command_word is None and not (re.match(r'[A-Za-z_]\w*=', value)
                 or value in ('{', 'if', 'then', 'elif', 'else', 'do', 'while', 'until', '!')):
             command_word = (value, raw)
