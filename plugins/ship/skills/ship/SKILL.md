@@ -459,7 +459,10 @@ The lane that applied the retirement opens the revert as a normal PR with an ind
 A revert that restores retired rows is a CoC-owned protected edit, limited to the rows that this PR retired.
 Only a `git revert` of this PR's merge commit may restore those rows; a hand edit never restores a row.
 The CoC names the revert commit in a frozen file before the push.
-Each restored row file must equal its blob before the retirement, byte for byte; the CoC's git check proves it, without a not-weaker review.
+Each restored row must equal its bytes at the parent of this PR's merge commit.
+The revert may remove a follow-up row only when this PR's merge commit added it.
+Every other line of each row file that the revert changes must equal that file at the revert's parent.
+The CoC's content-free git check proves these equalities, without a not-weaker review.
 Any other row change in the revert stops the push.
 Refuse the retirement when the claim is still true at the final code, or when the reviewer cannot confirm any requirement.
 Refuse on any doubt about any requirement.
