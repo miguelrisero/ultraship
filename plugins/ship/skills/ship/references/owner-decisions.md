@@ -178,10 +178,13 @@ The hook accepts only its own plugin's tool path for a writer with a matching re
 The driver fills every field of this template and sends it as the step 9 brief.
 Each field supplies one lane-derived route requirement; a writer refuses a missing, unfilled or mismatched field.
 Put identifiers in backticks and keep each sentence at most 25 words, so the message passes `text_lint.py`.
+`text_lint.py` removes backtick spans, then counts a leading `-` and any punctuation left beside a removed span as words.
+It also refuses three or more words of 22 or more characters outside backticks, so times and file names go in backticks.
+Each template sentence leaves at least 12 words for its values; split a long value or an added line into short sentences.
 The brief carries no row text, pair bytes or TOML text.
 
 ```text
-Re-anchor row `<row ID>` of <PR URL> once with the sanctioned row re-anchor tool, then commit the row file.
+Re-anchor row `<row ID>` of <PR URL> once with the sanctioned row re-anchor tool. Then commit the row file.
 
 Owner helper request: the owner's global CLAUDE.md, heading "Helper agents (standing request)", requests helper agents. Covered role: writer. Topic: <assigned topic>. Every permission, denial and gate stays in force.
 Readable files: `<worktree path>`, `<plugin root>/skills/ship/references/owner-decisions.md`, `<decision file path>`, `<tool route decision path>`, `<denial record path>`, `<attempt record path>`; every other path is out of scope
@@ -192,23 +195,23 @@ Never chain a glob listing into a write command.
 Facts:
 - Route: lane-derived, with the sanctioned row re-anchor tool.
 - Standing rule: category 5 of owner rule Input `<rule Input UUID>` in workspace `<workspace UUID>`, choice `plugin_rule`.
-- Standing rule event: `<rule event ID>`, hash `<rule event hash>`, `answer_submitted`, `owner_ui`; <rule verifier name> read it with `get_input` at <rule verification time>.
+- Standing rule event: `<rule event ID>`, hash `<rule event hash>`, `answer_submitted`, `owner_ui`. <rule verifier name> read it with `get_input` at `<rule verification time>`.
 - Owner access: Input `<Input UUID>` version <version>, workspace `<workspace UUID>`, choice B, answer text null.
 - Owner event: `<event ID>`, hash `<event hash>`, `answer_submitted`, `owner_ui`, `no_answer_yet` false.
-- Verifier: <verifier name> read the event with `get_input` at <verification time>.
+- Verifier: <verifier name> read the event with `get_input` at `<verification time>`.
 - CoC decision: `<decision file path>`, SHA256 `<decision file SHA256>`.
 - Allowlist: row file `<row file path>`, stored row ID `<row ID>`, subject `<subject path>`.
 - CI: run `<run ID>`, attempt <attempt>, job `<job ID>` named `<job name>`, log <job log URL>.
 - CI failure: row `<row ID>` found <count> times, expected <expected>.
 - Tested merge `<tested merge SHA>`, tree `<tested merge tree SHA>`, parents `<CI base SHA>` and `<author head SHA>`.
-- Subject change: PR commit `<subject commit SHA>` changed `<subject path>` lines <subject line range> at the author head; <added> added and <deleted> deleted lines from the CI base.
-- Same operation: the CoC reviewed the same-operation, same-claim reason at <review time>, in the decision file above.
+- Subject change: PR commit `<subject commit SHA>` changed `<subject path>` lines <subject line range> at the author head. From the CI base, the subject diff has <added> added and <deleted> deleted lines.
+- Same operation: the CoC reviewed the same-operation, same-claim reason at `<review time>`. The decision file above records it.
 - Tool base `<tool base SHA>`: <tool base reason>.
-- Method-only denials: <method-only denials> at <denial times>, recorded in `<denial record path>` lines <denial record lines>; each named only the method, never row content or scope.
+- Method-only denials: <method-only denials>. They came at `<denial times>`. Lines <denial record lines> of `<denial record path>` record them. Each named only the method, never row content or scope.
 - Tool route: the CoC selected the sanctioned tool for this row in `<tool route decision path>`.
-- Earlier attempts: <earlier attempts>; each made zero native Edit calls and zero tool runs, so the tool attempt is unused.
+- Earlier attempts: <earlier attempts>. Each made zero native Edit calls and zero tool runs. The tool attempt is therefore unused.
 - Attempt record: `<attempt record path>`.
-- Admission record: written for your agent ID, expires at <expiry time>.
+- Admission record: written for your agent ID, expires at `<expiry time>`.
 - Worktree: `<worktree path>` at `<author head SHA>`, clean.
 
 Decision:
@@ -220,8 +223,8 @@ Decision:
 - A content, scope or protected-access denial blocks the tool run; only the listed method-only denials may precede it.
 
 Next:
-- Return the tool output and the commit SHA by <return time>.
-Receipt: <decision file name>
+- Return the tool output and the commit SHA by `<return time>`.
+Receipt: `<decision file name>`
 ```
 
 ## Lane-owned disposition route
