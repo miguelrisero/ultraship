@@ -98,3 +98,36 @@ class NativePeerRoutingTests(unittest.TestCase):
         self.assertIn('pending native handoff', state)
         self.assertIn('continuing driver and acceptance', state)
         self.assertIn('result Input receipt with ID/version/owner URL', state)
+
+
+class BriefSafetyTests(unittest.TestCase):
+    def test_each_template_requires_read_scope_and_safety_sentences(self):
+        for name, heading in (
+            ('plugins/chief/skills/run/references/dispatch.md', '## Brief template'),
+            ('plugins/ship/skills/review/SKILL.md', '## Dispatch'),
+            ('plugins/ship/skills/panel/SKILL.md', '## Dispatch'),
+            ('plugins/ship/skills/ship/references/pipeline.md', '# Ship pipeline'),
+            ('plugins/ship/skills/ship/references/owner-decisions.md', '## Helper standing request'),
+        ):
+            section = (ROOT / name).read_text().split(heading + '\n', 1)[1].split('\n## ', 1)[0]
+            for requirement in (
+                'Readable files: <exact absolute paths or directories the agent may read; every other path is out of scope>',
+                'A hook refusal is final: report it and stop.',
+                'Never print a key value; never post outside bettergroupinc.',
+                'Never chain a glob listing into a write command.',
+            ):
+                with self.subTest(path=name, requirement=requirement):
+                    self.assertIn(requirement, section)
+            if heading != '## Brief template':
+                with self.subTest(path=name):
+                    self.assertRegex(section, r'Require this field and these sentences verbatim in every (?:dispatch )?brief:')
+
+    def test_dispatch_check_asks_for_readable_files(self):
+        dispatch = (ROOT / 'plugins/chief/skills/run/references/dispatch.md').read_text()
+        question = next(line for line in dispatch.splitlines() if line.startswith('2. **Contract.**'))
+        self.assertIn('the readable files', question)
+
+    def test_panel_build_step_includes_required_field_and_safety_sentences(self):
+        panel = (ROOT / 'plugins/ship/skills/panel/SKILL.md').read_text()
+        step = next(line for line in panel.splitlines() if line.startswith('4. Build one self-contained brief:'))
+        self.assertIn('the required `Readable files` field and three safety sentences above', step)

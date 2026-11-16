@@ -8,6 +8,15 @@ Require flaky-risk findings or explicit none with inspected scope in all direct,
 Code findings identify file, line, and mechanism; plan findings identify relevant evidence locations.
 
 Every initial, verification, and replacement brief lists permitted paths and exclusions.
+Require this field and these sentences verbatim in every brief:
+
+```text
+Readable files: <exact absolute paths or directories the agent may read; every other path is out of scope>
+A hook refusal is final: report it and stop.
+Never print a key value; never post outside bettergroupinc.
+Never chain a glob listing into a write command.
+```
+
 Apply this rule to every review dispatch, including slice, selection, fix-read, closing, and delegated review seats.
 Scope every search call to the permitted paths.
 Exclude `tests/mutation/`, generated and vendored content, and any other brief exclusions.
