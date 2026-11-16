@@ -3375,7 +3375,7 @@ def plain_git_commit_shell(command):
 
 
 # ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, Bash writes to gh configuration, glob `?` and writer-created file names, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
-def writer_gh_denial(command, depth=0, *, scan_values=True):
+def writer_gh_denial(command, depth=0, *, scan_values=True, judged_value=False):
     shell_text = command
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = re.sub(r'''['"\\]''', '', command)
@@ -3399,6 +3399,8 @@ def writer_gh_denial(command, depth=0, *, scan_values=True):
         tokens = list(lexer)
     except ValueError as error:
         return 'unparsed shell syntax rule: ' + str(error)
+    if judged_value and any(os.path.basename(token) == 'gh' for token in tokens):
+        return reason
     segments, segment = [], []
     for index, token in enumerate(tokens):
         redirect = (token == '&' and (segment and segment[-1].endswith(('<', '>'))
@@ -3410,44 +3412,48 @@ def writer_gh_denial(command, depth=0, *, scan_values=True):
             segment.append(token)
     segments.append(segment)
     for words in segments:
-        command_index = 0
-        while command_index < len(words) and re.match(r'[A-Za-z_]\w*\+?=', words[command_index]):
-            command_index += 1
-        cli_command = command_index < len(words) and os.path.basename(words[command_index]) == 'gh'
-        for index, token in enumerate(words):
+        cli_argument = False
+        for token in words:
             if any(char.isspace() or char in ';&|()' for char in token):
-                nested = writer_gh_denial(token, depth + 1,
-                                          scan_values=scan_values and not (cli_command and index > command_index))
+                nested = writer_gh_denial(token, depth + 1, scan_values=scan_values and not cli_argument,
+                                          judged_value=judged_value)
                 if nested:
                     return nested
+            cli_argument = cli_argument or os.path.basename(token) == 'gh'
         if not any(re.search(r'\bgh\b', word) for word in words):
             continue
         if scan_values:
-            cursor, mode = 0, None
-            while cursor < len(words):
-                word = words[cursor]
-                if re.match(r'[A-Za-z_]\w*\+?=', word):
-                    nested = writer_gh_denial(word.split('=', 1)[1], depth + 1)
-                    if nested:
-                        return nested
-                elif mode is None and os.path.basename(word) in ('env', 'export'):
-                    mode = os.path.basename(word)
-                elif mode == 'env' and word.startswith('-'):
-                    option = next((flag for flag in WRAPPERS['env'] if word == flag
-                                   or flag.startswith('--') and word.startswith(flag + '=')
-                                   or not flag.startswith('--') and word.startswith(flag)), None)
-                    if option:
-                        value = word[len(option):].removeprefix('=')
-                        if word == option:
+            starts = [(0, None)] + [(index + 1, os.path.basename(word)) for index, word in enumerate(words)
+                                    if os.path.basename(word) in ('env', 'export')]
+            for cursor, mode in starts:
+                options = mode == 'env'
+                while cursor < len(words):
+                    word = words[cursor]
+                    if re.match(r'[A-Za-z_]\w*\+?=', word):
+                        nested = writer_gh_denial(re.sub(r'^[!\s]*', '', word.split('=', 1)[1]), depth + 1,
+                                                  judged_value=True)
+                        if nested:
+                            return nested
+                    elif options and word == '--':
+                        options = False
+                    elif options and word.startswith('-'):
+                        if re.search(r'\bgh\b', word):
+                            return reason
+                        takes_value = (not word.startswith('--') and word[-1:] in ('u', 'C', 'S', 'P')
+                                       or word.startswith('--') and '=' not in word and len(word) >= 4
+                                       and any(flag.startswith(word) for flag in
+                                               ('--unset', '--chdir', '--split-string')))
+                        if takes_value:
                             cursor += 1
                             value = words[cursor] if cursor < len(words) else ''
-                        if option in ('-S', '--split-string'):
-                            nested = writer_gh_denial(value, depth + 1)
+                            if re.search(r'\bgh\b', value):
+                                return reason
+                            nested = writer_gh_denial(re.sub(r'^[!\s]*', '', value), depth + 1, judged_value=True)
                             if nested:
                                 return nested
-                elif mode != 'export':
-                    break
-                cursor += 1
+                    elif mode != 'export':
+                        break
+                    cursor += 1
             for index, word in enumerate(words):
                 if os.path.basename(word) != 'git':
                     continue
@@ -3465,7 +3471,8 @@ def writer_gh_denial(command, depth=0, *, scan_values=True):
                         cursor += 1
                         continue
                     if '=' in value:
-                        nested = writer_gh_denial(value.split('=', 1)[1], depth + 1)
+                        nested = writer_gh_denial(re.sub(r'^[!\s]*', '', value.split('=', 1)[1]), depth + 1,
+                                                  judged_value=True)
                         if nested:
                             return nested
                     cursor += 1

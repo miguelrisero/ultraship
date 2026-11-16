@@ -723,6 +723,10 @@ class WriterGitHubGuardTests(unittest.TestCase):
             "gh api -X GET search/issues -f 'q=gh in:title'",
             "gh api -X GET search/code -f 'q=label:gh-pages is:open'",
             'git -c remote.origin.url=https://github.com/o/gh-tools.git fetch',
+            "command gh api -X GET search/issues -f 'q=gh in:title'",
+            "env gh api -X GET search/issues -f 'q=gh in:title'",
+            "timeout 60 gh api -X GET search/issues -f 'q=gh in:title'",
+            "env GH_PAGER=cat gh api -X GET search/issues -f 'q=gh in:title'",
         )
         for command in commands:
             with self.subTest(command=command):
@@ -756,6 +760,17 @@ class WriterGitHubGuardTests(unittest.TestCase):
             "env -C /repo GIT_EDITOR='gh issue close 1' git commit -e -m x",
             'env \'-SGIT_EDITOR="gh issue close 1" git commit -e -m x\'',
             'env \'--split-string=GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            "git -c credential.helper='!gh issue close 1' fetch",
+            "GIT_EDITOR='!gh issue close 1' git commit -e -m x",
+            'env -iS\'GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'env \'--spl=GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'nice env \'-SGIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'command env -u VISUAL GIT_EDITOR=gh git commit -e -m x',
+            "git -c alias.x='!gh issue close 1' x",
+            "env -iS 'gh issue close 1'",
+            'env \'-vSGIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'env \'--split=GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            "GIT_EDITOR='command gh api repos/o/r/pulls/1/merge' git config --file=-XPUT --edit",
         )
         for command in commands:
             with self.subTest(command=command):
