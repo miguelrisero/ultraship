@@ -15,6 +15,17 @@ Preserve every higher-priority restriction, effective refusal, test admission, i
 Send a refusal to the CoC once through the existing native parent route; retain the exact action, restriction, and blocked scope.
 Change zero settings or owner instruction files to obtain access.
 
+Require this field and these sentences verbatim in every brief:
+
+```text
+Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
+A hook refusal is final: report it and stop.
+Never print a key value; never post outside bettergroupinc and miguelrisero.
+Never chain a glob listing into a write command.
+```
+The stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.
+The formatting, coordination and method-only routes in [Loaded instructions and refusals](#loaded-instructions-and-refusals) stay.
+
 ## Chief-managed CoC delivery
 
 For chief-managed work, apply the chief's native peer routing and model-independent output contracts to every child, timer, and recovery brief.
