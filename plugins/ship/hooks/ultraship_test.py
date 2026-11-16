@@ -703,6 +703,25 @@ class PythonHeredocGuardTests(unittest.TestCase):
 
 
 class WriterGitHubGuardTests(unittest.TestCase):
+    def test_writer_git_component_shapes_are_denied(self):
+        for command in ('git status; git arbitrary-write .git/config',
+                        'custom-write --output=.git/config', 'custom-write -o.git/x',
+                        'git diff --output .git/config', 'git diff --output=.git/hooks/pre-commit',
+                        'git log -o.git/x', 'git config --file .git/config --get user.name',
+                        'git config --bool --get core.bare',
+                        'custom-write .g?t/config', 'pushd .git', 'env -C .git ls',
+                        "cat .G''IT/config", 'ls .g*/config', 'echo {.g,x}it',
+                        'echo .g{i,x}t', 'cat .git/config', 'head .git/config', 'ls .git/hooks',
+                        'git --git-dir=.git status', 'git --git-dir .git status'):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_noncontrol_dot_paths_and_globs_are_admitted(self):
+        for command in ('ls .gitignore', 'cat .github/workflows/validate.yml', 'ls /repo/*',
+                        'ls ?git', "ls '.g?t/config'", 'ls .gift/config'):
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
     def test_writer_quote_identity_and_all_data_method_flags_are_denied(self):
         for command in ("echo '*'; gh pr view 1 -q *", "echo '[x]'; gh pr view 1 --jq [x]",
                         "gh pr view 1 -q 'ref=-X POST'", "gh pr view 1 -H 'ref=--method POST'",
@@ -736,10 +755,8 @@ class WriterGitHubGuardTests(unittest.TestCase):
                     self.assertTrue(denied(hook('pre', {**self.writer, 'tool_name': tool,
                                                       'cwd': str(self.repo), 'tool_input': {key: target}}, self.env)))
 
-    def test_writer_current_repository_selectors_and_control_reads_are_admitted(self):
-        for command in ('cat .git/config', 'head .git/config', 'ls .git/hooks',
-                        'git --git-dir=.git status', 'git --work-tree=. status',
-                        'git --git-dir .git status', 'git --work-tree . status'):
+    def test_writer_current_worktree_selectors_are_admitted(self):
+        for command in ('git --work-tree=. status', 'git --work-tree . status'):
             with self.subTest(command=command):
                 self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
 
@@ -844,7 +861,7 @@ class WriterGitHubGuardTests(unittest.TestCase):
         for command in ('git config --get user.name', 'git config --get-all core.pager',
                         'git config --list', 'git config -l',
                         "gh api -X GET search/issues -f 'ref=*'", "gh pr view 1 --jq '.[].title'",
-                        "gh pr view 1 -q '[{title: .title}]'", 'cat .git/config',
+                        "gh pr view 1 -q '[{title: .title}]'",
                         'git clone --config core.pager=cat https://example.com/o/r.git'):
             with self.subTest(command=command):
                 self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))

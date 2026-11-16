@@ -3401,36 +3401,42 @@ def writer_git_control_path(path):
     return False
 
 
-WRITER_GIT_CONTROL_READS = {'cat', 'ls', 'head', 'tail', 'grep', 'wc', 'stat'}
+WRITER_GIT_PATH_COMMAND_ALLOWLIST = set()
+
+
+def writer_git_component_pattern(component):
+    """Match brace alternatives without constructing expanded command words."""
+    pattern, depth = '', 0
+    for char in component:
+        if char == '{':
+            pattern += '(?:'
+            depth += 1
+        elif char == '}' and depth:
+            pattern += ')'
+            depth -= 1
+        elif char == ',' and depth:
+            pattern += '|'
+        else:
+            pattern += re.escape(char)
+    return not depth and re.fullmatch(pattern, '.git') is not None
 
 
 def writer_git_file_denial(command):
-    """Refuse literal Git control targets except operands of known reads."""
-    words = shell_raw_words(shell_without_heredoc_bodies(command))
-    if not any('.git' in value.casefold() for _, value, _, _ in words):
+    """Refuse Git path components independently of the program that receives them."""
+    if command in WRITER_GIT_PATH_COMMAND_ALLOWLIST:
         return None
-    positions = shell_command_positions(words)
-    program, redirect = '', False
-    for index, (raw, value, start, _) in enumerate(words):
-        if start in positions:
-            program = os.path.basename(value)
-        if raw in {';', '&', '|', '(', ')', '\n'} and not redirect:
-            program = ''
-        if raw == '>':
-            redirect = True
-            continue
-        if redirect and raw in {'>', '|', '&'}:
-            continue
-        target = value.removeprefix('of=')
-        if program == 'cd' and re.search(r'(?:^|/)\.git(?:/|$)', target, re.I):
-            return 'git control directory rule'
-        if writer_git_control_path(target):
-            selector = program == 'git' and index and words[index - 1][1] == '--git-dir'
-            git_read = selector or program == 'git' and any(word[1] in {'status', 'diff', 'log', 'show', 'ls-files',
-                                                           'ls-tree', 'grep', 'rev-parse'} for word in words[:index])
-            if redirect or program not in WRITER_GIT_CONTROL_READS and not git_read:
-                return 'git control file write rule'
-        redirect = False
+    words = shell_raw_words(shell_without_heredoc_bodies(commit_message_removed(command)))
+    for raw, value, _, _ in words:
+        active = shell_brace_text(raw)
+        for part in value.casefold().split('='):
+            part = re.sub(r'^-[A-Za-z]', '', part)
+            for component in part.split('/'):
+                if component == '.git':
+                    return 'git control path component rule'
+                if active and component.startswith('.') and fnmatch.fnmatchcase('.git', component):
+                    return 'git control path glob rule'
+                if '{' in active and ',' in active and writer_git_component_pattern(component):
+                    return 'git control path brace rule'
     return None
 
 
