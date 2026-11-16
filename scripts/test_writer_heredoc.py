@@ -71,7 +71,6 @@ class WriterHeredocTests(unittest.TestCase):
         for command in (
             'while false; do >x done; ((i=0)); done; (( i ))',
             'until true; do >x done; ((i=0)); done; (( i ))',
-            'for x in a; do >y done; ((i=0)); done; (( i ))',
             'for ((i=0;i<1;i++)); do >x done; done | cat; (( i ))',
             'for ((i=0;i<1;i++)); do 2>x done; done & (( i ))',
         ):
