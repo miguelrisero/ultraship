@@ -342,6 +342,14 @@ If the follow-up PR has not merged 24 hours after this PR merges, run the batter
 After that report, the CoC has the follow-up row merged or the retirement reverted; a retirement never stays on main without a merged follow-up row.
 The CoC decides any revert of this retirement.
 The lane that applied the retirement opens the revert as a normal PR with an independent review.
+A revert that restores retired rows is a CoC-owned protected edit, limited to the rows that this PR retired.
+Only a `git revert` of this PR's merge commit may restore those rows; a hand edit never restores a row.
+The CoC names the revert commit in a frozen file before the push.
+Each restored row must equal its bytes at the parent of this PR's merge commit.
+The revert may remove a follow-up row only when this PR's merge commit added it.
+Every other line of each row file that the revert changes must equal that file at the revert's parent.
+The CoC's content-free git check proves these equalities, without a not-weaker review.
+Any other row change in the revert stops the push.
 Refuse the retirement when the claim is still true at the final code, or when the reviewer cannot confirm any requirement.
 Refuse on any doubt about any requirement.
 Bind the review receipt to reviewer identity, approving verdict, decision file SHA256, frozen commit SHA, row-file paths, row IDs, cited `file:line`, cited hunk and follow-up row ID.
