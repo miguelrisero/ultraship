@@ -2337,6 +2337,7 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                                 regions.append((word[2], word[3]))
     numeric, assignments, numeric_scopes = set(), {}, {}
     control_words = []
+    false_closer = False
     for words in commands:
         if words:
             previous = next((token for token in reversed(tokens) if token[2] < words[0][2]), None)
@@ -2344,9 +2345,6 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                 continue
         time_prefix = False
         for index, word in enumerate(words):
-            if (index and word[0] in {'fi', 'done', 'esac'}
-                    and any(words[index - 1][3] <= token[2] < word[2] for token in tokens)):
-                break
             if re.fullmatch(rf'{identifier}=.*', word[1], re.S):
                 break
             if word[0] != word[1]:
@@ -2354,9 +2352,20 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
             if time_prefix and word[0] in {'-p', '--'}:
                 continue
             time_prefix = word[0] == 'time'
+            if (index and word[0] in {'fi', 'done', 'esac'}
+                    and any(words[index - 1][3] <= token[2] < word[2] for token in tokens)):
+                false_closer = True
             control_words.append(word)
             if word[0] not in {'then', 'do', 'else', '{', '!', 'if', 'elif', 'time'}:
                 break
+    open_kinds = []
+    for raw, _, _, _ in sorted(control_words, key=lambda word: word[2]):
+        if raw in {'if', 'while', 'until', 'case', 'for', 'select'}:
+            open_kinds.append(raw)
+        elif raw in {'fi', 'done'} and open_kinds and open_kinds[-1] == 'case':
+            false_closer = True
+        elif open_kinds and raw == {'if': 'fi', 'case': 'esac'}.get(open_kinds[-1], 'done'):
+            open_kinds.pop()
     loop_ends, loop_stack = {}, []
     for raw, _, start, end in sorted(control_words, key=lambda word: word[2]):
         if raw in {'for', 'while', 'until', 'select'}:
@@ -2462,7 +2471,7 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                   and all(previous[0] in {'then', 'do', 'else', '{', '!', 'if', 'elif'}
                           or re.fullmatch(rf'{identifier}=.*', previous[1], re.S)
                           for previous in words[:index])}
-    if (function_definition or any(value == 'source' or value == '.' and start in command_positions
+    if (false_closer or function_definition or any(value == 'source' or value == '.' and start in command_positions
                                    or value in {'eval', 'trap'} and start not in plain_code
                                    for _, value, start, _ in tokens)):
         numeric.clear()
