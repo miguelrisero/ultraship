@@ -3467,9 +3467,12 @@ def deny(reason):
     sys.exit(0)
 
 
+def ledger_script():
+    return Path(__file__).resolve().parents[1] / 'skills/ship/scripts/ledger.py'
+
+
 def load_ledger():
-    path = Path(__file__).resolve().parents[1] / 'skills/ship/scripts/ledger.py'
-    spec = importlib.util.spec_from_file_location('ledger', path)
+    spec = importlib.util.spec_from_file_location('ledger', ledger_script())
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -4202,7 +4205,7 @@ def own_account_call(data, raw):
     if (agent_type and not re.match(r'^(ship:)?driver(--|$)', agent_type)
             or not isinstance(session, str) or not session):
         return False
-    word = r'''(?:[A-Za-z0-9_./:@+,=%-]|'[^'\r\n]*'|"[^"$`\\!\r\n]*")+'''
+    word = r'''(?:[A-Za-z0-9_./:@+,%-]|'[^'\r\n]*'|"[^"$`\\!\r\n]*"|\\')+'''
     if not re.fullmatch(word + r'(?:[ \t]+' + word + r')*', raw):
         return False
     words = shlex.split(raw)
@@ -4210,7 +4213,7 @@ def own_account_call(data, raw):
         return False
     interpreter, script, command, pending, result, step, agent, sha, verdict, evidence = words
     return (interpreter == 'python3'
-            and script == str(Path(__file__).resolve().parents[1] / 'skills/ship/scripts/ledger.py')
+            and script == str(ledger_script())
             and command == 'account' and pending == str(owed_file(data))
             and bool(re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', result))
             and bool(re.fullmatch(r'[a-z][a-z-]*', step))
@@ -4298,10 +4301,10 @@ def receipt_custody(data, read_search=False):
         if (receipt_text(raw)
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
-                or (not own_account_call(data, raw)
-                    and ('.local/state' in command or 'xdg_state_home' in command)
+                or (('.local/state' in command or 'xdg_state_home' in command)
                     and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
-                         or any(char in raw for char in '*?[]{}$`')))
+                         or any(char in raw for char in '*?[]{}$`'))
+                    and not own_account_call(data, raw))
                 or any(any(char in word for char in '*?[{$`')
                        and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
                             or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
@@ -4902,10 +4905,10 @@ def stop(data):
               'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]` in its open run, '
               'Read every retained result and use its exact agent identity, including @agent_id when present. '
               'For a recorded result in a closed or earlier-branch run, use '
-              f'`python3 {Path(__file__).resolve().parents[1] / "skills/ship/scripts/ledger.py"} '
-              f"account {path} <result-id> <step> <agent> <sha> <verdict> '<evidence>'`; "
+              f'`python3 {shlex.quote(str(ledger_script()))} '
+              f"account {shlex.quote(str(path))} <result-id> <step> <agent> <sha> <verdict> '<evidence>'`; "
               'this appends bookkeeping without reopening the run. '
-              'Run this command alone with the evidence in single quotes. Never invent review evidence.'}))
+              'Run this command alone on one line with the evidence in single quotes. Never invent review evidence.'}))
 
 
 def compact(data):

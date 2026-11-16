@@ -420,6 +420,46 @@ class ReceiptCustodyTests(unittest.TestCase):
                              'tool_input': {'command': command}}))
                     self.assertEqual(output.getvalue(), '')
 
+        for evidence in ('"reviewed context, [P2] nit"', r"'Reviewer'\''s [P2] context'"):
+            command = shlex.join(self.account_words[:-1]) + ' ' + evidence
+            with self.subTest(evidence=evidence):
+                output = io.StringIO()
+                with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                    self.assertIsNone(ultraship.guarded_pre(
+                        {'cwd': str(self.cwd), **event, 'tool_input': {'command': command}}))
+                self.assertEqual(output.getvalue(), '')
+
+    def test_stop_account_diagnostic_admits_quoted_paths(self):
+        event = self.own_account_event()
+        home = Path(os.environ['HOME']) / 'home with space'
+        state = home / '.local/state/ultraship'
+        script = self.cwd / 'plugin with space/ledger.py'
+        with patch.dict(os.environ, {'HOME': str(home)}), \
+                patch.object(ultraship, 'STATE', state), \
+                patch.object(ultraship, 'ledger_script', return_value=script), \
+                patch.object(ultraship, 'load_ledger', return_value=None), \
+                patch.object(ultraship, 'account', side_effect=ValueError('synthetic missing review')):
+            pending = ultraship.owed_file(event)
+            pending.parent.mkdir(parents=True)
+            pending.write_text('100\tship:reviewer--sol\t' + str(self.cwd) + '\t' +
+                               json.dumps({'id': self.account_words[4], 'v': 2}) + '\n')
+            output = io.StringIO()
+            with redirect_stdout(output):
+                ultraship.stop(event)
+            diagnostic = json.loads(output.getvalue())
+            self.assertEqual(diagnostic['decision'], 'block')
+            commands = re.findall(r'`([^`]* account [^`]*)`', diagnostic['reason'])
+            self.assertEqual(len(commands), 1)
+            command = commands[0]
+            for placeholder, value in zip(('<result-id>', '<step>', '<agent>', '<sha>', '<verdict>', '<evidence>'),
+                                          self.account_words[4:]):
+                command = command.replace(placeholder, value)
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                self.assertIsNone(ultraship.guarded_pre(
+                    {'cwd': str(self.cwd), **event, 'tool_input': {'command': command}}))
+            self.assertEqual(output.getvalue(), '')
+
     def test_own_account_call_denies_other_commands_and_callers(self):
         event = self.own_account_event()
         command = event['tool_input']['command']
@@ -435,6 +475,10 @@ class ReceiptCustodyTests(unittest.TestCase):
                         ('"$(echo context)"', '"`echo context`"', '"${HOME} context"', '$HOME',
                          'context*', 'context?', 'context[ab]', 'context{a,b}', 'context\\ text',
                          '"context!"', '"context\\text"', '"context\ntext"', "'context\ntext'"))
+        commands.extend(shlex.join(self.account_words[:-1]) + ' ' + evidence for evidence in
+                        ("'reviewed context';id", "'reviewed context'&&id", "'reviewed context'|cat",
+                         "'reviewed context'>out", "'reviewed context'<in", "'reviewed context'(id)",
+                         "\n'reviewed context'", '=ls'))
         commands.extend(command.replace(' account ', ' ' + subcommand + ' ', 1)
                         for subcommand in ('correct-binding', 'run-start'))
         for invalid in commands:
@@ -447,8 +491,12 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_own_account_call_requires_session_and_valid_fields(self):
         event = self.own_account_event()
         for session in (None, '', 1):
+            command = event['tool_input']['command']
+            if session is None or session == '':
+                command = command.replace('session-context.tsv', 'unknown.tsv')
             with self.subTest(session=session):
-                self.assert_custody_denial({**event, 'session_id': session})
+                self.assert_custody_denial({**event, 'session_id': session,
+                                           'tool_input': {'command': command}})
         invalid_fields = ((4, '12345678-1234-1234-1234-123456789abC'), (4, 'invalid'),
                           (5, 'Slice-review'), (5, 'slice_review'), (6, 'reviewer@a@b'),
                           (7, 'abcdef'), (7, 'a' * 41), (7, 'ABCDEF1'),
