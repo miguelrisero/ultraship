@@ -2,11 +2,13 @@
 """Derive a row's paired fields while preserving its whole-file mutant hunks."""
 import argparse
 import difflib
+import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
 import subprocess
 import tomllib
+import uuid
 
 
 class Refused(Exception):
@@ -81,16 +83,19 @@ def row_statements(text, row_id):
     return values, fields
 
 
+def opcodes(a, b):
+    return difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+
+
 def hunks(before, after):
     a, b = lines(before), lines(after)
-    return [(tag, a[i:j], b[k:l]) for tag, i, j, k, l in
-            difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes() if tag != 'equal']
+    return [(tag, a[i:j], b[k:l]) for tag, i, j, k, l in opcodes(a, b) if tag != 'equal']
 
 
 def derive(old, new, base, head):
     require(base.count(old) == 1, 'base old count must be 1')
     a, b = lines(old), lines(new)
-    edits = [op for op in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes() if op[0] != 'equal']
+    edits = [op for op in opcodes(a, b) if op[0] != 'equal']
     require(edits, 'missing mutant hunk')
     offsets = [0]
     for line in a:
@@ -100,12 +105,7 @@ def derive(old, new, base, head):
         start, end = i, j
         if i == j:
             require(a, 'insertion needs an adjacent equal line')
-            if i and (number == 0 or edits[number - 1][2] < i):
-                start = i - 1
-            elif i < len(a) and (number + 1 == len(edits) or i < edits[number + 1][1]):
-                end = i + 1
-            else:
-                raise Refused('insertion needs an adjacent equal line')
+            start, end = (i - 1, j) if i else (i, i + 1)
         if number == 0:
             start = 0
         if number == len(edits) - 1:
@@ -121,11 +121,21 @@ def derive(old, new, base, head):
         require(base.find(anchor, previous) == origin + start, 'anchor is not the first occurrence on main')
         previous = origin + end
     require(base.count(anchors[0][2]) == 1 and head.count(anchors[0][2]) == 1, 'anchor 1 must be unique')
+    base_lines, head_lines = lines(base), lines(head)
+    equal_blocks = [op for op in opcodes(base_lines, head_lines) if op[0] == 'equal']
+    base_offsets, head_offsets = [0], [0]
+    for source, positions in ((base_lines, base_offsets), (head_lines, head_offsets)):
+        for line in source:
+            positions.append(positions[-1] + len(line))
     located, cursor = [], 0
-    for _, _, anchor, replacement in anchors:
+    for left, right, anchor, replacement in anchors:
         start = head.find(anchor, cursor)
         require(start >= 0, 'edit site missing at head')
         cursor = start + len(anchor)
+        require(any(base_offsets[i] <= origin + left and origin + right <= base_offsets[j]
+                    and start == head_offsets[k] + origin + left - base_offsets[i]
+                    and cursor <= head_offsets[l] for _, i, j, k, l in equal_blocks),
+                'anchor does not map to its base equal block')
         located.append((start, cursor, replacement))
     start, end = located[0][0], located[-1][1]
     head_old = head[start:end]
@@ -140,8 +150,8 @@ def derive(old, new, base, head):
 
 def run(args):
     row_file = Path(args.row_file)
-    require(row_file.is_absolute() and stat.S_ISREG(row_file.lstat().st_mode), 'row file must be absolute and regular')
-    require(not row_file.is_symlink() and row_file.resolve() == row_file, 'row file must be canonical without links')
+    require(row_file.is_absolute() and stat.S_ISREG(row_file.lstat().st_mode)
+            and row_file.resolve() == row_file, 'row file must be absolute, regular and canonical without links')
 
     def git(*words):
         return subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', str(row_file.parent), *words],
@@ -151,7 +161,7 @@ def run(args):
     relative = row_file.relative_to(root).as_posix()
     subject = PurePosixPath(args.subject)
     require(not subject.is_absolute() and args.subject == subject.as_posix()
-            and not {'..', '.'} & set(subject.parts) and subject.parts, 'subject must be repository-relative')
+            and '..' not in subject.parts and subject.parts, 'subject must be repository-relative')
     base_sha = git('rev-parse', '--verify', '--end-of-options', args.base + '^{commit}').decode().strip()
     head_sha = git('rev-parse', '--verify', '--end-of-options', args.head + '^{commit}').decode().strip()
     require(head_sha == git('rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
@@ -190,16 +200,34 @@ def run(args):
     require(len(targets) == 1 and targets[0]['old'] == old and targets[0]['new'] == new, 'edited pair mismatch')
     targets[0]['old'], targets[0]['new'] = head_values['old'], head_values['new']
     require(before == after, 'other TOML values differ')
-    cursor, expected = 0, []
-    for start, end, statement in sorted(replacements):
-        expected.extend(source[cursor:start])
-        expected.append(statement)
-        cursor = end
-    expected.extend(source[cursor:])
-    require(edited_text == ''.join(expected), 'bytes outside paired statements differ')
+    _, edited_fields = row_statements(edited_text, args.row_id)
+
+    def without_pair(value, fields):
+        kept = lines(value)
+        for start, end, _ in sorted((fields['old'], fields['new']), reverse=True):
+            del kept[start:end]
+        return ''.join(kept)
+
+    require(without_pair(text, head_fields) == without_pair(edited_text, edited_fields),
+            'bytes outside paired statements differ')
     result = edited_text.encode('utf-8')
     require(row_file.read_bytes() == original, 'row file changed during derivation')
-    row_file.write_bytes(result)
+    staged = row_file.with_name('.row-reanchor-' + uuid.uuid4().hex)
+    created = False
+    try:
+        descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(row_file.stat().st_mode))
+        created = True
+        with os.fdopen(descriptor, 'wb') as handle:
+            os.fchmod(handle.fileno(), stat.S_IMODE(row_file.stat().st_mode))
+            handle.write(result)
+            handle.flush()
+            os.fsync(handle.fileno())
+        require(staged.read_bytes() == result, 'staged write read-back differs')
+        require(row_file.read_bytes() == original, 'row file changed during staged write')
+        os.replace(staged, row_file)
+    finally:
+        if created and staged.exists():
+            staged.unlink()
     require(row_file.read_bytes() == result, 'write read-back differs')
     print('PASS')
     print('row_file=' + str(row_file))

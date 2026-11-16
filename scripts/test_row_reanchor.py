@@ -3,6 +3,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -33,16 +34,18 @@ class ToolTests(unittest.TestCase):
 
     def git(self, *args):
         return subprocess.check_output(['git', '-C', str(self.root), '-c', 'user.name=t',
-                                        '-c', 'user.email=t@example.invalid', *args], stderr=subprocess.PIPE).decode().strip()
+                                        '-c', 'user.email=t@example.invalid', *args], stderr=subprocess.PIPE,
+                                       env={**os.environ, 'GIT_CONFIG_GLOBAL': os.devnull,
+                                            'GIT_CONFIG_NOSYSTEM': '1'}).decode().strip()
 
     def commit(self):
-        self.git('add', '--', 'rows.toml', 'subject.txt')
+        self.git('add', '--', 'rows.toml', 'subject.txt', 'other.txt')
         self.git('commit', '--allow-empty', '-qm', 'fixture')
         return self.git('rev-parse', 'HEAD')
 
     def setup_pair(self, old=None, new=None, head=None, literal=False, extra='', row_id='target'):
         block = ''.join('    deleted_%s()\n' % i for i in range(11))
-        self.old = old if old is not None else 'begin()\n' + block + 'middle()\ncall(\n    argument,\n)\nend()\n'
+        self.old = old if old is not None else SENTINEL + '\nbegin()\n' + block + 'middle()\ncall(\n    argument,\n)\nend()\n'
         self.new = new if new is not None else self.old.replace(block, '').replace('    argument,\n', '    replacement,\n')
         self.head = head if head is not None else self.old.replace('middle()\n', 'middle()\ngrown_a()\ngrown_b()\n')
         old_field = "'''\n" + self.old + "'''" if literal else reanchor.basic(self.old)
@@ -51,23 +54,27 @@ class ToolTests(unittest.TestCase):
                             + '\nclaim = "same guarantee"\nfile = "subject.txt"\nold = ' + old_field
                             + '\nnew = ' + new_field + '\ntest = "test_subject"\n' + extra
                             + '\n[[hand_run]]\nid = "hand"\n[[retired]]\nid = "retired"\n')
+        (self.root / 'other.txt').write_text('other subject\n')
         self.subject.write_text('outside_before\n' + self.old + 'outside_after\n')
         self.base = self.commit()
         self.subject.write_text('outside_before\n' + self.head + 'outside_after\n')
         self.head_sha = self.commit()
 
-    def invoke(self, expected=0, **overrides):
+    def invoke(self, expected=0, reason=None, **overrides):
         before = self.row.read_bytes()
         options = {'row-file': str(self.row), 'row-id': 'target', 'subject': 'subject.txt',
                    'base': self.base, 'head': self.head_sha}
         options.update(overrides)
         result = subprocess.run(['python3', '-I', str(TOOL), *[word for key, value in options.items()
-                                 for word in ('--' + key, value)]], capture_output=True, text=True)
+                                 for word in ('--' + key, value)]], capture_output=True, text=True,
+                                env={**os.environ, 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'})
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         self.assertNotIn(SENTINEL, result.stdout + result.stderr)
         self.assertEqual(result.stderr, '')
         if expected:
             self.assertTrue(result.stdout.startswith('REFUSED: '))
+            self.assertIsNotNone(reason)
+            self.assertIn('REFUSED: ' + reason, result.stdout)
             self.assertEqual(self.row.read_bytes(), before)
         else:
             self.assertTrue(result.stdout.startswith('PASS\n'))
@@ -124,27 +131,27 @@ class ToolTests(unittest.TestCase):
 
     def test_missing_id(self):
         self.setup_pair()
-        self.invoke(2, **{'row-id': 'missing'})
+        self.invoke(2, 'row ID must match exactly once', **{'row-id': 'missing'})
 
     def test_duplicate_id(self):
         self.setup_pair()
         text = self.row.read_text()
         self.row.write_text(text + '\n[[row]]\nid = "target"\n')
         self.head_sha = self.commit()
-        self.invoke(2)
+        self.invoke(2, 'row ID must match exactly once')
 
     def test_subject_mismatch(self):
         self.setup_pair()
-        self.invoke(2, subject='other.txt')
+        self.invoke(2, 'subject mismatch', subject='other.txt')
 
     def test_head_must_equal_current_head(self):
         self.setup_pair()
-        self.invoke(2, head=self.base)
+        self.invoke(2, 'head must equal HEAD', head=self.base)
 
     def test_dirty_row_file(self):
         self.setup_pair()
         self.row.write_bytes(self.row.read_bytes() + b'\n')
-        self.invoke(2)
+        self.invoke(2, 'working row file differs from head')
 
     def test_base_old_count_must_equal_one(self):
         self.setup_pair()
@@ -152,47 +159,47 @@ class ToolTests(unittest.TestCase):
         self.subject.write_text(self.old + self.old)
         self.base = self.commit()
         self.head_sha = self.base
-        self.invoke(2)
+        self.invoke(2, 'base old count must be 1')
 
     def test_first_anchor_must_be_unique_at_head(self):
         self.setup_pair()
-        block = 'begin()\n' + ''.join('    deleted_%s()\n' % i for i in range(11))
+        block = SENTINEL + '\nbegin()\n' + ''.join('    deleted_%s()\n' % i for i in range(11))
         self.subject.write_text(self.subject.read_text() + block)
         self.head_sha = self.commit()
-        self.invoke(2)
+        self.invoke(2, 'anchor 1 must be unique')
 
     def test_edit_site_must_exist_at_head(self):
         self.setup_pair()
         self.subject.write_text(self.subject.read_text().replace('    argument,\n', '    absent,\n'))
         self.head_sha = self.commit()
-        self.invoke(2)
+        self.invoke(2, 'edit site missing at head')
 
     def test_expect_two(self):
         self.setup_pair(extra='expect = 2\n')
-        self.invoke(2)
+        self.invoke(2, 'expect must be 1')
 
     def test_later_anchor_must_be_first_occurrence_on_main(self):
         old = 'start\nremove_first\nkeep\nduplicate\nspacer\nduplicate\nafter\nremove_last\nend\n'
         new = 'start\nkeep\nduplicate\nspacer\nchanged\nafter\nend\n'
         self.setup_pair(old, new, old)
-        self.invoke(2)
+        self.invoke(2, 'anchor is not the first occurrence on main')
 
     def test_frozen_row_statement_must_be_byte_identical(self):
         self.setup_pair()
         self.row.write_text(self.row.read_text().replace('claim =', 'claim  ='))
         self.head_sha = self.commit()
-        self.invoke(2)
+        self.invoke(2, 'frozen row statements differ')
 
     def test_symlink_row_file(self):
         self.setup_pair()
         link = self.root / 'link.toml'
         link.symlink_to(self.row)
-        self.invoke(2, **{'row-file': str(link)})
+        self.invoke(2, 'row file must be absolute, regular and canonical without links', **{'row-file': str(link)})
 
     def test_wrong_whole_file_hunks_refuse(self):
         self.setup_pair('start\nremove_first\nmiddle\nremove_last\nend\n', 'start\nmiddle\nend\n',
                         'start\nremove_first\nremove_last\nend\n')
-        _, output = self.invoke(2)
+        _, output = self.invoke(2, 'whole-file mutant hunks differ')
         self.assertIn('whole-file mutant hunks differ', output)
 
     def test_nested_table_stays_equal(self):
@@ -204,8 +211,37 @@ class ToolTests(unittest.TestCase):
         self.setup_pair(extra='[row.mutant]\noperator = "replace"\n')
         self.row.write_text(self.row.read_text().replace('operator =', 'operator  ='))
         self.head_sha = self.commit()
-        _, output = self.invoke(2)
+        _, output = self.invoke(2, 'frozen row statements differ')
         self.assertIn('frozen row statements differ', output)
+
+    def test_moved_copy_refuses(self):
+        old, new = 'A\nr1\nB\nr2\nC\n', 'A\nB\nC\n'
+        head = 'A\nr1\nB2\nr2\nC\nB\nr2\nC\n'
+        self.setup_pair(old, new, head)
+        self.invoke(2, 'anchor does not map to its base equal block')
+
+    def test_three_hunks_with_insertion_preserve_grown_interior(self):
+        old = 'A\nr1\nB\nD\nE\nF\nr2\nC\n'
+        new = 'A\nB\nD\ninserted\nE\nF\nC\n'
+        head = 'A\nr1\nB\ngrown\nD\nE\nF\nr2\nC\n'
+        self.setup_pair(old, new, head)
+        self.invoke()
+        row = tomllib.loads(self.row.read_text())['row'][0]
+        self.assertEqual(self.subject.read_text().replace(row['old'], row['new'], 1),
+                         'outside_before\nA\nB\ngrown\nD\ninserted\nE\nF\nC\noutside_after\n')
+
+    def test_staged_write_failure_preserves_original_and_removes_stage(self):
+        self.setup_pair()
+        original = self.row.read_bytes()
+        argv = [str(TOOL), '--row-file', str(self.row), '--row-id', 'target', '--subject', 'subject.txt',
+                '--base', self.base, '--head', self.head_sha]
+        output = io.StringIO()
+        with patch('sys.argv', argv), patch.object(reanchor.os, 'fsync', side_effect=OSError(SENTINEL)), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(reanchor.main(), 2)
+        self.assertEqual(output.getvalue(), 'REFUSED: OSError\n')
+        self.assertEqual(self.row.read_bytes(), original)
+        self.assertEqual(list(self.root.glob('.row-reanchor-*')), [])
 
 
 class HookTests(unittest.TestCase):
@@ -240,8 +276,9 @@ class HookTests(unittest.TestCase):
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         result = output.getvalue()
-        self.reason = json.loads(result)['hookSpecificOutput']['permissionDecisionReason'] if result else ''
-        return bool(result and json.loads(result)['hookSpecificOutput']['permissionDecision'] == 'deny')
+        decision = json.loads(result)['hookSpecificOutput'] if result else {}
+        self.reason = decision.get('permissionDecisionReason', '')
+        return decision.get('permissionDecision') == 'deny'
 
     def test_exact_writer_form(self):
         self.assertFalse(self.denied(), self.reason)
@@ -275,6 +312,7 @@ class HookTests(unittest.TestCase):
                     self.record.write_text(json.dumps(fields))
                 self.assertTrue(self.denied(), self.reason)
                 self.assertIn('admission record', self.reason)
+                self.assertIn('must exist and meet this condition', self.reason)
 
     def test_exact_command_boundary(self):
         for command in (
@@ -288,6 +326,16 @@ class HookTests(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)
+                self.assertIn('Row re-anchor gate', self.reason)
+
+    def test_disguised_options_and_tool_copies_trigger_gate(self):
+        self.record.unlink()
+        for command in (self.command.replace('--row-file', '--"row-file"'),
+                        self.command.replace('--row-file', r'--row\-file'),
+                        self.command.replace(str(TOOL), '/another/copied.py'),
+                        'python3 -I /another/copied.py --row-id target'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
                 self.assertIn('Row re-anchor gate', self.reason)
 
     def test_other_callers(self):

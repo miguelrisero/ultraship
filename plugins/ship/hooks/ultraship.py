@@ -24,6 +24,8 @@ STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / '
 RESEARCH_BUDGET = 40
 ROW_REVIEW_PR = re.compile(r'https://github\.com/[\w.-]+/[\w.-]+/pull/\d+', re.ASCII)
 ROW_REVIEW_MAX_AHEAD = 4 * 3600
+PROTECTED_ROW = r'(?<![\w.-])tests/mutation(/|$)'
+ROW_RECORD_FOLDERS = ('row-review', 'row-reanchor')
 DISCOVERY = re.compile(r'^(Read|Grep|Glob|LSP|WebFetch|WebSearch|mcp__fff__\w+)$')
 # ponytail: a command-string match, so a writer can still reach these through a script it writes,
 # an alias or function, `eval`, or encoded text such as `$'\x70ush'` or base64.
@@ -3618,6 +3620,17 @@ def canonical_row_path(value):
     return not {'', '.', '..'} & set(parts) and os.path.realpath(value) == value
 
 
+def protected_row_path(value):
+    return canonical_row_path(value) and bool(re.search(PROTECTED_ROW, value, re.I))
+
+
+def regular_file(path):
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
 def row_record(data, folder, workspace_fallback=False):
     """Read the driver's bounded, private admission record for this agent."""
     agent_id = data.get('agent_id')
@@ -3687,14 +3700,9 @@ def row_reanchor_gate(data, command):
     if fields is None:
         deny(reason + unmet)
     target = fields.get('row_file')
-    if (not canonical_row_path(target) or not re.search(r'(?<![\w.-])tests/mutation(/|$)', target, re.I)
-            or target != match[2] or not isinstance(fields.get('row_id'), str) or fields['row_id'] != match[3]):
+    if not protected_row_path(target) or target != match[2] or fields.get('row_id') != match[3]:
         deny(reason + unmet + '`row_file` and `row_id` match the canonical protected path and row ID.')
-    try:
-        regular = stat.S_ISREG(os.lstat(target).st_mode)
-    except OSError:
-        regular = False
-    if not regular or match[4].startswith('/') or '..' in match[4].split('/'):
+    if not regular_file(target) or match[4].startswith('/') or '..' in match[4].split('/'):
         deny(reason + unmet + 'the row file is regular and the subject is repository-relative.')
 
 
@@ -3714,7 +3722,7 @@ def pre(data):
             written = tin.get('file_path') or tin.get('notebook_path')
             if isinstance(written, str) and written:
                 written = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(written))
-                for folder in ('row-review', 'row-reanchor'):
+                for folder in ROW_RECORD_FOLDERS:
                     records = os.path.realpath(STATE / folder).casefold()
                     for path in (os.path.abspath(written).casefold(), os.path.realpath(written).casefold()):
                         if (path == records or path.startswith(records + '/')
@@ -3724,13 +3732,16 @@ def pre(data):
         # shortcut: Bash matches state and workspace paths as text, so a path built from pieces slips past it.
         # Upgrade path: record folders that non-driver agents cannot reach.
         if tool == 'Bash':
-            for folder in ('row-review', 'row-reanchor'):
-                if 'ultraship/' + folder in str(tin.get('command', '')).casefold():
+            folded_command = str(tin.get('command', '')).casefold()
+            for folder in ROW_RECORD_FOLDERS:
+                if 'ultraship/' + folder in folded_command:
                     deny('Only the driver and the main session touch ' + folder + ' admission records (custody rule). '
                          'Report the blocked scope to the driver.')
     if tool == 'Bash':
         command = str(tin.get('command', ''))
-        if 'row_reanchor' in command.casefold() and '--row-' in command:
+        # shortcut: substitutions or variables can build option names; upgrade to driver-only record folders and a tool-side record check.
+        trigger = command.translate(str.maketrans('', '', "'\"\\")).casefold()
+        if '--row-file' in trigger or '--row-id' in trigger or 'row_reanchor' in trigger and '--row-' in trigger:
             row_reanchor_gate(data, command)
     if role(data, 'writer'):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
@@ -3826,7 +3837,7 @@ def pre(data):
         if tool.startswith('mcp__'):
             deny('Reviewers cannot use mcp__ tools. Use Grep or Glob with an explicit path.')
         try:
-            protected = r'(?<![\w.-])tests/mutation(/|$)'
+            protected = PROTECTED_ROW
             blocked = 'Reviewers cannot access explicit tests/mutation/ paths. Report the blocked scope to the coordinator.'
             if tool == 'WebFetch':
                 url = tin.get('url')
@@ -3866,8 +3877,6 @@ def pre(data):
             def normalize(value):
                 return os.path.realpath(value)
 
-            canonical = canonical_row_path
-
             home = normalize(str(Path.home()))
             cwd = normalize(data.get('cwd') or str(Path.cwd()))
             claude_dirs = {normalize(str(Path.home() / '.claude'))}
@@ -3897,7 +3906,7 @@ def pre(data):
                         deny('Reviewers require string paths and globs.')
                     values.append(tin[field])
             for path in paths:
-                if not canonical(path):
+                if not canonical_row_path(path):
                     deny('Reviewers must pass an exact absolute path: no `~`, `.` or `..` segment, repeated or '
                          'trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form. '
                          'Report the blocked scope to the coordinator.')
@@ -3917,16 +3926,11 @@ def pre(data):
                                     'and no `glob` or `type`, can be admitted.')
                 files = fields.get('row_files')
                 if (not isinstance(files, list) or not files
-                        or any(not isinstance(item, str) or not canonical(item)
-                               or not re.search(protected, item, re.IGNORECASE) for item in files)):
+                        or any(not protected_row_path(item) for item in files)):
                     return unmet + '`row_files` lists canonical absolute paths that contain tests/mutation.'
                 if target not in files:
                     return unmet + 'the path equals one `row_files` entry.'
-                try:
-                    regular = stat.S_ISREG(os.lstat(target).st_mode)
-                except OSError:
-                    regular = False
-                if not regular:
+                if not regular_file(target):
                     return unmet + 'the listed row file is a regular file.'
                 return None
 
