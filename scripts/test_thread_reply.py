@@ -176,6 +176,11 @@ REFUSE = (
     'gh >| x api repos/o/r/pulls/7/comments -f body=x',
     'gh 2>|/dev/null api repos/o/r/pulls/7/comments -f body=x',
     'gh api repos/o/r/pulls/7/comments -f body=x >',
+    r'true x\>|gh api repos/o/r/pulls/7/comments -f body=x',
+    r'true x\>&gh api repos/o/r/pulls/7/comments -f body=x',
+    r'true x\<&gh api repos/o/r/pulls/7/comments -f body=x',
+    r"tmux new 'true x\>|gh api repos/o/r/pulls/7/comments -f body=x'",
+    r'true \\>|gh api repos/o/r/pulls/7/comments -f body=x',
 )
 
 ADMIT = (

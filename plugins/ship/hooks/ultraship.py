@@ -3047,7 +3047,7 @@ def review_thread_denial(command):
                               and not tokens[index + 1].startswith(('/dev/', '/proc/'))):
                 return 'shell runner names gh'
     # Keep quote boundaries: GraphQL variables are literal only inside a single-quoted query value.
-    pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?<=[<>])&|&(?=>)|(?<=>)\||[^\s'"\\;&|()])+|(?:[;\n()]|(?<!>)\||(?<![<>])&(?!>))+'''
+    pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?<=(?<!\\)[<>])&|&(?=>)|(?<=(?<!\\)>)\||[^\s'"\\;&|()])+|(?:[;\n()]|(?<!(?<!\\)>)\||(?<!(?<!\\)[<>])&(?!>))+'''
     segments, words = [], []
     for match in re.finditer(pattern, command):
         raw = match[0]
