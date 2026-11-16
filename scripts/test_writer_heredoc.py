@@ -31,6 +31,583 @@ class WriterHeredocTests(unittest.TestCase):
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
+    def test_assignment_prefixed_fi_cannot_restore_numeric_proof(self):
+        self.assertTrue(self.denied('if false; then x=1 fi; i=0; fi; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_assignment_prefixed_done_cannot_restore_numeric_proof(self):
+        self.assertTrue(self.denied('while false; do x=1 done; i=0; done; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_assignment_prefixed_esac_cannot_restore_numeric_proof(self):
+        self.assertTrue(self.denied('case x in y) x=1 esac; i=0;; esac; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirect_prefixed_fi_cannot_restore_numeric_proof(self):
+        self.assertTrue(self.denied('if false; then >x fi; i=0; fi; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirect_prefixed_dot_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; >x . ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_descriptor_redirect_prefixed_dot_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; 2>/dev/null . ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirect_prefixed_quoted_dot_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; >x "." ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirect_prefixed_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; >x eval "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_prior_or_prevents_assignment_numeric_proof(self):
+        self.assertTrue(self.denied('cd x || exit 1; i=0; (( i++ ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_prior_pipe_prevents_assignment_numeric_proof(self):
+        self.assertTrue(self.denied('ls | head; i=0; (( i++ ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_completed_if_prevents_assignment_numeric_proof(self):
+        self.assertTrue(self.denied('if [ -f x ]; then echo y; fi; i=0; (( i++ ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_conditional_argument_word_prevents_numeric_proof(self):
+        self.assertTrue(self.denied('echo while; i=0; (( i++ ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirect_operators_keep_dot_in_command_position(self):
+        for redirect in ('> x', '>>x', '</dev/null', '2>&1', '&>x'):
+            with self.subTest(redirect=redirect):
+                self.assertTrue(self.denied('i=0; ' + redirect + ' . ./s; (( i ))'))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_conditional_argument_words_preserve_scoped_loop_proof(self):
+        for word in ('if', '"while"', "'until'", 'case', 'select'):
+            with self.subTest(word=word):
+                self.assertFalse(self.denied('echo ' + word + '; for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_plain_literal_proofs_and_data_controls_stay_admitted(self):
+        for command in (
+            'find . -name x; for ((i=0; i<3; i++)); do echo "$i"; done',
+            'i=0; (( i++ ))', "i=0; eval 'echo $i'; (( i++ ))",
+            "for ((i=0; i<3; i++)); do eval 'echo $i'; done",
+            "printf '%s\\n' 'a[$(echo RAN)]'",
+            'i=0; >x echo .; (( i++ ))',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_redirected_loop_pipeline_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('for ((i=0; i<1; i++)); do :; done > out | cat; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirected_loop_background_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('for ((i=0; i<1; i++)); do :; done >out & (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirected_arithmetic_pipeline_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('((i=0)) >x | cat; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirected_arithmetic_background_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('((i=0)) 2>&1 & (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_time_prefix_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('time for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_time_portable_option_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('time -p for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_time_option_end_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('time -- for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_time_group_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('time { for ((i=0; i<3; i++)); do echo "$i"; done; }'), self.reason)
+
+    def test_time_pipeline_loop_cannot_prove_parent_numeric_name(self):
+        self.assertTrue(self.denied('time for ((i=0; i<1; i++)); do :; done | cat; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_time_conditional_loop_cannot_prove_parent_numeric_name(self):
+        self.assertTrue(self.denied('if false; then time for ((i=0; i<1; i++)); do :; done; fi; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_if_body_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('if [ -f x ]; then for ((i=0; i<3; i++)); do echo "$i"; done; fi'), self.reason)
+
+    def test_while_body_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('while true; do for ((i=0; i<3; i++)); do echo "$i"; done; break; done'), self.reason)
+
+    def test_closed_if_keeps_literal_arithmetic_initializer(self):
+        self.assertFalse(self.denied('if true; then :; fi; ((i=0)); (( i++ ))'), self.reason)
+
+    def test_if_argument_keeps_literal_arithmetic_initializer(self):
+        self.assertFalse(self.denied('echo if; ((i=0)); ((i++))'), self.reason)
+
+    def test_loop_body_if_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('for ((i=0; i<3; i++)); do if [ "$i" = 1 ]; then echo one; fi; done'), self.reason)
+
+    def test_closed_case_keeps_later_literal_loop_proof(self):
+        self.assertFalse(self.denied('case "$x" in a) echo a;; esac; for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_find_dot_keeps_literal_loop_proof(self):
+        self.assertFalse(self.denied('find . -name x; for ((i=0; i<3; i++)); do echo "$i"; done'), self.reason)
+
+    def test_plain_literal_assignment_keeps_numeric_proof(self):
+        self.assertFalse(self.denied('i=0; (( i++ ))'), self.reason)
+
+    def test_literal_eval_read_keeps_numeric_proof(self):
+        self.assertFalse(self.denied("i=0; eval 'echo $i'; (( i++ ))"), self.reason)
+
+    def test_literal_printf_payload_keeps_data_exemption(self):
+        self.assertFalse(self.denied("printf '%s\\n' 'a[$(echo RAN)]'"), self.reason)
+
+    def test_double_quoted_offset_quote_keeps_arithmetic_refused(self):
+        self.assertTrue(self.denied('''echo "${s:'$((y))'}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_length_quote_keeps_substitution_refused(self):
+        self.assertTrue(self.denied('''echo "${s:0:'$(no""de -""e 1)'}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_index_quote_keeps_substitution_refused(self):
+        self.assertTrue(self.denied('''echo "${a['$(no""de -""e 1)']}"'''))
+        self.assertIn('array subscript evaluation rule (subscript payload)', self.reason)
+
+    def test_double_quoted_arithmetic_quote_keeps_substitution_refused(self):
+        self.assertTrue(self.denied('''echo "$(( '$(no""de -""e 1)' ))"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_offset_quote_keeps_backtick_refused(self):
+        self.assertTrue(self.denied('''echo "${s:'`y`'}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_length_quote_keeps_backtick_refused(self):
+        self.assertTrue(self.denied('''echo "${s:0:'`no""de -""e 1`'}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_index_quote_keeps_backtick_refused(self):
+        self.assertTrue(self.denied('''echo "${a['`no""de -""e 1`']}"'''))
+        self.assertIn('array subscript evaluation rule (subscript payload)', self.reason)
+
+    def test_double_quoted_arithmetic_quote_keeps_backtick_refused(self):
+        self.assertTrue(self.denied('''echo "$(( '`no""de -""e 1`' ))"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_arithmetic_single_quotes_refuse_uncertain_boundary(self):
+        for command in (
+            '''echo "${s:'1'}"''', '''echo "${s:0:'1'}"''',
+            '''echo "${a['1']}"''', '''echo "$(( '1' ))"''',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (substitution boundary)', self.reason)
+
+    def test_newline_after_and_keeps_loop_initializer_conditional(self):
+        self.assertTrue(self.denied('false &&\nfor ((i=0; i<1; i++)); do :; done; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_newline_after_or_keeps_assignment_conditional(self):
+        self.assertTrue(self.denied('false ||\ni=0; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_newline_after_and_keeps_arithmetic_initializer_conditional(self):
+        self.assertTrue(self.denied('false &&\n((i=0)); (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_newline_after_pipe_keeps_loop_proof_in_child(self):
+        self.assertTrue(self.denied('for ((i=0; i<1; i++)); do :; done |\ncat; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pipeline_continuation_assignment_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('false |\ni=0; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pipeline_continuation_arithmetic_cannot_prove_numeric_name(self):
+        self.assertTrue(self.denied('false |\n((i=0)); (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pipeline_loop_cannot_prove_numeric_name_in_parent(self):
+        self.assertTrue(self.denied('false | for ((i=0; i<1; i++)); do :; done; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pipeline_continuation_loop_cannot_prove_numeric_name_in_parent(self):
+        self.assertTrue(self.denied('false |\nfor ((i=0; i<1; i++)); do :; done; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pipeline_loop_scopes_stay_admitted(self):
+        for command in (
+            'ls | for ((i=0; i<3; i++)); do echo "$i"; done',
+            'for ((i=0; i<3; i++)); do echo "$i"; done | cat',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_pipeline_prevents_later_whole_command_proof(self):
+        for command in ('ls |\nhead -1; i=0; (( i++ ))', 'ls | head -1; i=0; (( i++ ))'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_literal_eval_parenthesis_function_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; eval 'f() { :; }'; f; (( i ))"))
+        self.assertIn('process-capable python -c rule', self.reason)
+
+    def test_literal_eval_keyword_function_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; eval 'function f { :; }'; f; (( i ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_literal_eval_dot_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; eval 'echo $i; . ./s'; (( i ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_arithmetic_quote_and_list_literal_controls_stay_admitted(self):
+        for command in (
+            "i=0; eval 'echo $i'; (( i++ ))",
+            'for ((i=0; i<3; i++)); do echo "$i"; done',
+            'echo "${s:1:2}"', 'echo "$(( 1 + 2 ))"', '''echo "${x#'prefix'}"''',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_hash_pattern_quote_keeps_arithmetic_refused(self):
+        self.assertTrue(self.denied('''echo "${x#'}'"'$((y))'"}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_hash_pattern_quote_keeps_indirect_refused(self):
+        self.assertTrue(self.denied('''echo "${x#'}'"'${!n}'"}"'''))
+        self.assertIn('array subscript evaluation rule (indirect)', self.reason)
+
+    def test_hash_pattern_quote_keeps_subscript_refused(self):
+        self.assertTrue(self.denied('''echo "${x#'}'"'${a[y]}'"}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_hash_pattern_quote_keeps_interpreter_refused(self):
+        self.assertTrue(self.denied('''echo "${x#'}'"'$(no""de -""e 1)'"}"'''))
+        self.assertIn('inline interpreter code rule (node)', self.reason)
+
+    def test_percent_pattern_quote_keeps_arithmetic_refused(self):
+        self.assertTrue(self.denied('''echo "${x%'}'"'$((y))'"}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_hash_pattern_quote_keeps_arithmetic_refused(self):
+        self.assertTrue(self.denied('''echo "${x##'}'"'$((y))'"}"'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_replacement_operand_quote_refuses_uncertain_boundary(self):
+        self.assertTrue(self.denied('''echo "${x/'}'/z}"'$((y))'"}"'''))
+        self.assertIn('inline interpreter code rule (substitution boundary)', self.reason)
+
+    def test_command_wrapped_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; command eval "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_builtin_wrapped_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; builtin eval "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_time_wrapped_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; time eval "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; "eval" "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_single_quoted_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('''c=$x; i=0; 'eval' "$c"; (( i ))'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_escaped_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied(r'c=$x; i=0; e\val "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_command_wrapped_source_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; command source ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_builtin_wrapped_dot_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; builtin . ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_single_quoted_source_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; 'source' ./s; (( i ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_double_quoted_dot_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; "." ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_command_wrapped_trap_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; command trap "$c" DEBUG; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_command_wrapped_eval_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied('c=$x; cd /tmp && for ((i=0; i<3; i++)); do command eval "$c"; echo "${a[i]}"; done'))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+
+    def test_printf_alias_invalidates_literal_data_exemption(self):
+        self.assertTrue(self.denied("shopt -s expand_aliases; alias printf=eval; printf '%s\\n' 'a[$(echo RAN)]'"))
+        self.assertIn('array subscript evaluation rule (subscript payload)', self.reason)
+
+    def test_disabled_printf_invalidates_literal_data_exemption(self):
+        self.assertTrue(self.denied("enable -n printf; printf '%s\\n' 'a[$(echo RAN)]'"))
+        self.assertIn('array subscript evaluation rule (subscript payload)', self.reason)
+
+    def test_hashed_printf_invalidates_literal_data_exemption(self):
+        self.assertTrue(self.denied("hash -p ./x printf; printf '%s\\n' 'a[$(echo RAN)]'"))
+        self.assertIn('array subscript evaluation rule (subscript payload)', self.reason)
+
+    def test_literal_eval_attached_destination_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('''i=0; eval 'echo $i; printf -vi %s "$x"'; (( i ))'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_literal_trap_attached_destination_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('''i=0; trap 'echo $i; printf -vi %s "$x"' EXIT; (( i ))'''))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_pattern_and_runtime_writer_literal_controls_stay_admitted(self):
+        for command in (
+            '''echo "${x:-'quoted text'}"''', '''echo "${x#'prefix'}"''',
+            'echo "${x%.txt}"', 'echo "${x/a/b}"',
+            "i=0; eval 'echo $i'; (( i++ ))", "i=0; trap 'echo $i' EXIT; (( i++ ))",
+            'find . -name x; for ((i=0; i<3; i++)); do echo "$i"; done',
+            "printf '%s\\n' 'a[$(echo RAN)]'",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_literal_eval_wrapped_source_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; eval 'echo $i; command source ./s'; (( i ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_parallel_loop_cannot_prove_numeric_name_in_parent(self):
+        for command in (
+            'for ((i=0; i<1; i++)); do :; done | cat; (( i ))',
+            'for ((i=0; i<1; i++)); do :; done & (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_closed_conditional_preserves_later_numeric_initializer(self):
+        self.assertFalse(self.denied('if true; then :; fi; ((i=0)); (( i++ ))'), self.reason)
+
+    def test_nested_arithmetic_closes_keep_unresolved_names(self):
+        """Protect the writer boundary when nested parentheses precede a runtime value."""
+        for command in (
+            'echo "$(( ((1)) + y ))"', 'read -r y < f; echo "$(( ((1)) + y ))"',
+            '(( ((1)) + y ))', 'echo "$[ (1 + (2)) + y ]"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_substitution_boundaries_keep_parameter_closes_and_case(self):
+        """Protect the complete executable body from parameter and case terminators."""
+        for command, reason in (
+            ('echo "$(echo ${x:-)}; no""de -""e 1)"', 'inline interpreter code rule (node)'),
+            ('echo "$(case x in x) no""de -""e 1;; esac)"',
+             'inline interpreter code rule (substitution boundary)'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn(reason, self.reason)
+
+    def test_double_quoted_parameter_operands_keep_expansions_active(self):
+        """Protect evaluated operands where a single quote is literal inside double quotes."""
+        for command, kind in (
+            ("echo \"${x:-'$((y))'}\"", 'arithmetic'),
+            ("echo \"${x:-'${!n}'}\"", 'indirect'),
+            ("echo \"${x:-'${a[y]}'}\"", 'arithmetic'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (' + kind + ')', self.reason)
+
+    def test_comments_cannot_supply_quotes_or_numeric_assignments(self):
+        """Protect runtime name checks from inert comment text."""
+        for command, kind in (
+            ("read -r name < f; # '\necho \"${!name}\"", 'indirect'),
+            ('# ; i=0;\n(( i ))', 'arithmetic'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (' + kind + ')', self.reason)
+
+    def test_command_prefixes_keep_hidden_name_commands_refused(self):
+        """Protect name operands after shell control words and command wrappers."""
+        for body in (
+            '! "$c" -v "$x" %s 1', 'time "$c" -v "$x" %s 1',
+            'time -p "$c" -v "$x" %s 1', 'exec "$c" -v "$x" %s 1',
+            'if "$c" -v "$x" %s 1; then :; fi',
+            'while "$c" -v "$x" %s 1; do :; done', '{ "$c" -v "$x" %s 1; }',
+            '! command "$c" -v "$x" %s 1',
+            'if false; then :; elif "$c" -v "$x" %s 1; then :; fi',
+            'until "$c" -v "$x" %s 1; do :; done',
+            'if true; then "$c" -v "$x" %s 1; else "$c" -v "$x" %s 1; fi',
+        ):
+            command = 'c=printf; ' + body
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (name)', self.reason)
+
+    def test_command_brace_alternatives_keep_name_commands_refused(self):
+        """Protect command-position brace alternatives without expansion markers."""
+        for command in ('{let,y}', 'x=1; {let,y}', '{let,y,}'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (name)', self.reason)
+
+    def test_conditional_initializers_cannot_prove_numeric_names(self):
+        """Require numeric initializers to execute on every path."""
+        for command in (
+            'if false; then :; ((i=0)); fi; ((i))',
+            'while false; do ((i=0)); done; ((i))',
+            'until true; do ((i=0)); done; ((i))',
+            'case x in y) ((i=0));; esac; ((i))',
+            'false && ((i=0)); ((i))', 'true || ((i=0)); ((i))',
+            'if false; then for ((i=0; i<1; i++)); do :; done; fi; (( i ))',
+            'true || for ((i=0; i<1; i++)); do :; done; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_debug_trap_assignment_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied('trap "i=$x" DEBUG; cd /tmp && for ((i=0; i<3; i++)); do echo "${a[i]}"; done'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_debug_trap_read_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied("trap 'read -r i < g' DEBUG; cd /tmp && for ((i=0; i<3; i++)); do echo \"${a[i]}\"; done"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_expanded_eval_argument_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied("i=0; eval 'echo $i' \"$c\"; (( i++ ))"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_literal_eval_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied("cd /tmp && for ((i=0; i<3; i++)); do eval 'echo $i'; echo \"${a[i]}\"; done"))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_source_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied('cd /tmp && for ((i=0; i<3; i++)); do source ./s; echo "${a[i]}"; done'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_dot_source_invalidates_scoped_loop_proof(self):
+        self.assertTrue(self.denied('cd /tmp && for ((i=0; i<3; i++)); do . ./s; echo "${a[i]}"; done'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_quoted_runtime_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; eval "$c"; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_unquoted_runtime_eval_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; eval $c; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_runtime_trap_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('c=$x; i=0; trap "$c" DEBUG; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_source_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; source ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_dot_source_invalidates_numeric_proof(self):
+        self.assertTrue(self.denied('i=0; . ./s; (( i ))'))
+        self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_numeric_loop_headers_prove_names_within_their_bodies(self):
+        """Keep local numeric proof inside loops on conditional and nested paths."""
+        for command in (
+            'cd /tmp && for ((i=0; i<3; i++)); do echo "$i"; done',
+            'cd /tmp && for ((i=0; i<3; i++)); do echo "${a[i]}"; done',
+            'git fetch -q && for ((i=0; i<2; i++)); do git log -1; done',
+            'cd x || exit 1; for ((i=0; i<3; i++)); do echo "$i"; done',
+            'echo x | cat; for ((i=0; i<3; i++)); do echo "$i"; done',
+            'echo x | cat\nfor ((i=0; i<3; i++)); do echo "$i"; done',
+            'if [ -d x ]; then for ((i=0; i<3; i++)); do echo "$i"; done; fi',
+            'for f in a b; do for ((i=0; i<2; i++)); do echo "$f $i"; done; done',
+            'for ((i=0; i<3; i++)); do for ((j=0; j<2; j++)); do echo "$((i+j))"; done; done',
+            'while read -r line; do for ((i=0; i<2; i++)); do echo "$line $i"; done; done < f',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_only_executable_loop_headers_prove_numeric_names(self):
+        """Protect numeric inference from comments, quoted data and heredoc data."""
+        for command in (
+            '# for ((i=0;\n(( i ))', "echo 'for ((i=0;'; (( i ))",
+            "cat <<'EOF'\nfor ((i=0;\nEOF\n(( i ))",
+            'echo for; ((i=0)); (( i ))',
+        ):
+            with self.subTest(command=command):
+                if command == 'echo for; ((i=0)); (( i ))':
+                    self.assertFalse(self.denied(command), self.reason)
+                else:
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_attached_quoted_destinations_invalidate_numeric_names(self):
+        """Protect arithmetic after writes through attached destination options."""
+        for command in (
+            'i=0; printf -v"i" %s "$x"; (( i ))',
+            "i=0; printf -v'i' %s \"$x\"; (( i ))",
+            'i=0; read -a"i" < f; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_quoted_declaration_compound_indices_keep_arithmetic_checks(self):
+        """Protect evaluated array indices inside quoted declaration operands."""
+        for declaration in ('declare', 'typeset', 'local'):
+            command = declaration + " -a 'b=([i]=1)'"
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_printf_glob_options_keep_runtime_names_refused(self):
+        """Protect printf destinations when filename expansion can supply an option."""
+        for command in ('printf ?v "$x" %s 1', 'printf *v "$x" %s 1',
+                        'printf [-v] "$x" %s 1'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (name)', self.reason)
+
+    def test_single_quoted_printf_data_stays_inert(self):
+        """Keep a literal data argument separate from an evaluated name operand."""
+        self.assertFalse(self.denied("printf '%s\\n' 'a[$(echo RAN)]'"), self.reason)
+
+    def test_eval_and_trap_numeric_reads_preserve_numeric_status(self):
+        """Keep permitted variable reads from masquerading as writes."""
+        for command in (
+            "i=0; eval 'echo $i'; (( i++ ))", "i=0; trap 'echo $i' EXIT; (( i++ ))",
+            "i=0; eval 'echo ${i}'; (( i++ ))", "i=0; trap 'echo ${i}' EXIT; (( i++ ))",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_parser_boundary_literal_controls_stay_admitted(self):
+        """Keep ordinary commands, parameter defaults and literal loops admitted."""
+        for command in (
+            'echo "$(git rev-parse --show-toplevel)"', 'echo "${x:-$(date)}"',
+            "echo ${x:-'$((y))'}", 'echo "${x:-default}"', "echo \"${x:-'quoted text'}\"",
+            '! grep -q x f', 'time make test', 'if grep -q x f; then echo y; fi',
+            '{ echo a; echo b; }', 'cp file{,.orig}', 'mkdir -p a/{b,c}', 'mv "$f"{,.bak}',
+            'for ((i=0; i<10; i++)); do echo "$i"; done', 'n=3; (( n > 1 ))',
+            '(( i = 0, i < 3 ))', 'printf -v X %s .',
+            'for f in a b; do printf -v X %s "$f"; done', "printf '%s\\n' \"$@\"",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_read_only_argument_words_with_interpreter_names_are_admitted(self):
         """Catch false refusals of literal read-only paths and patterns containing interpreter names."""
         for command in (

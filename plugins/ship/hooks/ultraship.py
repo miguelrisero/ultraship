@@ -1736,6 +1736,57 @@ def safe_directory_state(command, cwd=None):
     return not forbidden(base) and not forbidden(target) and os.path.isdir(target)
 
 
+def shell_without_redirections(tokens):
+    """Keep redirect targets and descriptor operators out of command and list positions."""
+    cursor = 0
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        raw, _, _, end = token
+        cursor += 1
+        if (re.fullmatch(r'\d+|\{[A-Za-z_][A-Za-z0-9_]*}', raw)
+                and cursor < len(tokens) and tokens[cursor][0] in {'<', '>'}
+                and end == tokens[cursor][2]):
+            continue
+        if raw in {'<', '>'} or (raw == '&' and cursor < len(tokens)
+                and tokens[cursor][0] == '>' and end == tokens[cursor][2]):
+            while (cursor < len(tokens) and tokens[cursor][0] in {'<', '>', '&', '|'}
+                   and tokens[cursor - 1][3] == tokens[cursor][2]):
+                cursor += 1
+            if cursor < len(tokens) and tokens[cursor][0] not in {';', '&', '|', '(', ')', '`', '\n'}:
+                cursor += 1
+            continue
+        yield token
+
+
+def shell_command_positions(tokens):
+    """Resolve shell prefixes without treating ordinary argument words as commands."""
+    positions, command_start, time_option = set(), True, False
+    for raw, value, start, _ in shell_without_redirections(tokens):
+        if raw in {';', '&', '|', '(', ')', '`', '\n'}:
+            command_start, time_option = True, False
+            continue
+        if not command_start:
+            continue
+        if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', value, re.S):
+            continue
+        if time_option and value in {'-p', '--'}:
+            time_option = False
+            continue
+        positions.add(start)
+        command_start = value in {'command', 'builtin', 'exec', 'time', '!', 'if', 'elif',
+                                  'while', 'until', 'then', 'do', 'else', '{'}
+        time_option = value in {'command', 'builtin', 'exec', 'time'}
+    return positions
+
+
+def shell_defines_function(tokens, positions):
+    return any(value == 'function' and start in positions or start in positions
+               and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', value)
+               and index + 2 < len(tokens) and tokens[index + 1][0] == '('
+               and tokens[index + 2][0] == ')'
+               for index, (_, value, start, _) in enumerate(tokens))
+
+
 def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
     spans = []
     for raw, _, _, _ in words:
@@ -1757,6 +1808,11 @@ def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
                 continue
             cursor += 1
         spans.append(None if parts is None or double else parts + [(raw[start:], False)])
+    printf_safe = (not any(value in {'alias', 'enable', 'hash', 'shopt', 'eval', 'trap', 'source'}
+                           for _, value, _, _ in tokens)
+                   and not any(value == '.' and start in shell_command_positions(tokens)
+                               for _, value, start, _ in tokens)
+                   and not shell_defines_function(tokens, shell_command_positions(tokens)))
     checked_words = [] if names_only else words
     legacy = any(parts is None or any('$[' in span for span, single in parts if not single) for parts in spans)
     expanded = lambda value: '$' in value or '`' in value
@@ -1765,7 +1821,11 @@ def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
         parts = spans[index]
         if (start in arithmetic or legacy) and expanded(value):
             return 'array subscript evaluation rule (arithmetic)'
-        if (grep_data_token(words, index) and parts is not None
+        printf_data = (printf_safe and index > 1 and words[0][0] == 'printf'
+                       and words[1][1] and not words[1][1].startswith(('-', '$', '`'))
+                       and not unresolved_shell_word(words[1][0])
+                       and raw.startswith("'") and raw.endswith("'") and "'" not in raw[1:-1])
+        if ((grep_data_token(words, index) or printf_data) and parts is not None
                 and not any(any(char in span for char in '$`\\') for span, single in parts if not single)):
             continue
         # Bash can evaluate a stored subscript payload long after shell quote removal.
@@ -1910,12 +1970,60 @@ def array_subscript_denial(words, arithmetic, tokens, groups, names_only=False):
     return None
 
 
-def shell_substitution_bodies(text):
+def arithmetic_end(text, start, closing):
+    """Match arithmetic delimiters without ending at a nested parenthesis or bracket."""
+    cursor, depth, quote = start, [], ''
+    while cursor < len(text):
+        char = text[cursor]
+        if char == '\\' and quote != "'":
+            cursor += 2
+            continue
+        if char == quote:
+            quote = ''
+        elif not quote and char in "'\"":
+            quote = char
+        elif not quote:
+            if not depth and text.startswith(closing, cursor):
+                return cursor
+            if char in '([':
+                depth.append(')' if char == '(' else ']')
+            elif depth and char == depth[-1]:
+                depth.pop()
+        cursor += 1
+    return len(text)
+
+
+def parameter_quote_mode(text, start):
+    parameter = re.match(r'[!#]?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*?#$!_-])(?:\[[^]]*\])?', text[start:])
+    tail = text[start + parameter.end():] if parameter else text[start:]
+    if re.match(r':?[-+=?]', tail):
+        return 'word'
+    if tail.startswith(('#', '%')):
+        return 'pattern'
+    if not tail or tail.startswith('}') or re.match(r':(?![-+=?])', tail):
+        return 'arithmetic'
+    return 'other'
+
+
+def shell_substitution_bodies(text, arithmetic_quotes=False):
     """Keep substitution quote state separate from the surrounding shell word."""
     frames, quote, cursor, word_start = [], '', 0, True
     while cursor < len(text):
         char = text[cursor]
         context = frames[-1][0] if frames else ''
+        double_operand = context == '}' and frames[-1][2] == '"'
+        operand_mode = parameter_quote_mode(text, frames[-1][1]) if double_operand else ''
+        if double_operand and char == "'" and operand_mode == 'other':
+            raise ValueError('shell substitution boundary')
+        if arithmetic_quotes and char == "'" and (
+                context in {'))', ']'} and frames[-1][2] == '"'
+                or double_operand and (operand_mode == 'arithmetic' or re.fullmatch(
+                    r'[!#]?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*?#$!_-])\[[^]]*',
+                    text[frames[-1][1]:cursor]))):
+            raise ValueError('shell substitution boundary')
+        if (not quote and context == ')' and word_start
+                and re.match(r'case(?=$|[\s;&|()])', text[cursor:])):
+            raise ValueError('shell substitution boundary')
         if not quote and context not in {'}', '))', ']'} and char == '#' and word_start:
             end = text.find('\n', cursor)
             comment = text[cursor:len(text) if end < 0 else end]
@@ -1958,11 +2066,15 @@ def shell_substitution_bodies(text):
             continue
         elif char == quote:
             quote = ''
-        elif char in "'\"" and not quote:
+        elif char in "'\"" and not quote and not (char == "'" and double_operand and operand_mode == 'word'):
             quote = char
         elif not quote and frames:
             closing, start, outer_quote, depth = frames[-1]
             if char == '(' and closing in {')', '))'}:
+                frames[-1] = (closing, start, outer_quote, depth + 1)
+            elif char == ')' and closing == '))' and depth > 1:
+                frames[-1] = (closing, start, outer_quote, depth - 1)
+            elif char == '[' and closing == ']':
                 frames[-1] = (closing, start, outer_quote, depth + 1)
             elif text.startswith(closing, cursor):
                 if depth == 1:
@@ -2006,27 +2118,35 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
         else:
             merged.append((start, end))
     regions = merged
+    # Token gaps contain comments; preserve offsets while discarding their inert text.
+    source = [' ' if char != '\n' else '\n' for char in text]
+    for _, _, start, end in tokens:
+        source[start:end] = text[start:end]
+    text = ''.join(source)
     quote, cursor, parameters = '', 0, []
     while cursor < len(text):
         if parameters and cursor == parameters[-1][0]:
-            _, quote = parameters.pop()
+            _, quote, _ = parameters.pop()
             cursor += 1
             continue
         char = text[cursor]
         if char == '\\' and quote != "'":
             cursor += 2
             continue
+        double_operand = bool(parameters and parameters[-1][1] == '"' and parameters[-1][2] == 'word')
         if char == quote:
             quote = ''
-        elif char in "'\"" and not quote:
+        elif char in "'\"" and not quote and not (char == "'" and double_operand):
             quote = char
         elif quote != "'" and text.startswith(('$((', '$['), cursor):
             opening = 3 if text.startswith('$((', cursor) else 2
             closing = '))' if opening == 3 else ']'
-            end = text.find(closing, cursor + opening)
-            regions.append((cursor + opening, len(text) if end < 0 else end))
+            end = arithmetic_end(text, cursor + opening, closing)
+            regions.append((cursor + opening, end))
         elif quote != "'" and text.startswith('${', cursor):
             start, end, inner_quote, brackets, braces = cursor + 2, cursor + 2, '', 0, 1
+            mode = parameter_quote_mode(text, start)
+            literal_single = (quote == '"' or double_operand) and mode == 'word'
             while end < len(text):
                 current = text[end]
                 if current == '\\' and inner_quote != "'":
@@ -2034,7 +2154,8 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                     continue
                 if current == inner_quote:
                     inner_quote = ''
-                elif current in "'\"" and not inner_quote:
+                elif (current in "'\"" and not inner_quote
+                      and not (current == "'" and literal_single)):
                     inner_quote = current
                 elif not inner_quote:
                     if current == '[':
@@ -2065,7 +2186,7 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                     offset = close + 1 if close >= 0 else len(body)
                 if body[offset:offset + 1] == ':' and body[offset + 1:offset + 2] not in {'-', '=', '?', '+'}:
                     regions.append((start + offset + 1, end))
-            parameters.append((end, quote))
+            parameters.append((end, '"' if quote == '"' or double_operand else quote, mode))
             quote = ''
             cursor = start - 1
         cursor += 1
@@ -2100,7 +2221,6 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                         return reason + 'attribute)'
             unquoted = re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', raw)
             if (shell_brace_text(raw).startswith('{') and re.search(r'[,]|\.\.', shell_brace_text(raw))
-                    and any(char in value for char in '$`')
                     and all(re.fullmatch(rf'{identifier}=.*', word[1], re.S) for word in words[:index])
                     and not re.match(rf'{identifier}=', value)):
                 return reason + 'name)'
@@ -2111,10 +2231,12 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                 command_start = 0
                 while command_start < index and re.fullmatch(rf'{identifier}=.*', words[command_start][1], re.S):
                     command_start += 1
-                while command_start < index and words[command_start][1] in {'command', 'builtin'}:
+                while command_start < index and words[command_start][1] in {
+                        'command', 'builtin', '!', 'time', 'exec', 'if', 'elif', 'while',
+                        'until', 'then', 'do', 'else', '{'}:
                     wrapper = words[command_start][1]
                     command_start += 1
-                    if wrapper == 'command' and command_start < index and words[command_start][1] == '-p':
+                    if wrapper in {'command', 'time'} and command_start < index and words[command_start][1] == '-p':
                         command_start += 1
                     if command_start < index and words[command_start][1] == '--':
                         command_start += 1
@@ -2146,7 +2268,7 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                     arg_raw, arg_value, _, _ = argument
                     outside_quotes = re.sub(r'''\\.|'[^']*'|"(?:\\.|[^"\\])*"''', '', arg_raw)
                     if value == 'printf':
-                        if arg_value.startswith(('$', '`')):
+                        if arg_value.startswith(('$', '`')) or any(char in outside_quotes for char in '*?['):
                             return reason + 'name)'
                         continue
                     if (re.search(r'\$[@*]|\[[@*]\]', arg_raw)
@@ -2163,6 +2285,9 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                         if any(char in argument for char in '$`'):
                             return reason + 'attribute)'
                         attribute = 'i' if 'i' in argument else 'n' if 'n' in argument else attribute
+                    elif re.match(rf'{identifier}=\(', argument):
+                        for subscript in re.finditer(r'\[([^]]*)\]=', arg_raw):
+                            regions.append((arg_start + subscript.start(1), arg_start + subscript.end(1)))
                     elif attribute:
                         target = argument.partition('=')[0]
                         if re.fullmatch(identifier, target):
@@ -2210,19 +2335,93 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
                                 if word[0] in {')', '`'} or neighbor in groups:
                                     return reason + 'arithmetic)'
                                 regions.append((word[2], word[3]))
-    numeric, assignments = set(), {}
+    numeric, assignments, numeric_scopes = set(), {}, {}
+    control_words = []
+    for words in commands:
+        if words:
+            previous = next((token for token in reversed(tokens) if token[2] < words[0][2]), None)
+            if previous is not None and previous[0] not in {';', '&', '|', '(', ')', '`', '\n'}:
+                continue
+        time_prefix = False
+        for word in words:
+            if re.fullmatch(rf'{identifier}=.*', word[1], re.S):
+                break
+            if word[0] != word[1]:
+                break
+            if time_prefix and word[0] in {'-p', '--'}:
+                continue
+            time_prefix = word[0] == 'time'
+            control_words.append(word)
+            if word[0] not in {'then', 'do', 'else', '{', '!', 'if', 'elif', 'time'}:
+                break
+    loop_ends, loop_stack = {}, []
+    for raw, _, start, end in sorted(control_words, key=lambda word: word[2]):
+        if raw in {'for', 'while', 'until', 'select'}:
+            loop_stack.append(start)
+        elif raw == 'done' and loop_stack:
+            loop_ends[loop_stack.pop()] = end
+    loop_starts = {start for raw, _, start, _ in control_words if raw == 'for'}
+    loop_headers = []
+
+    list_tokens = list(shell_without_redirections(tokens))
+
+    def conditional_before(position):
+        stack = []
+        for raw, _, start, _ in sorted(control_words, key=lambda word: word[2]):
+            if start >= position:
+                break
+            if raw in {'if', 'while', 'until', 'case', 'for', 'select'}:
+                stack.append(raw)
+            elif stack and raw == {'if': 'fi', 'case': 'esac'}.get(stack[-1], 'done'):
+                stack.pop()
+        if any(kind in {'if', 'while', 'until', 'case'} for kind in stack):
+            return True
+        before = []
+        for token in list_tokens:
+            if token[2] >= position:
+                break
+            if token[0] == '\n' and before and before[-1][0] in {'&', '|'}:
+                continue
+            before.append(token)
+        boundary = max((index for index, token in enumerate(before) if token[0] in {';', '\n'}), default=-1)
+        return (any(token[0] == '|' for token in before[boundary + 1:])
+                or any(left[0] == right[0] == '&' and left[3] == right[2]
+                       for left, right in zip(before[boundary + 1:], before[boundary + 2:])))
+
+    def parallel_after(position):
+        following = next((token for token in list_tokens if token[2] >= position), None)
+        return following is not None and following[0] in {'|', '&'}
+
     for loop in re.finditer(r'\bfor\s*\(\(([^;]*);', text):
+        if loop.start() not in loop_starts:
+            continue
+        opening = next((index for index, token in enumerate(tokens)
+                        if token[0] == '(' and loop.start() < token[2] < loop.start(1)), None)
+        if opening not in groups:
+            continue
+        header_end = tokens[groups[opening]][3]
+        loop_headers.append((loop.start(1), header_end))
+        scope_end = loop_ends.get(loop.start(), header_end)
         terms = loop[1].split(',')
         if all(re.fullmatch(rf'\s*{identifier}\s*=\s*[0-9]+\s*', term) for term in terms):
             for term in re.finditer(rf'({identifier})\s*=', loop[1]):
+                numeric_scopes.setdefault(term[1], []).append((loop.start(1), scope_end))
                 before = text[:loop.start(1) + term.start()]
-                if not re.search(rf'(?<![A-Za-z0-9_]){term[1]}(?![A-Za-z0-9_])', before):
+                if (scope_end > header_end and not conditional_before(loop.start())
+                        and not parallel_after(scope_end)
+                        and not re.search(r'\b(?:for|select|function)\b|[({]', text[:loop.start()])
+                        and not re.search(rf'(?<![A-Za-z0-9_]){term[1]}(?![A-Za-z0-9_])', before)):
                     numeric.add(term[1])
     for start, end in regions:
         match = re.match(rf'\s*({identifier})\s*=\s*[0-9]+(?=\s*(?:[,;)]|$))', text[start:end])
         if match:
             position = start + match.start(1)
             before = text[:position]
+            region_close = max((tokens[closing][3] for opening, closing in groups.items()
+                                if tokens[opening][2] < start < tokens[closing][3]), default=end)
+            if (conditional_before(position) or parallel_after(region_close)
+                    or any(left <= position < right for left, right in loop_headers)):
+                continue
             if not re.search(rf'(?<![A-Za-z0-9_]){match[1]}(?![A-Za-z0-9_])', before):
                 if re.search(r'(?:^|[;\n])\s*(?:for\s*)?\(\(\s*$', before):
                     numeric.add(match[1])
@@ -2232,35 +2431,90 @@ def runtime_name_denial(text, tokens, arithmetic, groups, commands):
         before = text[:start]
         if (not re.search(rf'(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])', before)
                 and re.search(r'(?:^|[;\n])\s*$', before)
+                and not conditional_before(start) and not parallel_after(end)
                 and not re.search(r'&&|\|\||[|({]|\b(?:if|while|until|case|for|select|function)\b', before)):
             numeric.add(name)
+    destination_operands = set()
+    for words in commands:
+        for index, word in enumerate(words):
+            if word[1] not in {'printf', 'read'}:
+                continue
+            for raw, value, start, _ in words[index + 1:]:
+                if not value.startswith('-'):
+                    break
+                if value == '--':
+                    break
+                if (word[1] == 'printf' and value.startswith('-v') and len(value) > 2
+                        or word[1] == 'read' and re.match(r'-[^adinNptu]*a.+', value)):
+                    destination_operands.add(start)
     declaration_operands = {word[2] for words in commands for index, word in enumerate(words)
                             if any(previous[1] in {'declare', 'typeset', 'local', 'export', 'readonly'}
                                    for previous in words[:index])}
     code_operands = {word[2] for words in commands for index, word in enumerate(words)
                      if any(previous[1] in {'eval', 'trap'} for previous in words[:index])}
-    for name in tuple(numeric):
+    command_positions = shell_command_positions(tokens)
+    function_definition = shell_defines_function(tokens, command_positions)
+    plain_code = {word[2] for words in commands for index, word in enumerate(words)
+                  if word[0] == word[1] and word[1] in {'eval', 'trap'}
+                  and all(previous[0] in {'then', 'do', 'else', '{', '!', 'if', 'elif'}
+                          or re.fullmatch(rf'{identifier}=.*', previous[1], re.S)
+                          for previous in words[:index])}
+    if (function_definition or any(value == 'source' or value == '.' and start in command_positions
+                                   or value in {'eval', 'trap'} and start not in plain_code
+                                   for _, value, start, _ in tokens)):
+        numeric.clear()
+        numeric_scopes.clear()
+    for words in commands:
+        for index, word in enumerate(words):
+            if word[2] not in command_positions or word[1] not in {'eval', 'trap'}:
+                continue
+            numeric_scopes.clear()
+            arguments = words[index + 1:]
+            if word[1] == 'trap':
+                if arguments and arguments[0][1] == '--':
+                    arguments = arguments[1:]
+                arguments = arguments[:1]
+            if any(not (raw.startswith("'") and raw.endswith("'") and "'" not in raw[1:-1])
+                   for raw, _, _, _ in arguments):
+                numeric.clear()
+            else:
+                for _, code, _, _ in arguments:
+                    code_tokens = shell_raw_words(code)
+                    code_positions = shell_command_positions(code_tokens)
+                    if (re.search(r'\(\s*\)', code)
+                            or shell_defines_function(code_tokens, code_positions)
+                            or any(code_value in {'source', 'eval', 'trap', 'function', '.'}
+                                   for _, code_value, _, _ in code_tokens)):
+                        numeric.clear()
+    for name in numeric | numeric_scopes.keys():
         for raw, value, start, end in tokens:
-            if assignments.get(start) == name:
+            if assignments.get(start) == name and name in numeric:
                 continue
             chars = list(raw)
             for left, right in regions:
                 for position in range(max(left, start), min(right, end)):
-                    chars[position - start] = ' '
+                    if name in numeric or any(a <= position < b for a, b in numeric_scopes[name]):
+                        chars[position - start] = ' '
             remaining = re.sub(rf'\$(?:{name}(?![A-Za-z0-9_])|\{{{name}\}})', '', ''.join(chars))
-            name_operand = (value == name or start in code_operands
+            name_operand = (value == name or start in code_operands or start in destination_operands
                             or start in declaration_operands and value.startswith((name + '=', name + '+=', name + '[')))
             if name_operand and ''.join(chars).strip():
-                remaining = value
+                remaining = re.sub(rf'\$(?:{name}(?![A-Za-z0-9_])|\{{{name}\}})', '', value)
+                if start in destination_operands:
+                    remaining = re.sub(r'^-(?:v|[^adinNptu]*a)', '', remaining)
             else:
                 remaining = re.sub(r'''(?:'[^']*'|"(?:\\.|[^"\\])*")''', '', remaining)
-            if re.search(rf'(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])', remaining):
+            if (name in remaining if start in code_operands else
+                    re.search(rf'(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])', remaining)):
                 numeric.discard(name)
+                numeric_scopes.pop(name, None)
                 break
     for start, end in regions:
         expression = text[start:end]
         for match in re.finditer(rf'(?<![A-Za-z0-9_#]){identifier}', expression):
-            if match[0] in numeric or re.match(r'\s*=(?!=)', text[start + match.end():end]):
+            if (match[0] in numeric or any(left <= start + match.start() < right
+                    for left, right in numeric_scopes.get(match[0], []))
+                    or re.match(r'\s*=(?!=)', text[start + match.end():end])):
                 continue
             return reason + 'arithmetic)'
     return None
@@ -3405,6 +3659,8 @@ def pre(data):
                 except ValueError as error:
                     if str(error) == 'shell comment substitution':
                         deny(classifier_reason + ' Rule: inline interpreter code rule (comment).')
+                    if str(error) == 'shell substitution boundary':
+                        deny(classifier_reason + ' Rule: inline interpreter code rule (substitution boundary).')
                     raise
                 reason = python_inline_denial(command)
                 if reason:
@@ -3412,6 +3668,12 @@ def pre(data):
                 reason = inline_interpreter_denial(command, data.get('cwd'))
                 if reason:
                     deny(classifier_reason + ' Rule: ' + reason + '.')
+                try:
+                    list(shell_substitution_bodies(shell_without_heredoc_bodies(command), arithmetic_quotes=True))
+                except ValueError as error:
+                    if str(error) == 'shell substitution boundary':
+                        deny(classifier_reason + ' Rule: inline interpreter code rule (substitution boundary).')
+                    raise
             except Exception:
                 deny(classifier_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''
