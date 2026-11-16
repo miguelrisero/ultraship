@@ -152,6 +152,7 @@ class EnvDirectoryTests(unittest.TestCase):
     def test_piped_groups_keep_input_for_every_segment(self):
         for command, label in (
             ("printf x | (eval 'cd /proc/self/fd'; node 0)", 'program from a pipe'),
+            ('printf x | (echo }; node 0)', 'program from a pipe'),
             ("printf x | { eval 'cd /proc/self/fd'; node 0; }", 'unresolved command word'),
         ):
             with self.subTest(command=command):
