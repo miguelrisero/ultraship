@@ -656,7 +656,82 @@ class TextLintTests(unittest.TestCase):
         self.assertIsNone(self.hook_output(self.event(valid)))
         self.assertFalse(pending.exists())
 
-    def test_pending_refusal_requires_citation_for_same_recipient(self):
+    def test_uncited_refusal_spends_pending_receipt_and_admits_later_messages(self):
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        marker = self.state / 'receipts' / (receipt_id + '.consumed')
+        valid = 'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.'
+        self.assertIsNone(self.hook_output(self.event(valid, to='another-chief')))
+        other_session = self.event()
+        other_session['session_id'] = 'another-session'
+        self.hook_refusal(other_session)
+        other_receipt_id = self.last_receipt['id']
+        self.assertTrue(self.last_receipt['resend_allowed'])
+        self.assertFalse(marker.exists())
+
+        reason = self.hook_refusal(self.event(valid))
+        self.assertIn('Receipt `' + receipt_id + '` is now spent.', reason)
+        self.assertIn('The message refused under receipt `' + receipt_id + '` stays refused. '
+                      'Later messages need no citation.', reason)
+        self.assertTrue(marker.exists())
+        self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o600)
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertIsNone(self.hook_output(self.event('The next review passes.\n' + valid)))
+        self.assertIn('Receipt is consumed', self.hook_refusal(self.resend(receipt_id)))
+        self.assertFalse(self.last_receipt['resend_allowed'])
+
+        other_session = self.resend(other_receipt_id)
+        other_session['session_id'] = 'another-session'
+        self.assertIsNone(self.hook_output(other_session))
+
+    def test_parallel_consumption_gets_normal_content_checks(self):
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        (self.state / 'receipts' / (receipt_id + '.consumed')).touch()
+        valid = 'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.'
+        with patch.object(text_lint, 'pending_entry', return_value={'id': receipt_id, 'state': 'open'}):
+            self.assertIsNone(self.hook_output(self.event(valid)))
+            reason = self.hook_refusal(self.event())
+        self.assertIn('Missing section: Facts Missing section: Decision Missing section: Next', reason)
+        self.assertTrue(self.last_receipt['formatting_only'])
+
+    def test_pending_marker_write_error_keeps_the_pending_refusal(self):
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        valid = 'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.'
+        marker = self.state / 'receipts' / (receipt_id + '.consumed')
+        open_file = text_lint.os.open
+
+        def fail_marker(path, flags, mode=0o777):
+            if path == marker:
+                raise PermissionError('marker unavailable')
+            return open_file(path, flags, mode)
+
+        with patch.object(text_lint.os, 'open', side_effect=fail_marker):
+            reason = self.hook_refusal(self.event(valid))
+        self.assertIn('A formatting-only refusal to this recipient is pending.', reason)
+        self.assertIn('Cite its receipt `' + receipt_id + '`', reason)
+        self.assertFalse(marker.exists())
+        identity = {'session_id': 'session-one', 'agent_id': 'agent-one',
+                    'tool_name': 'SendMessage', 'recipient': 'chief'}
+        self.assertEqual(text_lint.pending_entry(identity), {'id': receipt_id, 'state': 'open'})
+        self.assertIsNone(self.hook_output(self.resend(receipt_id)))
+
+    def test_uncited_spend_survives_receipt_write_failure(self):
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        valid = 'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.'
+        with patch.object(text_lint, 'write_receipt', side_effect=OSError('disk full')):
+            result = self.hook_output(self.event(valid))
+        self.assertEqual(result['permissionDecision'], 'deny')
+        self.assertIn('Receipt `' + receipt_id + '` is now spent.', result['permissionDecisionReason'])
+        self.assertIn('No receipt was written, so no resend', result['permissionDecisionReason'])
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        self.assertIsNone(self.hook_output(self.event('The next review passes.\n' + valid)))
+        self.assertIn('Receipt is consumed', self.hook_refusal(self.resend(receipt_id)))
+        self.assertFalse(self.last_receipt['resend_allowed'])
+
+    def test_uncited_message_spends_receipt_and_keeps_content_checks(self):
         self.hook_refusal(self.event())
         receipt_id = self.last_receipt['id']
         pending = next((self.state / 'pending').iterdir())
@@ -665,28 +740,43 @@ class TextLintTests(unittest.TestCase):
         self.assertEqual(pending.name, expected_key)
         self.assertEqual(json.loads(pending.read_text()), {'id': receipt_id, 'state': 'open'})
         valid = self.resend(receipt_id)['tool_input']['message'].split('\n<!--')[0]
-        for message in (valid, 'The review passes.'):
-            reason = self.hook_refusal(self.event(message))
-            self.assertIn('A formatting-only refusal to this recipient is pending.', reason)
-            self.assertIn('Cite its receipt `' + receipt_id + '`', reason)
-            self.assertFalse(self.last_receipt['resend_allowed'])
-            self.assertFalse(self.last_receipt['formatting_only'])
-            self.assertEqual(json.loads(pending.read_text()), {'id': receipt_id, 'state': 'open'})
+        reason = self.hook_refusal(self.event(valid))
+        self.assertIn('Receipt `' + receipt_id + '` is now spent.', reason)
+        self.assertIn('The message refused under receipt `' + receipt_id + '` stays refused. '
+                      'Later messages need no citation.', reason)
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertFalse(self.last_receipt['formatting_only'])
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        identity = {'session_id': 'session-one', 'agent_id': 'agent-one',
+                    'tool_name': 'SendMessage', 'recipient': 'chief'}
+        self.assertEqual(text_lint.pending_entry(identity), {'id': receipt_id, 'state': 'spent'})
+        reason = self.hook_refusal(self.event('The review passes.'))
+        self.assertIn('Missing section: Facts Missing section: Decision Missing section: Next', reason)
+        self.assertIn('This refusal permits no resend, because a receipt to this recipient '
+                      'was spent within 24 hours.', reason)
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertTrue(self.last_receipt['formatting_only'])
+        self.assertEqual(text_lint.pending_entry(identity), {'id': receipt_id, 'state': 'spent'})
         self.assertIsNone(self.hook_output(self.event(valid, to='another-chief')))
-        self.assertIsNone(self.hook_output(self.resend(receipt_id)))
-        self.assertFalse(pending.exists())
+        self.assertIn('Receipt is consumed', self.hook_refusal(self.resend(receipt_id)))
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        self.assertEqual(text_lint.pending_entry(identity), {'id': receipt_id, 'state': 'spent'})
 
-    def test_pending_input_and_stale_entries(self):
+    def test_uncited_input_spends_receipt_and_refuses_cited_resend(self):
         event = {'session_id': 'session-one', 'tool_name': 'create_input',
                  'tool_input': {'workspace_id': 'one', 'content': {'html': '<p>Wait.</p>'}}}
         self.hook_refusal(event)
         receipt_id = self.last_receipt['id']
-        pending = next((self.state / 'pending').iterdir())
         event['tool_input']['content']['html'] = '<meta name="output-kind" content="result"><p>Wait.</p>'
-        self.assertIn('is pending', self.hook_refusal(event))
+        self.assertIn('Receipt `' + receipt_id + '` is now spent.', self.hook_refusal(event))
         event['tool_input']['content']['html'] += '<!-- ultraship-receipt:' + receipt_id + ' -->'
-        self.assertIsNone(self.hook_output(event))
-        self.assertFalse(pending.exists())
+        self.assertIn('Receipt is consumed', self.hook_refusal(event))
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        identity = {'session_id': 'session-one', 'agent_id': None,
+                    'tool_name': 'create_input', 'recipient': 'one'}
+        self.assertEqual(text_lint.pending_entry(identity), {'id': receipt_id, 'state': 'spent'})
+
+    def test_pending_stale_entries(self):
         for stale in ('missing', 'expired', 'consumed'):
             with self.subTest(stale=stale):
                 self.hook_refusal(self.event())
@@ -726,10 +816,11 @@ class TextLintTests(unittest.TestCase):
                 self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
                 self.assertEqual(json.loads(pending.read_text()), {'id': receipt_id, 'state': 'open'})
         valid = self.resend(receipt_id)['tool_input']['message'].split('\n<!--')[0]
-        self.assertIn('A formatting-only refusal to this recipient is pending.',
+        self.assertIn('Receipt `' + receipt_id + '` is now spent.',
                       self.hook_refusal(self.event(valid)))
-        self.assertIsNone(self.hook_output(self.resend(receipt_id)))
-        self.assertEqual(list((self.state / 'pending').glob('*')), [])
+        identity = {'session_id': 'session-one', 'agent_id': 'agent-one',
+                    'tool_name': 'SendMessage', 'recipient': 'chief'}
+        self.assertEqual(text_lint.pending_entry(identity), {'id': receipt_id, 'state': 'spent'})
         self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
         self.assertIn('Receipt is consumed', self.hook_refusal(self.resend(receipt_id)))
         self.assertFalse(self.last_receipt['resend_allowed'])

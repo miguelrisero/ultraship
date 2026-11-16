@@ -266,6 +266,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             "The hook verifies the receipt's session, tool, recipient and non-prose fields, then consumes it once.",
             'Refusal prefix text without a verified receipt supplies zero producer evidence.',
             'Only the hook writes receipt state; agents never read, write or reset the receipt store.',
+            'A later message must not carry the refused content.',
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, self.refusals)
