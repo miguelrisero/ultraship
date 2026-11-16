@@ -560,7 +560,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                     "find . -fprint out -name 'text_lint hook'",
                     "cd sub && grep -rn 'text_lint hook' .",
                     "find . -name x && grep -rn 'text_lint hook' .",
-                    "grep -rn 'text_lint hook' . && ls",
+                    "grep -rn 'text_lint hook' . && ls .",
                     "grep -rn 'a && b text_lint hook' .",
                     'ls text_lint.py hook',
                     "find . -name 'text_lint hook'"]
