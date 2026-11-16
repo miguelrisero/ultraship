@@ -717,6 +717,96 @@ class TextLintTests(unittest.TestCase):
         self.assertIn('Receipt `' + receipt_id + '` is now spent.', self.hook_refusal(first))
         self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
 
+    def legacy_input_receipt(self, event, state='open'):
+        receipt = text_lint.write_receipt(event, ['Missing section: Recommendation'], True, None)
+        text_lint.pending_path(receipt).unlink()
+        receipt.pop('input_key')
+        receipt['mac'] = text_lint.signature(receipt, text_lint.receipt_key())
+        (self.state / 'receipts' / (receipt['id'] + '.json')).write_bytes(text_lint.canonical(receipt))
+        fields = [receipt.get(field) for field in ('session_id', 'agent_id', 'tool_name', 'recipient')]
+        path = self.state / 'pending' / hashlib.sha256(text_lint.canonical(fields)).hexdigest()
+        path.write_text(json.dumps({'id': receipt['id'], 'state': state}))
+        return receipt, path
+
+    def test_input_pending_key_matches_the_shared_hook_fixture(self):
+        self.hook_refusal(self.input_event('input-one'))
+        self.assertEqual(self.last_receipt['input_key'],
+                         '4acd0ff543a7910ac07be012ae7398e564230fb519bce47a535abe0d24f56413')
+        pending = next((self.state / 'pending').iterdir())
+        self.assertEqual(pending.name,
+                         'c57c4851d317765062fb5cbb32b7de185423bf77516b936618cbca195ea7b186')
+
+    def test_input_keys_with_a_shared_long_prefix_remain_independent(self):
+        prefix = 'x' * 200
+        self.hook_refusal(self.input_event(prefix + 'one'))
+        receipt_id = self.last_receipt['id']
+        pending = next((self.state / 'pending').iterdir())
+        pending_bytes = pending.read_bytes()
+
+        self.assertIsNone(self.hook_output(self.input_event(
+            prefix + 'two', '<meta name="output-kind" content="result"><p>The checks pass.</p>')))
+
+        self.assertEqual(pending.read_bytes(), pending_bytes)
+        self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+
+    def test_open_legacy_input_receipt_still_blocks_uncited_same_input(self):
+        event = self.input_event('input-one')
+        receipt, pending = self.legacy_input_receipt(event)
+        event['tool_input']['content']['html'] = ('<meta name="output-kind" content="result">'
+                                                 '<p>The review passes.</p>')
+
+        self.assertIn('Receipt `' + receipt['id'] + '` is now spent.', self.hook_refusal(event))
+
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertTrue((self.state / 'receipts' / (receipt['id'] + '.consumed')).exists())
+        self.assertTrue(pending.exists())
+
+    def test_spent_legacy_input_receipt_prevents_another_resend(self):
+        event = self.input_event('input-one')
+        receipt, pending = self.legacy_input_receipt(event, 'spent')
+        pending_bytes = pending.read_bytes()
+
+        self.hook_refusal(event)
+
+        self.assertTrue(self.last_receipt['formatting_only'])
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertEqual(pending.read_bytes(), pending_bytes)
+        self.assertEqual(json.loads(pending_bytes), {'id': receipt['id'], 'state': 'spent'})
+
+    def test_other_input_leaves_a_legacy_pending_entry_untouched(self):
+        receipt, pending = self.legacy_input_receipt(self.input_event('input-one'))
+        pending_bytes = pending.read_bytes()
+
+        self.assertIsNone(self.hook_output(self.input_event(
+            'input-two', '<meta name="output-kind" content="result"><p>The checks pass.</p>')))
+
+        self.assertEqual(pending.read_bytes(), pending_bytes)
+        self.assertFalse((self.state / 'receipts' / (receipt['id'] + '.consumed')).exists())
+
+    def test_legacy_input_resend_clears_only_the_same_invocations_ship_sibling(self):
+        for sibling_tool_id in ('tool-one', 'tool-two'):
+            with self.subTest(sibling_tool_id=sibling_tool_id):
+                event = self.input_event('input-one')
+                event['session_id'] = sibling_tool_id
+                legacy, legacy_pending = self.legacy_input_receipt(event)
+                sibling_event = {**event, 'tool_use_id': sibling_tool_id}
+                sibling = text_lint.write_receipt(
+                    sibling_event, ['Missing section: Recommendation'], True, None)
+                pending = text_lint.pending_path(sibling)
+                pending_bytes = pending.read_bytes()
+                event['tool_input']['content']['html'] = (
+                    '<meta name="output-kind" content="result"><p>The review passes.</p>'
+                    '<!-- ultraship-receipt:' + legacy['id'] + ' -->')
+
+                self.assertIsNone(self.hook_output(event))
+
+                self.assertFalse(legacy_pending.exists())
+                self.assertTrue((self.state / 'receipts' / (legacy['id'] + '.consumed')).exists())
+                self.assertEqual(pending.exists(), sibling_tool_id != 'tool-one')
+                if sibling_tool_id != 'tool-one':
+                    self.assertEqual(pending.read_bytes(), pending_bytes)
+                self.assertFalse((self.state / 'receipts' / (sibling['id'] + '.consumed')).exists())
+
     def test_expiry_uses_injected_clock(self):
         self.hook_refusal(self.event())
         receipt_id = self.last_receipt['id']

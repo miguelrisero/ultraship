@@ -262,7 +262,7 @@ def input_identity(event):
     if isinstance(tool, str) and tool.endswith('create_input'):
         # One workspace receives many unrelated Inputs; the external key names one Input across its retries.
         input_key = original.get('external_key') if isinstance(original, dict) else None
-        identity['input_key'] = str(input_key)[:200] if input_key is not None else None
+        identity['input_key'] = hashlib.sha256(canonical(input_key)).hexdigest() if input_key is not None else None
     return identity
 
 
@@ -278,13 +278,28 @@ def pending_path(identity):
     return store_dir() / 'pending' / key
 
 
-def clear_pending(receipt):
-    path = pending_path(receipt)
-    try:
-        if json.loads(path.read_text())['id'] == receipt['id']:
-            path.unlink(missing_ok=True)
-    except FileNotFoundError:
-        pass
+def clear_pending(receipt, event):
+    identity = dict(receipt)
+    create_input = isinstance(identity.get('tool_name'), str) and identity['tool_name'].endswith('create_input')
+    if create_input:
+        identity['input_key'] = input_identity(event)['input_key']
+    paths = {pending_path(identity)}
+    if create_input:
+        # Ship releases before this change keep create_input entries at the four-field path.
+        fields = [identity.get(field) for field in ('session_id', 'agent_id', 'tool_name', 'recipient')]
+        paths.add(store_dir() / 'pending' / hashlib.sha256(canonical(fields)).hexdigest())
+    for path in paths:
+        try:
+            entry = json.loads(path.read_text())
+            same = entry['id'] == receipt['id']
+            if not same and entry['state'] == 'open':
+                sibling = read_receipt(entry['id'])
+                same = (sibling.get('input_sha256') == receipt.get('input_sha256')
+                        and sibling.get('tool_use_id') == receipt.get('tool_use_id'))
+            if same:
+                path.unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
 
 
 def prune_receipts(directory):
@@ -316,22 +331,30 @@ def prune_receipts(directory):
 
 
 def pending_entry(identity):
-    path = pending_path(identity)
-    try:
-        entry = json.loads(path.read_text())
-        receipt_id = entry['id']
-        if entry['state'] not in ('open', 'spent') or not re.fullmatch(r'[0-9a-f]{32}', receipt_id):
-            raise ValueError('Invalid pending receipt entry.')
-        receipt_path = store_dir() / 'receipts' / (receipt_id + '.json')
-        receipt = json.loads(receipt_path.read_bytes())
-        created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
-        if timedelta(0) <= now() - created < timedelta(hours=24):
-            if receipt_path.with_suffix('.consumed').exists():
-                entry['state'] = 'spent'
-            return entry
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
-    path.unlink(missing_ok=True)
+    paths = [pending_path(identity)]
+    if isinstance(identity.get('tool_name'), str) and identity['tool_name'].endswith('create_input'):
+        # Ship releases before this change keep create_input entries at the four-field path.
+        fields = [identity.get(field) for field in ('session_id', 'agent_id', 'tool_name', 'recipient')]
+        paths.append(store_dir() / 'pending' / hashlib.sha256(canonical(fields)).hexdigest())
+    for index, path in enumerate(paths):
+        try:
+            entry = json.loads(path.read_text())
+            receipt_id = entry['id']
+            if entry['state'] not in ('open', 'spent') or not re.fullmatch(r'[0-9a-f]{32}', receipt_id):
+                raise ValueError('Invalid pending receipt entry.')
+            receipt_path = store_dir() / 'receipts' / (receipt_id + '.json')
+            receipt = json.loads(receipt_path.read_bytes())
+            created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
+            if timedelta(0) <= now() - created < timedelta(hours=24):
+                if index and ('input_key' in receipt
+                              or receipt.get('fields_sha256') != identity.get('fields_sha256')):
+                    return None
+                if receipt_path.with_suffix('.consumed').exists():
+                    entry['state'] = 'spent'
+                return entry
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        path.unlink(missing_ok=True)
     return None
 
 
@@ -512,7 +535,7 @@ def hook(event, parse_error=None):
                 check_pending(event)
             outgoing(event)
         if consumed:
-            clear_pending(consumed)
+            clear_pending(consumed, event)
         return
     except Exception as exc:
         findings = exc.findings if isinstance(exc, FindingsError) else [str(exc)]
