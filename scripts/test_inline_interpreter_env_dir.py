@@ -131,5 +131,60 @@ class EnvDirectoryTests(unittest.TestCase):
                 self.assertIn('inline interpreter code rule (program from a pipe): relative script after an unproven directory change', self.reason)
 
 
+    def test_env_directory_requires_first_segment_and_existing_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for command in (
+                'ln -sfn /dev/fd /tmp/d && env -C /tmp/d python3 0',
+                f'true; env -C {directory} python3 x.py',
+                f'sh -c "env -C {directory} python3 x.py"',
+            ):
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+            self.assertFalse(self.denied(f'env -C {directory} python3 scripts/x.py'), self.reason)
+
+    def test_piped_groups_keep_input_for_every_segment(self):
+        for command in (
+            "printf x | (eval 'cd /proc/self/fd'; node 0)",
+            "printf x | { eval 'cd /proc/self/fd'; node 0; }",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        self.assertFalse(self.denied('python3 scripts/x.py 2>&1 | tail -n 20'), self.reason)
+
+    def test_relative_scripts_refuse_earlier_path_changes(self):
+        for command in (
+            'ln -sfn /dev/stdin x.js && node x.js',
+            'mv link x.js; node x.js',
+            'cp link x.py; python3 x.py',
+            'mkfifo x.py; python3 x.py',
+            'rm x.py; python3 x.py',
+            'mkdir scripts; python3 scripts/x.py',
+            'install link x.py; python3 x.py',
+            'touch x.py; python3 x.py',
+            'mknod x.py p; python3 x.py',
+            'printf data > x.py; python3 x.py',
+            'printf data >> x.py; python3 x.py',
+            'ln -sfn /dev/stdin x.js; sh -c "node x.js"',
+            'ln -sfn /dev/stdin x.js; echo "$(node x.js)"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        with tempfile.TemporaryDirectory() as directory:
+            for command in (
+                'python3 scripts/x.py > out.json',
+                f'cd {directory} && python3 scripts/x.py 2>/dev/null',
+                'python3 scripts/x.py; rm -f out.json',
+                'true 2>&1; python3 scripts/x.py',
+                'true >&2; python3 scripts/x.py',
+                'true >&-; python3 scripts/x.py',
+                'true >/dev/null; python3 scripts/x.py',
+            ):
+                with self.subTest(command=command):
+                    self.assertFalse(self.denied(command), self.reason)
+
+
 if __name__ == '__main__':
     unittest.main()
