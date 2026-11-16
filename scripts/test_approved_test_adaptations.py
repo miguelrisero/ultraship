@@ -416,6 +416,15 @@ EXPECTED_DISPOSITION_AUTHORITY = (
     + EXPECTED_WRITER_DISPOSITION_RECEIPTS
 )
 
+EXPECTED_CONTRACT_GAP_RULE = [
+    'A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.',
+    'It made zero protected reads and named no content, scope, protected-access, hook, permission or tool finding.',
+    'Its cause resolves only when a new CoC decision, with a new SHA256, quotes the refusal verbatim and names that sole cause, and the next writer finds the selected route heading in its own loaded contract by native Read.',
+    'A refusal whose only reason is that an earlier contract-gap refusal stayed effective resolves with that refusal.',
+    'Hook, permission and tool denials, `REFUSED` tool results, and any refusal with another reason never qualify.',
+    'The fresh disposition and every other route requirement still apply.',
+]
+
 EXPECTED_DISPOSITION_BOUNDARY = [
     'Apply this route only to future briefs after verified runtime adoption.',
     'Source delivery grants zero runtime-adoption authority.',
@@ -425,6 +434,7 @@ EXPECTED_DISPOSITION_BOUNDARY = [
     'Preserve every effective refusal, tool and hook denial, and affected-session hold.',
     'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.',
     'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.',
+    *EXPECTED_CONTRACT_GAP_RULE,
     'The driver applies zero protected edits; the writer has zero publication authority.',
 ]
 
@@ -501,10 +511,43 @@ EXPECTED_NEW_ROW_BOUNDARY = [
     'Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.',
     'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.',
     'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.',
+    *EXPECTED_CONTRACT_GAP_RULE,
 ]
 
 
 class ApprovedTestAdaptationsTests(unittest.TestCase):
+    def test_contract_gap_rule_follows_every_anchor_and_preserves_refusal_boundaries(self):
+        anchor = 'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.'
+        cause = 'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.'
+        carriers = {
+            'plugins/ship/agents/writer--sol.md': 2,
+            'plugins/ship/agents/writer--sonnet.md': 2,
+            'plugins/ship/agents/writer--fable52.md': 2,
+            'plugins/ship/agents/driver.md': 2,
+            'plugins/ship/agents/driver--sol.md': 2,
+            'plugins/ship/agents/reviewer--sol.md': 2,
+            'plugins/ship/agents/reviewer--opus.md': 2,
+            'plugins/ship/skills/ship/SKILL.md': 2,
+            'plugins/ship/skills/ship/references/owner-decisions.md': 3,
+        }
+        for name, count in carriers.items():
+            with self.subTest(path=name):
+                lines = (ROOT / name).read_text().splitlines()
+                self.assertEqual(lines.count(anchor), count)
+                self.assertEqual(lines.count(cause), 2)
+                self.assertEqual(lines.count(EXPECTED_CONTRACT_GAP_RULE[0]), count)
+                for index, line in enumerate(lines):
+                    if line == anchor:
+                        self.assertEqual(
+                            lines[index + 1:index + 1 + len(EXPECTED_CONTRACT_GAP_RULE)],
+                            EXPECTED_CONTRACT_GAP_RULE,
+                        )
+        self.assertEqual(
+            {str(path.relative_to(ROOT)) for path in (ROOT / 'plugins').rglob('*.md')
+             if anchor in path.read_text().splitlines()},
+            set(carriers),
+        )
+
     def rewritten_code_route(self, name):
         text = (ROOT / name).read_text()
         heading = '## Rewritten-code row route' if 'reviewer--' in name else '#### Rewritten-code row route'
