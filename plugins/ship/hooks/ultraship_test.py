@@ -711,6 +711,41 @@ class WriterGitHubGuardTests(unittest.TestCase):
                         GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
         self.writer = {'agent_type': 'ship:writer--sol', 'tool_name': 'Bash'}
 
+    def test_writer_plain_commit_message_text_is_admitted(self):
+        commands = (
+            "git commit -m 'fix: no gh calls'",
+            "cd /repo && git add a.py && git commit -m 'fix: no gh calls'",
+            'git -C /repo commit -m "fix: no gh calls"',
+            "git commit --message 'no gh calls'",
+            "git commit --message='no gh calls'",
+            "git commit -m 'fix: message\nno gh calls'",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_executable_commit_message_shapes_are_denied(self):
+        commands = (
+            'git commit -m "$(gh api repos/o/r)"',
+            'git commit -m x; gh pr comment 1 --body y',
+            'git commit -m x && gh pr comment 1 --body y',
+            'git commit -m x\ngh pr comment 1 --body y',
+            "git commit -m 'x; gh pr merge 1' | sh",
+            'git commit -m "`gh pr merge 1`"',
+            "GIT_EDITOR='gh pr merge 1' git commit -e -m x",
+            "git -c core.editor='gh pr merge 1' commit -e -m x",
+            'GIT_EDITOR=gh git commit -e -m x',
+            "env GIT_EDITOR='gh pr merge 1' git commit -e -m x",
+            "export GIT_EDITOR='gh pr merge 1'; git commit -e -m x",
+            "git -c core.pager='gh pr merge 1' log",
+            "git -ccore.editor='gh pr merge 1' commit -e -m x",
+            "sh -c \"git commit -m 'gh pr comment 1 --body y'\"",
+            "git commit -m 'gh calls' && sh -c x",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
     def test_writer_gh_reads_are_admitted(self):
         for command in ('gh api repos/x/y/pulls/1', 'gh api -X GET repos/x/y/pulls/1',
                         'gh api --method=GET repos/x/y/pulls/1', 'gh pr view 1', 'gh pr checks 1', 'gh run view 1'):

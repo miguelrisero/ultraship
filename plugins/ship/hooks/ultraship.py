@@ -3363,8 +3363,20 @@ def load_ledger():
     return module
 
 
+def plain_git_commit_shell(command):
+    bare = re.sub(r"'[^']*'|" r'"[^$`\\"]*"', "''", command)
+    steps = bare.split('&&')
+    if re.search(r"""[\n;|&()<>$`\\"'#]""", ''.join(steps).replace("''", '')):
+        return False
+    if re.fullmatch(r'\s*cd\s+\S+\s*', steps[0]):
+        steps = steps[1:]
+    return bool(steps) and all(re.fullmatch(
+        r'\s*git\s+(?:-C\s+\S+\s+)?(?:add|commit)(?:\s+\S+)*\s*', step) for step in steps)
+
+
 # ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, Bash writes to gh configuration, glob `?` and writer-created file names, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
 def writer_gh_denial(command, depth=0):
+    shell_text = command
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = re.sub(r'''['"\\]''', '', command)
     if not re.search(r'\bgh\b', unquoted):
@@ -3377,6 +3389,8 @@ def writer_gh_denial(command, depth=0):
              'repo': ('view',), 'workflow': ('view', 'list')}
     if any(marker in command for marker in ('$(', '<(', '>(', '`')):
         return reason
+    if depth == 0 and plain_git_commit_shell(shell_text):
+        return None
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace = ' \t\r'
@@ -3401,6 +3415,40 @@ def writer_gh_denial(command, depth=0):
             segment.append(token)
     segments.append(segment)
     for words in segments:
+        cursor = 0
+        while cursor < len(words) and re.match(r'[A-Za-z_]\w*=', words[cursor]):
+            if re.search(r'\bgh\b', words[cursor].split('=', 1)[1]):
+                return reason
+            cursor += 1
+        if cursor < len(words) and os.path.basename(words[cursor]) in ('env', 'export'):
+            exporting = words[cursor] == 'export'
+            cursor += 1
+            while cursor < len(words):
+                word = words[cursor]
+                if re.match(r'[A-Za-z_]\w*=', word):
+                    if re.search(r'\bgh\b', word.split('=', 1)[1]):
+                        return reason
+                elif not exporting and not word.startswith('-'):
+                    break
+                cursor += 1
+        if cursor < len(words) and os.path.basename(words[cursor]) == 'git':
+            cursor += 1
+            while cursor < len(words) and words[cursor].startswith('-'):
+                option = words[cursor]
+                if option == '-c':
+                    cursor += 1
+                    value = words[cursor] if cursor < len(words) else ''
+                elif option.startswith('-c'):
+                    value = option[2:]
+                else:
+                    if option in ('-C', '--git-dir', '--work-tree', '--namespace', '--config-env',
+                                  '--super-prefix', '--attr-source', '--shallow-file'):
+                        cursor += 1
+                    cursor += 1
+                    continue
+                if '=' in value and re.search(r'\bgh\b', value.split('=', 1)[1]):
+                    return reason
+                cursor += 1
         if not any(re.search(r'\bgh\b', word) for word in words):
             continue
         if 'api' in words and any(word.strip('/') == 'graphql' for word in words) and any(
