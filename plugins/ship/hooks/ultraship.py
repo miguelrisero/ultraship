@@ -3506,7 +3506,7 @@ def literal_read_gh(words):
 
 def data_heredoc_removed(command):
     lines = command.splitlines(keepends=True)
-    if not lines or lines[0].count('<<') != 1 or not data_reader_header(lines[0]):
+    if not lines or '<<<' in lines[0] or lines[0].count('<<') != 1 or not data_reader_header(lines[0]):
         return command
     match = re.search(r'''<<(-?)[ \t]*(['"])([A-Za-z0-9_]+)\2''', lines[0])
     if not match:

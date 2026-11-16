@@ -202,6 +202,8 @@ REFUSE = (
     "echo \"\ncat <<'EOF'\n\"; gh api repos/o/r/pulls/7/comments -f body=x\nEOF",
     "cat > /home/u/ws/x.md <<'EOF'\nfoo\\\nEOF\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF",
     "cat > /home/u/ws/x.md <<'EOF'\ngh\\\nEOF\ngh api repos/o/r/pulls/7/comments -f body=x\nEOF",
+    "cat <<<'EOF' /home/u/ws/x\nbash -c x\nEOF\ngh pr view 7",
+    "cat <<<'EOF'\nbash -c x\nEOF\ngh pr view 7",
 )
 
 ADMIT = (
