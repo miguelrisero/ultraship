@@ -1149,6 +1149,17 @@ def shell_without_heredoc_bodies(command):
 
 SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'mksh', 'yash', 'rbash', 'ash'}
 STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su', 'trap'}
+READ_ONLY_OPTIONS = {
+    'grep': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})',
+    'git': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})|--',
+    'rg': r'-(?:[nilrFEweCABgt]|[nilFw]{2,})|--glob(?:=.*)?',
+    'find': r'-(?:name|iname|type|path|maxdepth|mindepth|print|o)',
+    'ls': r'-(?:[lah1]|[lah1]{2,})',
+    'cat': r'(?!)',
+    'head': r'-(?:n|[0-9]+)',
+    'tail': r'-(?:n|[0-9]+)',
+    'wc': r'-[lcwm]',
+}
 
 
 def read_only_argument_word(command, tokens, words, index):
@@ -1209,24 +1220,13 @@ def read_only_argument_word(command, tokens, words, index):
         cursor += 1
     if not pipelines[-1][-1] or not any(pipeline[0] == words for pipeline in pipelines):
         return False
-    options = {
-        'grep': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})',
-        'git': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})|--',
-        'rg': r'-(?:[nilrFEweCABgt]|[nilFw]{2,})|--glob(?:=.*)?',
-        'find': r'-(?:name|iname|type|path|maxdepth|mindepth|print|o)',
-        'ls': r'-(?:[lah1]|[lah1]{2,})',
-        'cat': r'(?!)',
-        'head': r'-(?:n|[0-9]+)',
-        'tail': r'-(?:n|[0-9]+)',
-        'wc': r'-[lcwm]',
-    }
     for pipeline in pipelines:
         git_grep = len(pipeline[0]) > 1 and pipeline[0][0][0] == 'git' and pipeline[0][1][0] == 'grep'
         if (pipeline[0][0][0] not in {'rg', 'grep', 'ls', 'cat', 'find'} and not git_grep
                 or any(part[0][0] not in {'head', 'tail', 'wc'} for part in pipeline[1:])):
             return False
         for part in pipeline:
-            if any(word[1].startswith('-') and not re.fullmatch(options[part[0][0]], word[1]) for word in part):
+            if any(word[1].startswith('-') and not re.fullmatch(READ_ONLY_OPTIONS[part[0][0]], word[1]) for word in part):
                 return False
     for raw, value, start, end in original:
         if raw in {'|', '&', ';'} or start in null_redirects:
@@ -2980,6 +2980,13 @@ def inline_interpreter_denial(command, cwd=None):
                     and unresolved_shell_word(first[0])):
                 return 'inline interpreter code rule (unresolved command word)'
             test_operands, test_commands, closing = set(), set(), None
+            # A single-quoted search pattern is data only after a prefix that cannot redefine the search command, with only listed options.
+            literal_ready = (bool(words) and words[0][0] in {'grep', 'git', 'rg'}
+                             and top_level and not TEST_SHAPE_REDEFINE.search(command) and prefix_end == 0
+                             and all(not word[1].startswith('-') or re.fullmatch(READ_ONLY_OPTIONS[words[0][0]], word[1])
+                                     for word in words)
+                             and not any(limit <= token[2] < words[0][2] and token[0] not in {';', '&', '|', '\n'}
+                                         for token in tokens))
             if words and words[-1][3] <= limit:
                 reserved_prefix = True
                 for _, value, start, _ in words:
@@ -3007,7 +3014,8 @@ def inline_interpreter_denial(command, cwd=None):
                 joined_code = (not neutral and unresolved_shell_word(raw) and bool(re.search(
                     rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw))
                                and not read_only_argument_word(command, tokens, words, index))
-                if start not in test_operands and (joined_code or unresolved and (
+                literal_data = literal_ready and re.fullmatch(r"'(?!-)[^']*'", raw) and grep_data_token(words, index)
+                if start not in test_operands and not literal_data and (joined_code or unresolved and (
                         any(code_option(argument) for argument in arguments)
                         or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'})):
                     return 'inline interpreter code rule (unresolved command word)'

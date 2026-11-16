@@ -707,6 +707,60 @@ class WriterHeredocTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
 
+    def test_literal_search_pattern_with_dollar_stays_data(self):
+        """Catch false unresolved-command refusals of single-quoted search patterns before another -e."""
+        for command in (
+            "git -C /work/lane grep -n -e '$(shell' -e 'include ' -- Makefile",
+            "grep -n -e '$(shell' -e 'include ' Makefile",
+            "rg -n -e '$(shell' -e 'include ' Makefile",
+            "cd /work/lane && git grep -n -e '$(shell' -e 'include ' -- Makefile && git status --short -- a.py",
+            "grep -C 2 -e '$(shell' -e y f",
+            "grep '$(python3 -c code)' -e y f",
+            "grep -e '`x`' -e code f",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+        reason = 'inline interpreter code rule (unresolved command word)'
+        for command in (
+            "git -C /work/lane grep -n -e '$(shell' -e 'include ' -- Makefile; $PY -c code",
+            "alias grep=eval\ngrep '$X' -e code",
+            "BASH_ALIASES[grep]=eval; grep '$X' -e code",
+            ": ${aliases[grep]::=eval}; grep '$X' -e code",
+            "eval \"$setup\"; grep '$X' -e code",
+            "source x.sh; grep '$X' -e code",
+            "x=$(grep '$X' -e code f)",
+            "PATH=/tmp/x grep '$X' -e code",
+            "$GREP '$X' -e code",
+            "if grep -q '$X' -e code f; then echo y; fi",
+            "egrep -e '$(shell' -e y f",
+            'grep -e "$X" -e code f',
+            "grep -e '$X'\"$Y\" -e code f",
+            "grep -e '-$(x)' -e y f",
+            "grep --filter='x:cat' -e '$(shell' -e y f",
+            "grep --pager=less -e '$(shell' -e y f",
+            "grep --view -e '$(shell' -e y f",
+            "grep --config=x -e '$(shell' -e y f",
+            "grep --- -e '$(shell' -e y f",
+            "grep --save-config -e '$(shell' -e y f",
+            "grep -Q -e '$(shell' -e y f",
+            "grep -z -e '$(shell' -e y f",
+            "rg -z -e '$(shell' -e y f",
+            "rg --pre /x/run.sh '$X' -e code",
+            "git -c core.pager=x grep -e '$(shell' -e y",
+            "git --exec-path=/tmp/x grep -e '$(shell' -e y",
+            "git -p grep -e '$(shell' -e y",
+            "git --git-dir=/x grep -e '$(shell' -e y",
+            "git grep -O -e '$(shell' -e y",
+            "git grep --open -e '$(shell' -e y",
+            "git grep -e '$(shell' -e y --open-files-in-pager=x",
+            "git grep --textconv -e '$(shell' -e y",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn(reason, self.reason)
+        self.assertTrue(self.denied('grep -e "$(python3 -c code)" -e y f'))
+        self.assertIn('process-capable python -c rule', self.reason)
+
     def test_read_only_argument_words_with_interpreter_names_are_admitted(self):
         """Catch false refusals of literal read-only paths and patterns containing interpreter names."""
         for command in (
