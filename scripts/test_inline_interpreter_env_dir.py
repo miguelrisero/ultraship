@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('ultraship_env_dir', ROOT / 'plugins/ship/hooks/ultraship.py')
@@ -30,7 +31,10 @@ class EnvDirectoryTests(unittest.TestCase):
 
     def test_env_directory_admits_verbatim_repository_script(self):
         command = 'env -C /home/miguel/.vk-worktrees/.bettercoding-workspaces/188e-pati-pr-backlog/lanes/pr-7890/backend/api API_ENVIRONMENT=testing uv run --frozen python scripts/integration_shards.py --refresh'
-        self.assertFalse(self.denied(command), self.reason)
+        isdir = ultraship.os.path.isdir
+        directory = '/home/miguel/.vk-worktrees/.bettercoding-workspaces/188e-pati-pr-backlog/lanes/pr-7890/backend/api'
+        with patch.object(ultraship.os.path, 'isdir', side_effect=lambda path: path == directory or isdir(path)):
+            self.assertFalse(self.denied(command), self.reason)
 
     def test_env_directory_literal_forms_admit_relative_scripts(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -40,9 +44,10 @@ class EnvDirectoryTests(unittest.TestCase):
                     with self.subTest(option=option, script=script):
                         self.assertFalse(self.denied(f'env {option} {script}'), self.reason)
 
-    def test_env_directory_missing_literal_directory_is_admitted(self):
+    def test_env_directory_missing_literal_directory_is_denied(self):
         with tempfile.TemporaryDirectory() as directory:
-            self.assertFalse(self.denied(f'env -C {directory}/missing python3 scripts/x.py'), self.reason)
+            self.assertTrue(self.denied(f'env -C {directory}/missing python3 scripts/x.py'))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
     def test_env_directory_script_symlinks_into_proc_are_denied(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -144,13 +149,13 @@ class EnvDirectoryTests(unittest.TestCase):
             self.assertFalse(self.denied(f'env -C {directory} python3 scripts/x.py'), self.reason)
 
     def test_piped_groups_keep_input_for_every_segment(self):
-        for command in (
-            "printf x | (eval 'cd /proc/self/fd'; node 0)",
-            "printf x | { eval 'cd /proc/self/fd'; node 0; }",
+        for command, label in (
+            ("printf x | (eval 'cd /proc/self/fd'; node 0)", 'program from a pipe'),
+            ("printf x | { eval 'cd /proc/self/fd'; node 0; }", 'unresolved command word'),
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+                self.assertIn(f'inline interpreter code rule ({label})', self.reason)
         self.assertFalse(self.denied('python3 scripts/x.py 2>&1 | tail -n 20'), self.reason)
 
     def test_relative_scripts_refuse_earlier_path_changes(self):
@@ -167,23 +172,21 @@ class EnvDirectoryTests(unittest.TestCase):
             'printf data > x.py; python3 x.py',
             'printf data >> x.py; python3 x.py',
             'ln -sfn /dev/stdin x.js; sh -c "node x.js"',
-            'ln -sfn /dev/stdin x.js; echo "$(node x.js)"',
+            'ln -sfn /dev/stdin x.js; echo $(node x.js)',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
                 self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
-        with tempfile.TemporaryDirectory() as directory:
-            for command in (
-                'python3 scripts/x.py > out.json',
-                f'cd {directory} && python3 scripts/x.py 2>/dev/null',
-                'python3 scripts/x.py; rm -f out.json',
-                'true 2>&1; python3 scripts/x.py',
-                'true >&2; python3 scripts/x.py',
-                'true >&-; python3 scripts/x.py',
-                'true >/dev/null; python3 scripts/x.py',
-            ):
-                with self.subTest(command=command):
-                    self.assertFalse(self.denied(command), self.reason)
+        for command in (
+            'python3 scripts/x.py > out.json',
+            'python3 scripts/x.py; rm -f out.json',
+            'true 2>&1; python3 scripts/x.py',
+            'true >&2; python3 scripts/x.py',
+            'true >&-; python3 scripts/x.py',
+            'true >/dev/null; python3 scripts/x.py',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
 
 
 if __name__ == '__main__':

@@ -1636,19 +1636,23 @@ def unsafe_script_path(value, base):
 
 
 def chdir_wrapper_present(command, env_directories):
-    pending, seen = [shell_without_heredoc_bodies(command)], set()
+    shell = shell_line_continuations(shell_without_heredoc_bodies(command))
+    pending, seen = [(shell, True)], set()
     targets = []
     directory_change = split_string = False
     while pending:
-        text = shell_line_continuations(pending.pop())
-        if text in seen:
+        text, first_segment = pending.pop()
+        text = shell_line_continuations(text)
+        if (text, first_segment) in seen:
             continue
-        seen.add(text)
+        seen.add((text, first_segment))
         try:
             tokens = shell_raw_words(text)
             if nested_work_exceeded(tokens, seen):
                 return True
             for index, token in enumerate(tokens):
+                if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
+                    first_segment = False
                 name = os.path.basename(token[1])
                 if token[1] in {'cd', 'pushd'}:
                     directory_change = True
@@ -1681,8 +1685,9 @@ def chdir_wrapper_present(command, env_directories):
                         else:
                             offset = 2 if option.startswith('-C') else len('--chdir=')
                             raw, target = tokens[cursor][0], option[offset:]
-                        if (unresolved_shell_word(raw) or not os.path.isabs(target)
-                                or '..' in target.split('/') or not re.fullmatch(r'[\w./-]+', target)):
+                        if (not first_segment or unresolved_shell_word(raw) or not os.path.isabs(target)
+                                or '..' in target.split('/') or not re.fullmatch(r'[\w./-]+', target)
+                                or not os.path.isdir(target)):
                             return True
                         targets.append(target)
                         cursor += 2 if separate else 1
@@ -1696,7 +1701,7 @@ def chdir_wrapper_present(command, env_directories):
                             payload = tokens[cursor + 1][1]
                             if '\\' in payload or '$' in payload:
                                 return True
-                            pending.append('env ' + payload)
+                            pending.append(('env ' + payload, False))
                         cursor += 2
                     elif '=' in option and option.partition('=')[0] in values:
                         if name == 'env' and option.startswith('--split-string='):
@@ -1704,18 +1709,18 @@ def chdir_wrapper_present(command, env_directories):
                             payload = option.partition('=')[2]
                             if '\\' in payload or '$' in payload:
                                 return True
-                            pending.append('env ' + payload)
+                            pending.append(('env ' + payload, False))
                         cursor += 1
                     elif name == 'env' and option.startswith('-S') and len(option) > 2:
                         split_string = True
                         payload = option[2:]
                         if '\\' in payload or '$' in payload:
                             return True
-                        pending.append('env ' + payload)
+                        pending.append(('env ' + payload, False))
                         cursor += 1
                     else:
                         return True
-            pending.extend(token[1] for token in nested_shell_strings(tokens, text))
+            pending.extend((token[1], False) for token in nested_shell_strings(tokens, text))
         except ValueError:
             return True
     if targets:
@@ -2745,6 +2750,26 @@ UNPROVEN_DIRECTORY_LABEL = ('inline interpreter code rule (program from a pipe)'
                             ': relative script after an unproven directory change')
 
 
+def shell_changes_paths(tokens):
+    if any(os.path.basename(token[1]) in {
+            'ln', 'mv', 'cp', 'rm', 'mkdir', 'install', 'touch', 'mkfifo', 'mknod'} for token in tokens):
+        return True
+    for index, token in enumerate(tokens):
+        if token[0] != '>':
+            continue
+        cursor = index + 1
+        if cursor < len(tokens) and tokens[cursor][0] == '>' and token[3] == tokens[cursor][2]:
+            cursor += 1
+        if cursor < len(tokens):
+            target = tokens[cursor]
+            if target[0] == '&' and tokens[cursor - 1][3] == target[2]:
+                continue
+            if target[1] == '/dev/null':
+                continue
+        return True
+    return False
+
+
 def inline_interpreter_denial(command, cwd=None):
     env_directories = []
     chdir_wrapper = chdir_wrapper_present(command, env_directories)
@@ -2757,7 +2782,7 @@ def inline_interpreter_denial(command, cwd=None):
     lines = command.splitlines(keepends=True)
     if lines and ANY_PYTHON_HEREDOC.fullmatch(lines[0]) and not process_heredoc_denial(command):
         shell = shell[len(lines[0]):]
-    pending = [(shell, (False, False, False))]
+    pending = [(shell, (False, False, False), False)]
     seen = set()
     subscript_reason = None
     runtime_reason = None
@@ -2767,10 +2792,10 @@ def inline_interpreter_denial(command, cwd=None):
             if subscript_reason:
                 return subscript_reason
             pending, substitutions = substitutions, []
-        text, inherited = pending.pop()
+        text, inherited, inherited_paths = pending.pop()
         top_level = not seen
         text = shell_line_continuations(text)
-        identity = (text, inherited)
+        identity = (text, inherited, inherited_paths)
         if identity in seen:
             continue
         seen.add(identity)
@@ -2866,18 +2891,29 @@ def inline_interpreter_denial(command, cwd=None):
         command_positions = shell_command_positions(tokens)
         test_safe = (top_level and not TEST_SHAPE_REDEFINE.search(command)
                      and test_operand_shape(tokens, groups))
-        segments, words, piped = [], [], False
+        segments, words, piped, pipe_groups = [], [], False, []
+        paths_changed = inherited_paths
         for token in tokens:
             raw = token[0]
+            if raw == '{' and token[2] in command_positions:
+                pipe_groups.append(piped or any(pipe_groups))
+            elif raw == '}' and pipe_groups:
+                pipe_groups.pop()
             if raw in {';', '&', '|', '(', ')', '`', '\n'}:
                 if words:
-                    segments.append((words, piped))
+                    segments.append((words, piped or any(pipe_groups), paths_changed))
+                    paths_changed = paths_changed or shell_changes_paths(words + [token])
                     words = []
+                if raw == '(':
+                    pipe_groups.append(piped or any(pipe_groups))
+                elif raw == ')' and pipe_groups:
+                    pipe_groups.pop()
                 if raw != '\n':
                     piped = raw == '|' or raw == '(' and token[2] > 0 and text[token[2] - 1] == '>'
             else:
                 words.append(token)
-        segments.append((words, piped))
+        segments.append((words, piped or any(pipe_groups), paths_changed))
+        containing_paths = paths_changed or shell_changes_paths(words)
         shell_programs = set()
         for index, token in enumerate(tokens):
             if os.path.basename(token[1]) not in SHELL_INTERPRETERS:
@@ -2896,7 +2932,7 @@ def inline_interpreter_denial(command, cwd=None):
                     cursor += 1
                     continue
                 break
-        for words, piped in segments:
+        for words, piped, paths_changed in segments:
             if subscript_reason is None:
                 try:
                     subscript_reason = (array_subscript_denial(words, arithmetic, tokens, groups)
@@ -2905,8 +2941,8 @@ def inline_interpreter_denial(command, cwd=None):
                     subscript_reason = 'array subscript evaluation rule (parse error)'
             reads_pipe = inherited[0] or piped or any(word[0] == '<' for word in words)
             unproven_directory = chdir_wrapper or directory and not safe_directory
-            segment_relative_denied = redirected or not safe_base or unproven_directory or reads_pipe
-            directory_only = unproven_directory and safe_base and not reads_pipe
+            segment_relative_denied = redirected or not safe_base or unproven_directory or reads_pipe or paths_changed
+            directory_only = unproven_directory and safe_base and not reads_pipe and not paths_changed
             prefix_end = next((index for index, word in enumerate(words)
                                if not re.match(r'[A-Za-z_][A-Za-z0-9_]*=', word[1])), len(words))
             first = words[prefix_end] if prefix_end < len(words) else None
@@ -2996,8 +3032,8 @@ def inline_interpreter_denial(command, cwd=None):
                     if (piped_input or piped) and (kind not in {'c', 'm', 'script'} or operand >= len(arguments)
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
-        pending.extend((token[1], state) for token in nested)
-        substitutions.extend((body, state) for body in shell_substitution_bodies(text))
+        pending.extend((token[1], state, containing_paths) for token in nested)
+        substitutions.extend((body, state, containing_paths) for body in shell_substitution_bodies(text))
     return subscript_reason or runtime_reason
 
 
