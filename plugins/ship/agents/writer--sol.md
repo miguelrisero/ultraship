@@ -245,6 +245,8 @@ Keep messages, briefs, and PR bodies free of pair bytes and TOML text; identify 
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 
+After a hook denies only the method of this route's row edit, apply the owner-decisions granted protected-row re-anchor; it is the one exception to the alternate-form sentence below.
+
 For newly admitted future operations, use native Edit with replace_all=false.
 Require a unique approved row-ID-contained old_string within the approved row extent.
 Change only the approved paired old/new fields; preserve every frozen field.
@@ -547,6 +549,7 @@ Apply your own loaded definition; checkout, cache, and version supply zero addit
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
 Apply the [once-only message-format contract](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) when every returned finding matches a known `text_lint.py` formatting message and, for a `text_lint.py` refusal, a resend cites its hook receipt and a fresh brief records it on the run board.
+Its fresh-brief route also admits one fresh reviewer, and a receiptless hook version records the full refusal text and hook version in place of the receipt id.
 Except under that contract or the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
 Except under the owner-decisions method-only rule: use no other process to do a step that a hook or permission denied.
 Script files, other interpreters, module flags and wrapper commands are other processes.
