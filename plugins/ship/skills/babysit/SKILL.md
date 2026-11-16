@@ -9,6 +9,20 @@ allowed-tools: Read, Grep, Glob, LSP, Edit, Write, Agent, SendMessage, Bash
 
 Bring the PR in `$ARGUMENTS`, or the current branch's PR, to green required CI and zero unresolved threads on the current head.
 
+## Brief safety
+
+Apply this rule to every triage, writer and reviewer brief.
+Require this field and these sentences verbatim in every brief:
+
+```text
+Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
+A hook refusal is final: report it and stop.
+Never print a key value; never post outside bettergroupinc and miguelrisero.
+Never chain a glob listing into a write command.
+```
+The stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.
+The formatting, coordination and method-only routes in [Loaded instructions and refusals](../ship/references/owner-decisions.md#loaded-instructions-and-refusals) stay.
+
 ## Push boundary
 
 Before every authorized feature push, including direct invocation, retries, round fixes, and main merges, apply the [resolved destination preflight](../ship/references/pipeline.md#9-push-and-pr). Use only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted. Writers prepare evidence only; the authorized driver executes the preflight and push; writers retain zero push authority, including push dry-runs. Preserve existing push authority, approval holds, merge holds, and verification gates.

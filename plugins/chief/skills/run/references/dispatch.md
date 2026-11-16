@@ -3,7 +3,7 @@
 Answer all five questions before each dispatch. A "no" means fix the brief first.
 
 1. **Owner.** Does exactly one agent own this work, and does no other lane touch its files?
-2. **Contract.** Does the brief state the goal, the files in scope, and a check that proves done?
+2. **Contract.** Does the brief state the goal, the files in scope, the readable files, and a check that proves done?
 3. **Base.** Does the brief name the worktree, branch, and base SHA, based on current remote main?
 4. **Authority.** Does the brief state which of commit, push, PR, merge, and production actions are granted?
 5. **Return.** Does the brief name the checkpoint fields the agent must return?
@@ -66,11 +66,18 @@ D6575, 2026-10-29: CoC coordination direction, separate from actual owner receip
 Task: <frozen goal, one paragraph>
 Repository: <owner/repo>   Worktree: <absolute path>   Branch: <name>   Base SHA: <sha>
 In scope: <files or areas>   Out of scope: <files or areas owned by other lanes>
+Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
+A hook refusal is final: report it and stop.
+Never print a key value; never post outside bettergroupinc and miguelrisero.
+Never chain a glob listing into a write command.
+The stop covers the refused call; the loaded formatting, coordination and method-only resend routes stay.
 Depends on: <lanes or none>
 Done when: <acceptance checks and permitted test commands>
 Mutation boundary: Execute mutation checks, anchor checks, and selectors only in the admitted battery STATIC part at the frozen head after GO; keep execution commands out of this brief.
 Authority: commit=<yes|no> push=<yes|no> pr=<yes|no> merge=<yes|no> production=<yes|no>
-Owner helper request: <exact applicable request; loaded source and heading or verified owner event; covered roles; assigned topic; retained restrictions; apply the installed ship plugin's skills/ship/references/owner-decisions.md Helper standing request contract>
+Owner helper request:
+<exact applicable request, verbatim, on its own line>
+<one sentence each, at most 25 words: loaded source and heading or verified owner event; covered roles; assigned topic; retained restrictions; apply the installed ship plugin's skills/ship/references/owner-decisions.md Helper standing request contract>
 Push boundary: Before every authorized feature push, the driver verifies repository, remote, current branch, and actual default branch using the resolved destination preflight in the installed ship plugin's skills/ship/references/pipeline.md, step 9. Run the permitted dry-run and inspect every advertised endpoint and destination ref; require the same remote and literal refspec for execution. Refuse main, the actual default branch, detached HEAD, and extra refs. Block when evidence is denied, unavailable, or unparseable. Every authorized push uses only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted. Never use an abbreviated or default push. Preserve existing push authority, approval holds, merge holds, and verification gates. Writers prepare evidence only; the authorized driver executes the preflight and push; writers retain zero push authority, including push dry-runs.
 Board: <absolute board path>   Run ID: <run id>
 Mode: /ship:ship light

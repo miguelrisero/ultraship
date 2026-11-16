@@ -80,6 +80,7 @@ Dispatch `ship:driver` for each lane. Drivers run `claude-opus-5-5`. Dispatch `s
 Each driver brief has:
 
 - The frozen task, worktree, branch, base SHA, dependencies, and success checks.
+- The `Readable files` field and the safety sentences from the brief template.
 - The board path and the chief run ID.
 - The granted commit, push, PR, merge, and production permissions.
 - The instruction to run `ship:ship light` inline, with this contract as its task.

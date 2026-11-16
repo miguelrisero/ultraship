@@ -47,6 +47,100 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied('if false; then >x fi; i=0; fi; (( i ))'))
         self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
+    def test_redirected_fi_cannot_restore_arithmetic_numeric_proof(self):
+        for command in (
+            'if false; then >x fi; ((i=0)); fi; (( i ))',
+            'if false; then 2>/dev/null fi; ((i=0)); fi; (( i ))',
+            'if false; then 2>&1 fi; ((i=0)); fi; (( i ))',
+            'if false; then &>x fi; ((i=0)); fi; (( i ))',
+            'if false; then <x fi; ((i=0)); fi; (( i ))',
+            'if false; then {fd}>x fi; ((i=0)); fi; (( i ))',
+            'if false; then >"$f" fi; ((i=0)); fi; (( i ))',
+            'if false; then :; else >x fi; ((i=0)); fi; (( i ))',
+            'if false; then ! >x fi; ((i=0)); fi; (( i ))',
+            'if false; then time >x fi; ((i=0)); fi; (( i ))',
+            'if false; then >x fi; ((i=0)); fi; echo $((i))',
+            'if false; then >x fi; ((i=0)); fi; let i',
+            'case a in b) :;; esac; if false; then >x fi; ((i=0)); fi; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirected_done_cannot_restore_arithmetic_numeric_proof(self):
+        for command in (
+            'while false; do >x done; ((i=0)); done; (( i ))',
+            'until true; do >x done; ((i=0)); done; (( i ))',
+            'for ((i=0;i<1;i++)); do >x done; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do 2>x done; done & (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_redirected_openers_preserve_existing_arithmetic_refusals(self):
+        for command in (
+            '! >x if; ((i=0)); (( i ))',
+            'then >x if; ((i=0)); (( i ))',
+            'time >x if; ((i=0)); (( i ))',
+            '! >x while false; do :; ((i=0)); done; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_false_closers_cannot_prove_arithmetic_numeric_names(self):
+        for command in (
+            'for ((i=0;i<1;i++)); do case x in x|done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in a) :;; done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in (done) :;; esac; done | cat; (( i ))',
+            'for x in $e; do >y done; ((i=0)); done; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_case_pattern_openers_cannot_hide_false_closers(self):
+        for command in (
+            'for ((i=0;i<1;i++)); do case x in x|if|done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in a) :;; x|esac|done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in a) :;; (if|done) :;; esac; done | cat; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_case_closers_and_nested_bodies_keep_valid_numeric_proof(self):
+        for command in (
+            '((n=0)); case x in a) :;; esac | cat; (( n++ ))',
+            '((n=0)); (case x in a) :;; esac); (( n++ ))',
+            'for ((i=0;i<3;i++)); do case $i in 1) if true; then echo $((i)); fi;; esac; done',
+            'for ((i=0;i<3;i++)); do case $i in 1) for x in a; do echo $((i)); done;; esac; done',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_case_and_subshell_commands_keep_valid_numeric_proof(self):
+        for command in (
+            'for ((i=0;i<3;i++)); do case $i in 1) echo $((i));; esac; done | cat',
+            '(for ((i=0;i<3;i++)); do echo $((i)); done)',
+            '((n=0)); case x in a) :;; esac; (( n++ ))',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_redirected_commands_keep_valid_numeric_proof(self):
+        for command in (
+            '((i=0)); if true; then >x echo hi; fi; (( i ))',
+            'for ((i=0;i<3;i++)); do >x echo $i; done',
+            'for ((i=0;i<3;i++)); do echo $i >x; done',
+            'for ((i=0;i<3;i++)); do 2>/dev/null echo $i; done',
+            '((i=0)); while false; do >x :; done; (( i ))',
+            'for ((i=0;i<3;i++)); do echo $i; done 2>/dev/null',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_redirect_prefixed_dot_invalidates_numeric_proof(self):
         self.assertTrue(self.denied('i=0; >x . ./s; (( i ))'))
         self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
@@ -254,9 +348,14 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
+    def test_ansi_c_quote_refusal_names_unparsed_shell_syntax(self):
+        self.assertTrue(self.denied("pat=$'x\\ny'; grep -c \"$pat\" notes.txt"))
+        self.assertIn('Rule: unparsed shell syntax rule: ANSI-C shell quote', self.reason)
+        self.assertNotIn('python -c', self.reason)
+
     def test_literal_eval_parenthesis_function_invalidates_numeric_proof(self):
         self.assertTrue(self.denied("i=0; eval 'f() { :; }'; f; (( i ))"))
-        self.assertIn('process-capable python -c rule', self.reason)
+        self.assertIn('unparsed shell syntax rule: word-internal shell group', self.reason)
 
     def test_literal_eval_keyword_function_invalidates_numeric_proof(self):
         self.assertTrue(self.denied("i=0; eval 'function f { :; }'; f; (( i ))"))
@@ -702,7 +801,7 @@ class WriterHeredocTests(unittest.TestCase):
             (r'''find /x/python*/a -o -exec python3 {} \;''', 'process-capable python -c rule'),
             (r'''find /x/python*/a \( -name a -o -fprint /x/b \)''', 'inline interpreter code rule (unresolved command word)'),
             (r'''find /x/python*/a -or -name b''', 'inline interpreter code rule (unresolved command word)'),
-            (r'''ls /x/python*/a; ls /x/python*(e:'python3 -c 1':)''', 'process-capable python -c rule'),
+            (r'''ls /x/python*/a; ls /x/python*(e:'python3 -c 1':)''', 'unparsed shell syntax rule: word-internal shell group'),
             (r'''ls /x/python*/a 2 >/dev/null''', 'inline interpreter code rule (unresolved command word)'),
             (r'''ls /x/python*/a 2> /dev/null''', 'inline interpreter code rule (unresolved command word)'),
         ):
@@ -928,6 +1027,8 @@ class WriterHeredocTests(unittest.TestCase):
                 r'''echo x | xargs python -c 1''',
                 r'''find . -exec python -c 1 \;''',
                 r'''find /x/lib/python3.13/site-packages/* -exec python3 {} \;''',
+            )),
+            ('unparsed shell syntax rule: word-internal shell group', (
                 r'''rg() { perl "$@"; }; rg /x/python*/a''',
                 r'''eval 'rg() { perl "$@"; }'; rg /x/python*/a''',
             )),
@@ -1545,11 +1646,13 @@ class WriterHeredocTests(unittest.TestCase):
                 'uv run python', 'env python3', '/usr/bin/python3', 'python3.12',
                 'timeout 5 python3', 'xargs python3', 'nohup python3', 'sudo python3')),
             'python3 -c "print($(echo 1))"', 'python3 -c a*b',
-            "python3 -c 'import sys; print(sys.argv)'", "python3 -c 'print(1)",
+            "python3 -c 'import sys; print(sys.argv)'",
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
                 self.assertIn('process-capable python -c rule', self.reason)
+        self.assertTrue(self.denied("python3 -c 'print(1)"))
+        self.assertIn('unparsed shell syntax rule: unfinished shell quote', self.reason)
 
     def test_free_threaded_python_names_get_the_python3_13_verdict(self):
         code = 'import subprocess; subprocess.run(["git", "pu" + "sh"])'
@@ -1960,7 +2063,7 @@ class WriterHeredocTests(unittest.TestCase):
 
     def test_ansi_quoted_node_option_is_denied(self):
         self.assertTrue(self.denied("node $'-e' 'require(\"child_process\").execSync(\"git \" + \"pu\" + \"sh\")'"))
-        self.assertIn('process-capable python -c rule', self.reason)
+        self.assertIn('unparsed shell syntax rule: ANSI-C shell quote', self.reason)
 
     def test_python_pipe_stdin_operand_keeps_trailing_arguments_denied(self):
         command = ('printf \'%s\' \'import subprocess; subprocess.run(["git", "pu" + "sh"])\' '
@@ -2011,7 +2114,7 @@ class WriterHeredocTests(unittest.TestCase):
         for command in (r'''echo x$'\''; bun --eval 'require("child_process")' #' ''', "echo $'text'"):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertIn('process-capable python -c rule', self.reason)
+                self.assertIn('unparsed shell syntax rule: ANSI-C shell quote', self.reason)
 
     def test_relative_stdin_paths_cannot_supply_program(self):
         for command in ("printf '%s' 'x' | node ../../../../../../dev/stdin",
@@ -2086,12 +2189,18 @@ class WriterHeredocTests(unittest.TestCase):
 
     def test_word_internal_glob_groups_cannot_hide_interpreters(self):
         # These process calls remain classifier input only.
-        for command in ("/usr/bin/pyth(o)n3 -c 'import os; os.system(chr(103))'",
-                        "cd /usr/bin && env (p)ython3 -c 'import os; os.system(chr(103))'",
-                        "/usr/bin/pyth@(o)n3 -c 'import os; os.system(chr(103))'", "/usr/bin/no(d)e -e 'x'"):
+        for command, reason in (
+            ("/usr/bin/pyth(o)n3 -c 'import os; os.system(chr(103))'",
+             'unparsed shell syntax rule: word-internal shell group'),
+            ("cd /usr/bin && env (p)ython3 -c 'import os; os.system(chr(103))'",
+             'unparsed shell syntax rule: word suffix after shell group'),
+            ("/usr/bin/pyth@(o)n3 -c 'import os; os.system(chr(103))'",
+             'unparsed shell syntax rule: word-internal shell group'),
+            ("/usr/bin/no(d)e -e 'x'", 'unparsed shell syntax rule: word-internal shell group'),
+        ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertIn('process-capable python -c rule', self.reason)
+                self.assertIn(reason, self.reason)
         self.assertFalse(self.denied('a=(1 2); echo ok'))
         self.assertFalse(self.denied('head=$(git -C /w rev-parse HEAD)trailing'))
 
@@ -2116,7 +2225,7 @@ class WriterHeredocTests(unittest.TestCase):
                         "echo `true #`; printf '%s' 'x' | node"):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertIn('process-capable python -c rule' if '`' in command
+                self.assertIn('unparsed shell syntax rule: comment inside command substitution' if '`' in command
                               else 'inline interpreter code rule (program from a pipe)', self.reason)
 
     def test_wrapper_code_bundles_and_command_prefixes_are_checked(self):
@@ -2138,7 +2247,7 @@ class WriterHeredocTests(unittest.TestCase):
                         "echo x >(true #); printf '%s' 'x' | node"):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertIn('process-capable python -c rule', self.reason)
+                self.assertIn('unparsed shell syntax rule: comment inside command substitution', self.reason)
 
     def test_comment_quote_cannot_hide_continued_interpreter(self):
         for command in ("# '\npyth\\\non3 -c 'import os; os.system(chr(105)+chr(100))'",
@@ -2325,7 +2434,7 @@ class WriterHeredocTests(unittest.TestCase):
         for command in ("DENO=deno; $DENO eval 'console.log(1)'", 'DENO=deno; $DENO run https://example.invalid/mod.ts',
                         'DENO=deno; $DENO repl', 'D=deno; "$D" eval x'):
             self.assertTrue(self.denied(command))
-            self.assertIn('process-capable python -c rule' if 'console.log' in command
+            self.assertIn('unparsed shell syntax rule: word-internal shell group' if 'console.log' in command
                           else 'inline interpreter code rule (unresolved command word)', self.reason)
 
     def test_here_string_cannot_hide_later_python_program(self):
@@ -2340,13 +2449,13 @@ class WriterHeredocTests(unittest.TestCase):
     def test_ansi_escape_cannot_hide_following_interpreter(self):
         command = r'''echo $'\''; bun --eval 'require("child_process").execSync("git "+"pu"+"sh")' #' '''.rstrip()
         self.assertTrue(self.denied(command))
-        self.assertIn('process-capable python -c rule', self.reason)
+        self.assertIn('unparsed shell syntax rule: ANSI-C shell quote', self.reason)
 
     def test_python_pipe_flags_and_normalized_stdin_paths_are_denied(self):
         for command in ("printf '%s' 'import subprocess' | python3 -I", "printf '%s\\n' 'x' | python3 -i -c 'print(1)'",
                         "printf '%s' 'x' | node /dev/./stdin", "python3 =(printf '%s' 'x')"):
             self.assertTrue(self.denied(command))
-            self.assertIn('process-capable python -c rule' if command.startswith('python3 =')
+            self.assertIn('unparsed shell syntax rule: word-internal shell group' if command.startswith('python3 =')
                           else 'inline interpreter code rule (program from a pipe)', self.reason)
 
     def test_shell_cluster_scans_every_following_program_word(self):
