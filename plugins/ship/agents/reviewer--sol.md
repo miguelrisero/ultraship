@@ -337,7 +337,7 @@ Not weaker means that the follow-up row guards the new behavior at least as tigh
 For a follow-up PR, bind its URL, head SHA, row-file path and row ID in the review receipt; a later follow-up head needs a new verdict.
 A later head that only merges main keeps the verdict when the follow-up row's lines, its subject file and its designated test file stay byte-identical; judge each merge commit by the merge-commit rule above, applied to those files.
 Run this PR's post-merge battery after that follow-up PR merges at a head that keeps the verdict, at a commit that contains both.
-Require the follow-up row to merge within 24 hours of this PR's merge, the same limit as the post-merge proof.
+The follow-up row merges within 24 hours of this PR's merge, the same limit as the post-merge battery.
 If the follow-up PR has not merged 24 hours after this PR merges, run the battery then and report the retired claim to the CoC as unguarded.
 After that report, the CoC has the follow-up row merged or the retirement reverted; a retirement never stays on main without a merged follow-up row.
 The CoC decides any revert of this retirement.
