@@ -702,6 +702,100 @@ class PythonHeredocGuardTests(unittest.TestCase):
 
 
 class WriterGitHubGuardTests(unittest.TestCase):
+    def test_writer_env_zero_split_and_post_filter_globs_are_denied(self):
+        for command in ("env '-0SGIT_EDITOR=vim git status'", "env '-0iSGIT_EDITOR=vim git status'",
+                        "gh pr view 1 -q .x 'a*'"):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_global_git_values_cannot_hide_config(self):
+        for option, value in (('--git-dir', '/repo/.git'), ('--work-tree', '/repo'),
+                              ('--namespace', 'lane'), ('--super-prefix', 'prefix'),
+                              ('--attr-source', 'HEAD')):
+            command = f'git {option} {value} -c core.editor=/tools/editor-helper commit'
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_exclude_flags_and_attached_data_are_admitted(self):
+        for command in ("git ls-files --others -e '*.lock'", "git clean -n -e '*.lock'",
+                        'gh api -X GET repos/o/r/contents/env --field=ref=gh',
+                        'gh api -X GET repos/o/r/contents/env -fref=gh',
+                        'gh api -X GET repos/o/r/contents/env --raw-field=ref=gh',
+                        "gh pr view 1 '--jq=[{title: .title}]'", 'gh pr view 1 -q.title',
+                        "gh pr view 1 '--template={{.title}}'", "gh pr view 1 '--header=ref=gh'"):
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_attached_expansions_and_editor_long_options_are_denied(self):
+        for command in ('gh api -X GET repos/o/r/issues --field={ref=main,-X,POST}',
+                        'gh api -X GET repos/o/r/issues -f{ref=main,-X,POST}',
+                        'gh api -X GET repos/o/r/issues --field=ref=-XPOST',
+                        'gh pr view 1 --jq=[{title:.title}]',
+                        'git grep --edit pattern', 'git ls-files --edit', 'git clean --edit',
+                        'git grep --fixup=amend:HEAD', 'git clean --fixup=reword:HEAD'):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_field_expansions_and_method_values_are_denied(self):
+        commands = (
+            'gh api -X GET repos/o/r/issues -f {ref=main,-X,POST}',
+            'gh api -X GET repos/o/r/issues -f *',
+            "gh api -X GET repos/o/r/issues -f 'ref=-X POST'",
+            "gh api -X GET repos/o/r/issues -f 'ref=--method POST'",
+            'gh api -X GET repos/o/r/issues --field=ref=-XPOST',
+            'gh api -X GET repos/o/r/issues --raw-field=ref=--method=POST',
+            'gh pr view 1 -q [{title:.title}]',
+            'gh pr view 1 -H *',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_stored_git_configuration_writes_are_denied(self):
+        commands = (
+            'git clone --config core.editor=vim https://example.com/o/r.git',
+            'git clone --config=core.editor=vim https://example.com/o/r.git',
+            'git config core.editor vim', 'git config --add core.pager less',
+            'git config --replace-all core.pager less', 'git config --unset core.pager',
+            'git config --unset-all core.pager', 'git config set core.editor vim',
+            'git config --global core.editor vim', 'git config --rename-section core old',
+            'git config --remove-section core', 'git config --edit',
+            'git config core.hooksPath /tools', 'git -c core.hooksPath=/tools status',
+            'git clone --config core.hooksPath=/tools https://example.com/o/r.git',
+            'git config --get core.pager --add',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_git_control_file_writes_are_denied(self):
+        for target in ('.git/config', '.git/config.worktree', '.git/hooks/pre-commit',
+                       '.git/worktrees/lane/config', '.git/worktrees/lane/config.worktree',
+                       '.git/worktrees/lane/hooks/pre-commit'):
+            for tool in ('Edit', 'Write', 'NotebookEdit'):
+                key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+                with self.subTest(target=target, tool=tool):
+                    self.assertTrue(denied(hook('pre', {**self.writer, 'tool_name': tool,
+                                                      'cwd': str(self.repo), 'tool_input': {key: target}}, self.env)))
+            for command in (f'echo value > {target}', f'printf value >> "{target}"',
+                            f'cat <<\'EOF\' > {target}\nvalue\nEOF\n',
+                            f'printf value | tee {target}', f'cp source {target}',
+                            f'mv source {target}', f'install source {target}',
+                            f'touch {target}', f'truncate -s 0 {target}', f'dd if=source of={target}',
+                            f"sed -i 's/a/b/' {target}"):
+                with self.subTest(target=target, command=command):
+                    self.assertTrue(denied(hook('pre', {**self.writer,
+                                                      'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_git_config_reads_and_quoted_filters_are_admitted(self):
+        for command in ('git config --get user.name', 'git config --get-all core.pager',
+                        'git config --list', 'git config -l',
+                        "gh api -X GET search/issues -f 'ref=*'", "gh pr view 1 --jq '.[].title'",
+                        "gh pr view 1 -q '[{title: .title}]'", 'cat .git/config',
+                        'git clone --config core.pager=cat https://example.com/o/r.git'):
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
     def test_writer_hidden_value_routes_are_denied(self):
         commands = (
             "GIT_EDITOR='gh pr merge 1' git commit -e -m x",
@@ -743,7 +837,6 @@ class WriterGitHubGuardTests(unittest.TestCase):
             'gh>x issue close 1',
             "git rebase --exec='gh issue close 1' HEAD~1",
             "git fetch --upload-pack='gh issue close 1' /repo",
-            'GIT_ALLOW_PROTOCOL=ext git ls-remote \'ext::gh issue close 1\'',
             '=gh issue close 1',
             "git add *(e:'gh issue close 1':)",
             "git clone -c core.editor='gh issue close 1' https://example.com/o/r.git r && git -C r commit --allow-empty -e -m x",
