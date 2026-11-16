@@ -563,7 +563,11 @@ class ReceiptCustodyTests(unittest.TestCase):
                     "grep -rn 'text_lint hook' . && ls .",
                     "grep -rn 'a && b text_lint hook' .",
                     'ls text_lint.py hook',
-                    "find . -name 'text_lint hook'"]
+                    "find . -name 'text_lint hook'",
+                    'grep\xa0/usr/bin/python3 ' + script + ' hook',
+                    "grep\xa0-rn 'text_lint hook' .",
+                    "grep -rn 'text_lint hook'\N{IDEOGRAPHIC SPACE}.",
+                    "grep -rn 'text_lint hook' .\r"]
         commands.extend(prefix + grep for prefix in ('env ', 'command '))
         commands.extend(grep.replace('grep', program, 1) for program in ('egrep', '/usr/bin/grep'))
         commands.extend(grep + before + separator + after + hook_command

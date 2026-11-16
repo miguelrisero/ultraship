@@ -4311,7 +4311,8 @@ def receipt_custody(data, read_search=False):
                        for word in raw_words)
                 # One literal grep starts no program; its text_lint words are search data.
                 or ('text_lint' in command and not (
-                    literal_search_shell(raw) and raw.split()[0] == 'grep' and '&&' not in raw.split())
+                    literal_search_shell(raw) and raw.split()[0] == 'grep' and '&&' not in raw.split()
+                    and not any(char.isspace() and char not in ' \t\n' for char in raw))
                     and (re.search(r'text_lint(\.py)?\s+hook\b', command) or any(token in command for token in
                          ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
                 or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
