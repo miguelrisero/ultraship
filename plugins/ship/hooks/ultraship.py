@@ -3938,8 +3938,97 @@ def writer_gh_denial(command, depth=0):
     return None
 
 
+def graphql_read_document(document):
+    token = re.compile(r'''(?P<ignored>[ \t\r\n,﻿]+|\#[^\r\n]*)|(?P<block>"""(?:\\"""|(?!""")[^\x00-\x08\x0b\x0c\x0e-\x1f])*""")|(?P<string>"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9A-Fa-f]{4}|u\{[0-9A-Fa-f]+\}))*")|(?P<name>[_A-Za-z][_0-9A-Za-z]*)|(?P<number>-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?(?![._0-9A-Za-z]))|(?P<punct>\.\.\.|[!$&():=@\[\]{|}])''')
+    tokens, cursor = [], 0
+    while cursor < len(document):
+        match = token.match(document, cursor)
+        if not match:
+            return False
+        if match.lastgroup != 'ignored':
+            tokens.append((match.lastgroup, match[0]))
+        cursor = match.end()
+
+    def group(position, opening):
+        if position >= len(tokens) or tokens[position] != ('punct', opening):
+            return None
+        stack = []
+        for index in range(position, len(tokens)):
+            kind, value = tokens[index]
+            if kind != 'punct':
+                continue
+            if value in '([{':
+                stack.append({'(': ')', '[': ']', '{': '}'}[value])
+            elif value in ')]}':
+                if not stack or stack.pop() != value:
+                    return None
+                if not stack:
+                    return index + 1
+        return None
+
+    cursor = 0
+    if tokens and tokens[0] == ('name', 'query'):
+        cursor = 1
+        if cursor < len(tokens) and tokens[cursor][0] == 'name':
+            cursor += 1
+        if cursor < len(tokens) and tokens[cursor] == ('punct', '('):
+            cursor = group(cursor, '(')
+            if cursor is None:
+                return False
+        while cursor < len(tokens) and tokens[cursor] == ('punct', '@'):
+            cursor += 1
+            if cursor >= len(tokens) or tokens[cursor][0] != 'name':
+                return False
+            cursor += 1
+            if cursor < len(tokens) and tokens[cursor] == ('punct', '('):
+                cursor = group(cursor, '(')
+                if cursor is None:
+                    return False
+    end = group(cursor, '{')
+    return end == len(tokens) and end is not None and end > cursor + 2
+
+
+def review_data_segment(words):
+    if not words or words[0] not in ('printf', 'echo', 'grep', 'ps'):
+        return False
+    if words[0] == 'printf':
+        return len(words) > 1 and not words[1].startswith('-')
+    if words[0] == 'grep':
+        cursor = 1
+        while cursor < len(words):
+            word = words[cursor]
+            if word in ('-e', '-A', '-B', '-C', '-m'):
+                cursor += 1
+                if cursor == len(words):
+                    return False
+            elif word.startswith('-') and not re.fullmatch(r'-[nilwEFvcoqhHsxrRL]+', word):
+                return False
+            cursor += 1
+    return True
+
+
+def hidden_gh_api_calls(text):
+    counts = []
+    for pattern in (r'[0-9]*(?:&>>?|>\||[<>]+&?)[^\s;&|()]*|[^\s;&|()<>]+',
+                    r'[0-9]*(?:&>>?|>\||[<>]+&?)[^\s;&|()`]*|[^\s;&|()<>`]+'):
+        words, skip_target = [], False
+        for word in re.findall(pattern, text):
+            if skip_target:
+                skip_target = False
+                continue
+            redirect = re.match(r'^[0-9]*(?:&>>?|>\||[<>]+&?)', word)
+            if redirect:
+                skip_target = redirect.end() == len(word)
+                continue
+            words.append(word)
+        counts.append(sum(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', word)[-1]).lstrip('!').casefold() == 'gh'
+                          and words[index + 1].casefold() == 'api'
+                          for index, word in enumerate(words[:-1])))
+    return max(counts)
+
+
 # shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
-def review_thread_denial(command):
+def review_thread_denial(command, data_mode=False):
     if read_only_shell(command) or literal_search_shell(command):
         return None
     if '$' not in command and re.fullmatch(
@@ -3964,9 +4053,17 @@ def review_thread_denial(command):
         return 'unparsed shell syntax rule: ' + str(error) if re.search(r'\bgh\b', normalized) else None
     names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word).lstrip('!')) == 'gh'
                    for word in re.split(r'[\s;&|()<>`]+', normalized))
-    if names_gh:
+    data_arguments, start = set(), 0
+    for end in range(len(tokens) + 1):
+        if end == len(tokens) or tokens[end] and all(char in ';&|\n()' for char in tokens[end]):
+            if review_data_segment(tokens[start:end]):
+                data_arguments.update(range(start + 1, end))
+            start = end + 1
+    if names_gh and not data_mode:
         seen_gh = False
         for index, token in enumerate(tokens):
+            if index in data_arguments:
+                continue
             if token and all(char in ';&|\n()' for char in token):
                 seen_gh = False
                 continue
@@ -4001,14 +4098,18 @@ def review_thread_denial(command):
             continue
         value = shlex.split(raw)[0]
         words.append((value, raw))
-        if (any(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', token)[-1]).lstrip('!').casefold() == 'gh'
-                for token in re.split(r'[\s;&|()<>`]+', re.sub(r'''['"\\]''', '', value)))
-                and value != raw):
-            reason = review_thread_denial(value)
-            if reason:
-                return reason
     segments.append(words)
     for words in segments:
+        data = review_data_segment([value for value, _ in words])
+        for position, (value, raw) in enumerate(words):
+            text = re.sub(r'''['"\\]''', '', value)
+            if (any(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', token)[-1]).lstrip('!').casefold() == 'gh'
+                    for token in re.split(r'[\s;&|()<>`]+', text)) and value != raw):
+                argument_data = data and position > 0 and not hidden_gh_api_calls(text)
+                reason = review_thread_denial(re.sub(r'''['"\\]''', ' ', value) if argument_data else value,
+                                              data_mode=argument_data)
+                if reason:
+                    return reason
         command_words, skip_target = [], False
         for value, raw in words:
             if skip_target:
@@ -4037,23 +4138,8 @@ def review_thread_denial(command):
         calls = [index for index, (value, _) in enumerate(words)
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
         text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words))
-        for hidden_pattern in (r'[0-9]*(?:&>>?|>\||[<>]+&?)[^\s;&|()]*|[^\s;&|()<>]+',
-                               r'[0-9]*(?:&>>?|>\||[<>]+&?)[^\s;&|()`]*|[^\s;&|()<>`]+'):
-            hidden_words, skip_target = [], False
-            for token in re.findall(hidden_pattern, text):
-                if skip_target:
-                    skip_target = False
-                    continue
-                redirect = re.match(r'^[0-9]*(?:&>>?|>\||[<>]+&?)', token)
-                if redirect:
-                    skip_target = redirect.end() == len(token)
-                    continue
-                hidden_words.append(token)
-            hidden_calls = sum(re.sub(r'^-[A-Za-z]*S', '', re.split(r'[/=]', word)[-1]).lstrip('!').casefold() == 'gh'
-                               and hidden_words[index + 1].casefold() == 'api'
-                               for index, word in enumerate(hidden_words[:-1]))
-            if hidden_calls > len(calls):
-                return 'review-thread guard parse failure'
+        if hidden_gh_api_calls(text) > len(calls):
+            return 'review-thread guard parse failure'
         text = text.casefold()
         for index, (value, raw) in enumerate(words):
             if (os.path.basename(value) == 'gh' or os.path.basename(re.sub(r'''['"\\]''', '', raw)) == 'gh') and any(
@@ -4082,6 +4168,7 @@ def review_thread_denial(command):
                    for _, raw in arguments):
                 return 'review-thread guard parse failure'
             cursor, parsed, options = 0, True, True
+            static_read, field_count, document = True, 0, None
             expanded_values = set()
             value_options = {'-H', '-X', '-f', '-F', '-q', '-t', '-p', '--method', '--field', '--raw-field',
                              '--input', '--header', '--jq', '--template', '--hostname', '--cache', '--preview'}
@@ -4090,6 +4177,7 @@ def review_thread_denial(command):
                 value, raw = arguments[cursor]
                 option, attached = None, None
                 if options and value == '--':
+                    static_read = False
                     options = False
                     cursor += 1
                     continue
@@ -4111,6 +4199,7 @@ def review_thread_denial(command):
                         attached = value[letter + 1:].removeprefix('=') or None
                         break
                 if option in value_options:
+                    static_read = static_read and option in ('-f', '--raw-field', '-q', '--jq', '-t', '--template')
                     if attached is not None:
                         option_value = attached
                         option_raw = raw.removeprefix(prefix) if raw.startswith(prefix) else raw
@@ -4126,18 +4215,22 @@ def review_thread_denial(command):
                         methods.append(option_value.upper())
                     elif option in ('-f', '-F', '--field', '--raw-field', '--input'):
                         fields = True
+                        field_count += 1
                         inputs = inputs or option == '--input'
                         if option_value.startswith('query='):
                             query_value = option_value[6:]
                             single = re.fullmatch(r"query='[^']*'|'query=[^']*'", option_raw) is not None
                             query = bool(query_value) and not query_value.startswith('@') and (
                                 single or not any(char in option_raw for char in '$`\\'))
+                            if single:
+                                document = query_value
                 elif options and (value in switches or option is None and value.startswith('-i')):
-                    pass
+                    static_read = static_read and value in ('-i', '--include', '--silent')
                 elif options and value.startswith('-') or endpoint is not None:
                     parsed = False
                 else:
                     endpoint = value
+                    static_read = static_read and value == raw == 'graphql'
                     if value and value[0] not in '$-':
                         expanded_values.add(cursor)
                 cursor += 1
@@ -4174,6 +4267,9 @@ def review_thread_denial(command):
             if write and (not visible or full_url and host != 'api.github.com'
                           or re.search(r'(?:^|/)pulls/[^/]+/comments(?:/|$)', route)):
                 return 'REST review-comment write or opaque endpoint'
+            if (static_read and endpoint == 'graphql' and field_count == 1 and document is not None
+                    and graphql_read_document(document)):
+                continue
             method = methods[-1] if methods else ('POST' if fields else 'GET')
             if method not in ('GET', 'HEAD'):
                 return 'gh api write outside the helper'

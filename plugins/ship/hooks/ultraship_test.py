@@ -518,6 +518,13 @@ class ReceiptCustodyTests(unittest.TestCase):
                 self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(words)}})
         self.assert_custody_denial({**event, 'cwd': str(state)})
 
+    def test_printf_data_cannot_write_receipt_store(self):
+        for caller in ('', 'ship:driver', 'ship:writer--sol'):
+            with self.subTest(caller=caller):
+                self.assert_custody_denial({
+                    'agent_type': caller, 'tool_name': 'Bash',
+                    'tool_input': {'command': "printf '%s\\n' 'bash before gh' > " + str(self.store / 'receipt.json')}})
+
     def test_plain_grep_text_lint_phrases_allow_every_caller(self):
         commands = ("grep -rn 'Only the text_lint hook reads or writes refusal receipts (custody rule).' .",
                     "grep -n 'text_lint.py hook' file.py",
