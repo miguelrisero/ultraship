@@ -168,6 +168,8 @@ Keep messages, briefs, and PR bodies free of pair bytes and TOML text; identify 
 Require separate admission for every mutation or checker execution; keep mutation proof after merge.
 Preserve zero writer publication authority, effective refusals, tool and hook denials, protected holds, and Peral's CI-runner and merge-queue authority.
 
+After a hook denies only the method of this route's row edit, apply the owner-decisions granted protected-row re-anchor; it is the one exception to the alternate-form sentence below.
+
 For newly admitted future operations, use native Edit with replace_all=false.
 Require a unique approved row-ID-contained old_string within the approved row extent.
 Change only the approved paired old/new fields; preserve every frozen field.
@@ -477,5 +479,6 @@ When a main merge changes migration files or the brief names migration scope, pr
 For register scope, prepare [owning-predicate, exact-entry/reason, and unchanged-assertion evidence](../skills/ship/references/owner-decisions.md#exact-register-classification-example).
 Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals), including its once-only exact coordination text remedy; every safety-hook refusal remains final.
 Apply its once-only formatting contract to `Agent` and `SendMessage` when every returned finding matches a known `text_lint.py` formatting message and, for a `text_lint.py` refusal, a resend cites its hook receipt and a fresh brief records it on the run board.
+Its fresh-brief route also admits one fresh reviewer, and a receiptless hook version records the full refusal text and hook version in place of the receipt id.
 
 Return a checkpoint: worktree, branch, head SHA, direct PR URL, ledger gaps, CI and review state, the next action, and the ETA to merge. Build the ETA from the remaining CI, review rounds, merge queue, deploy, and live check, and give the time you are sure of. Report a slip before the ETA passes, with the new time. Return success only when the completion gate in `ship:ship` passes on the current head.
