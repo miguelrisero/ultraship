@@ -89,6 +89,26 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
                 self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
 
+    def test_false_closers_cannot_prove_arithmetic_numeric_names(self):
+        for command in (
+            'for ((i=0;i<1;i++)); do case x in x|done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in a) :;; done) :;; esac; done | cat; (( i ))',
+            'for ((i=0;i<1;i++)); do case x in (done) :;; esac; done | cat; (( i ))',
+            'for x in $e; do >y done; ((i=0)); done; (( i ))',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('array subscript evaluation rule (arithmetic)', self.reason)
+
+    def test_case_and_subshell_commands_keep_valid_numeric_proof(self):
+        for command in (
+            'for ((i=0;i<3;i++)); do case $i in 1) echo $((i));; esac; done | cat',
+            '(for ((i=0;i<3;i++)); do echo $((i)); done)',
+            '((n=0)); case x in a) :;; esac; (( n++ ))',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
     def test_redirected_commands_keep_valid_numeric_proof(self):
         for command in (
             '((i=0)); if true; then >x echo hi; fi; (( i ))',
