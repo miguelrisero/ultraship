@@ -719,6 +719,10 @@ class WriterGitHubGuardTests(unittest.TestCase):
             "git commit --message 'no gh calls'",
             "git commit --message='no gh calls'",
             "git commit -m 'fix: message\nno gh calls'",
+            "git commit -m 'docs: explain `gh api` reads'",
+            "gh api -X GET search/issues -f 'q=gh in:title'",
+            "gh api -X GET search/code -f 'q=label:gh-pages is:open'",
+            'git -c remote.origin.url=https://github.com/o/gh-tools.git fetch',
         )
         for command in commands:
             with self.subTest(command=command):
@@ -727,9 +731,12 @@ class WriterGitHubGuardTests(unittest.TestCase):
     def test_writer_executable_commit_message_shapes_are_denied(self):
         commands = (
             'git commit -m "$(gh api repos/o/r)"',
-            'git commit -m x; gh pr comment 1 --body y',
-            'git commit -m x && gh pr comment 1 --body y',
-            'git commit -m x\ngh pr comment 1 --body y',
+            'git commit -m x; gh issue close 1',
+            'git commit -m x && gh issue close 1',
+            'git commit -m x || gh issue close 1',
+            'git commit -m x & gh issue close 1',
+            'git commit -m x | gh issue close 1',
+            'git commit -m x\ngh issue close 1',
             "git commit -m 'x; gh pr merge 1' | sh",
             'git commit -m "`gh pr merge 1`"',
             "GIT_EDITOR='gh pr merge 1' git commit -e -m x",
@@ -741,6 +748,14 @@ class WriterGitHubGuardTests(unittest.TestCase):
             "git -ccore.editor='gh pr merge 1' commit -e -m x",
             "sh -c \"git commit -m 'gh pr comment 1 --body y'\"",
             "git commit -m 'gh calls' && sh -c x",
+            "GIT_EDITOR+='gh issue close 1' git commit -e -m x",
+            "x='gh issue close 1'; GIT_EDITOR=$x git commit -e -m x",
+            "command git -c core.editor='gh issue close 1' commit -e -m x",
+            "timeout 9 git -c core.editor='gh issue close 1' commit -e -m x",
+            'env -u VISUAL GIT_EDITOR=gh git commit -e -m x',
+            "env -C /repo GIT_EDITOR='gh issue close 1' git commit -e -m x",
+            'env \'-SGIT_EDITOR="gh issue close 1" git commit -e -m x\'',
+            'env \'--split-string=GIT_EDITOR="gh issue close 1" git commit -e -m x\'',
         )
         for command in commands:
             with self.subTest(command=command):

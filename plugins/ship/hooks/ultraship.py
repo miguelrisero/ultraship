@@ -49,6 +49,8 @@ WRAPPERS = {'env': {'-u', '--unset', '-C', '--chdir', '-S', '--split-string'}, '
             'sudo': {'-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt', '-C', '--close-from',
                      '-U', '--other-user', '-r', '--role', '-t', '--type', '-D', '--chdir', '-R', '--chroot',
                      '-T', '--command-timeout'}}
+GIT_VALUE_OPTIONS = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
+                     '--config-env', '--super-prefix', '--attr-source', '--shallow-file'}
 
 
 def alias_runs_writer(setting):
@@ -3182,8 +3184,6 @@ def literal_search_shell(command):
 
 def shell_git_push(command):
     """Scan Git commands and shell-wrapper strings without regex backtracking."""
-    values = {'-C', '-c', '--git-dir', '--work-tree', '--namespace',
-              '--config-env', '--super-prefix', '--attr-source', '--shallow-file'}
     folders = {'-C', '--git-dir', '--work-tree'}
     pending = [command]
     seen = set()
@@ -3293,7 +3293,7 @@ def shell_git_push(command):
                 value_option = None
                 continue
             if expect_subcommand:
-                if token in values:
+                if token in GIT_VALUE_OPTIONS:
                     skip_value = True
                     folder_value = token in folders
                     value_option = token
@@ -3375,7 +3375,7 @@ def plain_git_commit_shell(command):
 
 
 # ponytail: this text guard misses credential-backed writes via env clearing, git -c, pushurl, direct ssh, token HTTP, existing gh aliases and extensions, Bash writes to gh configuration, glob `?` and writer-created file names, and files written then run; auto mode classifies env-based push refusal as blocked traffic redirection, so the upgrade path is an isolated read-only credential (owner Input a464c49b).
-def writer_gh_denial(command, depth=0):
+def writer_gh_denial(command, depth=0, *, scan_values=True):
     shell_text = command
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = re.sub(r'''['"\\]''', '', command)
@@ -3387,10 +3387,10 @@ def writer_gh_denial(command, depth=0):
     reads = {'pr': ('view', 'list', 'checks', 'diff', 'status'),
              'issue': ('view', 'list', 'status'), 'run': ('view', 'list', 'watch'),
              'repo': ('view',), 'workflow': ('view', 'list')}
-    if any(marker in command for marker in ('$(', '<(', '>(', '`')):
-        return reason
     if depth == 0 and plain_git_commit_shell(shell_text):
         return None
+    if any(marker in command for marker in ('$(', '<(', '>(', '`')):
+        return reason
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace = ' \t\r'
@@ -3399,11 +3399,6 @@ def writer_gh_denial(command, depth=0):
         tokens = list(lexer)
     except ValueError as error:
         return 'unparsed shell syntax rule: ' + str(error)
-    for token in tokens:
-        if any(char.isspace() or char in ';&|()' for char in token):
-            nested = writer_gh_denial(token, depth + 1)
-            if nested:
-                return nested
     segments, segment = [], []
     for index, token in enumerate(tokens):
         redirect = (token == '&' and (segment and segment[-1].endswith(('<', '>'))
@@ -3415,42 +3410,65 @@ def writer_gh_denial(command, depth=0):
             segment.append(token)
     segments.append(segment)
     for words in segments:
-        cursor = 0
-        while cursor < len(words) and re.match(r'[A-Za-z_]\w*=', words[cursor]):
-            if re.search(r'\bgh\b', words[cursor].split('=', 1)[1]):
-                return reason
-            cursor += 1
-        if cursor < len(words) and os.path.basename(words[cursor]) in ('env', 'export'):
-            exporting = words[cursor] == 'export'
-            cursor += 1
-            while cursor < len(words):
-                word = words[cursor]
-                if re.match(r'[A-Za-z_]\w*=', word):
-                    if re.search(r'\bgh\b', word.split('=', 1)[1]):
-                        return reason
-                elif not exporting and not word.startswith('-'):
-                    break
-                cursor += 1
-        if cursor < len(words) and os.path.basename(words[cursor]) == 'git':
-            cursor += 1
-            while cursor < len(words) and words[cursor].startswith('-'):
-                option = words[cursor]
-                if option == '-c':
-                    cursor += 1
-                    value = words[cursor] if cursor < len(words) else ''
-                elif option.startswith('-c'):
-                    value = option[2:]
-                else:
-                    if option in ('-C', '--git-dir', '--work-tree', '--namespace', '--config-env',
-                                  '--super-prefix', '--attr-source', '--shallow-file'):
-                        cursor += 1
-                    cursor += 1
-                    continue
-                if '=' in value and re.search(r'\bgh\b', value.split('=', 1)[1]):
-                    return reason
-                cursor += 1
+        command_index = 0
+        while command_index < len(words) and re.match(r'[A-Za-z_]\w*\+?=', words[command_index]):
+            command_index += 1
+        cli_command = command_index < len(words) and os.path.basename(words[command_index]) == 'gh'
+        for index, token in enumerate(words):
+            if any(char.isspace() or char in ';&|()' for char in token):
+                nested = writer_gh_denial(token, depth + 1,
+                                          scan_values=scan_values and not (cli_command and index > command_index))
+                if nested:
+                    return nested
         if not any(re.search(r'\bgh\b', word) for word in words):
             continue
+        if scan_values:
+            cursor, mode = 0, None
+            while cursor < len(words):
+                word = words[cursor]
+                if re.match(r'[A-Za-z_]\w*\+?=', word):
+                    nested = writer_gh_denial(word.split('=', 1)[1], depth + 1)
+                    if nested:
+                        return nested
+                elif mode is None and os.path.basename(word) in ('env', 'export'):
+                    mode = os.path.basename(word)
+                elif mode == 'env' and word.startswith('-'):
+                    option = next((flag for flag in WRAPPERS['env'] if word == flag
+                                   or flag.startswith('--') and word.startswith(flag + '=')
+                                   or not flag.startswith('--') and word.startswith(flag)), None)
+                    if option:
+                        value = word[len(option):].removeprefix('=')
+                        if word == option:
+                            cursor += 1
+                            value = words[cursor] if cursor < len(words) else ''
+                        if option in ('-S', '--split-string'):
+                            nested = writer_gh_denial(value, depth + 1)
+                            if nested:
+                                return nested
+                elif mode != 'export':
+                    break
+                cursor += 1
+            for index, word in enumerate(words):
+                if os.path.basename(word) != 'git':
+                    continue
+                cursor = index + 1
+                while cursor < len(words) and words[cursor].startswith('-'):
+                    option = words[cursor]
+                    if option == '-c':
+                        cursor += 1
+                        value = words[cursor] if cursor < len(words) else ''
+                    elif option.startswith('-c'):
+                        value = option[2:]
+                    else:
+                        if option in GIT_VALUE_OPTIONS:
+                            cursor += 1
+                        cursor += 1
+                        continue
+                    if '=' in value:
+                        nested = writer_gh_denial(value.split('=', 1)[1], depth + 1)
+                        if nested:
+                            return nested
+                    cursor += 1
         if 'api' in words and any(word.strip('/') == 'graphql' for word in words) and any(
                 GH_FIELD.fullmatch(word) for word in words):
             return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
