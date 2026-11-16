@@ -152,6 +152,8 @@ class EnvDirectoryTests(unittest.TestCase):
         for command, label in (
             ("printf x | (eval 'cd /proc/self/fd'; node 0)", 'program from a pipe'),
             ('printf x | (echo }; node 0)', 'program from a pipe'),
+            ('printf x | { true; python3; }', 'unresolved command word'),
+            ('printf x |& { true; node scripts/x.js; }', 'unresolved command word'),
             ("printf x | { eval 'cd /proc/self/fd'; node 0; }", 'unresolved command word'),
         ):
             with self.subTest(command=command):

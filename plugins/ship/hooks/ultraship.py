@@ -2905,6 +2905,10 @@ def inline_interpreter_denial(command, cwd=None):
             token[1] in {'while', 'until', 'for', 'select'} and token[2] in command_positions for token in tokens)
         for index, token in enumerate(tokens):
             raw = token[0]
+            if raw == '{' and token[2] in command_positions:
+                pipe_groups.append(piped or any(pipe_groups))
+            elif raw == '}' and token[2] in command_positions and pipe_groups:
+                pipe_groups.pop()
             previous = tokens[index - 1] if index else None
             following = tokens[index + 1] if index + 1 < len(tokens) else None
             before = previous is not None and previous[3] == token[2]
@@ -2922,7 +2926,7 @@ def inline_interpreter_denial(command, cwd=None):
                     segments.append((words, piped or any(pipe_groups)))
                     words = []
                 if raw == '(':
-                    pipe_groups.append(piped)
+                    pipe_groups.append(piped or any(pipe_groups))
                 elif raw == ')' and pipe_groups:
                     pipe_groups.pop()
                 if raw != '\n':
