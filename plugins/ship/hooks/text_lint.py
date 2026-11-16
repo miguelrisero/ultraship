@@ -463,10 +463,8 @@ def read_receipt(receipt_id):
         raise ValueError('Invalid receipt citation: ' + str(exc)) from None
 
 
-def consume_receipt(receipt_id, event):
-    receipt = read_receipt(receipt_id)
+def consume_receipt(receipt_id, event, receipt):
     try:
-        path = store_dir() / 'receipts' / (receipt_id + '.json')
         if receipt.get('id') != receipt_id or receipt.get('resend_allowed') is not True:
             raise ValueError('Receipt does not permit a resend.')
         if not event.get('session_id') or receipt.get('session_id') != event['session_id']:
@@ -501,7 +499,7 @@ def hook(event, parse_error=None):
                     and owner == input_identity(event)['recipient'] and owner != event.get('agent_id')):
                 parent = None
             else:
-                consumed = consume_receipt(parent, event)
+                consumed = consume_receipt(parent, event, receipt)
         if event.get('tool_name') not in ('Agent', 'Task'):
             if not parent:
                 check_pending(event)

@@ -494,13 +494,16 @@ class TextLintTests(unittest.TestCase):
         self.assertIn('Receipt sender differs.', result['permissionDecisionReason'])
         self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
 
-    def test_relay_keeps_the_senders_pending_refusal_open(self):
+    def test_relay_spends_only_the_senders_pending_receipt(self):
         result = self.entrypoint_output(json.dumps(self.event()))
-        receipt_id = re.search(r'Receipt: `([0-9a-f]{32})`', result['permissionDecisionReason'])[1]
+        receipt_id = self.receipt_id(result)
+        owner_pending = {p.name: p.read_bytes() for p in (self.state / 'pending').iterdir()}
+        owner_receipt = self.state / 'receipts' / (receipt_id + '.json')
+        owner_bytes = owner_receipt.read_bytes()
         sender = self.event(to='agent-one')
         sender['agent_id'] = None
         result = self.entrypoint_output(json.dumps(sender))
-        sender_id = re.search(r'Receipt: `([0-9a-f]{32})`', result['permissionDecisionReason'])[1]
+        sender_id = self.receipt_id(result)
         pending = {p.name: p.read_bytes() for p in (self.state / 'pending').iterdir()}
         relay = self.resend(receipt_id)
         relay['agent_id'] = None
@@ -510,15 +513,68 @@ class TextLintTests(unittest.TestCase):
 
         self.assertEqual(result['permissionDecision'], 'deny')
         reason = result['permissionDecisionReason']
-        self.assertIn('A formatting-only refusal to this recipient is pending.', reason)
-        self.assertIn('Cite its receipt `' + sender_id + '`', reason)
-        refusal_id = re.search(r'Receipt: `([0-9a-f]{32})`', reason)[1]
+        self.assertIn('Receipt `' + sender_id + '` is now spent.', reason)
+        refusal_id = self.receipt_id(result)
         refusal = json.loads((self.state / 'receipts' / (refusal_id + '.json')).read_bytes())
         self.assertIsNone(refusal['parent'])
         self.assertFalse(refusal['resend_allowed'])
         self.assertEqual({p.name: p.read_bytes() for p in (self.state / 'pending').iterdir()}, pending)
-        for unconsumed in (receipt_id, sender_id):
-            self.assertFalse((self.state / 'receipts' / (unconsumed + '.consumed')).exists())
+        for name, body in owner_pending.items():
+            self.assertEqual((self.state / 'pending' / name).read_bytes(), body)
+        self.assertEqual(owner_receipt.read_bytes(), owner_bytes)
+        self.assertFalse(owner_receipt.with_suffix('.consumed').exists())
+        self.assertTrue((self.state / 'receipts' / (sender_id + '.consumed')).exists())
+
+    def receipt_id(self, result):
+        return re.search(r'Receipt: `([0-9a-f]{32})`', result['permissionDecisionReason'])[1]
+
+    def test_null_receipt_owner_cannot_relay_to_an_absent_recipient(self):
+        owner = self.event()
+        owner['agent_id'] = None
+        receipt_id = self.receipt_id(self.entrypoint_output(json.dumps(owner)))
+        cited = self.resend(receipt_id)
+        cited['tool_input'].pop('to')
+        prompt = cited['tool_input']['message']
+        agent = {**cited, 'tool_name': 'Agent', 'tool_input': {'prompt': prompt}}
+        for event in (agent, cited):
+            with self.subTest(tool=event['tool_name']):
+                result = self.entrypoint_output(json.dumps(event))
+                self.assertEqual(result['permissionDecision'], 'deny')
+                self.assertIn('Receipt sender differs.', result['permissionDecisionReason'])
+                self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+
+    def test_self_addressed_citation_consumes_the_owners_resend(self):
+        receipt_id = self.receipt_id(self.entrypoint_output(json.dumps(self.event(to='agent-one'))))
+        resend = self.resend(receipt_id)
+        resend['tool_input']['to'] = 'agent-one'
+
+        self.assert_entrypoint_allows(resend)
+
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        result = self.entrypoint_output(json.dumps(resend))
+        self.assertIn('Receipt is consumed.', result['permissionDecisionReason'])
+
+    def test_format_refused_relay_resends_with_only_its_own_receipt(self):
+        receipt_id = self.receipt_id(self.entrypoint_output(json.dumps(self.event())))
+        relay = self.resend(receipt_id, 'Decision: Continue.\nNext: Resume.')
+        relay['agent_id'] = None
+        relay['tool_input']['to'] = 'agent-one'
+
+        result = self.entrypoint_output(json.dumps(relay))
+
+        self.assertEqual(result['permissionDecision'], 'deny')
+        self.assertIn('Missing section: Facts', result['permissionDecisionReason'])
+        relay_id = self.receipt_id(result)
+        refusal = json.loads((self.state / 'receipts' / (relay_id + '.json')).read_bytes())
+        self.assertTrue(refusal['resend_allowed'])
+        self.assertIsNone(refusal['parent'])
+        message = 'Facts: Receipt `' + receipt_id + '`.\nDecision: Continue.\nNext: Resume.'
+        resend = self.resend(relay_id, message)
+        resend['agent_id'] = None
+        resend['tool_input']['to'] = 'agent-one'
+        self.assert_entrypoint_allows(resend)
+        self.assertTrue((self.state / 'receipts' / (relay_id + '.consumed')).exists())
+        self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
 
     def test_session_recipient_tool_and_fields_are_bound(self):
         for field in ('session_id', 'recipient', 'tool_name', 'fields', 'null_session'):
