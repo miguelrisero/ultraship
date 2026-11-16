@@ -610,6 +610,113 @@ class TextLintTests(unittest.TestCase):
         event['tool_input']['content'] = content
         self.assertIsNone(self.hook_output(event))
 
+    def input_event(self, key, html='<p>The review passes.</p>', **fields):
+        return {'session_id': 'session-one', 'tool_use_id': 'tool-one', 'agent_id': 'agent-one',
+                'tool_name': 'mcp__bettercoding__create_input',
+                'tool_input': {'workspace_id': 'workspace-one', 'external_key': key,
+                               'content': {'html': html}, **fields}}
+
+    def test_unrelated_input_passes_and_keeps_the_first_receipt_open(self):
+        self.hook_refusal(self.input_event('input-one'))
+        receipt_id = self.last_receipt['id']
+        self.assertTrue(self.last_receipt['formatting_only'])
+        self.assertTrue(self.last_receipt['resend_allowed'])
+        pending = next((self.state / 'pending').iterdir())
+        pending_bytes = pending.read_bytes()
+
+        unrelated = self.input_event(
+            'input-two', '<meta name="output-kind" content="result"><p>The checks pass.</p>')
+        unrelated['tool_use_id'] = 'tool-two'
+        self.assertIsNone(self.hook_output(unrelated))
+
+        self.assertEqual(pending.read_bytes(), pending_bytes)
+        self.assertEqual(json.loads(pending_bytes), {'id': receipt_id, 'state': 'open'})
+        self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        resend = self.input_event('input-one', '<meta name="output-kind" content="result">'
+                                  '<p>The review passes.</p><!-- ultraship-receipt:' + receipt_id + ' -->')
+        self.assertIsNone(self.hook_output(resend))
+        self.assertFalse(pending.exists())
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+
+    def test_uncited_same_input_still_spends_its_receipt(self):
+        self.hook_refusal(self.input_event('input-one'))
+        receipt_id = self.last_receipt['id']
+        replay = self.input_event('input-one', '<meta name="output-kind" content="result">'
+                                 '<p>The review passes.</p>')
+        replay['tool_use_id'] = 'tool-two'
+
+        self.assertIn('Receipt `' + receipt_id + '` is now spent.', self.hook_refusal(replay))
+
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+
+    def test_input_cannot_cite_another_external_keys_receipt(self):
+        self.hook_refusal(self.input_event('input-one'))
+        receipt_id = self.last_receipt['id']
+        copied = self.input_event('input-two', '<meta name="output-kind" content="result">'
+                                 '<p>The review passes.</p><!-- ultraship-receipt:' + receipt_id + ' -->')
+
+        self.assertIn('Invalid receipt citation: Receipt tool, recipient or non-prose fields differ.',
+                      self.hook_refusal(copied))
+
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        self.assertEqual(json.loads(next((self.state / 'pending').iterdir()).read_text()),
+                         {'id': receipt_id, 'state': 'open'})
+
+    def test_identical_input_calls_share_pending_across_tool_use_ids(self):
+        first = self.input_event('input-one')
+        self.hook_refusal(first)
+        receipt_id = self.last_receipt['id']
+        pending = next((self.state / 'pending').iterdir())
+        repeated = {**first, 'tool_use_id': 'tool-two'}
+
+        self.assertIn('Receipt `' + receipt_id + '` is now spent.', self.hook_refusal(repeated))
+
+        self.assertEqual(list((self.state / 'pending').iterdir()), [pending])
+        self.assertEqual(json.loads(pending.read_text()), {'id': receipt_id, 'state': 'open'})
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        self.assertIsNone(self.hook_output(self.input_event(
+            'input-two', '<meta name="output-kind" content="result"><p>The checks pass.</p>')))
+
+    def test_later_input_gets_one_resend_after_another_input_is_spent(self):
+        self.hook_refusal(self.input_event('input-one'))
+        first_id = self.last_receipt['id']
+        self.assertIn('Receipt `' + first_id + '` is now spent.', self.hook_refusal(self.input_event(
+            'input-one', '<meta name="output-kind" content="result"><p>The review passes.</p>')))
+        self.hook_refusal(self.input_event('input-two'))
+        second_id = self.last_receipt['id']
+        self.assertTrue(self.last_receipt['formatting_only'])
+        self.assertTrue(self.last_receipt['resend_allowed'])
+        resend = self.input_event('input-two', '<meta name="output-kind" content="result">'
+                                  '<p>The review passes.</p><!-- ultraship-receipt:' + second_id + ' -->')
+        resend['tool_use_id'] = 'tool-three'
+
+        self.assertIsNone(self.hook_output(resend))
+
+        self.assertTrue((self.state / 'receipts' / (first_id + '.consumed')).exists())
+        self.assertTrue((self.state / 'receipts' / (second_id + '.consumed')).exists())
+        self.assertIn('Receipt is consumed.', self.hook_refusal(resend))
+        self.assertFalse(self.last_receipt['resend_allowed'])
+
+    def test_input_without_workspace_keeps_pending_per_external_key(self):
+        first = self.input_event('input-one')
+        first['tool_input'].pop('workspace_id')
+        self.hook_refusal(first)
+        receipt_id = self.last_receipt['id']
+        self.assertIsNone(self.last_receipt['recipient'])
+        second = self.input_event('input-two', '<meta name="output-kind" content="result">'
+                                  '<p>The checks pass.</p>')
+        second['tool_input'].pop('workspace_id')
+
+        self.assertIsNone(self.hook_output(second))
+
+        self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        first['tool_input']['content']['html'] = ('<meta name="output-kind" content="result">'
+                                                 '<p>The review passes.</p>')
+        self.assertIn('Receipt `' + receipt_id + '` is now spent.', self.hook_refusal(first))
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+
     def test_expiry_uses_injected_clock(self):
         self.hook_refusal(self.event())
         receipt_id = self.last_receipt['id']

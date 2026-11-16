@@ -253,12 +253,17 @@ def input_identity(event):
                 content.pop('html', None)
                 content.pop('title', None)
                 args['content'] = content
-    return {
+    identity = {
         'tool_name': tool,
         'recipient': str(recipient)[:200] if recipient is not None else None,
         'input_sha256': hashlib.sha256(canonical(original)).hexdigest(),
         'fields_sha256': hashlib.sha256(canonical(args)).hexdigest(),
     }
+    if isinstance(tool, str) and tool.endswith('create_input'):
+        # One workspace receives many unrelated Inputs; the external key names one Input across its retries.
+        input_key = original.get('external_key') if isinstance(original, dict) else None
+        identity['input_key'] = str(input_key)[:200] if input_key is not None else None
+    return identity
 
 
 def signature(receipt, key):
@@ -266,8 +271,10 @@ def signature(receipt, key):
 
 
 def pending_path(identity):
-    key = hashlib.sha256(canonical([identity.get(field) for field in
-                                   ('session_id', 'agent_id', 'tool_name', 'recipient')])).hexdigest()
+    fields = [identity.get(field) for field in ('session_id', 'agent_id', 'tool_name', 'recipient')]
+    if isinstance(identity.get('tool_name'), str) and identity['tool_name'].endswith('create_input'):
+        fields.append(identity.get('input_key'))
+    key = hashlib.sha256(canonical(fields)).hexdigest()
     return store_dir() / 'pending' / key
 
 
