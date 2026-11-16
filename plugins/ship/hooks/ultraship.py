@@ -3393,27 +3393,44 @@ WRITER_VALUE_ALLOWLIST = {
 
 
 def writer_git_control_path(path):
-    """Whether a literal path names Git configuration or an executable hook."""
+    """Whether a literal path names Git configuration, indirection or an executable hook."""
     for candidate in (os.path.abspath(path), os.path.realpath(path)):
-        if re.search(r'/\.git/(?:worktrees/[^/]+/)?(?:config(?:\.worktree)?$|hooks(?:/|$))', candidate):
+        if re.search(r'/\.git(?:$|/(?:worktrees/[^/]+/|modules/(?:[^/]+/)+)?'
+                     r'(?:config(?:\.worktree)?$|commondir$|gitdir$|hooks(?:/|$)))', candidate, re.I):
             return True
     return False
 
 
+WRITER_GIT_CONTROL_READS = {'cat', 'ls', 'head', 'tail', 'grep', 'wc', 'stat'}
+
+
 def writer_git_file_denial(command):
-    """Check literal redirect targets and operands of common file-writing commands."""
-    if '.git' not in command:
-        return None
+    """Refuse literal Git control targets except operands of known reads."""
     words = shell_raw_words(shell_without_heredoc_bodies(command))
-    writing = False
-    for index, (raw, value, _, _) in enumerate(words):
-        if raw in {';', '&', '|', '(', ')', '\n'}:
-            writing = False
-        if os.path.basename(value) in {'tee', 'cp', 'mv', 'install', 'touch', 'truncate', 'dd', 'sed', 'perl'}:
-            writing = True
+    if not any('.git' in value.casefold() for _, value, _, _ in words):
+        return None
+    positions = shell_command_positions(words)
+    program, redirect = '', False
+    for index, (raw, value, start, _) in enumerate(words):
+        if start in positions:
+            program = os.path.basename(value)
+        if raw in {';', '&', '|', '(', ')', '\n'} and not redirect:
+            program = ''
+        if raw == '>':
+            redirect = True
+            continue
+        if redirect and raw in {'>', '|', '&'}:
+            continue
         target = value.removeprefix('of=')
-        if writer_git_control_path(target) and (writing or index and words[index - 1][0] == '>'):
-            return 'git control file write rule'
+        if program == 'cd' and re.search(r'(?:^|/)\.git(?:/|$)', target, re.I):
+            return 'git control directory rule'
+        if writer_git_control_path(target):
+            selector = program == 'git' and index and words[index - 1][1] == '--git-dir'
+            git_read = selector or program == 'git' and any(word[1] in {'status', 'diff', 'log', 'show', 'ls-files',
+                                                           'ls-tree', 'grep', 'rev-parse'} for word in words[:index])
+            if redirect or program not in WRITER_GIT_CONTROL_READS and not git_read:
+                return 'git control file write rule'
+        redirect = False
     return None
 
 
@@ -3446,6 +3463,13 @@ def writer_trigger_text(command):
     return re.sub(r'''['"\\]''', '', command) + '\n' + re.sub(r'''['"\\]''', ' ', command)
 
 
+def writer_repository_selector(option, value):
+    if any(char in value for char in '$`*?[{'):
+        return False
+    expected = os.path.join(os.getcwd(), '.git') if option == '--git-dir' else os.getcwd()
+    return os.path.realpath(value) == os.path.realpath(expected)
+
+
 def writer_gh_denial(command, depth=0):
     if depth == 0:
         command = commit_message_removed(command)
@@ -3471,17 +3495,14 @@ def writer_gh_denial(command, depth=0):
         tokens = list(lexer)
     except ValueError as error:
         return 'unparsed shell syntax rule: ' + str(error)
-    quoted_values = {}
+    quoted_tokens = [False] * len(tokens)
     if re.search(r'\bgh\b', unquoted):
         try:
-            for raw, value, _, _ in shell_raw_words(command):
-                quoted_values.setdefault(value, []).append(bool(re.fullmatch(r"'[^']*'", raw, re.S)))
+            raw_tokens = shell_raw_words(command)
         except ValueError:
             return reason
-    quoted_tokens = []
-    for token in tokens:
-        occurrences = quoted_values.get(token, [])
-        quoted_tokens.append(occurrences.pop(0) if occurrences else False)
+        tokens = [value for _, value, _, _ in raw_tokens]
+        quoted_tokens = [bool(re.fullmatch(r"'[^']*'", raw, re.S)) for raw, _, _, _ in raw_tokens]
     segments, segment, quoted_segments, quoted_segment = [], [], [], []
     for index, token in enumerate(tokens):
         redirect = (token == '&' and (segment and segment[-1].endswith(('<', '>'))
@@ -3520,7 +3541,7 @@ def writer_gh_denial(command, depth=0):
         if 'api' in words and any(word.strip('/') == 'graphql' for word in words) and any(
                 GH_FIELD.fullmatch(word) for word in words):
             return 'writers cannot send GraphQL requests; use a REST GET with the query in the path'
-        data, field_data = set(), set()
+        data = set()
         if gh_index is not None:
             for index in range(gh_index + 1, len(words)):
                 if index in data:
@@ -3528,16 +3549,12 @@ def writer_gh_denial(command, depth=0):
                 if words[index] in ('-f', '-F', '--field', '--raw-field', '-q', '--jq',
                                     '-t', '--template', '-H', '--header'):
                     data.add(index + 1)
-                    if words[index] in ('-f', '-F', '--field', '--raw-field'):
-                        field_data.add(index + 1)
                 elif re.match(r'--(?:field|raw-field|jq|template|header)=|-[fFqtH].+', words[index]):
                     data.add(index)
-                    if GH_FIELD.fullmatch(words[index]):
-                        field_data.add(index)
         git_subcommand, git_value = None, None
         env_command = any(os.path.basename(word) == 'env' for word in words)
         for index, word in enumerate(words):
-            if index in field_data and ('-X' in word or '--method' in word):
+            if index in data and ('-X' in word or '--method' in word):
                 return 'gh field method option rule'
             if index in data:
                 if '$' in word or '`' in word or not quoted[index] and any(char in word for char in '*[{'):
@@ -3554,12 +3571,19 @@ def writer_gh_denial(command, depth=0):
             if git_value:
                 if git_value == '-c' and tuple(word.split('=', 1)) not in WRITER_VALUE_ALLOWLIST:
                     return 'git config value rule'
+                if git_value in {'--git-dir', '--work-tree'} and not writer_repository_selector(git_value, word):
+                    return 'git repository selector rule'
                 git_value = None
                 continue
             if os.path.basename(word) == 'git':
                 git_subcommand = ''
                 continue
             if git_subcommand is not None:
+                if word.startswith(('--git-dir=', '--work-tree=')):
+                    option, _, value = word.partition('=')
+                    if not writer_repository_selector(option, value):
+                        return 'git repository selector rule'
+                    continue
                 if word.startswith(('--config-env', '--exec-path')):
                     return 'git config/exec path option rule'
                 if git_subcommand in ('', 'clone') and (word.startswith('-c') or word == '--config'

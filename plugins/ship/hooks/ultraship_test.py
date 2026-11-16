@@ -219,6 +219,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
                     'cat <<\'EOF\' > f.sh\ngit push\nEOF\nbash f.sh',
                     'git -C $(pwd) status',
                     'git -C "$W" push', 'git -C "${W}" push origin HEAD', 'git --work-tree "$W" push',
+                    'git --git-dir "$G" status', 'git --work-tree "$W" diff --stat',
                     'git -C $W status', 'git -C "$W" status; git -C $W status', 'git -C "$W" $CMD',
                     'git -C "$W" -c x=y push', 'git -c "$X" status', 'git -C "$W*" status',
                     'git -C ""$W status', 'git -C "$W"$X status', 'git -C "$W"" push" status',
@@ -263,8 +264,8 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
                     'git -C . status 2>&1', 'git log --grep push 2>/dev/null', 'git log >push',
                     'git -C /w commit -m "no push here"', 'git commit -m "push"', 'git log --grep push',
                     'git commit -m "no push here"', 'gh pr view 3', 'npm test', 'git status',
-                    'git -C "$W" status', 'git -C "${W}" log --oneline -3', 'git --git-dir "$G" status',
-                    'git --work-tree "$W" diff --stat', "printf 'HEAD %s\\n' x; git -C \"$W\" status"]:
+                    'git -C "$W" status', 'git -C "${W}" log --oneline -3',
+                    "printf 'HEAD %s\\n' x; git -C \"$W\" status"]:
             assert not denied(hook('pre', {**writer, 'agent_type': agent, 'tool_input': {'command': cmd}}, env)), (agent, cmd)
     assert not denied(hook('pre', {'agent_type': 'ship:driver', 'tool_name': 'Bash', 'tool_input': {'command': 'git push'}}, env))
     assert denied(hook('pre', {**writer, 'tool_name': 'Write', 'tool_input': {'file_path': '/r/.claude/settings.local.json'}}, env))
@@ -702,6 +703,46 @@ class PythonHeredocGuardTests(unittest.TestCase):
 
 
 class WriterGitHubGuardTests(unittest.TestCase):
+    def test_writer_quote_identity_and_all_data_method_flags_are_denied(self):
+        for command in ("echo '*'; gh pr view 1 -q *", "echo '[x]'; gh pr view 1 --jq [x]",
+                        "gh pr view 1 -q 'ref=-X POST'", "gh pr view 1 -H 'ref=--method POST'",
+                        "gh pr view 1 --template='-XPOST'", "gh pr view 1 --jq=--method=POST"):
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
+    def test_writer_parsed_git_control_operands_are_denied(self):
+        commands = (
+            "echo x > .g''it/config", 'echo x > .git/config', 'echo x 2> .git/config',
+            'echo x &> .git/hooks/pre-commit', 'echo x >|.git/config', 'echo x >>.git/config',
+            'echo x 2>.git/config', 'echo x &>.git/hooks/pre-commit',
+            'cd .git', 'cd .git/hooks', 'echo x > .git/modules/sub/config',
+            'echo x > .git/modules/sub/nested/config.worktree',
+            'echo x > .git/modules/sub/commondir', 'echo x > .git/modules/sub/gitdir',
+            'echo x > .git/modules/sub/hooks/pre-commit', 'echo x > .GIT/CONFIG',
+            'echo x > .git', 'custom-write .git/config', 'custom-write .git/modules/sub/config',
+            'git --git-dir=/other/repo/.git status', 'git --work-tree=/other/repo status',
+            'git --git-dir /other/repo/.git status', 'git --work-tree /other/repo status',
+            'git --git-dir="$G" status', 'git --work-tree="$W" status',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+        for target in ('.git', '.GIT/CONFIG', '.git/modules/sub/config', '.git/modules/sub/config.worktree',
+                       '.git/modules/sub/commondir', '.git/modules/sub/gitdir',
+                       '.git/modules/sub/hooks/pre-commit'):
+            for tool in ('Edit', 'Write', 'NotebookEdit'):
+                key = 'notebook_path' if tool == 'NotebookEdit' else 'file_path'
+                with self.subTest(target=target, tool=tool):
+                    self.assertTrue(denied(hook('pre', {**self.writer, 'tool_name': tool,
+                                                      'cwd': str(self.repo), 'tool_input': {key: target}}, self.env)))
+
+    def test_writer_current_repository_selectors_and_control_reads_are_admitted(self):
+        for command in ('cat .git/config', 'head .git/config', 'ls .git/hooks',
+                        'git --git-dir=.git status', 'git --work-tree=. status',
+                        'git --git-dir .git status', 'git --work-tree . status'):
+            with self.subTest(command=command):
+                self.assertFalse(denied(hook('pre', {**self.writer, 'tool_input': {'command': command}}, self.env)))
+
     def test_writer_attached_quoted_command_operands_are_denied(self):
         for command in ("env -S'gh pr merge 1'", "env -iS'gh pr merge 1'",
                         "env -vS'gh pr merge 1'", "env -0S'gh pr merge 1'",
