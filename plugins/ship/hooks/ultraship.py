@@ -3506,7 +3506,7 @@ def writer_git_file_denial(command, cwd=None):
     words = shell_raw_words(shell_without_heredoc_bodies(commit_message_removed(command)))
     for raw, value, _, _ in words:
         active = shell_brace_text(raw)
-        if re.search(r'\{[^}]*\/[^}]*\}', active):
+        if any('/' in piece.partition('{')[2] for piece in active.split('}')[:-1]):
             return 'git control path brace slash rule'
         for part in value.split('='):
             part = re.sub(r'^-[a-z]+', '', part, flags=re.I)
@@ -3663,9 +3663,6 @@ def writer_gh_denial_main(command, depth=0):
 
 def writer_gh_denial(command, depth=0):
     if depth == 0:
-        main_reason = writer_gh_denial_main(command)
-        if main_reason:
-            return main_reason
         command = commit_message_removed(command)
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = writer_trigger_text(command)
@@ -4407,6 +4404,9 @@ def pre(data):
                 match = WRITER_BASH.search(file_text_removed)
                 if match:
                     deny(publication_reason + ' Rule: WRITER_BASH ' + repr(match[2].strip()) + '.')
+                reason = writer_gh_denial_main(file_text_removed)
+                if reason:
+                    deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + reason)
                 names_gh = re.search(r'\bgh\b', writer_trigger_text(file_text_removed))
                 github_reason = writer_gh_denial(file_text_removed)
                 if names_gh and github_reason:
