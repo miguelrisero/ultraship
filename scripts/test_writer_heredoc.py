@@ -1805,7 +1805,7 @@ class WriterHeredocTests(unittest.TestCase):
             live_command,
             'if [ "$x" -ge 93 ]; then exit 75; fi',
             '[ "$x" -le 1 ]', '[ "$x" -ne 1 ]', '[ "$x" -eq 1 ]',
-            '[[ "$x" -ge 1 ]]', 'test "$x" -ge 1',
+            '[[ "$a" -ef "$b" ]]', 'test "$x" -ge 1',
             r'''if [ "$disk" -ge 93 ]; then printf 'STOP disk=%s%%\n' "$disk"; exit 75; elif [ "${load%%.*}" -ge 40 ]; then printf 'HOLD load1=%s\n' "$load"; exit 75; fi''',
             'while [ "$x" -le 3 ]; do x=1; done', '! [ "$x" -ne 1 ]',
             '[ "$x" -ge 1 ] && [ "$y" -le 2 ]',
@@ -1833,7 +1833,11 @@ class WriterHeredocTests(unittest.TestCase):
                 'trap "$setup" DEBUG; test "$PY" -c code',
                 'source setup.sh; test "$PY" -c code',
                 '. setup.sh; test "$PY" -c code',
+                'set -A functions test x; test "$PY" -c code',
+                'autoload -Uz test; test "$PY" -c code',
+                'disable test; test "$PY" -c code',
             )),
+            ('array subscript evaluation rule (arithmetic)', ('[[ "$x" -ge 1 ]]',)),
             ('unparsed shell syntax rule: word-internal shell group', (
                 '[() { "$@"; }; [ "$PY" -c code ]',
                 'test() { "$@"; }; test "$PY" -c code',
@@ -1843,6 +1847,7 @@ class WriterHeredocTests(unittest.TestCase):
                 with self.subTest(command=command):
                     self.assertTrue(self.denied(command))
                     self.assertIn(reason, self.reason)
+        self.assertTrue(self.denied('''functions[test]='"$@"'; test "$PY" -c code'''))
 
     def test_safe_path_prefix_admits_plain_commands(self):
         for command in (

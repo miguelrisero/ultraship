@@ -2652,6 +2652,17 @@ def inline_interpreter_denial(command, cwd=None):
         except Exception:
             if subscript_reason is None:
                 subscript_reason = 'array subscript evaluation rule (parse error)'
+        command_positions = shell_command_positions(tokens)
+        test_safe = (not any(value in {'alias', 'enable', 'hash', 'shopt', 'eval', 'trap', 'source',
+                                       'autoload', 'disable'}
+                             or re.match(r'(?:dis_)?(?:functions|aliases|galiases|saliases|builtins)(?:$|\[|\+?=)', value)
+                             for _, value, _, _ in tokens)
+                     and not any(value == '.' and start in command_positions
+                                 for _, value, start, _ in tokens)
+                     and not shell_defines_function(tokens, command_positions)
+                     and not any(start in command_positions and index + 2 < len(tokens)
+                                 and tokens[index + 1][0] == '(' and tokens[index + 2][0] == ')'
+                                 for index, (_, _, start, _) in enumerate(tokens)))
         segments, words, piped = [], [], False
         for token in tokens:
             raw = token[0]
@@ -2701,18 +2712,30 @@ def inline_interpreter_denial(command, cwd=None):
             if (piped_input and first and first[0] != '[' and first[1] != '$?'
                     and unresolved_shell_word(first[0])):
                 return 'inline interpreter code rule (unresolved command word)'
+            test_operands, closing = set(), None
+            if test_safe:
+                for raw, value, start, _ in words:
+                    if closing is not None:
+                        if closing and value == closing:
+                            closing = None
+                        else:
+                            test_operands.add(start)
+                    elif start in command_positions and value in {'[', '[[', 'test'}:
+                        closing = {'[': ']', '[[': ']]', 'test': ''}[value]
             for index, (raw, value, start, end) in enumerate(words):
                 arguments = [word[1] for word in words[index + 1:]]
                 neutral = neutral_prefix and index < prefix_end and bool(re.fullmatch(
                     rf'[A-Za-z_][A-Za-z0-9_]*=("?){path_part}(?::{path_part})*\1', raw))
                 unresolved = (not neutral and raw != '[' and value != '$?' and start not in shell_programs
+                              and not (test_safe and start in command_positions and value == '[[')
                               and unresolved_shell_word(raw))
                 names = '|'.join(re.escape(name) for name in (*INLINE_INTERPRETERS, 'python'))
                 joined_code = (not neutral and unresolved_shell_word(raw) and bool(re.search(
                     rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw))
                                and not read_only_argument_word(command, tokens, words, index))
-                if joined_code or unresolved and (any(code_option(argument) for argument in arguments)
-                                                   or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'}):
+                if start not in test_operands and (joined_code or unresolved and (
+                        any(code_option(argument) for argument in arguments)
+                        or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'})):
                     return 'inline interpreter code rule (unresolved command word)'
                 if grep_data_token(words, index):
                     continue
