@@ -296,6 +296,19 @@ class EnvDirectoryTests(unittest.TestCase):
             command = f'true || (cd {directory} && python3 scripts/x.py)'
             self.assertFalse(self.denied(command), self.reason)
 
+    def test_absolute_scripts_refuse_runtime_path_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for interpreter, filename, program in (
+                ('node', 'p.js', 'console.log(1)'),
+                ('python3', 'p.py', 'print(1)'),
+            ):
+                with self.subTest(interpreter=interpreter):
+                    script = Path(directory) / filename
+                    self.assertFalse(script.exists())
+                    command = f"ln -sfn /dev/stdin {script}; printf '{program}' | {interpreter} {script}"
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -3043,7 +3043,7 @@ def inline_interpreter_denial(command, cwd=None):
                         return ('inline interpreter code rule (program from a pipe)' if piped_input or stdin_program_path(script) or unsafe_script
                                 or (segment_relative_denied or piped) and script and not os.path.isabs(script)
                                 else f'inline interpreter code rule ({name})')
-                    if paths_changed and not os.path.isabs(script) and path_reason is None:
+                    if paths_changed and path_reason is None:
                         path_reason = 'inline interpreter code rule (program from a pipe)'
                 elif not arguments or any(stdin_program_path(argument) for argument in arguments):
                     return 'inline interpreter code rule (program from a pipe)'
@@ -3060,7 +3060,7 @@ def inline_interpreter_denial(command, cwd=None):
                                         or 'i' in flags or any(word[1].startswith('PYTHONINSPECT=') for word in words)):
                         return 'inline interpreter code rule (program from a pipe)'
                     if (paths_changed and kind == 'script' and operand < len(arguments)
-                            and not os.path.isabs(script) and path_reason is None):
+                            and path_reason is None):
                         path_reason = 'inline interpreter code rule (program from a pipe)'
         for token in nested:
             preceding_paths = next((changed for words, _, changed in segments
