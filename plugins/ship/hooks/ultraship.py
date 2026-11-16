@@ -4194,6 +4194,29 @@ PRE_INPUT_INVALID = ('The ship hook could not read its input as a JSON object, s
                      'Report the blocked scope to the driver.')
 
 
+def own_account_call(data, raw):
+    agent_type = data.get('agent_type') or ''
+    session = data.get('session_id')
+    if (agent_type and not re.match(r'^(ship:)?driver(--|$)', agent_type)
+            or not isinstance(session, str) or not session):
+        return False
+    word = r'''(?:[A-Za-z0-9_./:@+,=%-]|'[^'\r\n]*'|"[^"$`\\!\r\n]*")+'''
+    if not re.fullmatch(word + r'(?:[ \t]+' + word + r')*', raw):
+        return False
+    words = shlex.split(raw)
+    if len(words) != 10:
+        return False
+    interpreter, script, command, pending, result, step, agent, sha, verdict, evidence = words
+    return (interpreter == 'python3'
+            and script == str(Path(__file__).resolve().parents[1] / 'skills/ship/scripts/ledger.py')
+            and command == 'account' and pending == str(owed_file(data))
+            and bool(re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', result))
+            and bool(re.fullmatch(r'[a-z][a-z-]*', step))
+            and bool(re.fullmatch(r'[\w:.-]+(@[\w-]+)?', agent))
+            and bool(re.fullmatch(r'[0-9a-f]{7,40}', sha))
+            and bool(re.fullmatch(r'[\w-]+', verdict)) and verdict != 'owed' and bool(evidence.strip()))
+
+
 def receipt_custody(data, read_search=False):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     if read_search and tool not in ('Read', 'Grep', 'Glob', 'LSP') and not tool.startswith('mcp__fff__'):
@@ -4273,7 +4296,8 @@ def receipt_custody(data, read_search=False):
         if (receipt_text(raw)
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
-                or (('.local/state' in command or 'xdg_state_home' in command)
+                or (not own_account_call(data, raw)
+                    and ('.local/state' in command or 'xdg_state_home' in command)
                     and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
                          or any(char in raw for char in '*?[]{}$`')))
                 or any(any(char in word for char in '*?[{$`')
@@ -4876,8 +4900,10 @@ def stop(data):
               'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]` in its open run, '
               'Read every retained result and use its exact agent identity, including @agent_id when present. '
               'For a recorded result in a closed or earlier-branch run, use '
-              f'`ledger.py account {path} <result-id> <step> <agent> <sha> <verdict> <evidence>`; '
-              'this appends bookkeeping without reopening the run. Never invent review evidence.'}))
+              f'`python3 {Path(__file__).resolve().parents[1] / "skills/ship/scripts/ledger.py"} '
+              f"account {path} <result-id> <step> <agent> <sha> <verdict> '<evidence>'`; "
+              'this appends bookkeeping without reopening the run. '
+              'Run this command alone with the evidence in single quotes. Never invent review evidence.'}))
 
 
 def compact(data):
