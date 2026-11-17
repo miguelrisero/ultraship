@@ -710,6 +710,7 @@ class WriterHeredocTests(unittest.TestCase):
     def test_read_only_argument_words_with_interpreter_names_are_admitted(self):
         """Catch false refusals of literal read-only paths and patterns containing interpreter names."""
         for command in (
+            r'''git -C /x grep foo /x/python*/a''',
             r'''cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-video && rg -n 'TIMEOUT|DEADLINE|timeout|CHUNK' backend/api/adapters/integrations/recall.py backend/api/tools/native/inspect_video.py backend/api/adapters/chat/attachment*.py && rg -n 'class AsyncFileStreamReader|async def __aexit__|async def aclose|async def __anext__' /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-intent/backend/api/.venv/lib/python3.13/site-packages/e2b/filesystem/* && rg -n '^Version:' /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-intent/backend/api/.venv/lib/python3.13/site-packages/e2b-2.30.0.dist-info/METADATA''',
             r'''rg -n 'class AsyncFileStreamReader|async def __aexit__|async def aclose|async def __anext__' /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-intent/backend/api/.venv/lib/python3.13/site-packages/e2b/filesystem/*''',
             r'''grep -n -e SLOT -e slot_gate -e SHA -e gate_child /home/miguel/.claude/plugins/marketplaces/better-plugin/plugins/chief-of-chiefs/skills/run/scripts/* | head -60''',
@@ -779,7 +780,12 @@ class WriterHeredocTests(unittest.TestCase):
             (r'''git grep --no-index foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git grep -f /x/p foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git -c core.pager=less grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
-            (r'''git -C /x grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C /x grep -O/x/pyth* foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C /x -c core.pager=less grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C /x --no-pager grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C /a -C /x grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C/x grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C '/x' grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git --no-pager grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git log /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git grep foo /x/python*/a; perl -e 1''', 'inline interpreter code rule (unresolved command word)'),

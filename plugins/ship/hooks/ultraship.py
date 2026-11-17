@@ -1221,6 +1221,12 @@ def read_only_argument_word(command, tokens, words, index):
         'wc': r'-[lcwm]',
     }
     for pipeline in pipelines:
+        if (len(pipeline[0]) > 3 and pipeline[0][0][0] == 'git' and pipeline[0][1][0] == '-C'
+                and pipeline[0][3][0] == 'grep'):
+            path = pipeline[0][2][0]
+            if not path or path.startswith('-') or any(char in path for char in "'\"\\$*?[{~^#"):
+                return False
+            pipeline = [[pipeline[0][0], *pipeline[0][3:]], *pipeline[1:]]
         git_grep = len(pipeline[0]) > 1 and pipeline[0][0][0] == 'git' and pipeline[0][1][0] == 'grep'
         if (pipeline[0][0][0] not in {'rg', 'grep', 'ls', 'cat', 'find'} and not git_grep
                 or any(part[0][0] not in {'head', 'tail', 'wc'} for part in pipeline[1:])):
@@ -3011,7 +3017,8 @@ def inline_interpreter_denial(command, cwd=None):
                         any(code_option(argument) for argument in arguments)
                         or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'})):
                     return 'inline interpreter code rule (unresolved command word)'
-                if grep_data_token(words, index):
+                if (grep_data_token(words, index) or words[0][0] == 'ls'
+                        and read_only_argument_word(command, tokens, words, index)):
                     continue
                 name = interpreter_name(value)
                 if not name:
