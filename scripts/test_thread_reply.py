@@ -420,7 +420,7 @@ class HookTests(unittest.TestCase):
             '{field(value:"} mutation \\" text"){id}}',
             '{field(value:"""} mutation"""){id}}',
             '{viewer{# mutation }\nlogin}}',
-            '﻿,query Read {viewer{login}}',
+            chr(0xFEFF) + ',query Read {viewer{login}}',
             '{field(value:"tab	x")}',
         )
         for document in documents:

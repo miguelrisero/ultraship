@@ -3941,7 +3941,7 @@ def writer_gh_denial(command, depth=0):
     return None
 
 
-GRAPHQL_TOKEN = re.compile(r'''(?P<ignored>[ \t\r\n,﻿]+|\#[^\x00-\x08\x0a-\x1f]*)|(?P<block>"""(?:\\"""|(?!"""|\\""")[^\x00-\x08\x0b\x0c\x0e-\x1f])*""")|(?P<string>(?!""")"(?:[^"\\\x00-\x08\x0a-\x1f]|\\(?:["\\/bfnrt]|u[0-9A-Fa-f]{4}))*")|(?P<name>[_A-Za-z][_0-9A-Za-z]*)|(?P<number>-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?(?![._0-9A-Za-z]))|(?P<punct>\.\.\.|[!$&():=@\[\]{|}])''')
+GRAPHQL_TOKEN = re.compile(r'''(?P<ignored>[ \t\r\n,''' + chr(0xFEFF) + r''']+|\#[^\x00-\x08\x0a-\x1f]*)|(?P<block>"""(?:\\"""|(?!"""|\\""")[^\x00-\x08\x0b\x0c\x0e-\x1f])*""")|(?P<string>(?!""")"(?:[^"\\\x00-\x08\x0a-\x1f]|\\(?:["\\/bfnrt]|u[0-9A-Fa-f]{4}))*")|(?P<name>[_A-Za-z][_0-9A-Za-z]*)|(?P<number>-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?(?![._0-9A-Za-z]))|(?P<punct>\.\.\.|[!$&():=@\[\]{|}])''')
 
 
 def graphql_read_document(document):
