@@ -11,7 +11,8 @@ spec.loader.exec_module(checks)
 
 class ModelRoutingTests(unittest.TestCase):
     def test_astra_and_luna_reviewer_names_pin_their_declared_models(self):
-        for seat, model in (('reviewer--astra', 'gpt-6-astra'),
+        for seat, model in (('reviewer--astra', 'gpt-6.2-astra'),
+                            ('verifier--astra', 'gpt-6.2-astra'),
                             ('reviewer--luna', 'gpt-6-luna')):
             with self.subTest(seat=seat):
                 path = ROOT / 'plugins/ship/agents' / (seat + '.md')

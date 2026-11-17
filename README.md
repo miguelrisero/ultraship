@@ -42,7 +42,7 @@ Use `/ship:ship <task>` alone for one task. Full mode adds a plan, a high panel,
 | Opt-in Fable 5.2 writer and reviewer, only when the brief or the owner names Fable 5.2 | `claude-fable-5-2` | high (writer), xhigh (reviewer) | `gpt-6.2-sol` (writer, xhigh), `claude-opus-5-5` (reviewer) |
 | Slice review, selection, fix read, high and final panels, closing pass | `gpt-6.2-sol` | xhigh | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
 | Deep review, simplify | `claude-opus-5-5` | xhigh | `claude-sonnet-5-5` |
-| Required panel seat, billing and authorization verifier | `claude-opus-5-5` | xhigh | `gpt-6-astra` (xhigh) |
+| Required panel seat, billing and authorization verifier | `claude-opus-5-5` | xhigh | `gpt-6.2-astra` (xhigh) |
 | Babysit triage | `gpt-6.2-sol` | xhigh | `gpt-6.2-sol` (reviewer, xhigh), `claude-sonnet-5-5` (reviewer) |
 | Research | `gpt-6-luna` | medium | `claude-sonnet-5-5` |
 | Chief | session model (`claude-opus-5-5`) | — | — |
