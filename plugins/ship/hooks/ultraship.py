@@ -2772,6 +2772,36 @@ def shell_changes_paths(tokens):
     return name != 'true' or len(tokens) != 1
 
 
+def shell_launches_commands(tokens, command_positions):
+    for start, token in enumerate(tokens):
+        if token[2] not in command_positions:
+            continue
+        wrapper, skip = None, False
+        for index in range(start, len(tokens)):
+            word = tokens[index][1]
+            if skip:
+                skip = False
+                continue
+            if re.match(r'[A-Za-z_]\w*\+?=', word):
+                continue
+            if wrapper and word.startswith('-'):
+                skip = word in WRAPPERS[wrapper]
+                continue
+            if wrapper == 'timeout' and re.fullmatch(r'[\d.]+[smhd]?', word):
+                continue
+            base = os.path.basename(word)
+            if base in {'xargs', 'parallel'}:
+                return True
+            if base in WRAPPERS:
+                wrapper = base
+                continue
+            if base == 'find' and any(word[1] in {'-exec', '-execdir', '-ok', '-okdir'}
+                                      for word in tokens[index + 1:]):
+                return True
+            break
+    return False
+
+
 def inline_interpreter_denial(command, cwd=None):
     env_directories = []
     chdir_wrapper = chdir_wrapper_present(command, env_directories)
@@ -2941,8 +2971,7 @@ def inline_interpreter_denial(command, cwd=None):
         changing_segments = [shell_changes_paths(words) for words, _ in segments]
         segments = [(words, piped, runtime_paths or any(changing_segments[:index])
                      or any(changing_segments[index + 1:])
-                     or any(os.path.basename(word[1]) in {'xargs', 'parallel'}
-                            or word[1] in {'-exec', '-execdir', '-ok', '-okdir'} for word in words))
+                     or shell_launches_commands(words, command_positions))
                     for index, (words, piped) in enumerate(segments)]
         shell_programs = set()
         for index, token in enumerate(tokens):
