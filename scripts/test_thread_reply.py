@@ -614,6 +614,9 @@ class HookTests(unittest.TestCase):
             "printf '%s\\n' 'the bash check before gh pr view' >> /tmp/x/notes.md",
             "printf '%s\\t%s\\n' run 'relay via sh then gh' >> /tmp/x/notes.md",
             "echo 'watch the gh queue'", 'ps -eo pid,ppid,args | grep -w gh | grep -v bash',
+            'echo "- $(date -u +%H:%MZ): lane note (one). The guard refused gh in a loop." >> /tmp/x/notes.md',
+            '''printf '%s\\n' "$(date -u +%FT%TZ) a source and a script and a watch near gh" >> /tmp/x/notes.md''',
+            'for d in $(find . -maxdepth 2 -name .git); do gh pr view 1 -R o/r --json state --jq .state; done',
         )
         for command in commands:
             for caller in ('', 'ship:driver'):
@@ -648,6 +651,34 @@ class HookTests(unittest.TestCase):
             for caller in ('', 'ship:driver'):
                 with self.subTest(command=command, caller=caller):
                     self.assertEqual(self.decision(command, caller).get('permissionDecision'), 'deny')
+        runner_commands = (
+            'coproc . /tmp/x/run; gh pr view 1',
+            'noglob . /tmp/x/run; gh pr view 1',
+            'nocorrect . /tmp/x/run; gh pr view 1',
+            '- . /tmp/x/run; gh pr view 1',
+            'repeat 1 . /tmp/x/run; gh pr view 1',
+            'if [[ -n x ]] . /tmp/x/run; gh pr view 1',
+            '. /tmp/x/run; gh pr view 1',
+            'command . /tmp/x/run; gh pr view 1',
+            'case x in x) . /tmp/x/run;; esac; gh pr view 1',
+            'find /tmp/x -name y; . /tmp/x/run; gh pr view 1',
+            '/usr/bin/find /tmp/x . ; gh pr view 1',
+            "find . -exec sh -c 'gh pr view 1' \\;",
+            'find . -name x -exec eval y \\; ; gh pr view 1',
+            'echo "$(gh pr view 1) $(bash -c x)" >> /tmp/x/notes.md',
+            'echo "$(gh pr view 1 && . /tmp/x/run)" >> /tmp/x/notes.md',
+            'echo "$(. /tmp/x/run) gh note" >> /tmp/x/notes.md',
+            '''printf '%s\\n' "$(find . -name x; . /tmp/x/run) gh" >> /tmp/x/notes.md''',
+            '''echo "$(echo ')' ; bash -c x) gh" >> /tmp/x/notes.md''',
+            'echo "$(case x in x) . /tmp/x/run;; esac) gh" >> /tmp/x/notes.md',
+            'echo "$((bash -c x); true) gh" >> /tmp/x/notes.md',
+        )
+        for command in runner_commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result['permissionDecision'], 'deny')
+                    self.assertEqual(result['permissionDecisionReason'].split('Rule: ', 1)[1], 'shell runner names gh.')
 
     def test_hidden_redirect_with_immediate_backtick_stays_refused(self):
         command = "gh '>`' api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123"
