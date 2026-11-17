@@ -585,6 +585,100 @@ class HookTests(unittest.TestCase):
             with self.subTest(document=document, caller='writer'):
                 self.assertEqual(self.decision(command, 'ship:writer--sol').get('permissionDecision'), 'deny')
 
+    def test_graphql_read_with_literal_scalar_variables(self):
+        query = ('query($owner:String!,$name:String!,$pr:Int!){'
+                 'repository(owner:$owner,name:$name){pullRequest(number:$pr){number}}}')
+        commands = (
+            "gh api graphql -F owner=o -F name=r -F pr=7 -f query='" + query + "'",
+            "gh api graphql -f query='" + query + "' -F owner='o' -F name=\"r\" -F pr=7",
+            "gh api graphql -f query='query($id:ID!){node(id:$id){id}}' -f id=example-id",
+            "gh api graphql -f query='query($enabled:Boolean!){viewer @include(if:$enabled){login}}' -F enabled=true",
+            "gh api graphql -f query='query($value:Float!){field(value:$value)}' -F value=1.5",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+            with self.subTest(command=command, caller='writer'):
+                self.assertEqual(self.decision(command, 'ship:writer--sol').get('permissionDecision'), 'deny')
+
+    def test_graphql_scalar_variables_keep_unsafe_inputs_refused(self):
+        read = "gh api graphql -f query='query($id:ID!){node(id:$id){id}}'"
+        commands = (
+            ("gh api graphql -f query='mutation($id:ID!){deleteIssue(input:{issueId:$id}){clientMutationId}}' -F id=x",
+             'gh api write outside the helper'),
+            ("gh api graphql -f query='query{viewer{login}} mutation{deleteIssue(input:{issueId:\"x\"}){clientMutationId}}' -F id=x",
+             'gh api write outside the helper'),
+            (read + " -f query='query{viewer{id}}' -F id=x", 'gh api write outside the helper'),
+            ("gh api graphql -F query=@query.graphql -F id=x", 'opaque GraphQL query'),
+            (read + ' --input payload.json -F id=x', 'opaque GraphQL query'),
+            (read + ' -F id=@identifier.txt', 'gh api write outside the helper'),
+            (read + ' -F id="$ID"', 'gh api write outside the helper'),
+            (read + ' -F id=$(cat identifier.txt)', 'review-thread guard parse failure'),
+            (read + ' -F id=x -F id=y', 'gh api write outside the helper'),
+            (read + " -F 'id[]=x'", 'gh api write outside the helper'),
+            (read + " -F 'id[value]=x'", 'gh api write outside the helper'),
+            (read + ' -F undeclared=x', 'gh api write outside the helper'),
+        )
+        for command, reason in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: ' + reason + '.', result['permissionDecisionReason'])
+
+    def test_single_quoted_script_arguments_keep_runner_prose_as_data(self):
+        commands = (
+            "python3 /repo/scripts/record.py append 'Four source checks pass; the gh read waits.'",
+            "python3 /repo/scripts/record.py append 'Check bash before the gh read.'",
+            "cd /repo && python3 scripts/record.py append 'The eval checks precede the gh read.'",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+
+    def test_executable_arguments_keep_shell_runner_refusals(self):
+        commands = (
+            "bash -c 'gh pr view 7'",
+            "eval 'gh pr view 7'",
+            "source /dev/stdin <<<'gh pr view 7'",
+            "watch -n 60 'gh pr view 7'",
+            "python3 /repo/scripts/record.py append \"$(bash -c 'gh pr view 7')\"",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: shell runner names gh.', result['permissionDecisionReason'])
+
+    def test_literal_dollar_before_closing_quote_is_data(self):
+        commands = (
+            r"grep -n 'api' /repo/notes.txt | grep -v '^\s*$' | sed -n 1,20p",
+            r"grep -n 'gh' /repo/notes.txt | grep -v '^\s*$'",
+            "printf '%s\\n' \"$'\" api",
+            r"printf '%s\n' \$\' api",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+
+    def test_actual_ansi_quotes_keep_the_caller_refusal(self):
+        commands = (
+            "printf '%s' $'api'",
+            "printf '%s' $'gh'",
+            "printf '%s' $'api' && grep -v '^$' /repo/notes.txt",
+            "grep -v '^$' /repo/notes.txt; printf '%s' $'api'",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
+
     def test_graphql_read_route_refuses_other_documents_and_options(self):
         documents = ('mutation{createIssue{ id }}', 'subscription{events{id}}',
                      'fragment F on User {login}', 'query{viewer{login}} query{viewer{id}}',
