@@ -495,7 +495,9 @@ class TextLintTests(unittest.TestCase):
                 path = text_lint.citation_refusal_path(self.last_receipt)
                 path.unlink()
                 if kind == 'symlink':
-                    path.symlink_to(self.state / 'key')
+                    target = self.state / 'old-refusal-time'
+                    target.write_text('2000-01-01T00:00:00Z')
+                    path.symlink_to(target)
                 else:
                     path.mkdir()
                 resend = self.resend(receipt_id)
@@ -503,6 +505,56 @@ class TextLintTests(unittest.TestCase):
                 self.assertIn('Invalid receipt citation:', self.hook_refusal(resend))
                 self.assertFalse(self.last_receipt['resend_allowed'])
                 self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+
+    def test_unknown_citation_spends_the_real_receipts_resend(self):
+        """Catch a final unknown-ID citation denial that leaves the real receipt usable."""
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        self.assertIn('Invalid receipt citation:', self.hook_refusal(self.resend('0' * 32)))
+        self.assertIn('A final citation refusal spent this receipt.',
+                      self.hook_refusal(self.resend(receipt_id)))
+        self.assertFalse(self.last_receipt['resend_allowed'])
+
+    def test_naive_citation_refusal_time_fails_closed(self):
+        """Catch a naive marker time that lacks the required explicit UTC-time refusal."""
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        path = text_lint.citation_refusal_path(self.last_receipt)
+        path.parent.mkdir(mode=0o700)
+        path.write_text('2026-11-15T12:00:00')
+        self.assertIn('Citation refusal marker requires a UTC time.',
+                      self.hook_refusal(self.resend(receipt_id)))
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+
+    def test_citation_refusal_preserves_other_identity_receipts(self):
+        """Catch refusal markers that also spend another session, agent, tool, or non-prose identity."""
+        for field in ('session_id', 'agent_id', 'tool_name', 'scope'):
+            with self.subTest(field=field):
+                first = self.input_event(field) if field == 'tool_name' else self.event(to=field + '-chief')
+                receipt = text_lint.write_receipt(first, ['Missing section: Facts'], True, None)
+                other = self.input_event(field) if field == 'tool_name' else self.event(to=field + '-chief')
+                if field == 'scope':
+                    other['tool_input']['scope'] = 'another-scope'
+                elif field == 'tool_name':
+                    other['tool_name'] = 'mcp__bettercoding__update_input'
+                else:
+                    other[field] = 'another-identity'
+                other_receipt = text_lint.write_receipt(other, ['Missing section: Facts'], True, None)
+                marker = '<!-- ultraship-receipt:' + receipt['id'] + ' -->'
+                if field == 'tool_name':
+                    first['tool_input']['content']['html'] += marker + marker
+                else:
+                    first['tool_input']['message'] += marker + marker
+                self.assertIn('Invalid receipt citation:', self.hook_refusal(first))
+                if field == 'tool_name':
+                    other['tool_input']['content']['html'] = (
+                        '<meta name="output-kind" content="result"><p>The review passes.</p>'
+                        '<!-- ultraship-receipt:' + other_receipt['id'] + ' -->')
+                else:
+                    other['tool_input']['message'] = self.resend(other_receipt['id'])['tool_input']['message']
+                self.assertIsNone(self.hook_output(other))
+                self.assertTrue((self.state / 'receipts' / (other_receipt['id'] + '.consumed')).exists())
 
     def test_resend_templates_end_with_single_marker_guidance(self):
         """Catch resend instructions that omit the final warning about duplicate receipt markers."""
