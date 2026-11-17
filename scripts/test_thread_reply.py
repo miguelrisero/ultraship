@@ -24,7 +24,8 @@ PR = 'https://github.com/o/r/pull/7'
 THREAD = 'PRRT_kwDOabc'
 COMMENT = PR + '#discussion_r123'
 PREFIX = ['api', '--hostname', 'github.com', 'graphql']
-SENTINEL = '$(echo x > should-never-exist)'
+SENTINEL_FILE = 'should-never-exist'
+SENTINEL = f'$(echo x > {SENTINEL_FILE})'
 
 REFUSE = (
     "gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=PRRT_kwDOabc",
@@ -304,7 +305,7 @@ sys.exit(response['code'])
                                     env={**os.environ, 'PATH': directory, 'GH_TEST_LOG': str(log),
                                          'GH_TEST_RESPONSES': str(canned)})
             calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
-            self.assertFalse((folder / 'should-never-exist').exists())
+            self.assertFalse((folder / SENTINEL_FILE).exists())
             return result, calls
 
     def test_reply_checks_ownership_before_sending_raw_body(self):
@@ -390,7 +391,7 @@ sys.exit(response['code'])
             result = subprocess.run(['/bin/sh', '-c', 'x=' + SENTINEL], cwd=directory,
                                     env={**os.environ, 'PATH': directory})
             self.assertEqual(result.returncode, 0)
-            self.assertTrue((Path(directory) / 'should-never-exist').exists())
+            self.assertTrue((Path(directory) / SENTINEL_FILE).exists())
 
     def test_read_preserves_complete_bodies_and_attribution(self):
         query = 'query($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$after){pageInfo{hasNextPage endCursor}nodes{author{login}url body}}}}}'
