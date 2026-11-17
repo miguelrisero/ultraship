@@ -1,7 +1,7 @@
 ---
 name: verifier--astra
 description: Fallback verifier. Use only when ship:verifier--fable is unavailable.
-model: gpt-6.2-astra
+model: gpt-6-astra
 effort: xhigh
 tools: Read, Grep, Glob, LSP, WebFetch, WebSearch
 ---
