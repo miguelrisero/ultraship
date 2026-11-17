@@ -396,6 +396,7 @@ sys.exit(response['code'])
         page = {'data': {'node': {'comments': {
             'pageInfo': {'hasNextPage': False, 'endCursor': None}, 'nodes': nodes}}}}
         result, calls = self.run_helper([(self.lookup(), 0), (page, 0)], action='read')
+        self.assertFalse(Path('should-never-exist').exists())
         expected = {'thread': THREAD, 'comments': [
             {'author': 'reviewer', 'url': COMMENT, 'body': body},
             {'author': 'ghost', 'url': PR + '#discussion_r124', 'body': 'Second\ncomment\n'},

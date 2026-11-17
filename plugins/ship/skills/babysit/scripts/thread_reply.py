@@ -55,7 +55,7 @@ def read_comments(thread, repository, number):
             raise ValueError('invalid comments cursor')
         if not page['hasNextPage']:
             break
-        if not isinstance(after, str) or not after or after in cursors:
+        if after is None or after in cursors:
             raise ValueError('invalid comments cursor')
         cursors.add(after)
     if not comments:
