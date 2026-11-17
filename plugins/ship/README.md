@@ -91,13 +91,15 @@ Run the executable helper directly to count overlapping UTF-8 literal bytes in a
 Pass each option once, with its value as a separate word, in any order.
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/source-count.py" --repo /absolute/repo --commit <full-sha> --subject src/example.py --literal 'exact text'
+<installed ship plugin root>/skills/ship/scripts/source-count.py --repo /absolute/repo --commit <full-sha> --subject src/example.py --literal 'exact text'
 ```
+
+Use the literal absolute path of the installed plugin's script; the writer hook refuses a shell expansion in that command word.
 
 The repository path must be canonical and absolute; the commit must be a full lowercase SHA.
 The subject must be a normalized repository-relative POSIX path.
 The helper reads the committed blob and ignores checkout edits, replacement objects, and `GIT_*` environment variables.
-It refuses protected mutation paths, sensitive paths, directories, symlinks, and submodules.
+It refuses `tests/mutation` paths, `.git` path segments, `.env` and `.env.*` files, `.pem` and `.key` files, directories, symlinks, and submodules.
 Python isolated mode comes from the executable shebang.
 
 Success prints one JSON line with `result`, `repo`, `commit`, `subject`, `blob`, `count`, `literal_bytes`, and `literal_sha256`.

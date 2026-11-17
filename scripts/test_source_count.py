@@ -14,9 +14,7 @@ SENTINEL = 'private-source-count-sentinel-7c31'
 
 class SourceCountTests(unittest.TestCase):
     def setUp(self):
-        scratch = ROOT.parent / '.scratch'
-        scratch.mkdir(exist_ok=True)
-        temp = tempfile.TemporaryDirectory(dir=scratch)
+        temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.directory = Path(temp.name).resolve()
         self.repo = self.directory / 'repo'
