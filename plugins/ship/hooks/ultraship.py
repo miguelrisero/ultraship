@@ -1758,7 +1758,7 @@ def safe_directory_state(command, cwd=None):
                 if cursor >= len(tokens):
                     return False
                 raw, target = tokens[cursor][:2]
-                if (unresolved_shell_word(raw) or not target or target.startswith(('-', '~'))
+                if (unresolved_shell_word(raw) or not os.path.isabs(target)
                         or '..' in target.split('/') or not re.fullmatch(r'[\w./-]+', target)):
                     return False
                 targets.append(target)
@@ -2940,7 +2940,10 @@ def inline_interpreter_denial(command, cwd=None):
         segments.append((words, piped or any(pipe_groups)))
         changing_segments = [shell_changes_paths(words) for words, _ in segments]
         segments = [(words, piped, runtime_paths or any(changing_segments[:index])
-                     or any(changing_segments[index + 1:])) for index, (words, piped) in enumerate(segments)]
+                     or any(changing_segments[index + 1:])
+                     or any(os.path.basename(word[1]) in {'xargs', 'parallel'}
+                            or word[1] in {'-exec', '-execdir', '-ok', '-okdir'} for word in words))
+                    for index, (words, piped) in enumerate(segments)]
         shell_programs = set()
         for index, token in enumerate(tokens):
             if os.path.basename(token[1]) not in SHELL_INTERPRETERS:
