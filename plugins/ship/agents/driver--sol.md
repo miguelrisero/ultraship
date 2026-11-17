@@ -1,8 +1,8 @@
 ---
 name: driver--sol
 description: Low-quota driver. Use only when the Claude quota is low and a current quota reading is recorded; otherwise use ship:driver.
-model: gpt-6.1-sol
-effort: high
+model: gpt-6.2-sol
+effort: xhigh
 ---
 
 Drive the ship tail for the lane in the brief. You coordinate; writers write code.

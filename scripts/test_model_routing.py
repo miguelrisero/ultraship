@@ -39,16 +39,42 @@ class ModelRoutingTests(unittest.TestCase):
             if path.stem.endswith('--fable52'):
                 continue
             self.assertNotIn('claude-fable-', checks.frontmatter(path.read_text()).get('model', ''))
-        sol = checks.frontmatter((ROOT / 'plugins/ship/agents/reviewer--sol.md').read_text())
-        self.assertEqual((sol['model'], sol['effort']), ('gpt-6.1-sol', 'high'))
+        for seat in ('driver--sol', 'planner--sol', 'reviewer--sol', 'triage--sol', 'writer--sol'):
+            with self.subTest(seat=seat):
+                path = ROOT / 'plugins/ship/agents' / (seat + '.md')
+                sol = checks.frontmatter(path.read_text())
+                self.assertEqual((sol['model'], sol['effort']), ('gpt-6.2-sol', 'xhigh'))
+                self.assertEqual(checks.inspect_text(path.read_text(), path), [])
         driver = checks.frontmatter((ROOT / 'plugins/ship/agents/driver.md').read_text())
         self.assertEqual((driver['model'], driver['effort']), ('claude-opus-5-5', 'xhigh'))
         low = checks.frontmatter((ROOT / 'plugins/ship/agents/driver--sol.md').read_text())
-        self.assertEqual((low['model'], low['effort']), ('gpt-6.1-sol', 'high'))
+        self.assertEqual((low['model'], low['effort']), ('gpt-6.2-sol', 'xhigh'))
         self.assertIn('low', low['description'])
         for path in (ROOT / 'plugins/ship/agents').glob('*.md'):
             self.assertNotEqual(checks.frontmatter(path.read_text()).get('model', 'inherit'), 'inherit', path.name)
         self.assertEqual(checks.check('HEAD'), [])
+
+    def test_sol_validator_requires_explicit_xhigh_and_keeps_61_high_compatibility(self):
+        cases = (
+            ('gpt-6.2-sol', 'xhigh', []),
+            ('gpt-6.2-sol', None, ['gpt-6.2-sol agents require explicit xhigh effort']),
+            ('gpt-6.1-sol', 'high', []),
+            ('gpt-6.1-sol', None, []),
+            ('unknown-model', 'xhigh', ['unsupported model: unknown-model']),
+        )
+        cases += tuple(
+            ('gpt-6.2-sol', effort, ['gpt-6.2-sol agents require explicit xhigh effort'])
+            for effort in ('low', 'medium', 'high', 'max')
+        )
+        cases += tuple(
+            ('gpt-6.1-sol', effort, ['sol agents run at high'])
+            for effort in ('low', 'medium', 'xhigh', 'max')
+        )
+        for model, effort, errors in cases:
+            with self.subTest(model=model, effort=effort):
+                effort_field = '' if effort is None else f'effort: {effort}\n'
+                text = f'---\nname: test\ndescription: Routing contract.\nmodel: {model}\n{effort_field}---\n'
+                self.assertEqual(checks.inspect_text(text, Path('agents/test.md')), errors)
 
     def test_fable52_seats_pin_fable_and_copy_their_base_seat_body(self):
         for seat, base, effort in (('writer--fable52', 'writer--sol', 'high'),
