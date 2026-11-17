@@ -113,7 +113,6 @@ REFUSE = (
     "echo 'gh api repos/o/r/pulls/7/comments' | bash",
     'S=\'gh api repos/o/r/pulls/7/comments\'; bash -c "$S"',
     "bash -c 'gh pr view 7'",
-    "gh api graphql -f query='query{viewer{login}}'",
     'gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$THREAD"',
     "gh api graphql -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}' -F owner=o -F name=r",
     "gh api graphql --paginate -f query='query($endCursor:String){viewer{repositories(first:10,after:$endCursor){nodes{name}}}}'",
@@ -123,7 +122,6 @@ REFUSE = (
     "gh api graphql -f 'query=query($id:ID!){node(id:$id){id}}' -F id=PRRT_x",
     'bash -c \'gh api graphql -f "query=query{viewer{login}}"\'',
     'gh api repos/{owner}/{repo}/issues/7/comments -f body=hello',
-    "gh api graphql -f query='query{viewer{login}}' && gh api https://api.github.com/user",
     'gh api repos/o/r/issues/7/comments -f body="$BODY"',
     'bash -o posix -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
     'bash -O extglob -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
@@ -207,6 +205,8 @@ REFUSE = (
 )
 
 ADMIT = (
+    "gh api graphql -f query='query{viewer{login}}'",
+    "gh api graphql -f query='query{viewer{login}}' && gh api https://api.github.com/user",
     'python3 /abs/plugins/ship/skills/babysit/scripts/thread_reply.py reply https://github.com/o/r/pull/7 PRRT_kwDOabc /abs/.scratch/reply.md',
     'python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" resolve https://github.com/o/r/pull/7 PRRT_kwDOabc',
     'bash "${CLAUDE_SKILL_DIR}/scripts/threads.sh" 7',
@@ -268,9 +268,10 @@ class HelperTests(unittest.TestCase):
         return {'data': {'node': {'__typename': 'PullRequestReviewThread', 'pullRequest': {
             'number': number, 'repository': {'nameWithOwner': repository}}}}}
 
-    def call(self, query, body=None):
+    def call(self, query, body=None, after=None):
         words = PREFIX + ['-f', 'query=' + query, '-f', 'id=' + THREAD]
-        return words + (['-f', 'body=' + body] if body is not None else [])
+        return (words + (['-f', 'body=' + body] if body is not None else [])
+                + (['-f', 'after=' + after] if after is not None else []))
 
     def run_helper(self, responses, action='reply', pr=PR, thread=THREAD, body='@done\nEvidence: café'):
         with tempfile.TemporaryDirectory() as directory:
@@ -382,6 +383,144 @@ sys.exit(response['code'])
         self.assertEqual(result.stderr, '')
         self.assertEqual(calls, [self.call(LOOKUP), self.call(REPLY, '@done\nEvidence: café')])
 
+    def test_read_preserves_complete_bodies_and_attribution(self):
+        query = 'query($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$after){pageInfo{hasNextPage endCursor}nodes{author{login}url body}}}}}'
+        body = ('<details><summary>Finding</summary>\n\nAction: preserve café 日本語.\n'
+                '```sh\nprintf `literal` $(touch should-never-exist)\n```\n'
+                '{"looks": "like JSON"}\n</details>\n')
+        nodes = [
+            {'author': {'login': 'reviewer'}, 'url': COMMENT, 'body': body},
+            {'author': None, 'url': PR + '#discussion_r124', 'body': 'Second\ncomment\n'},
+            {'author': {'login': 'other'}, 'url': PR.upper() + '?x=1', 'body': ''},
+        ]
+        page = {'data': {'node': {'comments': {
+            'pageInfo': {'hasNextPage': False, 'endCursor': None}, 'nodes': nodes}}}}
+        result, calls = self.run_helper([(self.lookup(), 0), (page, 0)], action='read')
+        self.assertFalse(Path('should-never-exist').exists())
+        expected = {'thread': THREAD, 'comments': [
+            {'author': 'reviewer', 'url': COMMENT, 'body': body},
+            {'author': 'ghost', 'url': PR + '#discussion_r124', 'body': 'Second\ncomment\n'},
+            {'author': 'other', 'url': PR.upper() + '?x=1', 'body': ''},
+        ]}
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(result.stdout, json.dumps(expected, ensure_ascii=False) + '\n')
+        self.assertEqual(calls, [self.call(LOOKUP), self.call(query)])
+
+    def test_read_paginates_in_order_with_exact_cursor_arguments(self):
+        query = 'query($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$after){pageInfo{hasNextPage endCursor}nodes{author{login}url body}}}}}'
+        nodes = [{'author': {'login': login}, 'url': PR + '#discussion_' + login, 'body': login}
+                 for login in ('first', 'second')]
+        pages = [{'data': {'node': {'comments': {
+            'pageInfo': {'hasNextPage': more, 'endCursor': cursor}, 'nodes': [node]}}}}
+            for node, more, cursor in zip(nodes, (True, False), ('cursor=+/café', None))]
+        result, calls = self.run_helper([(self.lookup(), 0)] + [(page, 0) for page in pages], action='read')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(json.loads(result.stdout), {'thread': THREAD, 'comments': [
+            {'author': 'first', 'url': PR + '#discussion_first', 'body': 'first'},
+            {'author': 'second', 'url': PR + '#discussion_second', 'body': 'second'}]})
+        self.assertEqual(calls, [self.call(LOOKUP), self.call(query), self.call(query, after='cursor=+/café')])
+
+    def test_read_refuses_unknown_or_foreign_ownership_before_comment_access(self):
+        cases = [self.lookup('foreign/repository'), self.lookup(number=8),
+                 {'data': {'node': None}}, {'data': {'node': {'__typename': 'Issue'}}},
+                 {'errors': [], **self.lookup()}, [], 'bad json', self.lookup(number='7')]
+        for response, code in [(value, 0) for value in cases] + [('failed lookup', 1)]:
+            with self.subTest(response=response, code=code):
+                result, calls = self.run_helper([(response, code)], action='read')
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertTrue(result.stderr.startswith('refused: '), result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(calls, [self.call(LOOKUP)])
+
+    def test_read_invalid_arguments_make_zero_calls(self):
+        for arguments in ({'pr': PR + '/'}, {'pr': PR + '\n'}, {'pr': PR.replace('/7', '/0')},
+                          {'pr': 'http://github.com/o/r/pull/7'}, {'thread': 'PRRT_'},
+                          {'thread': 'PRRC_x'}):
+            with self.subTest(arguments=arguments):
+                result, calls = self.run_helper([], action='read', **arguments)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertTrue(result.stderr.startswith('refused: '), result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(calls, [])
+
+    def test_read_page_failures_keep_stdout_empty_even_after_valid_pages(self):
+        query = 'query($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$after){pageInfo{hasNextPage endCursor}nodes{author{login}url body}}}}}'
+        comment = {'author': {'login': 'reviewer'}, 'url': COMMENT, 'body': 'Complete\nbody'}
+        connection = {'pageInfo': {'hasNextPage': False, 'endCursor': None}, 'nodes': [comment]}
+        bad_connections = [
+            None, [], {}, {'nodes': [comment]},
+            {**connection, 'pageInfo': None}, {**connection, 'pageInfo': []},
+            {**connection, 'pageInfo': {}},
+            {**connection, 'pageInfo': {'hasNextPage': False}},
+            *[{**connection, 'pageInfo': {'hasNextPage': False, 'endCursor': value}}
+              for value in ('', 1, [], {})],
+            *[{**connection, 'pageInfo': {'hasNextPage': value}} for value in (None, 0, 1, 'false', [], {})],
+            {'pageInfo': connection['pageInfo']},
+            *[{**connection, 'nodes': value} for value in (None, {}, 'comments', 1)],
+            *[{**connection, 'nodes': [value]} for value in (None, [], 'comment', {})],
+            *[{**connection, 'nodes': [{**comment, field: value}]}
+              for field in ('body', 'url') for value in (None, 1, [], {})],
+            *[{**connection, 'nodes': [{key: value for key, value in comment.items() if key != field}]}
+              for field in ('author', 'url', 'body')],
+            *[{**connection, 'nodes': [{**comment, 'author': value}]}
+              for value in ({}, [], 'author', {'login': None}, {'login': 1}, {'login': ''})],
+            *[{**connection, 'nodes': [{**comment, 'url': url}]} for url in (
+                'https://github.com/foreign/repository/pull/7#discussion_r1',
+                PR.replace('/7', '/8') + '#discussion_r1', PR + '0#discussion_r1',
+                'http://github.com/o/r/pull/7', 'x' + COMMENT)],
+            {**connection, 'pageInfo': {'hasNextPage': True}},
+            *[{**connection, 'pageInfo': {'hasNextPage': True, 'endCursor': value}}
+              for value in (None, '', 1, [], {})],
+        ]
+        responses = [('failed page', 1), ('invalid json', 0), ([], 0),
+                     ({'errors': [], 'data': {'node': {'comments': connection}}}, 0),
+                     ({}, 0), ({'data': None}, 0), ({'data': {}}, 0)]
+        responses += [({'data': {'node': node}}, 0) for node in
+                      (None, [], 'node', {'__typename': 'Issue'})]
+        responses += [({'data': {'node': {'comments': value}}}, 0) for value in bad_connections]
+        first = {'data': {'node': {'comments': {
+            **connection, 'pageInfo': {'hasNextPage': True, 'endCursor': 'cursor1'}}}}}
+        for response in responses:
+            for later_page in (False, True):
+                with self.subTest(response=response, later_page=later_page):
+                    prefix = [(self.lookup(), 0)] + ([(first, 0)] if later_page else [])
+                    result, calls = self.run_helper(prefix + [response], action='read')
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertTrue(result.stderr.startswith('failed: '), result.stderr)
+                    self.assertEqual(result.stdout, '')
+                    expected = [self.call(LOOKUP), self.call(query)]
+                    if later_page:
+                        expected.append(self.call(query, after='cursor1'))
+                    self.assertEqual(calls, expected)
+
+    def test_read_repeated_cursor_fails_before_another_request(self):
+        query = 'query($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$after){pageInfo{hasNextPage endCursor}nodes{author{login}url body}}}}}'
+        page = {'data': {'node': {'comments': {
+            'pageInfo': {'hasNextPage': True, 'endCursor': 'same'},
+            'nodes': [{'author': None, 'url': COMMENT, 'body': 'Pending\ncontent'}]}}}}
+        result, calls = self.run_helper([(self.lookup(), 0), (page, 0), (page, 0)], action='read')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertTrue(result.stderr.startswith('failed: '), result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(calls, [self.call(LOOKUP), self.call(query), self.call(query, after='same')])
+
+    def test_read_empty_thread_and_cursor_cycles_fail_without_mutations(self):
+        query = 'query($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$after){pageInfo{hasNextPage endCursor}nodes{author{login}url body}}}}}'
+        empty = {'data': {'node': {'comments': {
+            'pageInfo': {'hasNextPage': False, 'endCursor': None}, 'nodes': []}}}}
+        page = lambda cursor: {'data': {'node': {'comments': {
+            'pageInfo': {'hasNextPage': True, 'endCursor': cursor}, 'nodes': []}}}}
+        for pages, cursors in (([empty], [None]), ([page('one'), empty], [None, 'one']),
+                               ([page('one'), page('two'), page('one')], [None, 'one', 'two'])):
+            with self.subTest(pages=pages):
+                result, calls = self.run_helper([(self.lookup(), 0)] + [(value, 0) for value in pages], action='read')
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertTrue(result.stderr.startswith('failed: '), result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(calls, [self.call(LOOKUP)] + [self.call(query, after=cursor) for cursor in cursors])
+
 
 class HookTests(unittest.TestCase):
     def decision(self, command, agent_type):
@@ -393,6 +532,12 @@ class HookTests(unittest.TestCase):
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
         return json.loads(text)['hookSpecificOutput'] if text else {}
+
+    def test_documented_read_command_is_admitted_for_main_and_driver(self):
+        command = 'python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" read https://github.com/o/r/pull/7 PRRT_kwDOabc'
+        for agent_type in ('ship:driver', ''):
+            with self.subTest(agent_type=agent_type):
+                self.assertEqual(self.decision(command, agent_type), {})
 
     def test_refuse_forms_for_every_caller(self):
         for agent_type in ('', 'ship:driver', 'ship:writer--sol'):
@@ -410,6 +555,90 @@ class HookTests(unittest.TestCase):
             for command in ADMIT:
                 with self.subTest(agent_type=agent_type, command=command):
                     self.assertEqual(self.decision(command, agent_type), {})
+
+    def test_static_graphql_read_documents(self):
+        documents = (
+            '{repository(owner:"o",name:"r"){pullRequests(first:5){nodes{number files(first:10){nodes{path}}}}}}',
+            'query ReadViewer {viewer{login}}',
+            'query mutation {viewer{login}}',
+            'query Read($id:ID! = "x") @skip(if:false) {node(id:$id){id}}',
+            '{field(value:"} mutation \\" text"){id}}',
+            '{field(value:"""} mutation"""){id}}',
+            '{viewer{# mutation }\nlogin}}',
+            chr(0xFEFF) + ',query Read {viewer{login}}',
+            '{field(value:"tab	x")}',
+        )
+        for document in documents:
+            command = "gh api graphql -f query='" + document + "' --jq '.data.repository'"
+            for caller in ('', 'ship:driver'):
+                with self.subTest(document=document, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+            with self.subTest(document=document, caller='writer'):
+                self.assertEqual(self.decision(command, 'ship:writer--sol').get('permissionDecision'), 'deny')
+
+    def test_graphql_read_route_refuses_other_documents_and_options(self):
+        documents = ('mutation{createIssue{ id }}', 'subscription{events{id}}',
+                     'fragment F on User {login}', 'query{viewer{login}} query{viewer{id}}',
+                     '{viewer{login}} # comment\nmutation{createIssue{id}}',
+                     '{viewer{login}', 'Query{viewer{login}}', '', '{}', '{viewer(login:`x`)}',
+                     '{viewer(value:1e)}', '{viewer(value:"bad\\z")}', '{viewer([)]}',
+                     r'{a(s: """x\""")}', '{a(s: """")}', 'query R($a:Int {viewer{login}}')
+        commands = ["gh api graphql -f query='" + document + "'" for document in documents]
+        read = "gh api graphql -f query='{viewer{login}}'"
+        commands.extend(read + option for option in (
+            ' -f extra=x', ' -F extra=x', ' -X POST', ' --method POST', ' -H Accept:x', ' --input /tmp/x/body.json',
+            ' --hostname github.com', ' --paginate', ' --slurp', ' --cache 1h', ' -p x', ' --'))
+        commands.extend((read.replace('api graphql', 'api /graphql'),
+                         read.replace('api graphql', "api 'graphql'"),
+                         "gh api graphql -fquery='{viewer{login}}'",
+                         "gh api graphql --raw-field=query='{viewer{login}}'",
+                         read + ' && gh api repos/o/r/issues/7/comments -f body=x'))
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    self.assertEqual(self.decision(command, caller).get('permissionDecision'), 'deny')
+
+    def test_data_arguments_allow_literal_runner_words_and_apostrophes(self):
+        commands = (
+            '''printf '%s\\n' "$(date -u +%FT%TZ) the lane's gh read waits" >> /tmp/x/notes.md''',
+            '''R=/tmp/x/notes.md; printf '%s\\n' "$(date -u +%FT%TZ) the lane's gh read waits" >> "$R"''',
+            "printf '%s\\n' 'the bash check before gh pr view' >> /tmp/x/notes.md",
+            "printf '%s\\t%s\\n' run 'relay via sh then gh' >> /tmp/x/notes.md",
+            "echo 'watch the gh queue'", 'ps -eo pid,ppid,args | grep -w gh | grep -v bash',
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+
+    def test_data_arguments_preserve_execution_and_syntax_refusals(self):
+        write = 'gh api repos/o/r/issues/7/comments -f body=x'
+        commands = (
+            "printf '%s\\n' '" + write + "' | bash",
+            "printf '%s\\n' '" + write + "' | at now",
+            "printf '%s\\n' \"$(" + write + ')\"',
+            "printf -v result '%s' 'bash before gh'",
+            "grep --filter x bash gh /tmp/x/notes.md > /tmp/x/result",
+            "env printf '%s' 'bash before gh'",
+            "printf '%s' \"the lane's " + write + '\"',
+            'printf "%s" "unterminated gh',
+            'printf "%s" "`gh pr view 7`"',
+            "printf '%s' 'bash before gh' | sh",
+            '''printf '%s\\n' 'bash -c "gh pr close 7"' | at now''',
+            '''printf '%s\\n' "$(sh -c 'gh pr view 7')"''',
+            '''echo "$(bash -c "gh $(echo a)pi repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123")"''',
+            '''printf '%s\\n' "$(sh -c 'g''h pr view 7')"''',
+            '''printf '%s\\n' x > "$(sh -c 'gh pr view 7')"''',
+            '''printf $f 'bash -c "gh pr view 7"' ''',
+            'ps -eo pid,args | grep -w gh | grep -v bash *',
+            '''echo(){ sh -c "$1"; }; echo 'gh pr close 7' ''',
+            '''X=1; printf '%s\\n' 'bash -c "gh pr view 7"' | sh''',
+            "PATH=/tmp/x; printf '%s\\n' 'the bash check before gh'",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    self.assertEqual(self.decision(command, caller).get('permissionDecision'), 'deny')
 
     def test_hidden_redirect_with_immediate_backtick_stays_refused(self):
         command = "gh '>`' api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123"
