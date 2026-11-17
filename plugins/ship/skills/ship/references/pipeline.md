@@ -57,7 +57,7 @@ For design-heavy work, run `ship:panel design` on the plan before step 3.
 
 ## 3. Slices
 
-Include this rule in every writer brief: "Save helper code in scratch script files. Invoke each helper through its interpreter with a literal script path. Never pipe source code into an interpreter. Preserve existing script-review duties, historical refusals, and affected-session holds. This rule grants zero retry authority or alternate form for any denied operation."
+Include this rule in every writer brief: "Save helper code in scratch script files. Invoke each helper through its interpreter with a literal script path. Never pipe source code into an interpreter. Preserve each route's named validation form. Preserve existing script-review duties, historical refusals, and affected-session holds. This rule grants zero retry authority or alternate form for any denied operation."
 
 Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into every writer brief that can run the flaky-pattern guard.
 
