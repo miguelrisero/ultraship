@@ -515,6 +515,22 @@ class TextLintTests(unittest.TestCase):
                       self.hook_refusal(self.resend(receipt_id)))
         self.assertFalse(self.last_receipt['resend_allowed'])
 
+    def test_citation_refusal_time_never_moves_backward(self):
+        """Catch an earlier writer that makes a receipt spent by a later refusal citable again."""
+        event = self.event()
+        with patch.object(text_lint, 'now', return_value=self.clock + timedelta(seconds=2)):
+            receipt = text_lint.write_receipt(event, ['Missing section: Facts'], True, None)
+        with patch.object(text_lint, 'now', return_value=self.clock + timedelta(seconds=3)):
+            text_lint.write_citation_refusal(event)
+        text_lint.write_citation_refusal(event)
+
+        path = text_lint.citation_refusal_path(receipt)
+        self.assertEqual(path.read_text(), '2026-11-15T12:00:03Z')
+        with patch.object(text_lint, 'now', return_value=self.clock + timedelta(seconds=4)):
+            self.assertIn('A final citation refusal spent this receipt.',
+                          self.hook_refusal(self.resend(receipt['id'])))
+        self.assertFalse(self.last_receipt['resend_allowed'])
+
     def test_naive_citation_refusal_time_fails_closed(self):
         """Catch a naive marker time that lacks the required explicit UTC-time refusal."""
         self.hook_refusal(self.event())

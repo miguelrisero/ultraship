@@ -554,10 +554,27 @@ def write_citation_refusal(event):
                                      **input_identity(event)})
         store_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
         path.parent.mkdir(mode=0o700, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(dir=path.parent)
-        with os.fdopen(fd, 'w') as output:
-            output.write(now().isoformat().replace('+00:00', 'Z'))
-        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            fcntl.flock(directory, fcntl.LOCK_EX)
+            refused_at = now()
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd, 'rb') as source:
+                    if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                        raise ValueError('Citation refusal marker is not a regular file.')
+                    current = datetime.fromisoformat(source.read(64).decode().replace('Z', '+00:00'))
+                if current.tzinfo is None:
+                    raise ValueError('Citation refusal marker requires a UTC time.')
+                refused_at = max(refused_at, current)
+            except (OSError, ValueError):
+                pass
+            fd, temporary = tempfile.mkstemp(dir=path.parent)
+            with os.fdopen(fd, 'w') as output:
+                output.write(refused_at.isoformat().replace('+00:00', 'Z'))
+            os.replace(temporary, path)
+        finally:
+            os.close(directory)
     except OSError:
         pass
     finally:
