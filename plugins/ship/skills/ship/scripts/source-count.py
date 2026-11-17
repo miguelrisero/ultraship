@@ -20,7 +20,8 @@ def git(repo, *args):
         return subprocess.run(
             ['git', '--no-replace-objects', '--literal-pathspecs', '-C', repo, *args],
             stdin=subprocess.DEVNULL, capture_output=True, check=True,
-            env={key: value for key, value in os.environ.items() if not key.startswith('GIT_')},
+            env={**{key: value for key, value in os.environ.items() if not key.startswith('GIT_')},
+                 'GIT_NO_LAZY_FETCH': '1'},
         ).stdout
     except (OSError, subprocess.CalledProcessError):
         raise Refused('git') from None

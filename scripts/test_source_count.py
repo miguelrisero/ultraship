@@ -104,6 +104,21 @@ class SourceCountTests(unittest.TestCase):
         self.assert_pass(self.run_cli(env={**self.env, 'GIT_DIR': str(other / '.git'),
                                           'GIT_OBJECT_DIRECTORY': str(other / '.git/objects')}), 1)
 
+    def test_partial_clone_never_fetches_missing_blob(self):
+        self.git('config', 'uploadpack.allowFilter', 'true')
+        partial = self.directory / 'partial'
+        subprocess.run(['git', 'clone', '-q', '--filter=blob:none', '--no-checkout',
+                        self.repo.as_uri(), str(partial)], env=self.env,
+                       stdin=subprocess.DEVNULL, check=True)
+        blob = self.git('rev-parse', f'{self.sha}:{self.subject}')
+        missing = self.git('rev-list', '--objects', '--missing=print', self.sha, repo=partial)
+        self.assertEqual([line for line in missing.splitlines() if line.startswith('?')],
+                         ['?' + blob])
+        self.assert_refused(self.run_cli(repo=str(partial)), 'git')
+        missing = self.git('rev-list', '--objects', '--missing=print', self.sha, repo=partial)
+        self.assertEqual([line for line in missing.splitlines() if line.startswith('?')],
+                         ['?' + blob])
+
     def test_python_isolation_ignores_shadow_module(self):
         shadow = self.directory / 'shadow'
         shadow.mkdir()

@@ -104,6 +104,8 @@ Python isolated mode comes from the executable shebang.
 
 Success prints one JSON line with `result`, `repo`, `commit`, `subject`, `blob`, `count`, `literal_bytes`, and `literal_sha256`.
 Refusal prints one JSON line with `error` and `result: REFUSED`, and exits with status 2.
+In a partial clone, the helper never fetches a missing object; it refuses with the `git` identifier instead.
+Bound each run with a caller-owned `timeout --signal=TERM <seconds>`; the signal reaches the helper and its Git child.
 Output contains neither source bytes nor the literal; stderr stays empty.
 
 ## Test
