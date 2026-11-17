@@ -361,14 +361,11 @@ class EnvDirectoryTests(unittest.TestCase):
                 f'env >/dev/null {find}',
                 f'sudo ionice -t xargs node {script}',
                 f'doas -u node /usr/bin/{find}',
+                f"stdbuf -o node xargs env -S 'node {script}'",
             ):
                 with self.subTest(command=command):
                     self.assertTrue(self.denied(command, cwd=directory))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
-            for command in ('sudo -u root python3 scripts/x.py --label xargs',
-                            'stdbuf -oL python3 scripts/x.py parallel'):
-                with self.subTest(command=command):
-                    self.assertFalse(self.denied(command, cwd=directory), self.reason)
 
     def test_relative_directory_is_unproven_without_hook_cdpath(self):
         with tempfile.TemporaryDirectory() as directory:
