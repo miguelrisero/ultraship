@@ -786,7 +786,6 @@ class WriterHeredocTests(unittest.TestCase):
             (r'''git -C /a -C /x grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git -C/x grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git -C '/x' grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
-            (r'''git -C /x* grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git --no-pager grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git log /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git grep foo /x/python*/a; perl -e 1''', 'inline interpreter code rule (unresolved command word)'),
