@@ -4076,12 +4076,16 @@ def review_thread_denial(command, data_mode=False):
             or re.search(r'comments/\S*/replies', normalized)):
         return 'raw review-thread mutation'
     command = cat_heredoc_data(command)
-    try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
+
+    def shell_lex(text):
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace = ' \t\r'
         lexer.whitespace_split = True
         lexer.commenters = ''
-        tokens = list(lexer)
+        return list(lexer)
+
+    try:
+        tokens = shell_lex(command)
     except ValueError as error:
         return 'unparsed shell syntax rule: ' + str(error) if re.search(r'\bgh\b', normalized) else None
     names_gh = any(os.path.basename(re.sub(r'^[A-Za-z_]\w*=', '', word).lstrip('!')) == 'gh'
@@ -4093,31 +4097,40 @@ def review_thread_denial(command, data_mode=False):
             data_command = data_command and (review_data_segment(segment) or literal_data_assignment(segment))
             start = end + 1
     if names_gh and not ((data_command or data_mode) and re.search(r'\$\(|[<>]\(|`', command) is None):
-        seen_gh = False
-        for index, token in enumerate(tokens):
-            if token and all(char in ';&|\n()' for char in token):
-                seen_gh = False
-                continue
-            if os.path.basename(token) == 'gh':
-                seen_gh = True
-            if seen_gh:
-                continue
-            shell = os.path.basename(token) in ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'busybox')
-            shell = shell or token in ('eval', 'source', '.')
-            if os.path.basename(token) in ('watch', 'ssh', 'su', 'script', 'runuser'):
-                return 'shell runner names gh'
-            if os.path.basename(token) == 'env':
-                for later in tokens[index + 1:]:
-                    if later and all(char in ';&|\n()' for char in later):
-                        break
-                    split_option = later.split('=', 1)[0]
-                    if (later.startswith(('-S', '--split-string'))
-                            or len(split_option) >= 3 and '--split-string'.startswith(split_option)
-                            or later.startswith('-') and not later.startswith('--') and 'S' in later):
-                        return 'shell runner names gh'
-            if shell and not (index + 1 < len(tokens) and tokens[index + 1].endswith('.sh')
-                              and not tokens[index + 1].startswith(('/dev/', '/proc/'))):
-                return 'shell runner names gh'
+        scans = [tokens]
+        if ((data_command or data_mode) and re.search(r'[<>]\(', command) is None
+                and '$((' not in command):
+            try:
+                scans = [shell_lex(body) for body in shell_substitution_bodies(command)]
+            except ValueError:
+                scans = [tokens]
+        for scan in scans:
+            seen_gh, first = False, 0
+            for index, token in enumerate(scan):
+                if token and all(char in ';&|\n()' for char in token):
+                    seen_gh, first = False, index + 1
+                    continue
+                if os.path.basename(token) == 'gh':
+                    seen_gh = True
+                if seen_gh:
+                    continue
+                shell = os.path.basename(token) in ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'busybox')
+                find_operand = token == '.' and index > first and scan[first] == 'find'
+                shell = shell or token in ('eval', 'source') or token == '.' and not find_operand
+                if os.path.basename(token) in ('watch', 'ssh', 'su', 'script', 'runuser'):
+                    return 'shell runner names gh'
+                if os.path.basename(token) == 'env':
+                    for later in scan[index + 1:]:
+                        if later and all(char in ';&|\n()' for char in later):
+                            break
+                        split_option = later.split('=', 1)[0]
+                        if (later.startswith(('-S', '--split-string'))
+                                or len(split_option) >= 3 and '--split-string'.startswith(split_option)
+                                or later.startswith('-') and not later.startswith('--') and 'S' in later):
+                            return 'shell runner names gh'
+                if shell and not (index + 1 < len(scan) and scan[index + 1].endswith('.sh')
+                                  and not scan[index + 1].startswith(('/dev/', '/proc/'))):
+                    return 'shell runner names gh'
     # Keep quote boundaries: GraphQL variables are literal only inside a single-quoted query value.
     pattern = r'''(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?<=(?<!\\)[<>])&|&(?=>)|(?<=(?<!\\)>)\||[^\s'"\\;&|()])+|(?:[;\n()]|(?<!(?<!\\)>)\||(?<!(?<!\\)[<>])&(?!>))+'''
     segments, words = [], []
