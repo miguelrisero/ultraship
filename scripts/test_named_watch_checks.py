@@ -227,6 +227,46 @@ class NamedWatchChecksTests(unittest.TestCase):
         self.assertIn('41', result.stdout)
         self.assertIn('2', result.stdout)
 
+    def test_blank_and_duplicate_continuation_fields_refuse_before_request(self):
+        for endpoint in (RULES, RUNS, JOBS):
+            for extra in ('&page=', '&per_page=', '&unexpected='):
+                with self.subTest(endpoint=endpoint, extra=extra):
+                    _, data = fixture()
+                    continuation = f'https://api.github.com/{endpoint}&page=2{extra}'
+                    successful_page = copy.deepcopy(data['api'][endpoint][0])
+                    data['api'][continuation.removeprefix('https://api.github.com/')] = [successful_page]
+                    data['api'][endpoint][0]['link'] = f'<{continuation}>; rel="next"'
+                    result = self.outcome(4, data=data)
+                    self.assertNotIn(continuation, result.requests)
+
+    def test_malformed_extra_job_cannot_hide_beside_approved_success(self):
+        _, valid = fixture()
+        extra = copy.deepcopy(valid['api'][JOBS][0]['body']['jobs'][0])
+        extra.update(id=72, name='other', check_run_url=f'https://api.github.com/{REPO}/check-runs/62')
+        valid['api'][JOBS][0]['body'] = {
+            'total_count': 2, 'jobs': [valid['api'][JOBS][0]['body']['jobs'][0], extra]}
+        self.outcome(0, data=valid)
+        mutations = [('name', None), ('name', ''), ('name', 7), ('name', 'other\\n'),
+                     ('id', 72.0), ('id', True), ('id', 71), ('run_id', 41.0),
+                     ('run_attempt', True), ('head_sha', 'c' * 40),
+                     ('check_run_url', None), ('check_run_url', f'https://api.github.com/{CHECK}')]
+        for key, value in mutations:
+            with self.subTest(key=key, value=value):
+                _, data = fixture()
+                malformed = copy.deepcopy(extra)
+                malformed[key] = value
+                data['api'][JOBS][0]['body'] = {
+                    'total_count': 2, 'jobs': [data['api'][JOBS][0]['body']['jobs'][0], malformed]}
+                self.outcome(4, data=data)
+        for missing in ('name', 'id', 'run_id', 'run_attempt', 'head_sha', 'check_run_url'):
+            with self.subTest(missing=missing):
+                _, data = fixture()
+                malformed = copy.deepcopy(extra)
+                del malformed[missing]
+                data['api'][JOBS][0]['body'] = {
+                    'total_count': 2, 'jobs': [data['api'][JOBS][0]['body']['jobs'][0], malformed]}
+                self.outcome(4, data=data)
+
     def test_source_controlled_policy_is_refused_before_api_reads(self):
         result = self.outcome(4, policy_in_source=True)
         self.assertIn('outside PR-controlled source', result.stdout)

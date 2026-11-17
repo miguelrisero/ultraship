@@ -78,7 +78,7 @@ def collection(endpoint, repository_id, field=None):
     repository_path = re.fullmatch(r'/repos/[^/]+/[^/]+(/.*)', initial.path)
     require(repository_path, 'repository endpoint required')
     allowed_paths = {initial.path, f'/repositories/{repository_id}{repository_path[1]}'}
-    initial_pairs = parse_qsl(initial.query, strict_parsing=True)
+    initial_pairs = parse_qsl(initial.query, keep_blank_values=True, strict_parsing=True)
     initial_query = dict(initial_pairs)
     require(len(initial_pairs) == len(initial_query), 'duplicate collection query field')
     seen = set()
@@ -107,7 +107,7 @@ def collection(endpoint, repository_id, field=None):
                 match = re.fullmatch(r'\s*<([^<>]+)>;\s*rel="(next|prev|first|last)"\s*', part)
                 require(match and match[2] not in links, 'malformed pagination link')
                 target = urlsplit(match[1])
-                query_pairs = parse_qsl(target.query, strict_parsing=True)
+                query_pairs = parse_qsl(target.query, keep_blank_values=True, strict_parsing=True)
                 query = dict(query_pairs)
                 require(target.scheme == 'https' and target.netloc == 'api.github.com'
                         and not target.fragment and target.path in allowed_paths
@@ -116,8 +116,9 @@ def collection(endpoint, repository_id, field=None):
                         and {key: value for key, value in query.items() if key != 'page'} == initial_query,
                         'pagination escaped its origin or endpoint')
                 links[match[2]] = target
-        page = int(dict(parse_qsl(identity.query)).get('page', '1'))
-        pages = {relation: int(dict(parse_qsl(target.query))['page']) for relation, target in links.items()}
+        page = int(dict(parse_qsl(identity.query, keep_blank_values=True)).get('page', '1'))
+        pages = {relation: int(dict(parse_qsl(target.query, keep_blank_values=True))['page'])
+                 for relation, target in links.items()}
         require('first' not in pages or pages['first'] == 1, 'contradictory first page')
         require('prev' not in pages or page > 1 and pages['prev'] == page - 1, 'contradictory previous page')
         require('next' not in pages or pages['next'] == page + 1, 'pagination is incomplete')
@@ -301,8 +302,23 @@ def evidence(repo, item, policy, run):
         return outcome
     jobs = collection(f'{repo}/actions/runs/{run["id"]}/attempts/{run["run_attempt"]}/jobs?per_page=100',
                       policy['repository_id'], 'jobs')
-    require(all(isinstance(job, dict) for job in jobs), 'malformed job')
-    matches = [job for job in jobs if job.get('name') == item['check_name']]
+    job_ids = set()
+    check_urls = set()
+    for job in jobs:
+        require(isinstance(job, dict)
+                and all(positive(job.get(key)) for key in ('id', 'run_id', 'run_attempt'))
+                and job['run_id'] == run['id'] and job['run_attempt'] == run['run_attempt']
+                and job.get('head_sha') == policy['head']
+                and isinstance(job.get('name'), str) and job['name']
+                and not any(ord(character) < 32 for character in job['name']), 'malformed job identity or name')
+        url = job.get('check_run_url')
+        require(isinstance(url, str) and re.fullmatch(
+                r'https://api\.github\.com/' + re.escape(repo) + r'/check-runs/([1-9][0-9]*)', url),
+                'job check run URL escaped repository or endpoint')
+        require(job['id'] not in job_ids and url not in check_urls, 'ambiguous job identity')
+        job_ids.add(job['id'])
+        check_urls.add(url)
+    matches = [job for job in jobs if job['name'] == item['check_name']]
     require(len(matches) == 1, 'job mapping missing or ambiguous')
     job = matches[0]
     require(all(positive(job.get(key)) for key in ('id', 'run_id', 'run_attempt'))
