@@ -309,6 +309,35 @@ class EnvDirectoryTests(unittest.TestCase):
                     self.assertTrue(self.denied(command))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
+    def test_absolute_scripts_refuse_same_segment_launcher_path_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for interpreter, filename, program in (
+                ('node', 'p.js', 'console.log(1)'),
+                ('python3', 'p.py', 'print(1)'),
+            ):
+                with self.subTest(interpreter=interpreter):
+                    script = Path(directory) / filename
+                    self.assertFalse(script.exists())
+                    command = (f"printf '{program}' | find . -maxdepth 0 "
+                               f'-exec ln -sfn /dev/stdin {script} \\; '
+                               f'-exec {interpreter} {script} \\;')
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+        self.assertFalse(self.denied('timeout 5 python3 scripts/x.py'), self.reason)
+
+    def test_relative_directory_is_unproven_without_hook_cdpath(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sub = Path(directory) / 'sub'
+            sub.mkdir()
+            with patch.dict(ultraship.os.environ):
+                ultraship.os.environ.pop('CDPATH', None)
+                for target in ('sub', './sub'):
+                    with self.subTest(target=target):
+                        command = f'cd {target} && python3 scripts/x.py'
+                        self.assertTrue(self.denied(command, cwd=directory))
+                        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+                self.assertFalse(self.denied(f'cd {sub} && python3 scripts/x.py', cwd=directory), self.reason)
+
 
 if __name__ == '__main__':
     unittest.main()
