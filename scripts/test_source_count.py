@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -20,7 +21,8 @@ class SourceCountTests(unittest.TestCase):
         self.repo = self.directory / 'repo'
         self.env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
         self.env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
-                        GIT_TERMINAL_PROMPT='0')
+                        GIT_TERMINAL_PROMPT='0', HOME=str(self.directory),
+                        XDG_CONFIG_HOME=str(self.directory))
         self.init_repo(self.repo)
         self.subject = 'src/a.py'
         self.commit({self.subject: SENTINEL + '\n'})
@@ -42,7 +44,7 @@ class SourceCountTests(unittest.TestCase):
         for name, text in files.items():
             path = self.repo / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
+            path.write_text(text, encoding='utf-8')
         self.git('add', '--', *files)
         self.git('commit', '-m', 'Fixture commit')
 
@@ -80,7 +82,7 @@ class SourceCountTests(unittest.TestCase):
         first = self.sha
         self.commit({self.subject: (SENTINEL + '\n') * 2})
         second = self.git('rev-parse', 'HEAD')
-        (self.repo / self.subject).write_text((SENTINEL + '\n') * 3)
+        (self.repo / self.subject).write_text((SENTINEL + '\n') * 3, encoding='utf-8')
         self.assert_pass(self.run_cli(commit=first), 1, commit=first)
         self.assert_pass(self.run_cli(commit=second), 2, commit=second)
 
@@ -110,6 +112,7 @@ class SourceCountTests(unittest.TestCase):
         subprocess.run(['git', 'clone', '-q', '--filter=blob:none', '--no-checkout',
                         self.repo.as_uri(), str(partial)], env=self.env,
                        stdin=subprocess.DEVNULL, check=True)
+        self.git('config', 'protocol.file.allow', 'always', repo=partial)
         blob = self.git('rev-parse', f'{self.sha}:{self.subject}')
         missing = self.git('rev-list', '--objects', '--missing=print', self.sha, repo=partial)
         self.assertEqual([line for line in missing.splitlines() if line.startswith('?')],
@@ -122,8 +125,22 @@ class SourceCountTests(unittest.TestCase):
     def test_python_isolation_ignores_shadow_module(self):
         shadow = self.directory / 'shadow'
         shadow.mkdir()
-        (shadow / 'json.py').write_text('raise SystemExit("' + SENTINEL + '")\n')
+        (shadow / 'json.py').write_text('raise SystemExit("' + SENTINEL + '")\n', encoding='utf-8')
         self.assert_pass(self.run_cli(env={**self.env, 'PYTHONPATH': str(shadow)}), 1)
+        copy = shadow / SCRIPT.name
+        shutil.copy(SCRIPT, copy)
+        result = subprocess.run([str(copy), *self.arguments()], cwd=self.directory, env=self.env,
+                                stdin=subprocess.DEVNULL, capture_output=True)
+        self.assert_pass(result, 1)
+
+    def test_protected_pattern_matches_writer_hook(self):
+        definitions = []
+        for path in (SCRIPT, ROOT / 'plugins/ship/hooks/ultraship.py'):
+            lines = [line for line in path.read_text(encoding='utf-8').splitlines()
+                     if line.startswith('PROTECTED_ROW = ')]
+            self.assertEqual(len(lines), 1)
+            definitions.append(lines[0])
+        self.assertEqual(definitions[0], definitions[1])
 
     def test_option_order_dash_value_unicode_and_executable_blob(self):
         literal = '-café'
@@ -131,7 +148,7 @@ class SourceCountTests(unittest.TestCase):
         self.git('update-index', '--chmod=+x', self.subject)
         self.git('commit', '-m', 'Executable fixture')
         self.sha = self.git('rev-parse', 'HEAD')
-        args = ['--literal', literal, '--subject', self.subject,
+        args = ['--literal', literal.encode('utf-8'), '--subject', self.subject,
                 '--commit', self.sha, '--repo', str(self.repo)]
         self.assert_pass(self.run_cli(args=args), 1, literal=literal)
         self.assert_pass(self.run_cli(literal='absent-literal'), 0, literal='absent-literal')

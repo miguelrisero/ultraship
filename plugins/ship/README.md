@@ -95,6 +95,8 @@ Pass each option once, with its value as a separate word, in any order.
 ```
 
 Use the literal absolute path of the installed plugin's script; the writer hook refuses a shell expansion in that command word.
+The writer hook also refuses literals combining `$` with interpreter-like text, ANSI-C quoting, and raw whitespace beyond space, tab, and newline.
+A hook refusal ends the lane's attempt.
 
 The repository path must be canonical and absolute; the commit must be a full lowercase SHA.
 The subject must be a normalized repository-relative POSIX path.
@@ -105,8 +107,10 @@ Python isolated mode comes from the executable shebang.
 Success prints one JSON line with `result`, `repo`, `commit`, `subject`, `blob`, `count`, `literal_bytes`, and `literal_sha256`.
 Refusal prints one JSON line with `error` and `result: REFUSED`, and exits with status 2.
 In a partial clone, the helper never fetches a missing object; it refuses with the `git` identifier instead.
+The guard needs a Git build that honors `GIT_NO_LAZY_FETCH`; the partial-clone test fails on a build that ignores it.
 Bound each run with a caller-owned `timeout --signal=TERM <seconds>`; the signal reaches the helper and its Git child.
 Output contains neither source bytes nor the literal; stderr stays empty.
+For positive counts, blob readers can recover the literal using `literal_bytes` and `literal_sha256`, so give the output the same handling as the literal.
 
 ## Test
 
