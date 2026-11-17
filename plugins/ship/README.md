@@ -85,6 +85,25 @@ The sole driver must hold run custody and retire old legacy writers before impor
 
 Set `SHIP_LEDGER_DIR` to an absolute permitted directory for an explicit home, for example `export SHIP_LEDGER_DIR="$PWD/../.scratch/ship-ledgers"`. Export it for ledger commands and hooks. The directory directly contains the branch TSV; branch filenames replace `/` with `__`. Empty and relative values raise an error. The override selects its home without legacy import.
 
+## Count source at a commit
+
+Run the executable helper directly to count overlapping UTF-8 literal bytes in a committed regular file.
+Pass each option once, with its value as a separate word, in any order.
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/source-count.py" --repo /absolute/repo --commit <full-sha> --subject src/example.py --literal 'exact text'
+```
+
+The repository path must be canonical and absolute; the commit must be a full lowercase SHA.
+The subject must be a normalized repository-relative POSIX path.
+The helper reads the committed blob and ignores checkout edits, replacement objects, and `GIT_*` environment variables.
+It refuses protected mutation paths, sensitive paths, directories, symlinks, and submodules.
+Python isolated mode comes from the executable shebang.
+
+Success prints one JSON line with `result`, `repo`, `commit`, `subject`, `blob`, `count`, `literal_bytes`, and `literal_sha256`.
+Refusal prints one JSON line with `error` and `result: REFUSED`, and exits with status 2.
+Output contains neither source bytes nor the literal; stderr stays empty.
+
 ## Test
 
 ```bash
