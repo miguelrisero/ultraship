@@ -113,7 +113,6 @@ REFUSE = (
     "echo 'gh api repos/o/r/pulls/7/comments' | bash",
     'S=\'gh api repos/o/r/pulls/7/comments\'; bash -c "$S"',
     "bash -c 'gh pr view 7'",
-    "gh api graphql -f query='query{viewer{login}}'",
     'gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$THREAD"',
     "gh api graphql -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}' -F owner=o -F name=r",
     "gh api graphql --paginate -f query='query($endCursor:String){viewer{repositories(first:10,after:$endCursor){nodes{name}}}}'",
@@ -123,7 +122,6 @@ REFUSE = (
     "gh api graphql -f 'query=query($id:ID!){node(id:$id){id}}' -F id=PRRT_x",
     'bash -c \'gh api graphql -f "query=query{viewer{login}}"\'',
     'gh api repos/{owner}/{repo}/issues/7/comments -f body=hello',
-    "gh api graphql -f query='query{viewer{login}}' && gh api https://api.github.com/user",
     'gh api repos/o/r/issues/7/comments -f body="$BODY"',
     'bash -o posix -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
     'bash -O extglob -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
@@ -207,6 +205,8 @@ REFUSE = (
 )
 
 ADMIT = (
+    "gh api graphql -f query='query{viewer{login}}'",
+    "gh api graphql -f query='query{viewer{login}}' && gh api https://api.github.com/user",
     'python3 /abs/plugins/ship/skills/babysit/scripts/thread_reply.py reply https://github.com/o/r/pull/7 PRRT_kwDOabc /abs/.scratch/reply.md',
     'python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" resolve https://github.com/o/r/pull/7 PRRT_kwDOabc',
     'bash "${CLAUDE_SKILL_DIR}/scripts/threads.sh" 7',
@@ -555,6 +555,90 @@ class HookTests(unittest.TestCase):
             for command in ADMIT:
                 with self.subTest(agent_type=agent_type, command=command):
                     self.assertEqual(self.decision(command, agent_type), {})
+
+    def test_static_graphql_read_documents(self):
+        documents = (
+            '{repository(owner:"o",name:"r"){pullRequests(first:5){nodes{number files(first:10){nodes{path}}}}}}',
+            'query ReadViewer {viewer{login}}',
+            'query mutation {viewer{login}}',
+            'query Read($id:ID! = "x") @skip(if:false) {node(id:$id){id}}',
+            '{field(value:"} mutation \\" text"){id}}',
+            '{field(value:"""} mutation"""){id}}',
+            '{viewer{# mutation }\nlogin}}',
+            chr(0xFEFF) + ',query Read {viewer{login}}',
+            '{field(value:"tab	x")}',
+        )
+        for document in documents:
+            command = "gh api graphql -f query='" + document + "' --jq '.data.repository'"
+            for caller in ('', 'ship:driver'):
+                with self.subTest(document=document, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+            with self.subTest(document=document, caller='writer'):
+                self.assertEqual(self.decision(command, 'ship:writer--sol').get('permissionDecision'), 'deny')
+
+    def test_graphql_read_route_refuses_other_documents_and_options(self):
+        documents = ('mutation{createIssue{ id }}', 'subscription{events{id}}',
+                     'fragment F on User {login}', 'query{viewer{login}} query{viewer{id}}',
+                     '{viewer{login}} # comment\nmutation{createIssue{id}}',
+                     '{viewer{login}', 'Query{viewer{login}}', '', '{}', '{viewer(login:`x`)}',
+                     '{viewer(value:1e)}', '{viewer(value:"bad\\z")}', '{viewer([)]}',
+                     r'{a(s: """x\""")}', '{a(s: """")}', 'query R($a:Int {viewer{login}}')
+        commands = ["gh api graphql -f query='" + document + "'" for document in documents]
+        read = "gh api graphql -f query='{viewer{login}}'"
+        commands.extend(read + option for option in (
+            ' -f extra=x', ' -F extra=x', ' -X POST', ' --method POST', ' -H Accept:x', ' --input /tmp/x/body.json',
+            ' --hostname github.com', ' --paginate', ' --slurp', ' --cache 1h', ' -p x', ' --'))
+        commands.extend((read.replace('api graphql', 'api /graphql'),
+                         read.replace('api graphql', "api 'graphql'"),
+                         "gh api graphql -fquery='{viewer{login}}'",
+                         "gh api graphql --raw-field=query='{viewer{login}}'",
+                         read + ' && gh api repos/o/r/issues/7/comments -f body=x'))
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    self.assertEqual(self.decision(command, caller).get('permissionDecision'), 'deny')
+
+    def test_data_arguments_allow_literal_runner_words_and_apostrophes(self):
+        commands = (
+            '''printf '%s\\n' "$(date -u +%FT%TZ) the lane's gh read waits" >> /tmp/x/notes.md''',
+            '''R=/tmp/x/notes.md; printf '%s\\n' "$(date -u +%FT%TZ) the lane's gh read waits" >> "$R"''',
+            "printf '%s\\n' 'the bash check before gh pr view' >> /tmp/x/notes.md",
+            "printf '%s\\t%s\\n' run 'relay via sh then gh' >> /tmp/x/notes.md",
+            "echo 'watch the gh queue'", 'ps -eo pid,ppid,args | grep -w gh | grep -v bash',
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+
+    def test_data_arguments_preserve_execution_and_syntax_refusals(self):
+        write = 'gh api repos/o/r/issues/7/comments -f body=x'
+        commands = (
+            "printf '%s\\n' '" + write + "' | bash",
+            "printf '%s\\n' '" + write + "' | at now",
+            "printf '%s\\n' \"$(" + write + ')\"',
+            "printf -v result '%s' 'bash before gh'",
+            "grep --filter x bash gh /tmp/x/notes.md > /tmp/x/result",
+            "env printf '%s' 'bash before gh'",
+            "printf '%s' \"the lane's " + write + '\"',
+            'printf "%s" "unterminated gh',
+            'printf "%s" "`gh pr view 7`"',
+            "printf '%s' 'bash before gh' | sh",
+            '''printf '%s\\n' 'bash -c "gh pr close 7"' | at now''',
+            '''printf '%s\\n' "$(sh -c 'gh pr view 7')"''',
+            '''echo "$(bash -c "gh $(echo a)pi repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123")"''',
+            '''printf '%s\\n' "$(sh -c 'g''h pr view 7')"''',
+            '''printf '%s\\n' x > "$(sh -c 'gh pr view 7')"''',
+            '''printf $f 'bash -c "gh pr view 7"' ''',
+            'ps -eo pid,args | grep -w gh | grep -v bash *',
+            '''echo(){ sh -c "$1"; }; echo 'gh pr close 7' ''',
+            '''X=1; printf '%s\\n' 'bash -c "gh pr view 7"' | sh''',
+            "PATH=/tmp/x; printf '%s\\n' 'the bash check before gh'",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    self.assertEqual(self.decision(command, caller).get('permissionDecision'), 'deny')
 
     def test_hidden_redirect_with_immediate_backtick_stays_refused(self):
         command = "gh '>`' api repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123"
