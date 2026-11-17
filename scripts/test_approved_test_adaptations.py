@@ -675,7 +675,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             sites = [index for index, line in enumerate(lines) if line == anchor]
             found[name] = len(sites)
             with self.subTest(path=name):
-                self.assertEqual(lines.count(cause), 2)
+                self.assertEqual(lines.count(cause), 1 if name == 'plugins/ship/agents/reviewer--astra.md' else 2)
                 for rule_line in EXPECTED_CONTRACT_GAP_RULE:
                     self.assertEqual(lines.count(rule_line), len(sites))
                 for index in sites:
@@ -689,6 +689,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             'plugins/ship/agents/driver--sol.md': 2,
             'plugins/ship/agents/reviewer--sol.md': 2,
             'plugins/ship/agents/reviewer--opus.md': 2,
+            'plugins/ship/agents/reviewer--astra.md': 1,
             'plugins/ship/skills/ship/SKILL.md': 2,
             'plugins/ship/skills/ship/references/owner-decisions.md': 3,
         })
