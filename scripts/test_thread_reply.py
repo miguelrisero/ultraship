@@ -1077,12 +1077,17 @@ else:
                 path.chmod(0o700)
             for status in ('0', '1'):
                 log = folder / ('calls-' + status)
-                result = subprocess.run([sys.executable, str(HELPER), 'page', '7', 'opaque/+=='],
-                                        cwd=folder, text=True, capture_output=True,
-                                        env={**os.environ, 'PATH': directory, 'PAGE_ROOT': str(folder),
-                                             'PAGE_LOG': str(log), 'PAGE_RESPONSE': json.dumps(self.response()),
-                                             'PAGE_EXIT': status, 'GH_REPO': 'foreign/repo',
-                                             'GH_HOST': 'other.invalid', 'GIT_DIR': '/inert/git'})
+                stdout, stderr = io.StringIO(), io.StringIO()
+                environment = {**os.environ, 'PATH': directory, 'PAGE_ROOT': str(folder),
+                               'PAGE_LOG': str(log), 'PAGE_RESPONSE': json.dumps(self.response()),
+                               'PAGE_EXIT': status, 'GH_REPO': 'foreign/repo',
+                               'GH_HOST': 'other.invalid', 'GIT_DIR': '/inert/git'}
+                protocol_overhead = property(lambda process: 0, lambda process, value: None)
+                with patch.dict(os.environ, environment, clear=True), \
+                        patch.object(page_helper.Path, 'cwd', return_value=folder), \
+                        patch.object(page_helper.PageProcess, 'overhead', protocol_overhead, create=True), \
+                        contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    code = page_helper.main(['page', '7', 'opaque/+=='])
                 calls = [json.loads(line) for line in log.read_text().splitlines()]
                 self.assertEqual([call['program'] for call in calls], ['git', 'git', 'gh'])
                 for call in calls:
@@ -1093,11 +1098,11 @@ else:
                     'api', '--hostname', 'github.com', 'graphql', '-f', 'query=' + PAGE_QUERY,
                     '-f', 'owner=o', '-f', 'name=r', '-F', 'pr=7', '-f', 'after=opaque/+=='])
                 if status == '0':
-                    self.assertEqual((result.returncode, result.stderr), (0, ''))
-                    self.assertEqual(json.loads(result.stdout)['threads'][0]['id'], 'PRRT_example')
+                    self.assertEqual((code, stderr.getvalue()), (0, ''))
+                    self.assertEqual(json.loads(stdout.getvalue())['threads'][0]['id'], 'PRRT_example')
                 else:
-                    self.assertEqual((result.returncode, result.stdout), (1, ''))
-                    self.assertEqual(result.stderr, 'failed: thread page unavailable.\n')
+                    self.assertEqual((code, stdout.getvalue()), (1, ''))
+                    self.assertEqual(stderr.getvalue(), 'failed: thread page unavailable.\n')
 
 
 class HookTests(unittest.TestCase):
