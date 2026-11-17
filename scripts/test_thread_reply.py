@@ -636,6 +636,8 @@ class ThreadPageTests(unittest.TestCase):
         response = self.response()
         pull = response['data']['repository']['pullRequest']
         pull['number'] = 2147483647
+        pull['reviewThreads']['nodes'][0]['comments']['nodes'][0]['url'] = (
+            'https://github.com/o/r/pull/2147483647#discussion_r123')
         pull['reviewThreads']['pageInfo'] = {'hasNextPage': True, 'endCursor': 'next/+=='}
         code, out, err, popen, _ = self.invoke(['2147483647'], [
             str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(response)])
