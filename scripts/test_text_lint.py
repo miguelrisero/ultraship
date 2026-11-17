@@ -435,6 +435,84 @@ class TextLintTests(unittest.TestCase):
         self.assertIn('Receipt is consumed.', self.hook_refusal(event))
         self.assertFalse(self.last_receipt['resend_allowed'])
 
+    def test_invalid_citation_spends_every_matching_receipt(self):
+        """Catch an invalid citation that leaves a matching receipt available for a corrected resend."""
+        self.hook_refusal(self.event())
+        first_id = self.last_receipt['id']
+        second = text_lint.write_receipt(self.event(), ['Missing section: Facts'], True, None)
+        invalid = self.resend(first_id)
+        invalid['tool_input']['message'] += '\n<!-- ultraship-receipt:' + second['id'] + ' -->'
+
+        reason = self.hook_refusal(invalid)
+
+        self.assertIn('Invalid receipt citation: require exactly one well-formed marker.', reason)
+        self.assertIn('Well-formed markers: 2. Marker names: 2.', reason)
+        self.assertFalse(self.last_receipt['resend_allowed'])
+        for receipt_id in (first_id, second['id']):
+            with self.subTest(receipt_id=receipt_id):
+                self.assertIn('A final citation refusal spent this receipt.',
+                              self.hook_refusal(self.resend(receipt_id)))
+                self.assertFalse(self.last_receipt['resend_allowed'])
+
+    def test_invalid_citation_preserves_another_recipients_receipt(self):
+        """Catch an invalid citation that spends another recipient's resend permission."""
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        self.hook_refusal(self.event(to='another-chief'))
+        other_id = self.last_receipt['id']
+        invalid = self.resend(receipt_id)
+        invalid['tool_input']['message'] += '\n<!-- ultraship-receipt:' + receipt_id + ' -->'
+
+        self.assertIn('Invalid receipt citation:', self.hook_refusal(invalid))
+        other = self.resend(other_id)
+        other['tool_input']['to'] = 'another-chief'
+        self.assertIsNone(self.hook_output(other))
+        self.assertTrue((self.state / 'receipts' / (other_id + '.consumed')).exists())
+
+    def test_receipt_after_final_citation_refusal_remains_citable(self):
+        """Catch a final citation refusal that blocks a later receipt for the same identity."""
+        self.hook_refusal(self.event())
+        receipt_id = self.last_receipt['id']
+        invalid = self.resend(receipt_id)
+        invalid['tool_input']['message'] += '\n<!-- ultraship-receipt:' + receipt_id + ' -->'
+        self.assertIn('Invalid receipt citation:', self.hook_refusal(invalid))
+        with patch.object(text_lint, 'now', return_value=self.clock + timedelta(seconds=1)):
+            later = text_lint.write_receipt(self.event(), ['Missing section: Facts'], True, None)
+            self.assertIsNone(self.hook_output(self.resend(later['id'])))
+        self.assertTrue((self.state / 'receipts' / (later['id'] + '.consumed')).exists())
+
+    def test_unsafe_citation_refusal_markers_fail_closed(self):
+        """Catch unsafe final-refusal marker paths that allow a cited resend."""
+        for kind in ('symlink', 'directory'):
+            with self.subTest(kind=kind):
+                event = self.event(to=kind + '-chief')
+                self.hook_refusal(event)
+                receipt_id = self.last_receipt['id']
+                invalid = self.resend(receipt_id)
+                invalid['tool_input']['to'] = kind + '-chief'
+                invalid['tool_input']['message'] += '\n<!-- ultraship-receipt:' + receipt_id + ' -->'
+                self.assertIn('Invalid receipt citation:', self.hook_refusal(invalid))
+                path = text_lint.citation_refusal_path(self.last_receipt)
+                path.unlink()
+                if kind == 'symlink':
+                    path.symlink_to(self.state / 'key')
+                else:
+                    path.mkdir()
+                resend = self.resend(receipt_id)
+                resend['tool_input']['to'] = kind + '-chief'
+                self.assertIn('Invalid receipt citation:', self.hook_refusal(resend))
+                self.assertFalse(self.last_receipt['resend_allowed'])
+                self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+
+    def test_resend_templates_end_with_single_marker_guidance(self):
+        """Catch resend instructions that omit the final warning about duplicate receipt markers."""
+        instruction = ('Put the receipt marker exactly once; '
+                       'a second marker or marker name makes the refusal final.')
+        self.assertTrue(self.hook_refusal(self.event()).endswith('<' + instruction + '>'))
+        event = {'session_id': 'session-one', 'tool_name': 'mcp__bettercoding__create_input',
+                 'tool_input': {'content': {'html': '<p>The review passes.</p>'}}}
+        self.assertTrue(self.hook_refusal(event).endswith('\n' + instruction))
+
     def test_receipt_binds_the_sending_agent(self):
         self.hook_refusal(self.event())
         receipt_id = self.last_receipt['id']

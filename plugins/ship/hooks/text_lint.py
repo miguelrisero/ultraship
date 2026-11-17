@@ -30,7 +30,8 @@ Decision
 - <The action you take or ask for, within existing authority.>
 Next
 - <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>.
-<Every line: one point per sentence, at most 25 words each, with a space between words.>"""
+<Every line: one point per sentence, at most 25 words each, with a space between words.>
+<Put the receipt marker exactly once; a second marker or marker name makes the refusal final.>"""
 INPUT_TEMPLATE = '''Use exactly one output-kind meta tag: decision or result.
 Decision:
 <meta name="output-kind" content="decision">
@@ -41,7 +42,8 @@ Decision:
 <h2>If no answer</h2><p>...</p>
 Result alternative:
 <meta name="output-kind" content="result"><p>...</p>
-Write at most 25 words per sentence.'''
+Write at most 25 words per sentence.
+Put the receipt marker exactly once; a second marker or marker name makes the refusal final.'''
 
 
 class FindingsError(ValueError):
@@ -321,12 +323,13 @@ def prune_receipts(directory):
             path.unlink(missing_ok=True)
             path.with_suffix('.consumed').unlink(missing_ok=True)
             remaining -= 1
-    for path in (store_dir() / 'pending').glob('*'):
-        try:
-            if path.lstat().st_mtime < timestamp - 7 * 24 * 3600:
-                path.unlink(missing_ok=True)
-        except FileNotFoundError:
-            pass
+    for name in ('pending', 'citation-refused'):
+        for path in (store_dir() / name).glob('*'):
+            try:
+                if path.lstat().st_mtime < timestamp - 7 * 24 * 3600:
+                    path.unlink(missing_ok=True)
+            except FileNotFoundError:
+                pass
     return young
 
 
@@ -468,7 +471,8 @@ def citation(event):
     if 'ultraship-receipt' not in text:
         return None
     if len(markers) != 1 or text.count('ultraship-receipt') != 1:
-        raise ValueError('Invalid receipt citation: require exactly one well-formed marker.')
+        raise ValueError('Invalid receipt citation: require exactly one well-formed marker. '
+                         f'Well-formed markers: {len(markers)}. Marker names: {text.count("ultraship-receipt")}.')
     return markers[0]
 
 
@@ -509,6 +513,17 @@ def consume_receipt(receipt_id, event, receipt):
             raise ValueError('Receipt expires after 24 hours.')
         if created > now():
             raise ValueError('Receipt creation is in the future.')
+        try:
+            fd = os.open(citation_refusal_path(receipt), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            pass
+        else:
+            with os.fdopen(fd, 'rb') as source:
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                    raise ValueError('Citation refusal marker must be a regular file.')
+                refused_at = datetime.fromisoformat(source.read(64).decode().replace('Z', '+00:00'))
+            if created <= refused_at:
+                raise ValueError('A final citation refusal spent this receipt.')
         if not mark_consumed(receipt_id):
             raise ValueError('Receipt is consumed.')
         return receipt
@@ -516,12 +531,45 @@ def consume_receipt(receipt_id, event, receipt):
         raise ValueError('Invalid receipt citation: ' + str(exc)) from None
 
 
+def citation_refusal_path(identity):
+    fields = [identity.get(field) for field in
+              ('session_id', 'agent_id', 'tool_name', 'recipient', 'fields_sha256')]
+    return store_dir() / 'citation-refused' / hashlib.sha256(canonical(fields)).hexdigest()
+
+
+def write_citation_refusal(event):
+    session = event.get('session_id')
+    if not isinstance(session, str) or not session:
+        return
+    temporary = None
+    try:
+        path = citation_refusal_path({'session_id': session, 'agent_id': event.get('agent_id'),
+                                     **input_identity(event)})
+        path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(dir=path.parent)
+        with os.fdopen(fd, 'w') as output:
+            output.write(now().isoformat().replace('+00:00', 'Z'))
+        os.replace(temporary, path)
+    except OSError:
+        pass
+    finally:
+        if temporary is not None:
+            try:
+                Path(temporary).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def hook(event, parse_error=None):
     parent, consumed = None, None
     try:
         if parse_error is not None:
             raise parse_error
-        parent = citation(event)
+        try:
+            parent = citation(event)
+        except ValueError:
+            write_citation_refusal(event)
+            raise
         if parent:
             receipt = read_receipt(parent)
             owner = receipt.get('agent_id')
