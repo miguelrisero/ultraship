@@ -72,12 +72,19 @@ def one(endpoint, absent=False):
     return payload
 
 
-def collection(endpoint, field=None):
+def collection(endpoint, repository_id, field=None):
+    require(positive(repository_id), 'verified numeric repository identity required')
     initial = urlsplit('https://api.github.com/' + endpoint)
-    initial_query = dict(parse_qsl(initial.query, strict_parsing=True))
+    repository_path = re.fullmatch(r'/repos/[^/]+/[^/]+(/.*)', initial.path)
+    require(repository_path, 'repository endpoint required')
+    allowed_paths = {initial.path, f'/repositories/{repository_id}{repository_path[1]}'}
+    initial_pairs = parse_qsl(initial.query, strict_parsing=True)
+    initial_query = dict(initial_pairs)
+    require(len(initial_pairs) == len(initial_query), 'duplicate collection query field')
     seen = set()
     rows = []
     total = None
+    advertised_last = None
     current = endpoint
     while True:
         identity = urlsplit(current if current.startswith('https://') else 'https://api.github.com/' + current)
@@ -103,18 +110,27 @@ def collection(endpoint, field=None):
                 query_pairs = parse_qsl(target.query, strict_parsing=True)
                 query = dict(query_pairs)
                 require(target.scheme == 'https' and target.netloc == 'api.github.com'
-                        and not target.fragment and target.path == initial.path
+                        and not target.fragment and target.path in allowed_paths
                         and len(query_pairs) == len(query)
                         and query.get('page', '').isdigit() and int(query['page']) > 0
                         and {key: value for key, value in query.items() if key != 'page'} == initial_query,
                         'pagination escaped its origin or endpoint')
                 links[match[2]] = target
+        page = int(dict(parse_qsl(identity.query)).get('page', '1'))
+        pages = {relation: int(dict(parse_qsl(target.query))['page']) for relation, target in links.items()}
+        require('first' not in pages or pages['first'] == 1, 'contradictory first page')
+        require('prev' not in pages or page > 1 and pages['prev'] == page - 1, 'contradictory previous page')
+        require('next' not in pages or pages['next'] == page + 1, 'pagination is incomplete')
+        if 'last' in pages:
+            require(pages['last'] >= page and (advertised_last is None or advertised_last == pages['last']),
+                    'contradictory last page')
+            advertised_last = pages['last']
+        if advertised_last is not None:
+            require(page <= advertised_last and ('next' in pages) == (page < advertised_last),
+                    'advertised pages are incomplete')
         if 'next' not in links:
             break
-        target = links['next']
-        page = int(dict(parse_qsl(identity.query)).get('page', '1'))
-        require(int(dict(parse_qsl(target.query))['page']) == page + 1, 'pagination is incomplete')
-        current = target.geturl()
+        current = links['next'].geturl()
     require(total is None or len(rows) == total, 'collection is incomplete')
     return rows
 
@@ -187,13 +203,13 @@ def pr_identity(pr, policy, expected_repo=None):
     value = decode(result.stdout)
     require(isinstance(value, dict), 'PR object missing')
     match = re.fullmatch(r'https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([0-9]+)', value.get('url', ''))
-    require(match and int(match[2]) == policy['pr'] and type(value.get('number')) is int
+    require(match and int(match[2]) == policy['pr'] and positive(value.get('number'))
             and value['number'] == policy['pr'] and value.get('baseRefName') == policy['base']
             and value.get('headRefOid') == policy['head'], 'PR differs from approved identity')
     repo = match[1]
     require(expected_repo is None or repo == expected_repo, 'PR repository changed')
     repository = one('repos/' + repo)
-    require(type(repository.get('id')) is int and repository['id'] == policy['repository_id']
+    require(positive(repository.get('id')) and repository['id'] == policy['repository_id']
             and repository.get('full_name') == repo, 'repository differs from approved identity')
     return 'repos/' + repo
 
@@ -204,30 +220,48 @@ def protection(repo, policy):
     require(value.get('name') == policy['base'] and value.get('protected') is False,
             'branch must explicitly report protected=false')
     one(branch + '/protection', absent=True)
-    require(collection(repo + '/rules/branches/' + quote(policy['base'], safe='') + '?per_page=100') == [],
+    require(collection(repo + '/rules/branches/' + quote(policy['base'], safe='') + '?per_page=100',
+                       policy['repository_id']) == [],
             'branch rules must be completely empty')
 
 
 def run_matches(run, item, policy):
     require(isinstance(run, dict), 'malformed workflow run')
-    if not (run.get('workflow_id') == item['workflow_id'] and run.get('path') == item['workflow_path']
-            and run.get('event') == 'pull_request' and run.get('head_sha') == policy['head']
-            and run.get('repository', {}).get('id') == policy['repository_id']
-            and run.get('head_repository', {}).get('id') == policy['repository_id']):
-        return False
+    require(all(positive(run.get(key)) for key in
+                ('id', 'workflow_id', 'run_number', 'run_attempt', 'check_suite_id')),
+            'complete typed run identity required')
+    require(all(isinstance(run.get(key), str) and run[key] for key in ('path', 'event'))
+            and isinstance(run.get('head_sha'), str) and re.fullmatch(r'[0-9a-f]{40}', run['head_sha'])
+            and positive(run.get('repository', {}).get('id'))
+            and positive(run.get('head_repository', {}).get('id')), 'malformed run binding')
     pulls = run.get('pull_requests')
-    require(isinstance(pulls, list), 'PR association missing')
-    return any(isinstance(pull, dict) and pull.get('number') == policy['pr']
-               and pull.get('head', {}).get('sha') == policy['head']
-               and pull.get('head', {}).get('repo', {}).get('id') == policy['repository_id']
-               and pull.get('base', {}).get('ref') == policy['base']
-               and pull.get('base', {}).get('repo', {}).get('id') == policy['repository_id'] for pull in pulls)
+    require(isinstance(pulls, list) and pulls, 'PR association missing')
+    numbers = set()
+    for pull in pulls:
+        require(isinstance(pull, dict) and positive(pull.get('number')),
+                'typed PR association required')
+        require(pull['number'] not in numbers, 'ambiguous PR association')
+        numbers.add(pull['number'])
+        require(isinstance(pull.get('head', {}).get('sha'), str)
+                and re.fullmatch(r'[0-9a-f]{40}', pull['head']['sha'])
+                and positive(pull.get('head', {}).get('repo', {}).get('id'))
+                and isinstance(pull.get('base', {}).get('ref'), str) and pull['base']['ref']
+                and positive(pull.get('base', {}).get('repo', {}).get('id')), 'malformed PR binding')
+    if not (run['workflow_id'] == item['workflow_id'] and run['path'] == item['workflow_path']
+            and run['event'] == 'pull_request' and run['head_sha'] == policy['head']
+            and run['repository']['id'] == policy['repository_id']
+            and run['head_repository']['id'] == policy['repository_id']):
+        return False
+    return any(pull['number'] == policy['pr'] and pull['head']['sha'] == policy['head']
+               and pull['head']['repo']['id'] == policy['repository_id']
+               and pull['base']['ref'] == policy['base']
+               and pull['base']['repo']['id'] == policy['repository_id'] for pull in pulls)
 
 
 def latest(repo, item, policy):
     endpoint = (f'{repo}/actions/workflows/{item["workflow_id"]}/runs?event=pull_request'
                 f'&head_sha={policy["head"]}&per_page=100')
-    runs = collection(endpoint, 'workflow_runs')
+    runs = collection(endpoint, policy['repository_id'], 'workflow_runs')
     matches = [run for run in runs if run_matches(run, item, policy)]
     require(not runs or matches, 'runs lack approved PR association')
     if not matches:
@@ -265,13 +299,15 @@ def evidence(repo, item, policy, run):
     outcome = state(run)
     if outcome:
         return outcome
-    jobs = collection(f'{repo}/actions/runs/{run["id"]}/attempts/{run["run_attempt"]}/jobs?per_page=100', 'jobs')
+    jobs = collection(f'{repo}/actions/runs/{run["id"]}/attempts/{run["run_attempt"]}/jobs?per_page=100',
+                      policy['repository_id'], 'jobs')
     require(all(isinstance(job, dict) for job in jobs), 'malformed job')
     matches = [job for job in jobs if job.get('name') == item['check_name']]
     require(len(matches) == 1, 'job mapping missing or ambiguous')
     job = matches[0]
-    require(positive(job.get('id')) and job.get('run_id') == run['id']
-            and job.get('run_attempt') == run['run_attempt'] and job.get('head_sha') == policy['head'],
+    require(all(positive(job.get(key)) for key in ('id', 'run_id', 'run_attempt'))
+            and job['run_id'] == run['id']
+            and job['run_attempt'] == run['run_attempt'] and job.get('head_sha') == policy['head'],
             'job identity differs from run')
     url = job.get('check_run_url')
     require(isinstance(url, str), 'check run URL missing')
@@ -279,11 +315,14 @@ def evidence(repo, item, policy, run):
     require(match, 'check run URL escaped repository or endpoint')
     check = one(f'{repo}/check-runs/{match[1]}')
     suite = one(f'{repo}/check-suites/{run["check_suite_id"]}')
-    require(check.get('id') == int(match[1]) and check.get('name') == item['check_name']
-            and check.get('head_sha') == policy['head'] and check.get('app', {}).get('id') == item['app_id']
-            and check.get('check_suite', {}).get('id') == run['check_suite_id'], 'check run identity differs')
-    require(suite.get('id') == run['check_suite_id'] and suite.get('head_sha') == policy['head']
-            and suite.get('app', {}).get('id') == item['app_id'], 'check suite identity differs')
+    require(positive(check.get('id')) and positive(check.get('app', {}).get('id'))
+            and positive(check.get('check_suite', {}).get('id'))
+            and check['id'] == int(match[1]) and check.get('name') == item['check_name']
+            and check.get('head_sha') == policy['head'] and check['app']['id'] == item['app_id']
+            and check['check_suite']['id'] == run['check_suite_id'], 'check run identity differs')
+    require(positive(suite.get('id')) and positive(suite.get('app', {}).get('id'))
+            and suite['id'] == run['check_suite_id'] and suite.get('head_sha') == policy['head']
+            and suite['app']['id'] == item['app_id'], 'check suite identity differs')
     outcomes = [state(job), state(check)]
     return 1 if 1 in outcomes else max(outcomes)
 
@@ -294,7 +333,8 @@ def main():
     protection(repo, policy)
     for item in policy['checks']:
         workflow = one(f'{repo}/actions/workflows/{item["workflow_id"]}')
-        require(workflow.get('id') == item['workflow_id'] and workflow.get('path') == item['workflow_path']
+        require(positive(workflow.get('id')) and workflow['id'] == item['workflow_id']
+                and workflow.get('path') == item['workflow_path']
                 and workflow.get('state') == 'active', 'workflow identity differs')
         content = one(f'{repo}/contents/{quote(item["workflow_path"], safe="/")}?ref={policy["head"]}')
         require(content.get('type') == 'file' and content.get('path') == item['workflow_path']

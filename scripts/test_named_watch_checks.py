@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import tempfile
@@ -139,18 +140,22 @@ sys.exit(0 if status == 200 else 1)
 
 
 class NamedWatchChecksTests(unittest.TestCase):
-    def watch(self, policy=None, data=None, digest=None, ignore='', bounds=('0', '0'), option=True):
+    def watch(self, policy=None, data=None, digest=None, ignore='', bounds=('0', '0'), option=True,
+              policy_in_source=False):
         default_policy, default_data = fixture()
         policy = default_policy if policy is None else policy
         data = default_data if data is None else data
-        with tempfile.TemporaryDirectory() as tmp:
+        scratch = ROOT.parent / '.scratch'
+        scratch.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch) as tmp, tempfile.TemporaryDirectory(
+                dir=ROOT if policy_in_source else tmp) as policy_tmp:
             directory = Path(tmp)
             (directory / 'gh').write_text(GH_STUB)
             (directory / 'gh').chmod(0o755)
             (directory / 'sleep').write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "${0%/*}/sleeps"\n')
             (directory / 'sleep').chmod(0o755)
             (directory / 'responses.json').write_text(json.dumps(data))
-            policy_path = directory / 'approved.json'
+            policy_path = Path(policy_tmp) / 'approved.json'
             policy_bytes = json.dumps(policy).encode()
             policy_path.write_bytes(policy_bytes)
             approved = hashlib.sha256(policy_bytes).hexdigest() if digest is None else digest
@@ -221,6 +226,128 @@ class NamedWatchChecksTests(unittest.TestCase):
         self.assertIn(HEAD, result.stdout)
         self.assertIn('41', result.stdout)
         self.assertIn('2', result.stdout)
+
+    def test_source_controlled_policy_is_refused_before_api_reads(self):
+        result = self.outcome(4, policy_in_source=True)
+        self.assertIn('outside PR-controlled source', result.stdout)
+        self.assertEqual(result.requests, [])
+
+    def test_canonical_numeric_repository_pagination_is_bound_to_verified_id(self):
+        for endpoint, field in ((RULES, None), (RUNS, 'workflow_runs'), (JOBS, 'jobs')):
+            for repository_id, expected in ((17, 0), (99, 4)):
+                with self.subTest(endpoint=endpoint, repository_id=repository_id):
+                    _, data = fixture()
+                    canonical = endpoint.replace(REPO, f'repositories/{repository_id}', 1) + '&page=2'
+                    final_page = copy.deepcopy(data['api'][endpoint][0])
+                    empty_page = [] if field is None else {'total_count': 1, field: []}
+                    data['api'][endpoint] = [response(empty_page,
+                        link=f'<https://api.github.com/{canonical}>; rel="next"')]
+                    data['api'][canonical] = [final_page]
+                    result = self.outcome(expected, data=data)
+                    if expected == 4:
+                        self.assertNotIn(f'https://api.github.com/{canonical}', result.requests)
+
+    def test_numeric_api_identities_require_positive_integers(self):
+        targets = [('pr', ('number',)), (REPO, ('id',)), (WORKFLOW, ('id',)),
+                   (CHECK, ('id',)), (CHECK, ('app', 'id')), (CHECK, ('check_suite', 'id')),
+                   (SUITE, ('id',)), (SUITE, ('app', 'id')),
+                   (JOBS, ('jobs', 0, 'id')), (JOBS, ('jobs', 0, 'run_id')),
+                   (JOBS, ('jobs', 0, 'run_attempt'))]
+        run_paths = [('id',), ('workflow_id',), ('run_number',), ('run_attempt',),
+                     ('check_suite_id',), ('repository', 'id'), ('head_repository', 'id'),
+                     ('pull_requests', 0, 'number'), ('pull_requests', 0, 'head', 'repo', 'id'),
+                     ('pull_requests', 0, 'base', 'repo', 'id')]
+        targets += [(RUN, path) for path in run_paths]
+        targets += [(RUNS, ('workflow_runs', 0, *path)) for path in run_paths]
+        for endpoint, path in targets:
+            for kind in ('float', 'boolean'):
+                with self.subTest(endpoint=endpoint, path=path, kind=kind):
+                    _, data = fixture()
+                    # Isolate each API observation from fixture objects shared by other responses.
+                    data = json.loads(json.dumps(data))
+                    target = data['pr'][0] if endpoint == 'pr' else data['api'][endpoint][0]['body']
+                    for key in path[:-1]:
+                        target = target[key]
+                    target[path[-1]] = float(target[path[-1]]) if kind == 'float' else True
+                    self.outcome(4, data=data)
+
+    def test_malformed_newer_run_never_falls_back_to_older_success(self):
+        for missing in ('workflow_id', 'run_attempt', 'repository', 'pull_requests'):
+            with self.subTest(missing=missing):
+                _, data = fixture()
+                newer = copy.deepcopy(data['api'][RUN][0]['body'])
+                newer.update(id=42, run_number=10, status='completed', conclusion='failure')
+                del newer[missing]
+                data['api'][RUNS][0]['body'] = {
+                    'total_count': 2, 'workflow_runs': [newer, data['api'][RUN][0]['body']]}
+                self.outcome(4, data=data)
+
+    def test_incomplete_and_contradictory_page_metadata_refuses(self):
+        for endpoint in (RULES, RUNS, JOBS):
+            for pages in ({'last': 2}, {'first': 2}, {'prev': 1},
+                          {'next': 2, 'last': 1}, {'next': 3}):
+                with self.subTest(endpoint=endpoint, pages=pages):
+                    _, data = fixture()
+                    data['api'][endpoint][0]['link'] = ', '.join(
+                        f'<https://api.github.com/{endpoint}&page={page}>; rel="{relation}"'
+                        for relation, page in pages.items())
+                    final_page = copy.deepcopy(data['api'][endpoint][0])
+                    final_page['link'] = None
+                    for page in set(pages.values()):
+                        data['api'][endpoint + f'&page={page}'] = [final_page]
+                    result = self.outcome(4, data=data)
+                    self.assertFalse(any('&page=' in request for request in result.requests))
+        _, data = fixture()
+        second = RULES + '&page=2'
+        data['api'][RULES] = [response([], link=(
+            f'<https://api.github.com/{second}>; rel="next", '
+            f'<https://api.github.com/{RULES}&page=3>; rel="last"'))]
+        data['api'][second] = [response([])]
+        result = self.outcome(4, data=data)
+        self.assertIn(f'https://api.github.com/{second}', result.requests)
+
+    def test_boolean_equal_to_one_cannot_supply_api_identity(self):
+        policy, data = fixture()
+        policy.update(repository_id=1, pr=1)
+        policy['checks'][0].update(workflow_id=1, app_id=1)
+
+        def one_ids(value):
+            if isinstance(value, dict):
+                return {key: (1 if key in {'id', 'number', 'workflow_id', 'run_id', 'run_attempt',
+                                           'run_number', 'check_suite_id'} else
+                              'https://api.github.com/repos/example/repo/check-runs/1'
+                              if key == 'check_run_url' else one_ids(item)) for key, item in value.items()}
+            if isinstance(value, list):
+                return [one_ids(item) for item in value]
+            return value
+
+        data = one_ids(data)
+        data['pr'][0]['url'] = 'https://github.com/example/repo/pull/1'
+        data['api'] = {re.sub(r'/(?=\d)[0-9]+(?=/|\?|$)', '/1', endpoint): responses
+                       for endpoint, responses in data['api'].items()}
+        self.outcome(0, policy=policy, data=data)
+        targets = [('pr', ('number',)), (REPO, ('id',)),
+                   (f'{REPO}/actions/workflows/1', ('id',)),
+                   (f'{REPO}/check-runs/1', ('id',)),
+                   (f'{REPO}/check-runs/1', ('app', 'id')),
+                   (f'{REPO}/check-runs/1', ('check_suite', 'id')),
+                   (f'{REPO}/check-suites/1', ('id',)),
+                   (f'{REPO}/check-suites/1', ('app', 'id'))]
+        for key in ('id', 'run_id', 'run_attempt'):
+            targets.append((f'{REPO}/actions/runs/1/attempts/1/jobs?per_page=100', ('jobs', 0, key)))
+        for path in [('id',), ('workflow_id',), ('run_number',), ('run_attempt',), ('check_suite_id',),
+                     ('repository', 'id'), ('head_repository', 'id'), ('pull_requests', 0, 'number'),
+                     ('pull_requests', 0, 'head', 'repo', 'id'), ('pull_requests', 0, 'base', 'repo', 'id')]:
+            targets.append((f'{REPO}/actions/runs/1', path))
+            targets.append((RUNS.replace('/23/', '/1/'), ('workflow_runs', 0, *path)))
+        for endpoint, path in targets:
+            with self.subTest(endpoint=endpoint, path=path):
+                altered = copy.deepcopy(data)
+                target = altered['pr'][0] if endpoint == 'pr' else altered['api'][endpoint][0]['body']
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = True
+                self.outcome(4, policy=policy, data=altered)
 
     def test_absent_option_keeps_default_required_context_route(self):
         result = self.watch(option=False)
