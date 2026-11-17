@@ -13,8 +13,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,6 +103,8 @@ elif args and args[0] == 'api':
     endpoints = [arg for arg in args[1:] if arg.startswith(('repos/', 'https://'))]
     if len(endpoints) != 1:
         sys.exit('unexpected API arguments')
+    with (root / 'requests.jsonl').open('a') as requests:
+        requests.write(json.dumps(endpoints[0]) + '\\n')
     key = endpoints[0].removeprefix('https://api.github.com/')
     if key.endswith('/protection/required_status_checks'):
         print('gh: Branch not protected (HTTP 404)', file=sys.stderr)
@@ -155,9 +159,46 @@ class NamedWatchChecksTests(unittest.TestCase):
                 args += ['--named-checks', str(policy_path), '--approved-policy-sha256', approved]
             env = {**os.environ, 'PATH': f'{directory}{os.pathsep}{os.environ["PATH"]}',
                    'WATCH_CHECKS_IGNORE': ignore, 'PYTHONDONTWRITEBYTECODE': '1'}
-            result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=10)
+            boot_path = Path('/proc/sys/kernel/random/boot_id')
+            boot = boot_path.read_text().strip()
+            with (directory / 'stdout').open('w+') as stdout, (directory / 'stderr').open('w+') as stderr:
+                process = subprocess.Popen(args, env=env, stdout=stdout, stderr=stderr,
+                                           text=True, start_new_session=True)
+
+                def owned_identity():
+                    fields = Path(f'/proc/{process.pid}/stat').read_text().rsplit(')', 1)[1].split()
+                    self.assertEqual(boot_path.read_text().strip(), boot)
+                    self.assertEqual(tuple(map(int, fields[1:4])),
+                                     (os.getpid(), process.pid, process.pid))
+                    return fields[19]
+
+                start = owned_identity()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    # An unreaped leader prevents reuse of its process-group identity during cleanup.
+                    try:
+                        self.assertEqual(owned_identity(), start)
+                        os.killpg(process.pid, signal.SIGTERM)
+                        time.sleep(5)
+                        self.assertEqual(owned_identity(), start)
+                        try:
+                            os.killpg(process.pid, 0)
+                        except ProcessLookupError:
+                            pass
+                        else:
+                            self.assertEqual(owned_identity(), start)
+                            os.killpg(process.pid, signal.SIGKILL)
+                    finally:
+                        process.wait()
+                    raise
+                stdout.seek(0)
+                stderr.seek(0)
+                result = subprocess.CompletedProcess(args, process.returncode, stdout.read(), stderr.read())
             counts_path = directory / 'counts.json'
             result.calls = json.loads(counts_path.read_text()) if counts_path.exists() else {}
+            requests_path = directory / 'requests.jsonl'
+            result.requests = [json.loads(line) for line in requests_path.read_text().splitlines()] if requests_path.exists() else []
             sleeps_path = directory / 'sleeps'
             result.sleeps = sleeps_path.read_text().splitlines() if sleeps_path.exists() else []
             return result
@@ -354,8 +395,19 @@ class NamedWatchChecksTests(unittest.TestCase):
                                  f'https://api.github.com/{endpoint}&head_sha=wrong&page=2'):
                 with self.subTest(endpoint=endpoint, continuation=continuation):
                     _, data = fixture()
+                    forbidden_key = continuation.removeprefix('https://api.github.com/')
+                    successful_page = copy.deepcopy(data['api'][endpoint][0])
+                    if forbidden_key == endpoint:
+                        data['api'][endpoint].append(successful_page)
+                    else:
+                        data['api'][forbidden_key] = [successful_page]
                     data['api'][endpoint][0]['link'] = f'<{continuation}>; rel="next"'
-                    self.outcome(4, data=data)
+                    result = self.outcome(4, data=data)
+                    self.assertNotIn(continuation, result.requests)
+                    if forbidden_key == endpoint:
+                        self.assertEqual(result.calls.get(endpoint), 1)
+                    else:
+                        self.assertEqual(result.calls.get(forbidden_key, 0), 0)
             _, data = fixture()
             data['api'][endpoint][0]['link'] = 'unparseable'
             self.outcome(4, data=data)
