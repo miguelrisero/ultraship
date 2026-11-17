@@ -8,7 +8,6 @@ The other models reach Claude Code through [Better Shunt](https://github.com/mig
 |---|---|---|
 | `claude-opus-5-5`, `claude-fable-5-2`, `claude-sonnet-5-5` | Anthropic | shunt passthrough |
 | `gpt-6.2-sol`, `gpt-6-luna`, `gpt-6.2-astra` | ChatGPT login (Codex) | shunt `responses` adapter |
-| `kimi-k3` | Kimi coding API | shunt `anthropic` adapter |
 
 shunt selects the route from the `model` field of each request.
 It sends an unmapped `claude-*` ID to Anthropic with the credential of the caller.
@@ -23,7 +22,6 @@ This guide gives the manual procedure.
 - The Codex CLI (`codex`), for the ChatGPT login.
 - `curl` and `jq`, for the tests.
 - A ChatGPT plan that includes the GPT models you route.
-- A Kimi coding plan and API key, for `kimi-k3`.
 - For a source build: `git` and a Rust toolchain.
 
 Skip a provider that you do not use.
@@ -88,31 +86,6 @@ Do not put a secret in `shunt.toml`, in a URL, or in a shell history.
 
 shunt reads this login for every route with `auth = "chatgpt_oauth"`.
 
-### Kimi
-
-1. Create an API key for the Kimi coding API.
-
-A 1M context on Kimi needs a plan tier that includes it.
-Refer to the [Kimi model page](https://www.kimi.com/code/docs/en/kimi-code/models.html).
-
-### The environment file
-
-1. Create the file with mode `0600`:
-
-   ```bash
-   mkdir -p ~/.config/ultraship
-   install -m 0600 /dev/null ~/.config/ultraship/env
-   ```
-
-2. Put these lines in `~/.config/ultraship/env` with an editor:
-
-   ```bash
-   KIMI_CODING_API_KEY=<Kimi API key>
-   ```
-
-The file name is a convention of this guide.
-shunt reads the keys from the environment of its process.
-
 ## Configure shunt
 
 Write `~/.config/shunt/shunt.toml`:
@@ -132,13 +105,6 @@ kind = "responses"
 base_url = "https://chatgpt.com/backend-api"
 auth = "chatgpt_oauth"
 
-[providers.kimi_subscription]
-kind = "anthropic"
-base_url = "https://api.kimi.com/coding"
-auth = "api_key"
-api_key_env = "KIMI_CODING_API_KEY"
-api_key_header = "bearer"
-
 [[routes]]
 model = "gpt-6.2-astra"
 provider = "codex"
@@ -154,10 +120,6 @@ model = "gpt-6-luna"
 provider = "codex"
 upstream_model = "gpt-6-luna"
 
-[[routes]]
-model = "kimi-k3"
-provider = "kimi_subscription"
-upstream_model = "k3"
 ```
 
 > Verify: `gpt-6.2-sol` needs a ChatGPT plan that includes it. Run the test in [Verification](#verification) before you use the Sol agents.
@@ -190,7 +152,6 @@ Use these IDs in the Claude Code picker:
 | `gpt-6.2-astra[1m]` | GPT-6.2 Astra (1M) |
 | `gpt-6.2-sol[1m]` | GPT-6.2 Sol (1M) |
 | `gpt-6-luna[1m]` | GPT-6 Luna (1M) |
-| `kimi-k3[1m]` | Kimi K3 (1M) |
 
 Obey these rules:
 
@@ -203,7 +164,6 @@ A `[1m]` label sets the client budget only.
 The upstream window can be smaller:
 
 - The ChatGPT subscription advertises a 272K default and an 872K maximum.
-- Kimi gives 1M on some plan tiers only.
 
 > Verify: `claude-sonnet-5-5[1m]` gets a 1M window on your Anthropic plan.
 
@@ -213,14 +173,12 @@ The Claude Code `/effort` command sends `output_config.effort`.
 shunt maps it to `reasoning.effort` on the Codex routes.
 The value `max` passes through on the `gpt-5.6` and `gpt-6` families.
 
-The Kimi documentation maps `medium` to high and `xhigh` to max.
 
 ## Start the gateway
 
-1. Load the secrets into the shell:
+1. Direct local clients to the loopback gateway:
 
    ```bash
-   set -a; . ~/.config/ultraship/env; set +a
    export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}"
    ```
 
@@ -255,15 +213,13 @@ Run shunt under a supervisor for daily use, for example a systemd user unit or l
          { "model": "haiku", "label": "Claude Haiku (200k)" },
          { "model": "gpt-6.2-astra[1m]", "label": "GPT-6.2 Astra (1M)" },
          { "model": "gpt-6.2-sol[1m]", "label": "GPT-6.2 Sol (1M)" },
-         { "model": "gpt-6-luna[1m]", "label": "GPT-6 Luna (1M)" },
-         { "model": "kimi-k3[1m]", "label": "Kimi K3 (1M)" }
+         { "model": "gpt-6-luna[1m]", "label": "GPT-6 Luna (1M)" }
        ]
      },
      "modelSettings": {
        "gpt-6.2-astra": { "effortLevel": "high" },
        "gpt-6.2-sol": { "effortLevel": "xhigh" },
-       "gpt-6-luna": { "effortLevel": "high" },
-       "kimi-k3": { "effortLevel": "high" }
+       "gpt-6-luna": { "effortLevel": "high" }
      }
    }
    ```
@@ -301,7 +257,7 @@ Do not give a per-call `model` override.
 2. Send one request per routed model:
 
    ```bash
-   for m in gpt-6.2-astra gpt-6.2-sol gpt-6-luna kimi-k3; do printf '%s: ' "$m"; curl -s -D - -o /dev/null -X POST http://127.0.0.1:3001/v1/messages -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$m\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" | grep -iE '^(HTTP|x-gateway-upstream)' | tr -d '\r' | tr '\n' ' '; echo; done
+   for m in gpt-6.2-astra gpt-6.2-sol gpt-6-luna; do printf '%s: ' "$m"; curl -s -D - -o /dev/null -X POST http://127.0.0.1:3001/v1/messages -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$m\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" | grep -iE '^(HTTP|x-gateway-upstream)' | tr -d '\r' | tr '\n' ' '; echo; done
    ```
 
    Each line must show HTTP status 200 and an `x-gateway-upstream` header.
@@ -321,7 +277,7 @@ Do not give a per-call `model` override.
 5. Show the model that Claude Code resolved:
 
    ```bash
-   claude -p --model 'kimi-k3[1m]' --output-format stream-json --verbose 'Reply with the word ok.' | grep -o '"resolvedModel":"[^"]*"' | head -1
+   claude -p --model 'gpt-6.2-astra[1m]' --output-format stream-json --verbose 'Reply with the word ok.' | grep -o '"resolvedModel":"[^"]*"' | head -1
    ```
 
 6. Open Claude Code and run `/model`. Every entry from `modelPicker.options` must appear.
@@ -331,7 +287,6 @@ Do not give a per-call `model` override.
 | Symptom | Cause | Action |
 |---|---|---|
 | `ChatGPT auth not found; run codex login` | shunt cannot read the ChatGPT login. | Run `codex login`, then retry. |
-| HTTP 401 on `kimi-k3` | The Kimi key is missing or wrong. | Load the env file before `shunt run`. |
 | HTTP 429 with `rate_limit_kind` | The provider quota is used up. | Read `rate_limit_kind`. Wait for the reset, or select a different model. |
 | `config check failed` at start | `shunt.toml` has an error. | Run `shunt check --config ~/.config/shunt/shunt.toml`. |
 | Tool search is inactive | Claude Code turns it off behind a custom base URL. | Set `ENABLE_TOOL_SEARCH=true` in `settings.json`. |
