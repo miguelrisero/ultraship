@@ -127,6 +127,57 @@ All conditions must hold:
    Preserve every credential refusal and user/project rule on both routes.
    Missing or failed browser evidence blocks merge. CI and review supply zero substitute browser evidence.
 
+### Explicit checks on an unprotected branch
+
+The default completion route requires configured required contexts.
+The CoC may approve a nonempty named check set for a branch that positively proves its unprotected state.
+This explicit route satisfies condition 2 only when the named-check checker returns exit 0 on the approved pushed head.
+Run the checker with the coordinator-approved policy file and its separately approved SHA256:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/watch-checks.sh" <PR> 0 0 --named-checks <absolute-policy.json> --approved-policy-sha256 <approved-sha256>
+```
+
+Keep the policy outside PR-controlled source.
+Require the coordinator's approval of the digest through a separate trusted channel.
+A policy payload supplies zero approval authority.
+Use schema version 1 with exactly these fields:
+
+```json
+{
+  "schema_version": 1,
+  "repository_id": 17,
+  "pr": 7,
+  "base": "main",
+  "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "checks": [{
+    "workflow_id": 23,
+    "workflow_path": ".github/workflows/validate.yml",
+    "workflow_blob_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "check_name": "validate",
+    "app_id": 31
+  }]
+}
+```
+
+These values illustrate the schema; obtain actual identities from approved repository evidence.
+Require numeric repository, PR, workflow and App IDs, the full approved head, and each exact workflow path, blob and check name.
+Keep `checks` nonempty and unique.
+The route forbids ignore settings, unknown fields and unknown schema versions.
+It requires branch `protected=false`, the structured classic `Branch not protected` 404, and completely empty branch rules.
+Every collection requires complete pagination within its original API origin and endpoint.
+The checker selects the latest matching same-repository `pull_request` run and its latest attempt.
+It binds the job through its check-run URL, suite, App, name and head.
+Both the job and workflow must complete successfully; skipped and neutral conclusions fail.
+Before success, it rechecks protection, the latest run and attempt, and the PR head.
+A push or rerun invalidates the receipt.
+Exit 1 means unsuccessful evidence; exits 2 and 3 retain the start and overall timeout meanings.
+Exit 4 means uncertainty and blocks completion.
+Keep the 600-second start, 5400-second overall and 300-second polling defaults.
+Select this route explicitly; an ordinary checker failure grants zero opt-in authority.
+Source delivery grants zero installation, runtime adoption, historical PASS or affected-retry authority.
+Preserve every earlier formal outcome and effective refusal.
+
 Re-read `headRefOid` after verification. A changed head reopens the affected steps. Finish with the direct PR URL. Merge and production actions need their own authority.
 
 ## Proof after merge

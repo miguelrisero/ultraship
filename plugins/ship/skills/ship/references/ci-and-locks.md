@@ -3,6 +3,7 @@
 ## GitHub quota
 
 CI snapshots use GraphQL `gh pr checks` or `gh pr view`; the installed script uses `gh api graphql`. The required-context checker reads classic required status checks and branch rules once at startup to determine the required contexts.
+The explicit named-check route uses REST evidence under the [unprotected-branch completion contract](../SKILL.md#explicit-checks-on-an-unprotected-branch). Its coordinator-approved external policy and separate digest bind the exact nonempty check set. Each snapshot reads complete protection and workflow evidence, then rechecks protection, selected latest runs and attempts, and the PR head before success. Use this route only through explicit opt-in. It preserves the sole-reader cadence and the 600-second start, 5400-second overall and 300-second polling defaults.
 Limit each polling reader to at most once every 5 minutes per PR, including reader handoffs. Run one CI reader at a time during babysit, including Better Review reads and `watch-checks.sh`.
 One-shot completion-gate reads in `skills/ship/SKILL.md` are exempt from this polling cadence. Never use `gh run watch`, a check-runs loop, job polling, or repeated status comments.
 Read one failed log once per failure with `gh run view <run-id> --log-failed`. Read a merge queue from its own `/mq/queue` endpoint where the repository has one.
