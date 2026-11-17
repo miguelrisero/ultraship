@@ -24,6 +24,7 @@ PR = 'https://github.com/o/r/pull/7'
 THREAD = 'PRRT_kwDOabc'
 COMMENT = PR + '#discussion_r123'
 PREFIX = ['api', '--hostname', 'github.com', 'graphql']
+SENTINEL = '$(echo x > should-never-exist)'
 
 REFUSE = (
     "gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=PRRT_kwDOabc",
@@ -299,10 +300,11 @@ sys.exit(response['code'])
             arguments = [sys.executable, str(HELPER), action, pr, thread]
             if action == 'reply':
                 arguments.append(str(body_file))
-            result = subprocess.run(arguments, text=True, capture_output=True,
+            result = subprocess.run(arguments, text=True, capture_output=True, cwd=directory,
                                     env={**os.environ, 'PATH': directory, 'GH_TEST_LOG': str(log),
                                          'GH_TEST_RESPONSES': str(canned)})
             calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+            self.assertFalse((folder / 'should-never-exist').exists())
             return result, calls
 
     def test_reply_checks_ownership_before_sending_raw_body(self):
@@ -383,10 +385,17 @@ sys.exit(response['code'])
         self.assertEqual(result.stderr, '')
         self.assertEqual(calls, [self.call(LOOKUP), self.call(REPLY, '@done\nEvidence: café')])
 
+    def test_sentinel_substitution_creates_the_file_under_the_harness_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(['/bin/sh', '-c', 'x=' + SENTINEL], cwd=directory,
+                                    env={**os.environ, 'PATH': directory})
+            self.assertEqual(result.returncode, 0)
+            self.assertTrue((Path(directory) / 'should-never-exist').exists())
+
     def test_read_preserves_complete_bodies_and_attribution(self):
         query = 'query($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$after){pageInfo{hasNextPage endCursor}nodes{author{login}url body}}}}}'
         body = ('<details><summary>Finding</summary>\n\nAction: preserve café 日本語.\n'
-                '```sh\nprintf `literal` $(touch should-never-exist)\n```\n'
+                '```sh\nprintf `literal` ' + SENTINEL + '\n```\n'
                 '{"looks": "like JSON"}\n</details>\n')
         nodes = [
             {'author': {'login': 'reviewer'}, 'url': COMMENT, 'body': body},
@@ -396,7 +405,6 @@ sys.exit(response['code'])
         page = {'data': {'node': {'comments': {
             'pageInfo': {'hasNextPage': False, 'endCursor': None}, 'nodes': nodes}}}}
         result, calls = self.run_helper([(self.lookup(), 0), (page, 0)], action='read')
-        self.assertFalse(Path('should-never-exist').exists())
         expected = {'thread': THREAD, 'comments': [
             {'author': 'reviewer', 'url': COMMENT, 'body': body},
             {'author': 'ghost', 'url': PR + '#discussion_r124', 'body': 'Second\ncomment\n'},
