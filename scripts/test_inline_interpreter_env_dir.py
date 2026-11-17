@@ -254,6 +254,11 @@ class EnvDirectoryTests(unittest.TestCase):
                 with self.subTest(command=command):
                     self.assertTrue(self.denied(command, cwd=directory))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+            for command in (f'cd {sub} && python3 fd/0', f'pushd {sub} && python3 fd/0'):
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command, cwd=directory))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+                    self.assertNotIn(': relative script after an unproven directory change', self.reason)
             (sub / 'x.js').symlink_to('/dev/stdin')
             self.assertTrue(self.denied(f'cd {sub} && node x.js', cwd=directory))
             self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
@@ -323,7 +328,21 @@ class EnvDirectoryTests(unittest.TestCase):
                                f'-exec {interpreter} {script} \\;')
                     self.assertTrue(self.denied(command))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
-        self.assertFalse(self.denied('timeout 5 python3 scripts/x.py'), self.reason)
+            self.assertFalse(self.denied('timeout 5 python3 scripts/x.py', cwd=directory), self.reason)
+
+    def test_launcher_names_as_script_arguments_stay_admitted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for command in ('python3 scripts/x.py --label xargs',
+                            'python3 scripts/x.py parallel', 'node x.js -exec'):
+                with self.subTest(command=command):
+                    self.assertFalse(self.denied(command, cwd=directory), self.reason)
+            script = Path(directory) / 'p.js'
+            self.assertFalse(script.exists())
+            command = (f'timeout 5 find . -maxdepth 0 '
+                       f'-exec ln -sfn /dev/stdin {script} \\; '
+                       f'-exec node {script} \\;')
+            self.assertTrue(self.denied(command, cwd=directory))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
     def test_relative_directory_is_unproven_without_hook_cdpath(self):
         with tempfile.TemporaryDirectory() as directory:
