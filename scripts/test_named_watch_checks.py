@@ -246,7 +246,7 @@ class NamedWatchChecksTests(unittest.TestCase):
         valid['api'][JOBS][0]['body'] = {
             'total_count': 2, 'jobs': [valid['api'][JOBS][0]['body']['jobs'][0], extra]}
         self.outcome(0, data=valid)
-        mutations = [('name', None), ('name', ''), ('name', 7), ('name', 'other\\n'),
+        mutations = [('name', None), ('name', ''), ('name', 7), ('name', 'other\n'),
                      ('id', 72.0), ('id', True), ('id', 71), ('run_id', 41.0),
                      ('run_attempt', True), ('head_sha', 'c' * 40),
                      ('check_run_url', None), ('check_run_url', f'https://api.github.com/{CHECK}')]
