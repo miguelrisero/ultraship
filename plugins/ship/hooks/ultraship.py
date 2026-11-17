@@ -4675,10 +4675,13 @@ def pre(data):
                 elif (re.search(r'(?<!<)<<(?!<)', command) and '\\\n' in command
                       and (re.search(r'\bgh\b', separated) or re.search(r'\bgh\b', normalized))):
                     reason = 'heredoc with line continuation'
-                elif (thread_command_config(command) or '--config-env' in command
-                      or "$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
-                                             or re.search(r'\b(?:gh|api)\b', normalized))):
-                    reason = 'git config from the command line'
+                elif thread_command_config(command):
+                    reason = 'git configuration assignment'
+                elif '--config-env' in command:
+                    reason = 'git configuration environment option'
+                elif "$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
+                                           or re.search(r'\b(?:gh|api)\b', normalized)):
+                    reason = 'ANSI-C shell quoting'
         except Exception:
             reason = 'review-thread guard parse failure'
         if reason:

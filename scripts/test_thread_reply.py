@@ -1220,7 +1220,7 @@ class HookTests(unittest.TestCase):
                 with self.subTest(command=command, caller=caller):
                     result = self.decision(command, caller)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
+                    self.assertIn(' Rule: ANSI-C shell quoting.', result['permissionDecisionReason'])
 
     def test_graphql_read_route_refuses_other_documents_and_options(self):
         documents = ('mutation{createIssue{ id }}', 'subscription{events{id}}',
@@ -1304,11 +1304,18 @@ class HookTests(unittest.TestCase):
         )
         for command in commands:
             with self.subTest(command=command):
-                self.assertEqual(self.decision(command, '').get('permissionDecision'), 'deny')
+                result = self.decision(command, '')
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                if '--config-env' in command:
+                    self.assertIn(' Rule: git configuration environment option.', result['permissionDecisionReason'])
 
     def test_git_config_key_assignment_stays_refused(self):
-        self.assertEqual(self.decision('GIT_CONFIG_KEY_0=alias.x git log -1', '').get('permissionDecision'), 'deny')
-        self.assertEqual(self.decision('GIT_CONFIG_KEY_1=include.path git log -1', '').get('permissionDecision'), 'deny')
+        for command in ('GIT_CONFIG_KEY_0=alias.x git log -1',
+                        'GIT_CONFIG_KEY_1=include.path git log -1'):
+            with self.subTest(command=command):
+                result = self.decision(command, '')
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(' Rule: git configuration assignment.', result['permissionDecisionReason'])
 
     def test_git_config_value_assignment_stays_refused(self):
         self.assertEqual(self.decision("GIT_CONFIG_VALUE_0='!echo hi' git log -1", '').get('permissionDecision'), 'deny')
