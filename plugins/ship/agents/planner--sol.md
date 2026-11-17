@@ -1,7 +1,7 @@
 ---
 name: planner--sol
 description: Plan an important design or engineering decision with evidence, slices, and falsifiable premises.
-model: gpt-6.1-sol
+model: gpt-6.2-sol
 effort: high
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch
 ---

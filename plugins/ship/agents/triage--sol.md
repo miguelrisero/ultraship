@@ -1,7 +1,7 @@
 ---
 name: triage--sol
 description: Classify CI failures and review-bot threads during babysit.
-model: gpt-6.1-sol
+model: gpt-6.2-sol
 effort: high
 tools: Read, Grep, Glob, LSP, WebFetch, WebSearch
 ---

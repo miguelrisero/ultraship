@@ -11,7 +11,7 @@ spec.loader.exec_module(checks)
 
 class ModelRoutingTests(unittest.TestCase):
     def test_astra_and_luna_reviewer_names_pin_their_declared_models(self):
-        for seat, model in (('reviewer--astra', 'gpt-6-astra'),
+        for seat, model in (('reviewer--astra', 'gpt-6.2-astra'),
                             ('reviewer--luna', 'gpt-6-luna')):
             with self.subTest(seat=seat):
                 path = ROOT / 'plugins/ship/agents' / (seat + '.md')
@@ -40,11 +40,11 @@ class ModelRoutingTests(unittest.TestCase):
                 continue
             self.assertNotIn('claude-fable-', checks.frontmatter(path.read_text()).get('model', ''))
         sol = checks.frontmatter((ROOT / 'plugins/ship/agents/reviewer--sol.md').read_text())
-        self.assertEqual((sol['model'], sol['effort']), ('gpt-6.1-sol', 'high'))
+        self.assertEqual((sol['model'], sol['effort']), ('gpt-6.2-sol', 'high'))
         driver = checks.frontmatter((ROOT / 'plugins/ship/agents/driver.md').read_text())
         self.assertEqual((driver['model'], driver['effort']), ('claude-opus-5-5', 'xhigh'))
         low = checks.frontmatter((ROOT / 'plugins/ship/agents/driver--sol.md').read_text())
-        self.assertEqual((low['model'], low['effort']), ('gpt-6.1-sol', 'high'))
+        self.assertEqual((low['model'], low['effort']), ('gpt-6.2-sol', 'high'))
         self.assertIn('low', low['description'])
         for path in (ROOT / 'plugins/ship/agents').glob('*.md'):
             self.assertNotEqual(checks.frontmatter(path.read_text()).get('model', 'inherit'), 'inherit', path.name)

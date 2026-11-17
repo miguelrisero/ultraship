@@ -1,7 +1,7 @@
 ---
 name: reviewer--sol
 description: Slice review, finding selection, fix read, high and final panel seat, closing pass, and babysit breaker review at a frozen SHA.
-model: gpt-6.1-sol
+model: gpt-6.2-sol
 effort: high
 tools: Read, Grep, Glob, LSP, WebFetch, WebSearch
 ---

@@ -7,7 +7,7 @@ The other models reach Claude Code through [Better Shunt](https://github.com/mig
 | Model ID | Provider | Path |
 |---|---|---|
 | `claude-opus-5-5`, `claude-fable-5-2`, `claude-sonnet-5-5` | Anthropic | shunt passthrough |
-| `gpt-6.1-sol`, `gpt-6-luna`, `gpt-6-astra` | ChatGPT login (Codex) | shunt `responses` adapter |
+| `gpt-6.2-sol`, `gpt-6-luna`, `gpt-6.2-astra` | ChatGPT login (Codex) | shunt `responses` adapter |
 | `kimi-k3` | Kimi coding API | shunt `anthropic` adapter |
 
 shunt selects the route from the `model` field of each request.
@@ -140,14 +140,14 @@ api_key_env = "KIMI_CODING_API_KEY"
 api_key_header = "bearer"
 
 [[routes]]
-model = "gpt-6-astra"
+model = "gpt-6.2-astra"
 provider = "codex"
-upstream_model = "gpt-6-astra"
+upstream_model = "gpt-6.2-astra"
 
 [[routes]]
-model = "gpt-6.1-sol"
+model = "gpt-6.2-sol"
 provider = "codex"
-upstream_model = "gpt-6.1-sol"
+upstream_model = "gpt-6.2-sol"
 
 [[routes]]
 model = "gpt-6-luna"
@@ -160,7 +160,7 @@ provider = "kimi_subscription"
 upstream_model = "k3"
 ```
 
-> Verify: `gpt-6.1-sol` needs a ChatGPT plan that includes it. Run the test in [Verification](#verification) before you use the Sol agents.
+> Verify: `gpt-6.2-sol` needs a ChatGPT plan that includes it. Run the test in [Verification](#verification) before you use the Sol agents.
 
 Check the file:
 
@@ -187,8 +187,8 @@ Use these IDs in the Claude Code picker:
 | `claude-opus-5-5[1m]` | Claude Opus 5.5 (1M) |
 | `claude-sonnet-5-5[1m]` | Claude Sonnet 5.5 (1M) |
 | `haiku` | Claude Haiku (200k) |
-| `gpt-6-astra[1m]` | GPT-6 Astra (1M) |
-| `gpt-6.1-sol[1m]` | GPT-6.1 Sol (1M) |
+| `gpt-6.2-astra[1m]` | GPT-6.2 Astra (1M) |
+| `gpt-6.2-sol[1m]` | GPT-6.2 Sol (1M) |
 | `gpt-6-luna[1m]` | GPT-6 Luna (1M) |
 | `kimi-k3[1m]` | Kimi K3 (1M) |
 
@@ -253,15 +253,15 @@ Run shunt under a supervisor for daily use, for example a systemd user unit or l
          { "model": "claude-opus-5-5[1m]", "label": "Claude Opus 5.5 (1M)" },
          { "model": "claude-sonnet-5-5[1m]", "label": "Claude Sonnet 5.5 (1M)" },
          { "model": "haiku", "label": "Claude Haiku (200k)" },
-         { "model": "gpt-6-astra[1m]", "label": "GPT-6 Astra (1M)" },
-         { "model": "gpt-6.1-sol[1m]", "label": "GPT-6.1 Sol (1M)" },
+         { "model": "gpt-6.2-astra[1m]", "label": "GPT-6.2 Astra (1M)" },
+         { "model": "gpt-6.2-sol[1m]", "label": "GPT-6.2 Sol (1M)" },
          { "model": "gpt-6-luna[1m]", "label": "GPT-6 Luna (1M)" },
          { "model": "kimi-k3[1m]", "label": "Kimi K3 (1M)" }
        ]
      },
      "modelSettings": {
-       "gpt-6-astra": { "effortLevel": "high" },
-       "gpt-6.1-sol": { "effortLevel": "high" },
+       "gpt-6.2-astra": { "effortLevel": "high" },
+       "gpt-6.2-sol": { "effortLevel": "high" },
        "gpt-6-luna": { "effortLevel": "high" },
        "kimi-k3": { "effortLevel": "high" }
      }
@@ -301,7 +301,7 @@ Do not give a per-call `model` override.
 2. Send one request per routed model:
 
    ```bash
-   for m in gpt-6-astra gpt-6.1-sol gpt-6-luna kimi-k3; do printf '%s: ' "$m"; curl -s -D - -o /dev/null -X POST http://127.0.0.1:3001/v1/messages -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$m\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" | grep -iE '^(HTTP|x-gateway-upstream)' | tr -d '\r' | tr '\n' ' '; echo; done
+   for m in gpt-6.2-astra gpt-6.2-sol gpt-6-luna kimi-k3; do printf '%s: ' "$m"; curl -s -D - -o /dev/null -X POST http://127.0.0.1:3001/v1/messages -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$m\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" | grep -iE '^(HTTP|x-gateway-upstream)' | tr -d '\r' | tr '\n' ' '; echo; done
    ```
 
    Each line must show HTTP status 200 and an `x-gateway-upstream` header.
@@ -309,7 +309,7 @@ Do not give a per-call `model` override.
 3. Test one route through Claude Code:
 
    ```bash
-   claude -p --model gpt-6.1-sol 'Reply with the word ok.'
+   claude -p --model gpt-6.2-sol 'Reply with the word ok.'
    ```
 
 4. Test a native model:
