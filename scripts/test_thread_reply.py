@@ -452,6 +452,9 @@ sys.exit(response['code'])
             None, [], {}, {'nodes': [comment]},
             {**connection, 'pageInfo': None}, {**connection, 'pageInfo': []},
             {**connection, 'pageInfo': {}},
+            {**connection, 'pageInfo': {'hasNextPage': False}},
+            *[{**connection, 'pageInfo': {'hasNextPage': False, 'endCursor': value}}
+              for value in ('', 1, [], {})],
             *[{**connection, 'pageInfo': {'hasNextPage': value}} for value in (None, 0, 1, 'false', [], {})],
             {'pageInfo': connection['pageInfo']},
             *[{**connection, 'nodes': value} for value in (None, {}, 'comments', 1)],

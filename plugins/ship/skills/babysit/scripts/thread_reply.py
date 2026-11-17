@@ -50,9 +50,11 @@ def read_comments(thread, repository, number):
             if not belongs_to_pr(comment['url'], repository, number):
                 raise ValueError('comment URL does not belong to this PR')
             comments.append({'author': author, 'url': comment['url'], 'body': comment['body']})
+        after = page['endCursor']
+        if after is not None and (not isinstance(after, str) or not after):
+            raise ValueError('invalid comments cursor')
         if not page['hasNextPage']:
             break
-        after = page['endCursor']
         if not isinstance(after, str) or not after or after in cursors:
             raise ValueError('invalid comments cursor')
         cursors.add(after)
