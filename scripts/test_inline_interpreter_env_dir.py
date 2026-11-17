@@ -359,11 +359,13 @@ class EnvDirectoryTests(unittest.TestCase):
                 f'nice 2>/dev/null {find}',
                 f'timeout 5 2>err {find}',
                 f'env >/dev/null {find}',
+                f'sudo ionice -t xargs node {script}',
+                f'doas -u node /usr/bin/{find}',
             ):
                 with self.subTest(command=command):
                     self.assertTrue(self.denied(command, cwd=directory))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
-            for command in ('sudo -Eu root python3 scripts/x.py --label xargs',
+            for command in ('sudo -u root python3 scripts/x.py --label xargs',
                             'stdbuf -oL python3 scripts/x.py parallel'):
                 with self.subTest(command=command):
                     self.assertFalse(self.denied(command, cwd=directory), self.reason)
