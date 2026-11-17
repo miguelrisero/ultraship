@@ -34,7 +34,7 @@ class ModelRoutingTests(unittest.TestCase):
         self.assertIn('| `ship:reviewer--fable` | `claude-opus-5-5` | xhigh |', roster)
         self.assertIn('| `ship:verifier--fable` | `claude-opus-5-5` | xhigh |', roster)
         panels = (ROOT / 'plugins/ship/skills/panel/references/panels.md').read_text()
-        self.assertIn('`reviewer--fable`, `reviewer--kimi`', panels)
+        self.assertIn('`reviewer--fable`, `reviewer--luna`', panels)
         self.assertIn('`reviewer--astra` takes the seat', panels)
         for path in (ROOT / 'plugins/ship/agents').glob('*.md'):
             if path.stem.endswith('--fable52'):
@@ -55,12 +55,13 @@ class ModelRoutingTests(unittest.TestCase):
             self.assertNotEqual(checks.frontmatter(path.read_text()).get('model', 'inherit'), 'inherit', path.name)
         self.assertEqual(checks.check('HEAD'), [])
 
-    def test_sol_validator_requires_explicit_xhigh_and_keeps_61_high_compatibility(self):
+    def test_sol_validator_requires_explicit_xhigh_and_rejects_retired_models(self):
         cases = (
             ('gpt-6.2-sol', 'xhigh', []),
             ('gpt-6.2-sol', None, ['gpt-6.2-sol agents require explicit xhigh effort']),
-            ('gpt-6.1-sol', 'high', []),
-            ('gpt-6.1-sol', None, []),
+            ('gpt-6.1-sol', 'high', ['unsupported model: gpt-6.1-sol']),
+            ('gpt-6-astra', None, ['unsupported model: gpt-6-astra']),
+            ('kimi-k3', None, ['unsupported model: kimi-k3']),
             ('unknown-model', 'xhigh', ['unsupported model: unknown-model']),
         )
         cases += tuple(
@@ -68,7 +69,7 @@ class ModelRoutingTests(unittest.TestCase):
             for effort in ('low', 'medium', 'high', 'max')
         )
         cases += tuple(
-            ('gpt-6.1-sol', effort, ['sol agents run at high'])
+            ('gpt-6.1-sol', effort, ['unsupported model: gpt-6.1-sol'])
             for effort in ('low', 'medium', 'xhigh', 'max')
         )
         for model, effort, errors in cases:
