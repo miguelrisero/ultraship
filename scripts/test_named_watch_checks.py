@@ -173,10 +173,16 @@ class NamedWatchChecksTests(unittest.TestCase):
                     return fields[19]
 
                 start = owned_identity()
+                deadline = time.monotonic() + 10
                 try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    # An unreaped leader prevents reuse of its process-group identity during cleanup.
+                    # WNOWAIT retains the leader identity even when Bash exits before its descendants.
+                    while os.waitid(os.P_PID, process.pid,
+                                    os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise subprocess.TimeoutExpired(args, 10)
+                        time.sleep(min(0.01, remaining))
+                finally:
                     try:
                         self.assertEqual(owned_identity(), start)
                         os.killpg(process.pid, signal.SIGTERM)
@@ -191,7 +197,6 @@ class NamedWatchChecksTests(unittest.TestCase):
                             os.killpg(process.pid, signal.SIGKILL)
                     finally:
                         process.wait()
-                    raise
                 stdout.seek(0)
                 stderr.seek(0)
                 result = subprocess.CompletedProcess(args, process.returncode, stdout.read(), stderr.read())
