@@ -29,6 +29,32 @@ class EnvDirectoryTests(unittest.TestCase):
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
+    def test_python_version_after_independent_pipeline_is_admitted(self):
+        for command in (
+            'python3 --version',
+            'printf sample | cat; python3 --version',
+            'printf sample | cat && python3 --version',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_python_version_exemption_preserves_program_refusals(self):
+        for command, rule in (
+            ('printf sample | python3', 'inline interpreter code rule (program from a pipe)'),
+            ('printf sample | python3 -', 'inline interpreter code rule (program from a pipe)'),
+            ('python3 --version < input', 'inline interpreter code rule (program from a pipe)'),
+            ('printf sample | cat; python3 --version < input',
+             'inline interpreter code rule (program from a pipe)'),
+            ('printf sample | cat; python3 --version -',
+             'inline interpreter code rule (program from a pipe)'),
+            ("python3 --version -c 'print(1)'", 'process-capable python -c rule'),
+            ("printf sample | cat; python3 --version -c 'print(1)'",
+             'process-capable python -c rule'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertEqual(self.reason.split('Rule: ', 1)[1], rule + '.')
+
     def test_env_directory_admits_verbatim_repository_script(self):
         command = 'env -C /home/miguel/.vk-worktrees/.bettercoding-workspaces/188e-pati-pr-backlog/lanes/pr-7890/backend/api API_ENVIRONMENT=testing uv run --frozen python scripts/integration_shards.py --refresh'
         isdir = ultraship.os.path.isdir
