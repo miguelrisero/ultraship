@@ -344,6 +344,30 @@ class EnvDirectoryTests(unittest.TestCase):
             self.assertTrue(self.denied(command, cwd=directory))
             self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
+    def test_launchers_behind_unknown_wrappers_and_redirections_are_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / 'p.js'
+            self.assertFalse(script.exists())
+            find = (f'find . -maxdepth 0 -exec ln -sfn /dev/stdin {script} \\; '
+                    f'-exec node {script} \\;')
+            for command in (
+                f'sudo -Eu root {find}',
+                f'env -iu X {find}',
+                f'sudo -Eu root xargs node {script}',
+                f'stdbuf -oL {find}',
+                f'ionice -c3 {find}',
+                f'nice 2>/dev/null {find}',
+                f'timeout 5 2>err {find}',
+                f'env >/dev/null {find}',
+            ):
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command, cwd=directory))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+            for command in ('sudo -Eu root python3 scripts/x.py --label xargs',
+                            'stdbuf -oL python3 scripts/x.py parallel'):
+                with self.subTest(command=command):
+                    self.assertFalse(self.denied(command, cwd=directory), self.reason)
+
     def test_relative_directory_is_unproven_without_hook_cdpath(self):
         with tempfile.TemporaryDirectory() as directory:
             sub = Path(directory) / 'sub'
