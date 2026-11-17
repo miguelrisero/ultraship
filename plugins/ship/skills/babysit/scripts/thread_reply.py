@@ -27,10 +27,17 @@ class PageProcess:
     def __init__(self):
         started = monotonic()
         self.work_deadline = started + 30
+        self.transport_deadline = started + 29
         self.deadline = started + 40
+        self.overhead = 0
         self.child, self.pid, self.reaped = None, None, False
         self.environment = {key: value for key, value in os.environ.items()
                             if not key.startswith('GIT_') and key not in ('GH_REPO', 'GH_HOST')}
+
+    def identity_capability(self):
+        if not callable(getattr(os, 'waitid', None)) or any(
+                not isinstance(getattr(os, name, None), int) for name in ('P_PID', 'WEXITED', 'WNOHANG', 'WNOWAIT')):
+            raise CleanupUnsettled('child identity observation is unavailable')
 
     def reap(self, child, deadline):
         remaining = min(deadline, self.deadline) - monotonic()
@@ -59,14 +66,18 @@ class PageProcess:
         return True
 
     def cleanup(self, child, pid):
+        entered = monotonic()
         try:
             if not self.live(child, pid):
                 return
+            self.overhead += max(0, entered - self.transport_deadline)
             if monotonic() >= self.deadline:
                 raise CleanupUnsettled('cleanup reserve exhausted')
             child.terminate()
-            grace = monotonic() + 5
-            if grace + 5 > self.deadline:
+            term_finished = monotonic()
+            self.overhead += term_finished - entered
+            grace = term_finished + 5
+            if self.overhead > 1 or grace + 5 > self.deadline:
                 raise CleanupUnsettled('cleanup reserve exhausted after TERM')
             try:
                 self.reap(child, grace)
@@ -85,21 +96,24 @@ class PageProcess:
             self.reap(child, reap_deadline)
         except CleanupUnsettled:
             raise
-        except (OSError, subprocess.SubprocessError, ValueError):
+        except (OSError, subprocess.SubprocessError, ValueError, AttributeError, TypeError, NotImplementedError):
             raise CleanupUnsettled('child cleanup failed') from None
 
     def run(self, arguments, cwd):
         if self.child is not None and not self.reaped:
             raise CleanupUnsettled('previous child remains owned')
-        remaining = self.work_deadline - monotonic()
-        if remaining <= 0 or self.deadline - monotonic() <= 10:
+        self.identity_capability()
+        started = monotonic()
+        remaining = self.transport_deadline - started
+        if remaining <= 0 or self.overhead >= 1 or remaining + 11 > self.deadline - started:
             raise ValueError('thread page work budget exhausted')
         child = Popen(arguments, cwd=cwd, env=self.environment, stdin=subprocess.DEVNULL,
-                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False)
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
         self.child, self.pid, self.reaped = child, child.pid, False
+        self.overhead += monotonic() - started
         try:
-            remaining = self.work_deadline - monotonic()
-            if remaining <= 0:
+            remaining = self.transport_deadline - monotonic()
+            if remaining <= 0 or self.overhead >= 1:
                 raise ValueError('thread page work budget exhausted')
             try:
                 stdout, _ = child.communicate(timeout=remaining)
@@ -110,9 +124,12 @@ class PageProcess:
             self.reaped = True
             if child.returncode:
                 raise ValueError('thread page command failed')
-            if monotonic() >= self.work_deadline:
+            if monotonic() >= self.transport_deadline:
                 raise ValueError('thread page work budget exhausted')
-            return stdout
+            try:
+                return stdout.decode('utf-8')
+            except UnicodeDecodeError:
+                raise ValueError('invalid thread page output encoding') from None
         finally:
             cleanup_error = None
             try:

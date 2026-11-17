@@ -553,7 +553,7 @@ class ThreadPageTests(unittest.TestCase):
         children = []
         def spawn(vector, **options):
             child = Mock(pid=123456, returncode=0, stdout=io.StringIO(), stderr=io.StringIO())
-            child.communicate.return_value = (outputs[len(children)], '')
+            child.communicate.return_value = (outputs[len(children)].encode('utf-8'), b'')
             children.append(child)
             return child
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -595,6 +595,8 @@ class ThreadPageTests(unittest.TestCase):
              '-f', 'owner=o', '-f', 'name=r', '-F', 'pr=7', '-f', 'after=' + cursor]])
         for call in popen.call_args_list:
             self.assertIs(call.kwargs['shell'], False)
+            self.assertNotIn('text', call.kwargs)
+            self.assertNotIn('encoding', call.kwargs)
             self.assertNotIn('start_new_session', call.kwargs)
             self.assertNotIn('process_group', call.kwargs)
             self.assertEqual(call.kwargs['stdin'], subprocess.DEVNULL)
@@ -697,19 +699,20 @@ class ThreadPageTests(unittest.TestCase):
             def communicate(timeout):
                 calls.append(timeout)
                 now[0] += 4
-                return outputs[index], ''
+                return outputs[index].encode('utf-8'), b''
             child.communicate.side_effect = communicate
             return child
         with patch.object(page_helper, 'Popen', side_effect=spawn), \
                 patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]):
             page_helper.thread_page(['7'])
-        self.assertEqual(calls, [30, 26, 22])
+        self.assertEqual(calls, [29, 25, 21])
 
     def lifecycle(self, term_latency=0, term_error=False, wait_exit=False, identity=True, start=0):
         now, events = [start], []
         child = Mock(pid=123456, returncode=None, stdout=io.StringIO(), stderr=io.StringIO())
         process = object.__new__(page_helper.PageProcess)
-        process.work_deadline, process.deadline = 30, 40
+        process.work_deadline, process.transport_deadline, process.deadline = 30, 29, 40
+        process.overhead = 0
         process.child, process.pid, process.reaped = child, child.pid, False
         def terminate():
             events.append(('TERM', now[0]))
@@ -737,9 +740,9 @@ class ThreadPageTests(unittest.TestCase):
         return events, error, child
 
     def test_lifecycle_preserves_full_post_term_grace_and_bounded_reap(self):
-        events, error, _ = self.lifecycle(term_latency=2, start=25)
+        events, error, _ = self.lifecycle(term_latency=0.5, start=29)
         self.assertIsNone(error)
-        self.assertEqual(events, [('TERM', 25), ('wait', 27, 5), ('KILL', 32), ('wait', 32, 5)])
+        self.assertEqual(events, [('TERM', 29), ('wait', 29.5, 5), ('KILL', 34.5), ('wait', 34.5, 5)])
 
     def test_lifecycle_insufficient_reserve_and_term_failure_never_kill(self):
         for options in ({'term_latency': 1, 'start': 30}, {'term_error': True, 'start': 25}, {'start': 40}):
@@ -768,7 +771,7 @@ class ThreadPageTests(unittest.TestCase):
             raise subprocess.TimeoutExpired('synthetic', timeout)
         def wait(timeout):
             events.append(('wait', now[0], timeout))
-            if now[0] < 35:
+            if now[0] < 34:
                 now[0] += timeout
                 raise subprocess.TimeoutExpired('synthetic', timeout)
             child.returncode = -9
@@ -784,7 +787,7 @@ class ThreadPageTests(unittest.TestCase):
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = page_helper.main(['page', '7'])
         self.assertEqual((code, out.getvalue()), (1, ''))
-        self.assertEqual(events, [('TERM', 30), ('wait', 30, 5), ('KILL', 35), ('wait', 35, 5)])
+        self.assertEqual(events, [('TERM', 29), ('wait', 29, 5), ('KILL', 34), ('wait', 34, 5)])
         self.assertTrue(err.getvalue().startswith('failed: '))
 
     def test_page_empty_final_page_and_total_expiry(self):
@@ -822,7 +825,7 @@ class ThreadPageTests(unittest.TestCase):
                         child.returncode = 0
                         child.stdout = Mock()
                         child.stdout.close.side_effect = OSError('private stream error')
-                        return str(ROOT.resolve()) + '\n', ''
+                        return (str(ROOT.resolve()) + '\n').encode('utf-8'), b''
                     now[0] += timeout
                     if failure == 'cached':
                         child.returncode = 0
@@ -832,7 +835,7 @@ class ThreadPageTests(unittest.TestCase):
                     if failure == 'term':
                         raise OSError('private TERM error')
                     if failure == 'reserve':
-                        now[0] += 1
+                        now[0] += 2
                 def wait(timeout):
                     if failure == 'wait':
                         raise OSError('private wait error')
@@ -846,16 +849,22 @@ class ThreadPageTests(unittest.TestCase):
                 child.terminate.side_effect = terminate
                 child.kill.side_effect = kill
                 child.wait.side_effect = wait
-                if failure != 'stream':
-                    child.stdout = Mock()
-                    child.stdout.close.side_effect = OSError('secondary close error')
                 original = page_helper.PageProcess.__init__
                 def initialize(process):
                     original(process)
                     processes.append(process)
                 state = Mock(si_pid=123457) if failure == 'identity' else None
+                cleanup_errors = []
+                original_cleanup = page_helper.PageProcess.cleanup
+                def cleanup(owner, process, pid):
+                    try:
+                        return original_cleanup(owner, process, pid)
+                    except page_helper.CleanupUnsettled as error:
+                        cleanup_errors.append(error)
+                        raise
                 out, err = io.StringIO(), io.StringIO()
                 with patch.object(page_helper.PageProcess, '__init__', initialize), \
+                        patch.object(page_helper.PageProcess, 'cleanup', cleanup), \
                         patch.object(page_helper, 'Popen', return_value=child), \
                         patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
                         patch.object(page_helper.os, 'waitid', return_value=state,
@@ -868,6 +877,9 @@ class ThreadPageTests(unittest.TestCase):
                 self.assertIs(processes[0].child, child)
                 self.assertEqual(processes[0].pid, 123456)
                 self.assertEqual(processes[0].reaped, failure == 'stream')
+                self.assertEqual(len(cleanup_errors), 0 if failure == 'stream' else 1)
+                if cleanup_errors:
+                    self.assertIsInstance(cleanup_errors[0], page_helper.CleanupUnsettled)
                 if failure in ('term', 'wait', 'identity', 'observation', 'cached', 'stream', 'reserve'):
                     child.kill.assert_not_called()
                 if failure in ('identity', 'observation', 'cached', 'stream'):
@@ -879,6 +891,7 @@ class ThreadPageTests(unittest.TestCase):
         child = Mock(pid=123456, returncode=None)
         process.child, process.pid, process.reaped = child, child.pid, False
         process.deadline = 40
+        process.overhead = 0
         def wait(timeout):
             child.returncode = 0
             return 0
@@ -899,7 +912,8 @@ class ThreadPageTests(unittest.TestCase):
         process = object.__new__(page_helper.PageProcess)
         child = Mock(pid=123456, returncode=None)
         process.child, process.pid, process.reaped = child, child.pid, False
-        process.deadline = 40
+        process.deadline, process.transport_deadline = 40, 29
+        process.overhead = 0
         def wait(timeout):
             now[0] += timeout
             child.pid = 123457
@@ -915,20 +929,127 @@ class ThreadPageTests(unittest.TestCase):
         self.assertEqual(process.pid, 123456)
 
     def test_page_transport_failures_hide_child_output(self):
-        for failure in ('spawn', 'exit', 'json'):
-            child = Mock(pid=123456, returncode=1 if failure == 'exit' else 0,
-                         stdout=io.StringIO(), stderr=io.StringIO())
-            child.communicate.return_value = ('private malformed payload', 'private stderr')
+        for failure in ('spawn', 'exit', 'json', 'encoding'):
+            children = []
+            outputs = [(str(ROOT.resolve()) + '\n').encode(), b'https://github.com/o/r\n',
+                       b'\xff' if failure == 'encoding' else b'private malformed payload']
+            def spawn(vector, **options):
+                if failure == 'spawn':
+                    raise OSError('private spawn error')
+                child = Mock(pid=123456, returncode=1 if failure == 'exit' else 0,
+                             stdout=io.BytesIO(), stderr=io.BytesIO())
+                child.communicate.return_value = (outputs[len(children)], b'private stderr')
+                children.append(child)
+                return child
             out, err = io.StringIO(), io.StringIO()
             with patch.object(page_helper, 'monotonic', return_value=0), \
-                    patch.object(page_helper, 'Popen', side_effect=OSError('private spawn error')
-                                 if failure == 'spawn' else None, return_value=child), \
+                    patch.object(page_helper, 'Popen', side_effect=spawn) as popen, \
                     contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 code = page_helper.main(['page', '7'])
             self.assertEqual((code, out.getvalue()), (1, ''))
             self.assertEqual(err.getvalue(), 'failed: thread page unavailable.\n')
-            child.terminate.assert_not_called()
-            child.kill.assert_not_called()
+            self.assertEqual(popen.call_count, 3 if failure in ('json', 'encoding') else 1)
+            for child in children:
+                child.terminate.assert_not_called()
+                child.kill.assert_not_called()
+
+    def test_page_identity_capability_blocks_child_start(self):
+        for capability in (None, 'unavailable'):
+            with self.subTest(capability=capability), \
+                    patch.object(page_helper.os, 'waitid', capability):
+                code, out, err, popen, _ = self.invoke(['7'], [])
+                self.assertEqual((code, out, err), (
+                    1, '', 'failed: thread page unavailable. Cleanup unsettled.\n'))
+                popen.assert_not_called()
+
+    def test_page_empty_progress_and_nonexistent_root_fail_closed(self):
+        response = self.response()
+        connection = response['data']['repository']['pullRequest']['reviewThreads']
+        connection['nodes'] = []
+        connection['pageInfo'] = {'hasNextPage': True, 'endCursor': 'next'}
+        code, out, err, _, _ = self.invoke(['7'], [
+            str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(response)])
+        self.assertEqual((code, out, err), (1, '', 'failed: thread page unavailable.\n'))
+        with tempfile.TemporaryDirectory() as directory:
+            absent = str(Path(directory) / 'absent')
+            code, out, err, popen, _ = self.invoke(['7'], [absent + '\n'])
+        self.assertEqual((code, out, err, popen.call_count), (
+            1, '', 'failed: thread page unavailable.\n', 1))
+
+    def test_cleanup_primary_error_survives_secondary_stream_error(self):
+        now = [0]
+        process = page_helper.PageProcess
+        instances = []
+        child = Mock(pid=123456, returncode=None, stdout=Mock(), stderr=Mock())
+        child.stdout.close.side_effect = OSError('secondary close error')
+        child.terminate.side_effect = OSError('primary TERM error')
+        def communicate(timeout):
+            now[0] += timeout
+            raise subprocess.TimeoutExpired('synthetic', timeout)
+        child.communicate.side_effect = communicate
+        original = process.__init__
+        def initialize(instance):
+            original(instance)
+            instances.append(instance)
+        with patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(page_helper, 'Popen', return_value=child), \
+                patch.object(page_helper.os, 'waitid', return_value=None), \
+                patch.object(process, '__init__', initialize):
+            owner = process()
+            with self.assertRaisesRegex(page_helper.CleanupUnsettled, 'child cleanup failed'):
+                owner.run(['git', 'rev-parse', '--show-toplevel'], ROOT)
+        self.assertIs(instances[0].child, child)
+        self.assertFalse(instances[0].reaped)
+        child.kill.assert_not_called()
+
+    def test_transport_overhead_below_and_above_allowance(self):
+        for latency, expected_unsettled in ((0.125, False), (0.5, True)):
+            with self.subTest(latency=latency):
+                now, events, owners = [0], [], []
+                child = Mock(pid=123456, returncode=None, stdout=io.BytesIO(), stderr=io.BytesIO())
+                def spawn(vector, **options):
+                    now[0] += latency
+                    return child
+                def communicate(timeout):
+                    now[0] += timeout + latency
+                    raise subprocess.TimeoutExpired('synthetic', timeout)
+                def terminate():
+                    events.append(('TERM', now[0]))
+                    now[0] += latency
+                def wait(timeout):
+                    events.append(('wait', now[0], timeout))
+                    if any(event[0] == 'KILL' for event in events):
+                        child.returncode = -9
+                        return -9
+                    now[0] += timeout
+                    raise subprocess.TimeoutExpired('synthetic', timeout)
+                child.communicate.side_effect = communicate
+                child.terminate.side_effect = terminate
+                child.wait.side_effect = wait
+                child.kill.side_effect = lambda: events.append(('KILL', now[0]))
+                original = page_helper.PageProcess.__init__
+                def initialize(owner):
+                    original(owner)
+                    owners.append(owner)
+                out, err = io.StringIO(), io.StringIO()
+                with patch.object(page_helper.PageProcess, '__init__', initialize), \
+                        patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                        patch.object(page_helper, 'Popen', side_effect=spawn), \
+                        patch.object(page_helper.os, 'waitid', return_value=None), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = page_helper.main(['page', '7'])
+                self.assertEqual((code, out.getvalue()), (1, ''))
+                self.assertEqual(err.getvalue(), 'failed: thread page unavailable.'
+                                 + (' Cleanup unsettled.' if expected_unsettled else '') + '\n')
+                self.assertIs(owners[0].child, child)
+                self.assertLessEqual(now[0], 40)
+                if expected_unsettled:
+                    child.kill.assert_not_called()
+                    self.assertFalse(owners[0].reaped)
+                else:
+                    self.assertEqual(events, [('TERM', 29.125), ('wait', 29.25, 5),
+                                              ('KILL', 34.25), ('wait', 34.25, 5)])
+                    self.assertTrue(owners[0].reaped)
 
     def test_page_synthetic_git_and_gh_path_stubs(self):
         with tempfile.TemporaryDirectory() as directory:
