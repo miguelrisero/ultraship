@@ -2773,6 +2773,7 @@ def shell_changes_paths(tokens):
 
 
 def shell_launches_commands(tokens, command_positions):
+    tokens = list(shell_without_redirections(tokens))
     for start, token in enumerate(tokens):
         if token[2] not in command_positions:
             continue
@@ -2787,8 +2788,6 @@ def shell_launches_commands(tokens, command_positions):
             if wrapper and word.startswith('-'):
                 skip = word in WRAPPERS[wrapper]
                 continue
-            if wrapper == 'timeout' and re.fullmatch(r'[\d.]+[smhd]?', word):
-                continue
             base = os.path.basename(word)
             if base in {'xargs', 'parallel'}:
                 return True
@@ -2798,7 +2797,8 @@ def shell_launches_commands(tokens, command_positions):
             if base == 'find' and any(word[1] in {'-exec', '-execdir', '-ok', '-okdir'}
                                       for word in tokens[index + 1:]):
                 return True
-            break
+            if interpreter_name(word):
+                break
     return False
 
 
