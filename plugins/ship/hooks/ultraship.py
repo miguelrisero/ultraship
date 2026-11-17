@@ -2774,6 +2774,13 @@ def shell_changes_paths(tokens):
 
 def shell_launches_commands(tokens, command_positions):
     tokens = list(shell_without_redirections(tokens))
+    last_interpreter = next((index for index in range(len(tokens) - 1, -1, -1)
+                             if interpreter_name(tokens[index][1])), len(tokens))
+    for index, token in enumerate(tokens[:last_interpreter]):
+        base = os.path.basename(token[1])
+        if base in {'xargs', 'parallel'} or base == 'find' and any(
+                word[1] in {'-exec', '-execdir', '-ok', '-okdir'} for word in tokens[index + 1:]):
+            return True
     for start, token in enumerate(tokens):
         if token[2] not in command_positions:
             continue
