@@ -1,5 +1,6 @@
 """Thread ownership checks and the Bash boundary for review-thread writes."""
 import contextlib
+import copy
 import importlib.util
 import io
 import json
@@ -9,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / 'plugins/ship/skills/babysit/scripts/thread_reply.py'
@@ -531,6 +532,453 @@ sys.exit(response['code'])
                 self.assertEqual(calls, [self.call(LOOKUP)] + [self.call(query, after=cursor) for cursor in cursors])
 
 
+page_spec = importlib.util.spec_from_file_location('thread_page_helper', HELPER)
+page_helper = importlib.util.module_from_spec(page_spec)
+page_spec.loader.exec_module(page_helper)
+PAGE_QUERY = ('query($owner:String!,$name:String!,$pr:Int!,$after:String){'
+              'repository(owner:$owner,name:$name){nameWithOwner pullRequest(number:$pr){number '
+              'reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}'
+              'nodes{id isResolved isOutdated path line comments(first:1){nodes{author{login}url body}}}}}}}')
+
+
+class ThreadPageTests(unittest.TestCase):
+    def response(self):
+        return {'data': {'repository': {'nameWithOwner': 'o/r', 'pullRequest': {
+            'number': 7, 'reviewThreads': {'pageInfo': {'hasNextPage': False, 'endCursor': None},
+            'nodes': [{'id': 'PRRT_example', 'isResolved': False, 'isOutdated': False,
+                       'path': 'example.py', 'line': 3, 'comments': {'nodes': [
+                           {'author': {'login': 'reviewer'}, 'url': COMMENT, 'body': 'First\nFull preview'}]}}]}}}}}
+
+    def invoke(self, arguments, outputs, clock=None):
+        children = []
+        def spawn(vector, **options):
+            child = Mock(pid=123456, returncode=0, stdout=io.StringIO(), stderr=io.StringIO())
+            child.communicate.return_value = (outputs[len(children)], '')
+            children.append(child)
+            return child
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(page_helper, 'Popen', side_effect=spawn) as popen, \
+                patch.object(page_helper, 'monotonic', side_effect=clock or (lambda: 0)), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = page_helper.main(['page', *arguments])
+        return code, stdout.getvalue(), stderr.getvalue(), popen, children
+
+    def test_page_uses_fixed_vectors_and_sanitized_environment(self):
+        root = str(ROOT.resolve())
+        response = self.response()
+        nodes = response['data']['repository']['pullRequest']['reviewThreads']['nodes']
+        resolved = copy.deepcopy(nodes[0])
+        resolved.update(id='PRRT_resolved', isResolved=True, isOutdated=True, line=None)
+        resolved['comments']['nodes'][0]['author'] = None
+        nodes.append(resolved)
+        cursor = '@cursor/+==;$(echo inert)'
+        with patch.dict(os.environ, {'GH_REPO': 'other/repo', 'GH_HOST': 'other.invalid',
+                                     'GIT_DIR': '/inert/git', 'GIT_CONFIG_COUNT': '1'}):
+            code, out, err, popen, children = self.invoke(
+                ['7', cursor], [root + '\n', 'https://github.com/o/r.git\n', json.dumps(response)])
+        self.assertEqual((code, err), (0, ''))
+        result = json.loads(out)
+        self.assertEqual(result, {'repository': 'o/r', 'number': 7,
+                                 'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                                 'threads': [
+                                     {'id': 'PRRT_example', 'isResolved': False, 'isOutdated': False,
+                                      'path': 'example.py', 'line': 3, 'comments': [
+                                          {'author': 'reviewer', 'url': COMMENT, 'body': 'First\nFull preview'}]},
+                                     {'id': 'PRRT_resolved', 'isResolved': True, 'isOutdated': True,
+                                      'path': 'example.py', 'line': None, 'comments': [
+                                          {'author': 'ghost', 'url': COMMENT, 'body': 'First\nFull preview'}]}]})
+        vectors = [call.args[0] for call in popen.call_args_list]
+        self.assertEqual(vectors, [
+            ['git', 'rev-parse', '--show-toplevel'],
+            ['git', 'config', '--local', '--get-all', 'remote.origin.url'],
+            ['gh', 'api', '--hostname', 'github.com', 'graphql', '-f', 'query=' + PAGE_QUERY,
+             '-f', 'owner=o', '-f', 'name=r', '-F', 'pr=7', '-f', 'after=' + cursor]])
+        for call in popen.call_args_list:
+            self.assertIs(call.kwargs['shell'], False)
+            self.assertNotIn('start_new_session', call.kwargs)
+            self.assertNotIn('process_group', call.kwargs)
+            self.assertEqual(call.kwargs['stdin'], subprocess.DEVNULL)
+            self.assertFalse(set(call.kwargs['env']) & {'GH_REPO', 'GH_HOST'})
+            self.assertFalse(any(key.startswith('GIT_') for key in call.kwargs['env']))
+        self.assertEqual(popen.call_args_list[0].kwargs['cwd'], Path.cwd().resolve())
+        self.assertEqual([call.kwargs['cwd'] for call in popen.call_args_list[1:]], [ROOT.resolve()] * 2)
+        for child in children:
+            child.terminate.assert_not_called()
+            child.kill.assert_not_called()
+
+    def test_page_rejects_inputs_before_starting_children(self):
+        for arguments in ([], ['0'], ['-1'], ['01'], ['1.0'], ['2147483648'], ['99999999999'],
+                          ['7', ''], ['7', '\x00'], ['7', 'cursor', 'extra'],
+                          ['--host', 'example.invalid'], ['--query', 'query{viewer{login}}']):
+            with self.subTest(arguments=arguments):
+                code, out, err, popen, _ = self.invoke(arguments, [])
+                self.assertEqual((code, out), (1, ''))
+                self.assertTrue(err.startswith('failed: '))
+                popen.assert_not_called()
+
+    def test_page_validates_local_origin_before_github_access(self):
+        root = str(ROOT.resolve()) + '\n'
+        for origin in ('', 'https://github.com/o/r\nhttps://github.com/o/other\n',
+                       'git@github.com:o/r.git\n', 'https://user:secret@github.com/o/r\n',
+                       'https://example.invalid/o/r\n', 'https://github.com/o/r?token=secret\n'):
+            with self.subTest(origin=origin):
+                code, out, err, popen, _ = self.invoke(['7'], [root, origin])
+                self.assertEqual((code, out, popen.call_count), (1, '', 2))
+                self.assertNotIn('secret', err)
+        for root_text in ('', 'relative/path\n', '/one\n/two\n'):
+            with self.subTest(root=root_text):
+                code, out, _, popen, _ = self.invoke(['7'], [root_text])
+                self.assertEqual((code, out, popen.call_count), (1, '', 1))
+
+    def test_page_accepts_boundary_pr_and_progressing_cursor(self):
+        response = self.response()
+        pull = response['data']['repository']['pullRequest']
+        pull['number'] = 2147483647
+        pull['reviewThreads']['pageInfo'] = {'hasNextPage': True, 'endCursor': 'next/+=='}
+        code, out, err, popen, _ = self.invoke(['2147483647'], [
+            str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(response)])
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(json.loads(out)['pageInfo'], {'hasNextPage': True, 'endCursor': 'next/+=='})
+        self.assertEqual(popen.call_args.args[0][-2:], ['-F', 'pr=2147483647'])
+
+    def test_page_malformed_response_emits_zero_partial_threads(self):
+        cases = [None, [], {}, {'errors': []}, {'data': None}]
+        base = self.response()
+        for repository in ('other/repo', None, 1):
+            value = copy.deepcopy(base)
+            value['data']['repository']['nameWithOwner'] = repository
+            cases.append(value)
+        for number in (8, '7', True):
+            value = copy.deepcopy(base)
+            value['data']['repository']['pullRequest']['number'] = number
+            cases.append(value)
+        for page in ({}, None, {'hasNextPage': 1, 'endCursor': None},
+                     {'hasNextPage': True, 'endCursor': None}, {'hasNextPage': True, 'endCursor': 'same'},
+                     {'hasNextPage': False, 'endCursor': ''}, {'hasNextPage': False, 'endCursor': 1}):
+            value = copy.deepcopy(base)
+            value['data']['repository']['pullRequest']['reviewThreads']['pageInfo'] = page
+            cases.append(value)
+        for key, bad in (('id', 'other'), ('id', None), ('isResolved', 1), ('isOutdated', None),
+                         ('path', ''), ('line', True), ('line', 0), ('comments', {})):
+            value = copy.deepcopy(base)
+            nodes = value['data']['repository']['pullRequest']['reviewThreads']['nodes']
+            invalid = copy.deepcopy(nodes[0])
+            invalid['id'] = 'PRRT_second'
+            invalid[key] = bad
+            nodes.append(invalid)
+            cases.append(value)
+        for field, bad in (('author', {}), ('author', {'login': ''}), ('body', None),
+                           ('url', 'https://github.com/foreign/repo/pull/7#discussion_r1')):
+            value = copy.deepcopy(base)
+            value['data']['repository']['pullRequest']['reviewThreads']['nodes'][0]['comments']['nodes'][0][field] = bad
+            cases.append(value)
+        for bad in (None, {}, 'threads'):
+            value = copy.deepcopy(base)
+            value['data']['repository']['pullRequest']['reviewThreads']['nodes'] = bad
+            cases.append(value)
+        value = copy.deepcopy(base)
+        nodes = value['data']['repository']['pullRequest']['reviewThreads']['nodes']
+        nodes.append(copy.deepcopy(nodes[0]))
+        cases.append(value)
+        for response in cases:
+            with self.subTest(response=response):
+                code, out, err, _, _ = self.invoke(['7', 'same'], [
+                    str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(response)])
+                self.assertEqual((code, out), (1, ''))
+                self.assertTrue(err.startswith('failed: '))
+
+    def test_page_shared_deadline_reduces_each_child_timeout(self):
+        now = [0]
+        calls = []
+        outputs = [str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(self.response())]
+        def spawn(vector, **options):
+            child = Mock(pid=123456, returncode=0, stdout=io.StringIO(), stderr=io.StringIO())
+            index = len(calls)
+            def communicate(timeout):
+                calls.append(timeout)
+                now[0] += 4
+                return outputs[index], ''
+            child.communicate.side_effect = communicate
+            return child
+        with patch.object(page_helper, 'Popen', side_effect=spawn), \
+                patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]):
+            page_helper.thread_page(['7'])
+        self.assertEqual(calls, [30, 26, 22])
+
+    def lifecycle(self, term_latency=0, term_error=False, wait_exit=False, identity=True, start=0):
+        now, events = [start], []
+        child = Mock(pid=123456, returncode=None, stdout=io.StringIO(), stderr=io.StringIO())
+        process = object.__new__(page_helper.PageProcess)
+        process.work_deadline, process.deadline = 30, 40
+        process.child, process.pid, process.reaped = child, child.pid, False
+        def terminate():
+            events.append(('TERM', now[0]))
+            now[0] += term_latency
+            if term_error:
+                raise OSError('synthetic TERM failure')
+        def wait(timeout):
+            events.append(('wait', now[0], timeout))
+            if wait_exit or any(event[0] == 'KILL' for event in events):
+                child.returncode = 0
+                return 0
+            now[0] += timeout
+            raise subprocess.TimeoutExpired('synthetic', timeout)
+        child.terminate.side_effect = terminate
+        child.kill.side_effect = lambda: events.append(('KILL', now[0]))
+        child.wait.side_effect = wait
+        state = None if identity else Mock(si_pid=123457)
+        with patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(page_helper.os, 'waitid', return_value=state):
+            try:
+                process.cleanup(child, 123456)
+                error = None
+            except ValueError as caught:
+                error = str(caught)
+        return events, error, child
+
+    def test_lifecycle_preserves_full_post_term_grace_and_bounded_reap(self):
+        events, error, _ = self.lifecycle(term_latency=2, start=25)
+        self.assertIsNone(error)
+        self.assertEqual(events, [('TERM', 25), ('wait', 27, 5), ('KILL', 32), ('wait', 32, 5)])
+
+    def test_lifecycle_insufficient_reserve_and_term_failure_never_kill(self):
+        for options in ({'term_latency': 1, 'start': 30}, {'term_error': True, 'start': 25}, {'start': 40}):
+            with self.subTest(options=options):
+                events, error, child = self.lifecycle(**options)
+                self.assertIn('unsettled', error)
+                self.assertFalse(any(event[0] in ('KILL', 'wait') for event in events))
+                child.kill.assert_not_called()
+
+    def test_lifecycle_early_exit_and_uncertain_identity_never_signal(self):
+        events, error, child = self.lifecycle(wait_exit=True, start=25)
+        self.assertIsNone(error)
+        self.assertEqual(events, [('TERM', 25), ('wait', 25, 5)])
+        child.kill.assert_not_called()
+        events, error, child = self.lifecycle(identity=False, start=25)
+        self.assertIn('uncertain', error)
+        self.assertEqual(events, [])
+        child.terminate.assert_not_called()
+        child.kill.assert_not_called()
+
+    def test_page_work_timeout_cleans_only_owned_child_and_emits_zero_stdout(self):
+        now, events = [0], []
+        child = Mock(pid=123456, returncode=None, stdout=io.StringIO(), stderr=io.StringIO())
+        def communicate(timeout):
+            now[0] += timeout
+            raise subprocess.TimeoutExpired('synthetic', timeout)
+        def wait(timeout):
+            events.append(('wait', now[0], timeout))
+            if now[0] < 35:
+                now[0] += timeout
+                raise subprocess.TimeoutExpired('synthetic', timeout)
+            child.returncode = -9
+            return -9
+        child.communicate.side_effect = communicate
+        child.wait.side_effect = wait
+        child.terminate.side_effect = lambda: events.append(('TERM', now[0]))
+        child.kill.side_effect = lambda: events.append(('KILL', now[0]))
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(page_helper, 'Popen', return_value=child), \
+                patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(page_helper.os, 'waitid', return_value=None), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = page_helper.main(['page', '7'])
+        self.assertEqual((code, out.getvalue()), (1, ''))
+        self.assertEqual(events, [('TERM', 30), ('wait', 30, 5), ('KILL', 35), ('wait', 35, 5)])
+        self.assertTrue(err.getvalue().startswith('failed: '))
+
+    def test_page_empty_final_page_and_total_expiry(self):
+        response = self.response()
+        response['data']['repository']['pullRequest']['reviewThreads']['nodes'] = []
+        outputs = [str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(response)]
+        code, out, err, _, _ = self.invoke(['7'], outputs)
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(json.loads(out)['threads'], [])
+        real_dumps = json.dumps
+        now = [0]
+        def serialize(value, **options):
+            result = real_dumps(value, **options)
+            now[0] = 40
+            return result
+        with patch.object(page_helper.json, 'dumps', side_effect=serialize):
+            code, out, err, _, _ = self.invoke(['7'], outputs, clock=lambda: now[0])
+        self.assertEqual((code, out, err), (1, '', 'failed: thread page unavailable.\n'))
+
+    def test_page_exhausted_work_reserve_starts_zero_children(self):
+        with patch.object(page_helper, 'monotonic', side_effect=[0, 30]), \
+                patch.object(page_helper, 'Popen') as popen:
+            process = page_helper.PageProcess()
+            with self.assertRaisesRegex(ValueError, 'work budget'):
+                process.run(['git', 'rev-parse', '--show-toplevel'], ROOT)
+        popen.assert_not_called()
+
+    def test_page_cleanup_errors_keep_owned_child_and_fixed_unsettled_output(self):
+        for failure in ('term', 'kill', 'wait', 'reap_timeout', 'identity', 'observation', 'cached', 'stream', 'reserve'):
+            with self.subTest(failure=failure):
+                now, processes, events = [0], [], []
+                child = Mock(pid=123456, returncode=None, stdout=io.StringIO(), stderr=io.StringIO())
+                def communicate(timeout):
+                    if failure == 'stream':
+                        child.returncode = 0
+                        child.stdout = Mock()
+                        child.stdout.close.side_effect = OSError('private stream error')
+                        return str(ROOT.resolve()) + '\n', ''
+                    now[0] += timeout
+                    if failure == 'cached':
+                        child.returncode = 0
+                    raise subprocess.TimeoutExpired('synthetic', timeout)
+                def terminate():
+                    events.append('TERM')
+                    if failure == 'term':
+                        raise OSError('private TERM error')
+                    if failure == 'reserve':
+                        now[0] += 1
+                def wait(timeout):
+                    if failure == 'wait':
+                        raise OSError('private wait error')
+                    now[0] += timeout
+                    raise subprocess.TimeoutExpired('synthetic', timeout)
+                def kill():
+                    events.append('KILL')
+                    if failure == 'kill':
+                        raise OSError('private KILL error')
+                child.communicate.side_effect = communicate
+                child.terminate.side_effect = terminate
+                child.kill.side_effect = kill
+                child.wait.side_effect = wait
+                if failure != 'stream':
+                    child.stdout = Mock()
+                    child.stdout.close.side_effect = OSError('secondary close error')
+                original = page_helper.PageProcess.__init__
+                def initialize(process):
+                    original(process)
+                    processes.append(process)
+                state = Mock(si_pid=123457) if failure == 'identity' else None
+                out, err = io.StringIO(), io.StringIO()
+                with patch.object(page_helper.PageProcess, '__init__', initialize), \
+                        patch.object(page_helper, 'Popen', return_value=child), \
+                        patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                        patch.object(page_helper.os, 'waitid', return_value=state,
+                                     side_effect=OSError('private observation error')
+                                     if failure == 'observation' else None), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = page_helper.main(['page', '7'])
+                self.assertEqual((code, out.getvalue(), err.getvalue()), (
+                    1, '', 'failed: thread page unavailable. Cleanup unsettled.\n'))
+                self.assertIs(processes[0].child, child)
+                self.assertEqual(processes[0].pid, 123456)
+                self.assertEqual(processes[0].reaped, failure == 'stream')
+                if failure in ('term', 'wait', 'identity', 'observation', 'cached', 'stream', 'reserve'):
+                    child.kill.assert_not_called()
+                if failure in ('identity', 'observation', 'cached', 'stream'):
+                    child.terminate.assert_not_called()
+                self.assertLessEqual(now[0], 40)
+
+    def test_cleanup_completed_child_requires_verified_reap(self):
+        process = object.__new__(page_helper.PageProcess)
+        child = Mock(pid=123456, returncode=None)
+        process.child, process.pid, process.reaped = child, child.pid, False
+        process.deadline = 40
+        def wait(timeout):
+            child.returncode = 0
+            return 0
+        child.wait.side_effect = wait
+        with patch.object(page_helper, 'monotonic', return_value=0), \
+                patch.object(page_helper.os, 'waitid', return_value=Mock(si_pid=123456)):
+            process.cleanup(child, child.pid)
+        self.assertTrue(process.reaped)
+        child.terminate.assert_not_called()
+        child.kill.assert_not_called()
+        process.reaped = False
+        with self.assertRaises(page_helper.CleanupUnsettled):
+            process.cleanup(child, child.pid)
+        self.assertFalse(process.reaped)
+
+    def test_cleanup_rechecks_identity_before_escalation(self):
+        now = [25]
+        process = object.__new__(page_helper.PageProcess)
+        child = Mock(pid=123456, returncode=None)
+        process.child, process.pid, process.reaped = child, child.pid, False
+        process.deadline = 40
+        def wait(timeout):
+            now[0] += timeout
+            child.pid = 123457
+            raise subprocess.TimeoutExpired('synthetic', timeout)
+        child.wait.side_effect = wait
+        with patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(page_helper.os, 'waitid', return_value=None):
+            with self.assertRaises(page_helper.CleanupUnsettled):
+                process.cleanup(child, 123456)
+        child.terminate.assert_called_once()
+        child.kill.assert_not_called()
+        self.assertIs(process.child, child)
+        self.assertEqual(process.pid, 123456)
+
+    def test_page_transport_failures_hide_child_output(self):
+        for failure in ('spawn', 'exit', 'json'):
+            child = Mock(pid=123456, returncode=1 if failure == 'exit' else 0,
+                         stdout=io.StringIO(), stderr=io.StringIO())
+            child.communicate.return_value = ('private malformed payload', 'private stderr')
+            out, err = io.StringIO(), io.StringIO()
+            with patch.object(page_helper, 'monotonic', return_value=0), \
+                    patch.object(page_helper, 'Popen', side_effect=OSError('private spawn error')
+                                 if failure == 'spawn' else None, return_value=child), \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = page_helper.main(['page', '7'])
+            self.assertEqual((code, out.getvalue()), (1, ''))
+            self.assertEqual(err.getvalue(), 'failed: thread page unavailable.\n')
+            child.terminate.assert_not_called()
+            child.kill.assert_not_called()
+
+    def test_page_synthetic_git_and_gh_path_stubs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            script = f'#!{sys.executable}\n' + '''import json, os, sys
+from pathlib import Path
+vector = sys.argv[1:]
+with Path(os.environ['PAGE_LOG']).open('a') as stream:
+    stream.write(json.dumps({'program': Path(sys.argv[0]).name, 'vector': vector,
+                             'cwd': os.getcwd(), 'keys': sorted(os.environ)}) + '\\n')
+if Path(sys.argv[0]).name == 'git':
+    if vector == ['rev-parse', '--show-toplevel']:
+        print(os.environ['PAGE_ROOT'])
+    elif vector == ['config', '--local', '--get-all', 'remote.origin.url']:
+        print('https://github.com/o/r.git')
+    else:
+        sys.exit(9)
+else:
+    print(os.environ['PAGE_RESPONSE'])
+    sys.exit(int(os.environ['PAGE_EXIT']))
+'''
+            for name in ('git', 'gh'):
+                path = folder / name
+                path.write_text(script)
+                path.chmod(0o700)
+            for status in ('0', '1'):
+                log = folder / ('calls-' + status)
+                result = subprocess.run([sys.executable, str(HELPER), 'page', '7', 'opaque/+=='],
+                                        cwd=folder, text=True, capture_output=True,
+                                        env={**os.environ, 'PATH': directory, 'PAGE_ROOT': str(folder),
+                                             'PAGE_LOG': str(log), 'PAGE_RESPONSE': json.dumps(self.response()),
+                                             'PAGE_EXIT': status, 'GH_REPO': 'foreign/repo',
+                                             'GH_HOST': 'other.invalid', 'GIT_DIR': '/inert/git'})
+                calls = [json.loads(line) for line in log.read_text().splitlines()]
+                self.assertEqual([call['program'] for call in calls], ['git', 'git', 'gh'])
+                for call in calls:
+                    self.assertEqual(call['cwd'], str(folder.resolve()))
+                    self.assertFalse(set(call['keys']) & {'GH_HOST', 'GH_REPO'})
+                    self.assertFalse(any(key.startswith('GIT_') for key in call['keys']))
+                self.assertEqual(calls[-1]['vector'], [
+                    'api', '--hostname', 'github.com', 'graphql', '-f', 'query=' + PAGE_QUERY,
+                    '-f', 'owner=o', '-f', 'name=r', '-F', 'pr=7', '-f', 'after=opaque/+=='])
+                if status == '0':
+                    self.assertEqual((result.returncode, result.stderr), (0, ''))
+                    self.assertEqual(json.loads(result.stdout)['threads'][0]['id'], 'PRRT_example')
+                else:
+                    self.assertEqual((result.returncode, result.stdout), (1, ''))
+                    self.assertEqual(result.stderr, 'failed: thread page unavailable.\n')
+
+
 class HookTests(unittest.TestCase):
     def decision(self, command, agent_type):
         output = io.StringIO()
@@ -547,6 +995,13 @@ class HookTests(unittest.TestCase):
         for agent_type in ('ship:driver', ''):
             with self.subTest(agent_type=agent_type):
                 self.assertEqual(self.decision(command, agent_type), {})
+
+    def test_fixed_page_action_is_admitted_for_main_and_driver(self):
+        for cursor in ('', ' cursor/+==', " '@cursor/+=='"):
+            command = 'python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" page 7' + cursor
+            for caller in ('', 'ship:driver'):
+                with self.subTest(cursor=cursor, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
 
     def test_refuse_forms_for_every_caller(self):
         for agent_type in ('', 'ship:driver', 'ship:writer--sol'):
