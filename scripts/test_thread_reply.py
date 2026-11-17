@@ -421,6 +421,7 @@ class HookTests(unittest.TestCase):
             '{field(value:"""} mutation"""){id}}',
             '{viewer{# mutation }\nlogin}}',
             '﻿,query Read {viewer{login}}',
+            '{field(value:"tab	x")}',
         )
         for document in documents:
             command = "gh api graphql -f query='" + document + "' --jq '.data.repository'"
@@ -435,7 +436,8 @@ class HookTests(unittest.TestCase):
                      'fragment F on User {login}', 'query{viewer{login}} query{viewer{id}}',
                      '{viewer{login}} # comment\nmutation{createIssue{id}}',
                      '{viewer{login}', 'Query{viewer{login}}', '', '{}', '{viewer(login:`x`)}',
-                     '{viewer(value:1e)}', '{viewer(value:"bad\\z")}', '{viewer([)]}')
+                     '{viewer(value:1e)}', '{viewer(value:"bad\\z")}', '{viewer([)]}',
+                     r'{a(s: """x\""")}', '{a(s: """")}', 'query R($a:Int {viewer{login}}')
         commands = ["gh api graphql -f query='" + document + "'" for document in documents]
         read = "gh api graphql -f query='{viewer{login}}'"
         commands.extend(read + option for option in (
@@ -443,6 +445,8 @@ class HookTests(unittest.TestCase):
             ' --hostname github.com', ' --paginate', ' --slurp', ' --cache 1h', ' -p x', ' --'))
         commands.extend((read.replace('api graphql', 'api /graphql'),
                          read.replace('api graphql', "api 'graphql'"),
+                         "gh api graphql -fquery='{viewer{login}}'",
+                         "gh api graphql --raw-field=query='{viewer{login}}'",
                          read + ' && gh api repos/o/r/issues/7/comments -f body=x'))
         for command in commands:
             for caller in ('', 'ship:driver'):
@@ -475,6 +479,16 @@ class HookTests(unittest.TestCase):
             'printf "%s" "unterminated gh',
             'printf "%s" "`gh pr view 7`"',
             "printf '%s' 'bash before gh' | sh",
+            '''printf '%s\\n' 'bash -c "gh pr close 7"' | at now''',
+            '''printf '%s\\n' "$(sh -c 'gh pr view 7')"''',
+            '''echo "$(bash -c "gh $(echo a)pi repos/o/r/pulls/7/comments -f body=x -F in_reply_to=123")"''',
+            '''printf '%s\\n' "$(sh -c 'g''h pr view 7')"''',
+            '''printf '%s\\n' x > "$(sh -c 'gh pr view 7')"''',
+            '''printf $f 'bash -c "gh pr view 7"' ''',
+            'ps -eo pid,args | grep -w gh | grep -v bash *',
+            '''echo(){ sh -c "$1"; }; echo 'gh pr close 7' ''',
+            '''X=1; printf '%s\\n' 'bash -c "gh pr view 7"' | sh''',
+            "PATH=/tmp/x; printf '%s\\n' 'the bash check before gh'",
         )
         for command in commands:
             for caller in ('', 'ship:driver'):
