@@ -3026,6 +3026,8 @@ def inline_interpreter_denial(command, cwd=None):
                 segment_text = text[words[0][2]:words[-1][3]]
                 if redirected or any(word[0] == '<' for word in words) or re.search(r'[<>][ \t]*\(|=\(', text[end:]):
                     return 'inline interpreter code rule (program from a pipe)'
+                if arguments == ['--version']:
+                    continue
                 if not arguments and not piped:
                     if piped_input or any(token[0] in {'<', '|', '('} or token[0] == '{'
                                           for token in input_tokens + tokens):
@@ -3038,8 +3040,6 @@ def inline_interpreter_denial(command, cwd=None):
                                    or argument.startswith('-') and not argument.startswith('--')
                                    and bool(set(argument[1:]) & set(short)) for argument in arguments[:1])):
                         return f'inline interpreter code rule ({name})'
-                    if arguments == ['--version']:
-                        continue
                     script = arguments[0] if arguments else ''
                     unsafe_script = any(unsafe_script_path(script, base) for base in bases)
                     if (not script or script.startswith('-') or stdin_program_path(script) or unsafe_script
@@ -4585,7 +4585,7 @@ def pre(data):
             publication_reason = ('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                                   'commit grants permit local base-branch merges into their own lane branch. '
                                   'Return this step to your driver; the driver may run it.')
-            classifier_reason = ('This operation remains denied. Report the rule and blocked scope to the parent. '
+            classifier_reason = ('This operation is denied. Report the rule and blocked scope to the parent. '
                                  'Native Edit grants zero alternate command form or actor for a denied operation. '
                                  'Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt. '
                                  'Never replay a denied command, equivalent, or substitute actor.')
