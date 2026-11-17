@@ -2773,40 +2773,15 @@ def shell_changes_paths(tokens):
 
 
 def shell_launches_commands(tokens, command_positions):
-    tokens = list(shell_without_redirections(tokens))
-    last_interpreter = next((index for index in range(len(tokens) - 1, -1, -1)
-                             if interpreter_name(tokens[index][1])), len(tokens))
-    for index, token in enumerate(tokens[:last_interpreter]):
-        base = os.path.basename(token[1])
-        if base in {'xargs', 'parallel'} or base == 'find' and any(
-                word[1] in {'-exec', '-execdir', '-ok', '-okdir'} for word in tokens[index + 1:]):
-            return True
-    for start, token in enumerate(tokens):
-        if token[2] not in command_positions:
-            continue
-        wrapper, skip = None, False
-        for index in range(start, len(tokens)):
-            word = tokens[index][1]
-            if skip:
-                skip = False
-                continue
-            if re.match(r'[A-Za-z_]\w*\+?=', word):
-                continue
-            if wrapper and word.startswith('-'):
-                skip = word in WRAPPERS[wrapper]
-                continue
-            base = os.path.basename(word)
-            if base in {'xargs', 'parallel'}:
-                return True
-            if base in WRAPPERS:
-                wrapper = base
-                continue
-            if base == 'find' and any(word[1] in {'-exec', '-execdir', '-ok', '-okdir'}
-                                      for word in tokens[index + 1:]):
-                return True
-            if interpreter_name(word):
-                break
-    return False
+    words = list(shell_without_redirections(tokens))
+    first = next((word for word in words
+                  if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', word[1], re.S)), None)
+    if first and first[2] in command_positions and interpreter_name(first[1]):
+        return False
+    return any(os.path.basename(word[1]) in {'xargs', 'parallel'}
+               or os.path.basename(word[1]) == 'find' and any(
+                   later[1] in {'-exec', '-execdir', '-ok', '-okdir'} for later in words[index + 1:])
+               for index, word in enumerate(words))
 
 
 def inline_interpreter_denial(command, cwd=None):
