@@ -453,7 +453,7 @@ def citation(event):
     if not isinstance(args, dict):
         return None
     if tool == 'SendMessage':
-        fields = [args.get(name, '') for name in ('message', 'content', 'summary')]
+        fields = [args.get('message') or args.get('content') or '', args.get('summary', '')]
     elif tool in ('Agent', 'Task'):
         fields = [args.get('prompt', '')]
     elif tool.endswith(('create_input', 'update_input')):

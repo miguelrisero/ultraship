@@ -513,6 +513,49 @@ class TextLintTests(unittest.TestCase):
                  'tool_input': {'content': {'html': '<p>The review passes.</p>'}}}
         self.assertTrue(self.hook_refusal(event).endswith('\n' + instruction))
 
+    def test_sendmessage_backfilled_preview_cites_canonical_body_once(self):
+        """Catch a generated preview that duplicates a valid receipt marker in the canonical body."""
+        fields = {'type': 'message', 'recipient': 'chief', 'recipient_kind': 'agent'}
+        self.hook_refusal(self.event(content='The review passes.', **fields))
+        receipt_id = self.last_receipt['id']
+        message = ('<!-- ultraship-receipt:' + receipt_id + ' -->\n'
+                   'The review passes.\nFacts: Checks pass.\nDecision: Continue.\nNext: Resume.')
+        resend = self.event(message, content=message[:49] + '…', **fields)
+
+        self.assertIsNone(self.hook_output(resend))
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+        self.assertIn('Receipt is consumed.', self.hook_refusal(resend))
+
+    def test_sendmessage_content_fallback_still_cites_receipt(self):
+        """Catch receipt parsing that drops content when SendMessage has no message field."""
+        first = self.event(content='The review passes.')
+        first['tool_input'].pop('message')
+        self.hook_refusal(first)
+        receipt_id = self.last_receipt['id']
+        resend = self.resend(receipt_id)
+        resend['tool_input']['content'] = resend['tool_input'].pop('message')
+
+        self.assertIsNone(self.hook_output(resend))
+        self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
+
+    def test_sendmessage_duplicate_body_and_summary_markers_stay_invalid(self):
+        """Catch canonical body parsing that admits duplicate markers in message or summary."""
+        for field in ('message', 'summary'):
+            with self.subTest(field=field):
+                first = self.event(to=field + '-chief')
+                self.hook_refusal(first)
+                receipt_id = self.last_receipt['id']
+                resend = self.resend(receipt_id)
+                resend['tool_input']['to'] = field + '-chief'
+                marker = '<!-- ultraship-receipt:' + receipt_id + ' -->'
+                resend['tool_input'][field] = resend['tool_input'].get(field, '') + '\n' + marker
+
+                reason = self.hook_refusal(resend)
+
+                self.assertIn('Invalid receipt citation: require exactly one well-formed marker.', reason)
+                self.assertIn('Well-formed markers: 2. Marker names: 2.', reason)
+                self.assertFalse(self.last_receipt['resend_allowed'])
+
     def test_receipt_binds_the_sending_agent(self):
         self.hook_refusal(self.event())
         receipt_id = self.last_receipt['id']
