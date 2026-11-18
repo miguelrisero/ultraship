@@ -1528,5 +1528,64 @@ class WriterGitHubGuardTests(unittest.TestCase):
         self.assertIsNone(ultraship.writer_git_file_denial('echo {a,b}/c', str(self.repo)))
 
 
+class ReviewThreadReadTests(unittest.TestCase):
+    def test_literal_graphql_reads_with_pagination_and_variables(self):
+        # These shell commands are classifier inputs only.
+        watcher = HOOK.parents[1] / 'skills/babysit/scripts/threads.sh'
+        query = next(line.removeprefix('query=') for line in watcher.read_text().splitlines()
+                     if line.startswith('query='))
+        watcher_read = ("gh api graphql --paginate -F owner=example-org -F name=example-repo -F pr=456 "
+                        f"-f query={query} --jq '.data.repository.pullRequest.reviewThreads.nodes[]'")
+        reads = (
+            'gh pr view https://github.com/example-org/example-repo/pull/123 '
+            "--json headRefOid,statusCheckRollup,body --jq '{head:.headRefOid,body,checks:[.statusCheckRollup[]"
+            '|select((.conclusion == "FAILURE") or (.name|test("[Ii]ntegration|Merge Queue|create-preview")))'
+            "|{name,status,conclusion,detailsUrl}]}'; gh api graphql --paginate -f query='query($endCursor:String)"
+            '{ repository(owner:"example-org",name:"example-repo"){ pullRequest(number:123)'
+            '{ reviewThreads(first:50,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{id isResolved '
+            "isOutdated path line comments(first:15){nodes{id databaseId body url author{login}}}}}}}}' "
+            "--jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not)'",
+            "gh api graphql --paginate -f query='query($endCursor:String)"
+            '{repository(owner:"example-org",name:"example-repo"){pullRequest(number:456){headRefOid '
+            'reviewThreads(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{id isResolved '
+            "isOutdated path comments(last:3){nodes{body url databaseId author{login}}}}}}}}' "
+            "--jq '.data.repository.pullRequest | {headRefOid,total:(.reviewThreads.nodes|length),"
+            "unresolved:[.reviewThreads.nodes[] | select(.isResolved|not)]}'",
+            watcher_read,
+        )
+        self.assertIn('after:$endCursor', query)
+        for command in reads:
+            with self.subTest(command=command):
+                self.assertIsNone(ultraship.review_thread_denial(command))
+        for command in (
+            watcher_read + ' -F owner=another-org',
+            watcher_read + ' -F undeclared=x',
+            watcher_read.replace(',$endCursor:String', ''),
+            watcher_read.replace('-f query=', '-f= query='),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(ultraship.review_thread_denial(command), 'gh api write outside the helper')
+
+    def test_graphql_read_exception_excludes_writes_and_unproven_fields(self):
+        query = "-f query='query { viewer { login } }'"
+        read = f'gh api graphql --paginate {query}'
+        write = 'gh api write outside the helper'
+        for command, reason in (
+            ("gh api graphql --paginate -f query='mutation { example { id } }'", write),
+            ('gh api repos/o/r/issues -X POST -f title=example', write),
+            (f'{read} {query}', write),
+            (f'{read} -F owner=@example.txt', write),
+            (f'{read} -F owner="{{owner}}"', write),
+            (f'{read} -F owner="$OWNER"', write),
+            (f'{read} -X PATCH', write),
+            (f'gh api graphql/ --paginate {query}', write),
+            ("gh api graphql --paginate -f= query='query { viewer { login } }'", write),
+            (f'{read} --input example.json', 'opaque GraphQL query'),
+            ('gh api graphql --paginate -f query="$QUERY"', 'opaque GraphQL query'),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(ultraship.review_thread_denial(command), reason)
+
+
 if __name__ == '__main__':
     unittest.main()
