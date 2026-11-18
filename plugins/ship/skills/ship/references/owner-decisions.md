@@ -422,11 +422,11 @@ For a policy change, supply its applicable dedicated authority; a register label
 ## Refusal escalation
 
 A classifier refusal of a Bash call writes a signed escalation record and names the manager in the refusal text.
-The manager of a subagent is its parent main session. The manager of a main session is the CoC, which is the session whose working directory is inside `ULTRASHIP_COC_DIR`.
+The manager of a subagent is its parent main session. The manager of a main session is the CoC: the session named by `ULTRASHIP_COC_SESSION_ID`, working inside `ULTRASHIP_COC_DIR`. A session never approves its own record.
 The lane reports the escalation id and stops this step. It never runs the command in another form.
 The manager reads the record with `python3 <plugin root>/hooks/escalation.py show <id>` and reviews the exact command.
-To approve, the manager runs `python3 <plugin root>/hooks/escalation.py approve <id> --reason '<why>'`, then runs the exact command once as `cd '<cwd>' && <command>`, and tells the lane the result.
-To reject, the manager runs `python3 <plugin root>/hooks/escalation.py reject <id> --reason '<why>'` and tells the lane the reason.
+To approve, the manager runs the exact approve command that `show` prints, with the reason filled in, then runs the exact command once as `cd '<cwd>' && <command>`, and tells the lane the result.
+To reject, the manager runs the same command with `reject` in place of `approve`, and tells the lane the reason.
 An approval binds the command hash, the cwd, the head SHA and the approving session. It is single use and expires after 60 minutes.
 No approval runs an absolute hold: secret reads, production writes, destructive git, owner-only settings, and writes to the escalation or receipt stores. Send these to the owner.
 `python3 <plugin root>/hooks/escalation.py list` prints the undecided records.
