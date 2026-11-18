@@ -710,6 +710,18 @@ An explicit owner refusal blocks every route for that edit until applicable owne
 Apply your own loaded definition; checkout, cache, and version supply zero additional authority.
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
+A superseded-ruling free is the one exception to every rule that keeps a used protected-row attempt, or its record, consumed.
+Only a fresh CoC row decision file with a new SHA256 grants it, for exactly one further attempt on one named row.
+That file names the repository, PR, row file and row ID, and quotes each earlier refusal on that row verbatim.
+It records that every earlier attempt on that row made zero protected reads, zero edits and zero commits.
+It records that the first refusal named only a chief or CoC ruling, never the row content.
+It records that each later refusal named only that first refusal or the attempt it used.
+It supersedes that ruling by name, and it resolves the quoted refusals for that row only.
+Refuse the free when the file lacks any of these records.
+A row gets at most one free, whatever the decision file or head SHA; refuse a second free.
+Record the free on the row's attempt record, with the decision file and its SHA256, before the freed attempt starts.
+Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial stay final; no decision frees their attempts.
+The freed attempt keeps every other route requirement, authority, independent review and publication hold.
 Apply the [once-only message-format contract](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) when every returned finding matches a known `text_lint.py` formatting message and, for a `text_lint.py` refusal, a resend cites its hook receipt and a fresh brief records it on the run board.
 Its fresh-brief route also admits one fresh reviewer, and a receiptless hook version records the full refusal text and hook version in place of the receipt id.
 Except under that contract or the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
