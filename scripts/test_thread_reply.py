@@ -1167,6 +1167,17 @@ class HookTests(unittest.TestCase):
             with self.subTest(caller=caller):
                 self.assertEqual(self.decision(command, caller).get('permissionDecision'), 'deny')
 
+    def test_quoted_grep_pattern_in_pipeline_is_data(self):
+        command = '''cd /repo && grep -nE 'gh [^"]+' docs/notes.md | head -n 5'''
+        nested_write = 'test "$(gh api -X POST repos/o/r/pulls/7/comments -f body=x)" = abc'
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+                result = self.decision(command + ' && ' + nested_write, caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(' Rule: REST review-comment write or opaque endpoint.',
+                              result['permissionDecisionReason'])
+
     def test_static_graphql_read_documents(self):
         documents = (
             '{repository(owner:"o",name:"r"){pullRequests(first:5){nodes{number files(first:10){nodes{path}}}}}}',
@@ -1382,6 +1393,23 @@ class HookTests(unittest.TestCase):
     def test_git_literal_pager_stays_admitted(self):
         self.assertEqual(self.decision('git -c core.pager=cat log -1', ''), {})
 
+    def test_writer_admits_literal_commit_abbreviation_override(self):
+        command = ('git -C /abs/lane -c core.abbrev=40 commit --only '
+                   '-m "fix(mcp): pull editable skill versions" -- src/example.py')
+        self.assertEqual(self.decision(command, 'ship:writer--sol'), {})
+        commands = (
+            ('git -C /abs/lane config --local core.abbrev 40', 'git stored config write rule'),
+            ('git -C /abs/lane -c core.abbrev=40 status', 'git config value rule'),
+            (command.replace('core.abbrev=40', 'core.editor=cat'), 'git config value rule'),
+            (command.replace('core.abbrev=40', 'core.abbrev=12'), 'git config value rule'),
+            (command + ' && git push origin HEAD', 'git remote writer rule (push)'),
+        )
+        for command, rule in commands:
+            with self.subTest(command=command):
+                result = self.decision(command, 'ship:writer--sol')
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(rule, result['permissionDecisionReason'])
+
     def test_driver_count_and_shell_options_stay_admitted(self):
         for command in ("grep -c 'FAIL backend' f.log", "jq -c '.[]' f.json", "timeout 60 bash -c 'echo hi'"):
             with self.subTest(command=command):
@@ -1488,6 +1516,41 @@ class HookTests(unittest.TestCase):
 
     def test_base_pr_ready_decision(self):
         self.assertIsNone(ultraship.review_thread_denial('gh pr ready https://github.com/o/r/pull/7'))
+
+    def test_pr_body_file_edit_keeps_role_limits(self):
+        for path in ('.scratch/pr-body.md', "'.scratch/resolveReviewThread.md'", '.scratch/comments/123/replies.md'):
+            command = 'gh pr edit 7 --body-file ' + path
+            for caller in ('', 'ship:driver'):
+                with self.subTest(path=path, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+            result = self.decision(command, 'ship:writer--sol')
+            self.assertEqual(result.get('permissionDecision'), 'deny')
+            self.assertIn('Writers never push', result['permissionDecisionReason'])
+
+    def test_pr_body_file_edit_keeps_compound_thread_writes_refused(self):
+        edit = 'gh pr edit 7 --body-file .scratch/resolveReviewThread.md'
+        commands = (
+            (edit + " && gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"PRRT_x\"}){thread{id}}}'",
+             'raw review-thread mutation'),
+            (edit + '; gh api repos/o/r/pulls/7/comments -f body=done -F in_reply_to=123',
+             'REST review-comment write or opaque endpoint'),
+        )
+        for command, rule in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: ' + rule + '.', result['permissionDecisionReason'])
+
+    def test_pr_create_reads_quoted_markdown_body(self):
+        command = ("cat > .scratch/pr-body.md <<'BODY'\n"
+                   f'See the review thread at `{COMMENT}`.\n'
+                   'BODY\n'
+                   'gh pr create --title "docs: link the review thread" --body-file .scratch/pr-body.md')
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+        self.assertEqual(self.decision(command, 'ship:writer--sol').get('permissionDecision'), 'deny')
 
     def test_guard_exception_denies_every_caller(self):
         with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):

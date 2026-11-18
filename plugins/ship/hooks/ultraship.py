@@ -889,13 +889,15 @@ def literal_ps_awk_filter(command):
                   r"'([^'\r\n]*)'(?=[ \t]*(?:$|;|&&|\|\||\)))", data, command)
 
 
-def cat_heredoc_data(command):
+def cat_heredoc_data(command, *, pr_create_body=False):
     # ponytail: PATH or link aliases can reach the written file; sandbox execution to enforce filesystem identity.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
     path = r'[\w./-]+'
     header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
               rf'(?:<<(-?)[ \t]*{delimiter}[ \t]+>>?[ \t]*{path}'
               rf'|>>?[ \t]*{path}[ \t]+<<(-?)[ \t]*{delimiter})[ \t]*\n$')
+    if pr_create_body and any(char.isspace() and char not in ' \t\n' for char in command):
+        return command
     lines = command.splitlines(keepends=True)
     match = re.fullmatch(header, lines[0]) if lines else None
     if not match:
@@ -906,6 +908,17 @@ def cat_heredoc_data(command):
         candidate = lines[end].lstrip('\t') if strip_tabs else lines[end]
         if candidate.removesuffix('\n') == end_marker:
             remainder = ''.join(lines[end + 1:])
+            shell = re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
+            written = re.search(r'>>?[ \t]*([\w./-]+)', lines[0])[1]
+            if pr_create_body:
+                # A literal PR create reads the same file as Markdown and runs no body text.
+                body_path = re.escape(written)
+                title = r'''(?:'[^'\r\n]+'|"[^"$`\\!\r\n]+")'''
+                if written.endswith('.md') and re.fullmatch(
+                        rf'[ \t]*gh[ \t]+pr[ \t]+create[ \t]+--title[ \t]+{title}[ \t]+--body-file[ \t]+'
+                        rf'''(?:{body_path}|'{body_path}'|"{body_path}")[ \t]*\n?''', remainder):
+                    return shell
+                return command
             ruff = (r'(?:ruff|/[\w./-]+/\.venv/bin/ruff)[ \t]+'
                     r'(?:check|format)(?:[ \t]+[A-Za-z0-9./_=\-]+)*')
             segments = [part.strip() for part in re.split(r'&&|;|\n', remainder) if part.strip()]
@@ -918,7 +931,7 @@ def cat_heredoc_data(command):
                 if executable.is_absolute() and (
                         Path(os.path.realpath(executable)).parent != Path(os.path.realpath(executable.parent))):
                     return command
-            written = Path(re.search(r'>>?[ \t]*([\w./-]+)', lines[0])[1])
+            written = Path(written)
             folder = re.match(rf'^[ \t]*cd +({path}) +&& +', lines[0])
             if folder:
                 written = Path(folder[1]) / written
@@ -932,7 +945,7 @@ def cat_heredoc_data(command):
                             or any(part.startswith('python') or Path(part).stem in {'sitecustomize', 'usercustomize'}
                                    for part in destination.parts)):
                         return command
-            return re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
+            return shell
     return command
 
 
@@ -3822,7 +3835,11 @@ def writer_gh_denial(command, depth=0):
                 return 'hidden gh word-part rule'
             if git_value:
                 if git_value == '-c' and tuple(word.split('=', 1)) not in WRITER_VALUE_ALLOWLIST:
-                    return 'git config value rule'
+                    commit_prefix = re.match(r'[ \t]*git[ \t]+(?:-C[ \t]+/[\w./-]+[ \t]+)?'
+                                             r'-c[ \t]+core\.abbrev=40[ \t]+commit(?=[ \t]|$)', command)
+                    if not (depth == 0 and words is segments[0] and commit_prefix
+                            and words[:index + 2] == commit_prefix[0].split()):
+                        return 'git config value rule'
                 if git_value in {'--git-dir', '--work-tree'} and not writer_repository_selector(git_value, word):
                     return 'git repository selector rule'
                 git_value = None
@@ -4067,13 +4084,22 @@ def review_thread_denial(command, data_mode=False):
     if '$' not in command and re.fullmatch(
             r"git commit(?: +-[A-Za-z]+| +--[a-z-]+)*(?: +-m +'[^']*'(?: +-[A-Za-z]+| +--[a-z-]+)*)+ *", command):
         return None
+    if '--body-file' in command:
+        command = cat_heredoc_data(command, pr_create_body=True)
     command = command.replace('\\\n', '')
     normalized = re.sub(r'''['"\\]''', '', command).casefold()
     if re.search(r'\bgh\b', normalized) and '`' in outside_single_quotes(command):
         return 'review-thread guard parse failure'
-    if (any(name in normalized for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
-                                            'resolvereviewthread'))
-            or re.search(r'comments/\S*/replies', normalized)):
+    # shortcut: mask only the first literal PR body path; use shell token offsets if later segments need it.
+    body_file = re.match(r'[ \t]*gh[ \t]+pr[ \t]+edit[ \t]+[1-9][0-9]*[ \t]+--body-file[ \t]+'
+                         r'''([\w./-]+|'[\w./-]+'|"[\w./-]+")(?=[ \t\n;&|]|$)''', command)
+    mutation_text = normalized
+    if body_file:
+        masked = command[:body_file.start(1)] + '_' + command[body_file.end(1):]
+        mutation_text = re.sub(r'''['"\\]''', '', masked).casefold()
+    if (any(name in mutation_text for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
+                                               'resolvereviewthread'))
+            or re.search(r'comments/\S*/replies', mutation_text)):
         return 'raw review-thread mutation'
     command = cat_heredoc_data(command)
     try:
@@ -4136,8 +4162,15 @@ def review_thread_denial(command, data_mode=False):
                 continue
             text = re.sub(r'''['"\\]''', '', value)
             if any(gh_word(token) for token in re.split(r'[\s;&|()<>`]+', text)):
-                argument_data = data_command and position > 0 and not hidden_gh_api_calls(text)
+                api_calls = hidden_gh_api_calls(text)
+                argument_data = data_command and position > 0 and not api_calls
                 reason = review_thread_denial(text if argument_data else value, data_mode=argument_data)
+                if reason == 'unparsed shell syntax rule: No closing quotation' and (
+                        position > 0 and words[0][1] == 'grep' and '"' in value and not api_calls
+                        and re.fullmatch(r"'[^']*'", raw)
+                        and literal_search_shell(' '.join(word for _, word in words))):
+                    # A literal grep pattern can contain an unmatched quote as regex data.
+                    continue
                 if reason:
                     return reason
         command_words, skip_target = [], False
