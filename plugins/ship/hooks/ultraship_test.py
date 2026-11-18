@@ -1570,6 +1570,15 @@ class ReviewThreadReadTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(ultraship.review_thread_denial(command), 'gh api write outside the helper')
 
+    def test_paginated_graphql_read_refuses_two_cursor_bound_connections(self):
+        threads = 'reviewThreads(first:20,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{id}}'
+        command = ("gh api graphql --paginate -f query='query($endCursor:String)"
+                   '{repository(owner:"example-org",name:"example-repo"){'
+                   f'firstPr:pullRequest(number:1){{{threads}}}'
+                   f'secondPr:pullRequest(number:2){{{threads}}}'
+                   "}}'")
+        self.assertEqual(ultraship.review_thread_denial(command), 'gh api write outside the helper')
+
     def test_graphql_read_exception_excludes_writes_and_unproven_fields(self):
         query = ("-f query='query($owner:String!,$endCursor:String)"
                  '{repository(owner:$owner,name:"example-repo"){pullRequest(number:456)'

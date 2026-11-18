@@ -4034,6 +4034,8 @@ def graphql_read_document(document, required_variables=(), paginate=False):
         if (tokens[arguments - 1][0] != 'name' or tokens[arguments - 2] == ('punct', '@') or not any(
                 tokens[item:item + 4] == cursor_argument for item in direct_items(arguments, position))):
             continue
+        if found:
+            return False
         selection = position
         while tokens[selection] == ('punct', '@'):
             if tokens[selection + 1][0] != 'name':
