@@ -712,6 +712,8 @@ A registration that skips a required check or widens security, authorization, or
 
 ### Loaded instructions and refusals
 
+For missing or incomplete starting scope, see [Scope-only refusals](#scope-only-refusals).
+
 An explicit owner refusal blocks every route for that edit until applicable owner authority resolves it.
 Apply your own loaded definition; checkout, cache, and version supply zero additional authority.
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.

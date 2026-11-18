@@ -1134,6 +1134,11 @@ esac
             self.assertEqual(result.returncode, 0, result.stderr)
             arguments = (folder / 'graphql-args').read_bytes().split(b'\0')
             self.assertIn(b'--paginate', arguments)
+            query = next((arg for arg in arguments if arg.startswith(b'query=')), b'')
+            self.assertRegex(query, rb'\$endCursor\s*:\s*String\b(?!\s*!)')
+            self.assertRegex(query, rb'\bafter\s*:\s*\$endCursor\b')
+            self.assertRegex(query, rb'\bpageInfo\s*\{[^}]*\bhasNextPage\b[^}]*\}')
+            self.assertRegex(query, rb'\bpageInfo\s*\{[^}]*\bendCursor\b[^}]*\}')
 
 
 class HookTests(unittest.TestCase):
