@@ -33,10 +33,10 @@ This section adds no authority beyond the route that the brief names.
 Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
 A single-parent squash commit meets that requirement only when it contains the recorded base and all conditions below hold.
 1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
-2. Both diffs change the same files with the same file modes, and each file's diff is byte-equal.
-3. The squash commit's tree equals the clean merge of the author head into the squash commit's parent.
-Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent, with submodule changes included.
-Ignore only each diff's `index` line and the line numbers in its hunk headers; apply no whitespace normalization.
+2. The squash tree equals the exact tree from a successful merge of the author head into the squash parent.
+The checker uses `git merge-tree --write-tree` with the squash parent first and the author head second.
+Require this check even when the squash parent already contains the author's changes.
+The `files` field counts the paths that differ between the squash parent and the squash commit.
 The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
 Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
 Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.

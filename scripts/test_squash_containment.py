@@ -1,4 +1,4 @@
-"""Squash containment requires PR linkage, equal modes and exact diff bytes."""
+"""Squash containment requires PR linkage and the exact clean merge tree."""
 import json
 import os
 from pathlib import Path
@@ -21,10 +21,10 @@ CONTRACT_PATHS = (
 BODY = '''Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
 A single-parent squash commit meets that requirement only when it contains the recorded base and all conditions below hold.
 1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
-2. Both diffs change the same files with the same file modes, and each file's diff is byte-equal.
-3. The squash commit's tree equals the clean merge of the author head into the squash commit's parent.
-Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent, with submodule changes included.
-Ignore only each diff's `index` line and the line numbers in its hunk headers; apply no whitespace normalization.
+2. The squash tree equals the exact tree from a successful merge of the author head into the squash parent.
+The checker uses `git merge-tree --write-tree` with the squash parent first and the author head second.
+Require this check even when the squash parent already contains the author's changes.
+The `files` field counts the paths that differ between the squash parent and the squash commit.
 The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
 Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
 Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.
@@ -112,21 +112,21 @@ class SquashContainmentTests(unittest.TestCase):
     def test_unlinked_squash_refuses(self):
         self.assert_refuse(self.check(linked=self.parent), 'mergeCommit')
 
-    def test_different_patch_with_the_same_files_refuses(self):
+    def test_different_content_with_the_same_files_refuses(self):
         self.commit({'alpha.txt': 'different feature\n'})
         squash = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-m', 'Different squash')
-        self.assert_refuse(self.check(squash=squash), 'file diffs differ')
+        self.assert_refuse(self.check(squash=squash), 'squash tree differs')
 
     def test_whitespace_difference_refuses(self):
         self.commit({'alpha.txt': 'alpha feature \n'})
         squash = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-m', 'Whitespace squash')
-        self.assert_refuse(self.check(squash=squash), 'file diffs differ')
+        self.assert_refuse(self.check(squash=squash), 'squash tree differs')
 
     def test_file_mode_difference_refuses(self):
         self.git('update-index', '--chmod=+x', 'alpha.txt')
         tree = self.git('write-tree')
         squash = self.git('commit-tree', tree, '-p', self.parent, '-m', 'Executable squash')
-        self.assert_refuse(self.check(squash=squash), 'file diffs differ')
+        self.assert_refuse(self.check(squash=squash), 'squash tree differs')
 
     def test_main_edits_far_from_feature_hunk_allow_shifted_line_numbers(self):
         self.git('checkout', '-b', 'shifted-main', self.base)
@@ -144,6 +144,34 @@ class SquashContainmentTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(result.stdout.startswith('PASS '), result.stdout)
 
+    def test_advanced_base_and_parent_compose_with_nearby_author_edit(self):
+        self.git('checkout', '-b', 'adjacent-main', self.base)
+        original = 'top\nauthor old\nkeep 1\nbase old\nkeep 2\nparent old\nbottom\n'
+        self.commit({'adjacent.txt': original})
+        self.git('checkout', '-b', 'adjacent-feature')
+        self.commit({'adjacent.txt': original.replace('author old', 'author new')})
+        author = self.git('rev-parse', 'HEAD')
+        self.git('checkout', 'adjacent-main')
+        base_text = original.replace('base old', 'base new')
+        self.commit({'adjacent.txt': base_text})
+        base = self.git('rev-parse', 'HEAD')
+        parent_text = base_text.replace('parent old', 'parent new')
+        self.commit({'adjacent.txt': parent_text})
+        parent = self.git('rev-parse', 'HEAD')
+        self.git('merge', '--squash', 'adjacent-feature')
+        self.git('commit', '-m', 'Adjacent squash')
+        squash = self.git('rev-parse', 'HEAD')
+        result = self.check(base=base, author=author, squash=squash)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, f'PASS pr={PR} base={base} author_head={author} '
+                         f'squash={squash} parent={parent} files=1\n')
+
+        merged_text = parent_text.replace('author old', 'author new')
+        self.assertEqual((self.repo / 'adjacent.txt').read_text(), merged_text)
+        self.commit({'adjacent.txt': merged_text.replace('parent new', 'unexplained edit')})
+        wrong = self.git('commit-tree', 'HEAD^{tree}', '-p', parent, '-m', 'Wrong adjacent squash')
+        self.assert_refuse(self.check(base=base, author=author, squash=wrong), 'squash tree differs')
+
     def test_identical_hunk_at_a_different_location_refuses(self):
         self.git('checkout', '-b', 'repeated-main', self.base)
         lines = ['same\n'] * 40
@@ -157,7 +185,7 @@ class SquashContainmentTests(unittest.TestCase):
         lines[7], lines[27] = 'same\n', 'changed\n'
         self.commit({'repeated.txt': ''.join(lines)})
         squash = self.git('rev-parse', 'HEAD')
-        self.assert_refuse(self.check(base=base, author=author, squash=squash), 'clean merge')
+        self.assert_refuse(self.check(base=base, author=author, squash=squash), 'squash tree differs')
 
     def test_ignored_submodule_pointer_difference_refuses(self):
         self.git('checkout', '-b', 'gitlink-main', self.base)
@@ -174,15 +202,23 @@ class SquashContainmentTests(unittest.TestCase):
         self.git('commit', '-m', 'Gitlink squash')
         equal = self.check(base=base, author=author, squash=self.git('rev-parse', 'HEAD'))
         self.assertEqual(equal.returncode, 0, equal.stdout + equal.stderr)
+        self.assertTrue(equal.stdout.endswith(' files=2\n'), equal.stdout)
         self.git('update-index', '--cacheinfo', f'160000,{self.base},dependency')
         tree = self.git('write-tree')
         squash = self.git('commit-tree', tree, '-p', base, '-m', 'Omitted gitlink')
-        self.assert_refuse(self.check(base=base, author=author, squash=squash), 'file sets')
+        self.assert_refuse(self.check(base=base, author=author, squash=squash), 'squash tree differs')
 
     def test_extra_changed_file_refuses(self):
         self.commit({'extra.txt': 'extra\n'})
         squash = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-m', 'Extra squash')
-        self.assert_refuse(self.check(squash=squash), 'file sets')
+        self.assert_refuse(self.check(squash=squash), 'squash tree differs')
+
+    def test_conflicting_merge_refuses(self):
+        self.git('checkout', '-b', 'conflicting-main', self.parent)
+        self.commit({'alpha.txt': 'alpha main\n'})
+        parent = self.git('rev-parse', 'HEAD')
+        squash = self.git('commit-tree', f'{self.squash}^{{tree}}', '-p', parent, '-m', 'Resolved squash')
+        self.assert_refuse(self.check(squash=squash), 'git command failed (exit 1)')
 
     def test_two_parent_commit_refuses(self):
         merge = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-p', self.author, '-m', 'Merge')
@@ -197,9 +233,21 @@ class SquashContainmentTests(unittest.TestCase):
     def test_missing_commit_refuses(self):
         self.assert_refuse(self.check(author='missing-commit'), 'git command failed')
 
-    def test_empty_diff_refuses(self):
+    def test_empty_diff_that_omits_author_changes_refuses(self):
         empty = self.git('commit-tree', f'{self.parent}^{{tree}}', '-p', self.parent, '-m', 'Empty')
-        self.assert_refuse(self.check(squash=empty, author=self.base), 'non-empty')
+        self.assert_refuse(self.check(squash=empty), 'squash tree differs')
+
+    def test_author_changes_already_in_parent_still_require_exact_tree(self):
+        parent = self.squash
+        empty = self.git('commit-tree', f'{parent}^{{tree}}', '-p', parent, '-m', 'Empty squash')
+        result = self.check(squash=empty)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, f'PASS pr={PR} base={self.base} author_head={self.author} '
+                         f'squash={empty} parent={parent} files=0\n')
+
+        self.commit({'extra.txt': 'extra\n'})
+        wrong = self.git('rev-parse', 'HEAD')
+        self.assert_refuse(self.check(squash=wrong), 'squash tree differs')
 
     def test_wrong_argument_count_exits_two(self):
         result = subprocess.run([sys.executable, str(SCRIPT)], cwd=self.repo,
