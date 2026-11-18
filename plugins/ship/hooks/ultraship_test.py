@@ -1579,6 +1579,13 @@ class ReviewThreadReadTests(unittest.TestCase):
                    "}}'")
         self.assertEqual(ultraship.review_thread_denial(command), 'gh api write outside the helper')
 
+    def test_paginated_graphql_read_refuses_connection_under_pull_request_list(self):
+        command = ("gh api graphql --paginate -f query='query($endCursor:String)"
+                   '{repository(owner:"example-org",name:"example-repo"){pullRequests(first:2){nodes{'
+                   'reviewThreads(first:20,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{id}}'
+                   "}}}}'")
+        self.assertEqual(ultraship.review_thread_denial(command), 'gh api write outside the helper')
+
     def test_paginated_graphql_read_requires_one_page_info_response_key(self):
         query = ("gh api graphql --paginate -f query='query($endCursor:String)"
                  '{repository(owner:"example-org",name:"example-repo"){pullRequest(number:456){'

@@ -4029,6 +4029,8 @@ def graphql_read_document(document, required_variables=(), paginate=False):
                 and tokens[item - 2:item] != [('punct', '...'), ('name', 'on')])
 
     cursor_argument = [('name', 'after'), ('punct', ':'), ('punct', '$'), ('name', 'endCursor')]
+    singular_parents = ['repository', 'pullRequest']
+    selection_names, parents = {}, []
     page_info, bound_page_info, position = None, None, cursor + 1
     while position < end - 1:
         # gh looks up the response key across the whole result.
@@ -4036,21 +4038,34 @@ def graphql_read_document(document, required_variables=(), paginate=False):
             if page_info is not None:
                 return False
             page_info = position
+        if tokens[position] == ('punct', '{'):
+            parents.append(selection_names.get(position))
+        elif tokens[position] == ('punct', '}'):
+            parents.pop()
         if tokens[position] != ('punct', '('):
             position += 1
             continue
         arguments = position
         position = group(arguments, '(')
-        if (tokens[arguments - 1][0] != 'name' or tokens[arguments - 2] == ('punct', '@') or not any(
-                tokens[item:item + 4] == cursor_argument for item in direct_items(arguments, position))):
+        kind, field = tokens[arguments - 1]
+        if kind != 'name' or tokens[arguments - 2] == ('punct', '@'):
             continue
-        if bound_page_info is not None:
+        cursor_count = sum(tokens[item:item + 4] == cursor_argument for item in direct_items(arguments, position))
+        # A single selection under a list can return several cursors.
+        if cursor_count and (cursor_count != 1 or bound_page_info is not None
+                             or parents != singular_parents or field != 'reviewThreads'):
             return False
+        if not cursor_count and field not in singular_parents:
+            continue
         selection = position
         while tokens[selection] == ('punct', '@'):
             if tokens[selection + 1][0] != 'name':
                 return False
             selection = optional_arguments(selection + 2)
+        if not cursor_count:
+            if tokens[selection] == ('punct', '{'):
+                selection_names[selection] = field
+            continue
         selection_end = group(selection, '{')
         if selection_end is None:
             return False
