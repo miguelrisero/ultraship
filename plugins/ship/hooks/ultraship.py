@@ -889,22 +889,20 @@ def literal_ps_awk_filter(command):
                   r"'([^'\r\n]*)'(?=[ \t]*(?:$|;|&&|\|\||\)))", data, command)
 
 
-PR_BODY_HELPER = 'pr_create_body.py'
-
-
-def pr_create_body_shell(command):
-    """Project one exact helper call onto the PR command it executes."""
-    helper = str(Path(__file__).resolve().parents[1] / 'skills/ship/scripts' / PR_BODY_HELPER)
-    if "'" in helper or any(ord(char) < 32 for char in helper) or '\x00' in command:
+def literal_pr_create_shell(command):
+    """Return the executable header only for one complete literal stdin form."""
+    line, _, body = command.partition('\n')
+    header = re.fullmatch(r"(gh pr create --repo github\.com/(?:bettergroupinc|miguelrisero)/([A-Za-z0-9_.-]+)"
+                          r" --head ([A-Za-z0-9_][A-Za-z0-9_./-]*) --title '[^'\x00-\x1f\x7f]+' --body-file -) <<'BODY'",
+                          line)
+    if not header or header[2] in {'.', '..'} or '\x00' in body:
         return None
-    lines = command.removesuffix('\n').split('\n')
-    title = r'''(?:'[^'\x00-\x1f\x7f]+'|"[^"$`\\!\x00-\x1f\x7f]+")'''
-    header = re.fullmatch(rf"/usr/bin/python3 -I '{re.escape(helper)}' pr-body-[A-Za-z0-9_-]+\.md "
-                          r"(github\.com/(?:bettergroupinc|miguelrisero)/[A-Za-z0-9_.-]+) "
-                          rf"([A-Za-z0-9_][A-Za-z0-9_./-]*) ({title}) <<'([A-Za-z_][A-Za-z_0-9]*)'", lines[0])
-    if header and len(lines) > 1 and lines[-1] == header[4] and header[4] not in lines[1:-1]:
-        return f'gh pr create --repo {header[1]} --head {header[2]} --title {header[3]} --body-file -'
-    return None
+    branch = header[3]
+    if '..' in branch or branch.endswith('.') or any(
+            not part or part.startswith('.') or part.endswith('.lock') for part in branch.split('/')):
+        return None
+    lines = body.removesuffix('\n').split('\n')
+    return header[1] if lines[-1] == 'BODY' and 'BODY' not in lines[:-1] else None
 
 
 def cat_heredoc_data(command):
@@ -4740,16 +4738,15 @@ def pre(data):
                          'Report the blocked scope to the driver.')
     if tool == 'Bash':
         command = str(tin.get('command', ''))
+        pr_body_command = literal_pr_create_shell(command)
+        command = pr_body_command or command
         # shortcut: substitutions or variables can build option names; upgrade to driver-only record folders and a tool-side record check.
         trigger = command.translate(str.maketrans('', '', "'\"\\")).casefold()
         if '--row-file' in trigger or '--row-id' in trigger or 'row_reanchor' in trigger and '--row-' in trigger:
             row_reanchor_gate(data, command)
-    pr_body_command = None
-    if tool == 'Bash' and PR_BODY_HELPER in trigger:
-        pr_body_command = pr_create_body_shell(command)
-        if pr_body_command is None or (agent_type and not role(data, 'writer')
-                                       and not re.match(r'^(ship:)?driver(--|$)', agent_type)):
-            deny('Only the main session and the driver may use the literal PR body helper form in the Ship pipeline.')
+        if (pr_body_command and agent_type and not role(data, 'writer')
+                and not re.match(r'^(ship:)?driver(--|$)', agent_type)):
+            deny('Only the main session and the driver may use the literal PR body stdin form in the Ship pipeline.')
     if role(data, 'writer'):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
                     'mcp__bettercoding__set_input_status'):
@@ -4839,14 +4836,17 @@ def pre(data):
         try:
             command = pr_body_command or tin.get('command', '')
             reason = review_thread_denial(command)
-            if reason is None and '<<' in command:
-                create = r'\bgh[ \t]+pr[ \t]+create\b'
+            if reason is None and pr_body_command is None:
+                repo_option = r'(?:[ \t]+(?:-R|--repo)(?:[ \t]+|=)[^ \t\n;&|()<>]+)?'
+                create = rf'\bgh{repo_option}[ \t]+pr{repo_option}[ \t]+(?:create|new)\b'
                 raw = re.sub(r'''['"\\]''', '', command.replace('\\\n', ''))
-                if re.search(create, raw):
+                body_option = r'(?:^|[ \t])(?:--body-file\b|-[A-Za-z]*F)'
+                stdin_option = body_option + r'[ \t=]*-(?=$|[ \t\n;&|()<>])'
+                if re.search(create, raw) and ('<<' in command or re.search(stdin_option, raw)):
                     shell = shell_without_heredoc_bodies(command)
                     shell = re.sub(r'''['"\\]''', '', shell.replace('\\\n', ''))
-                    if re.search(create, shell) and re.search(r'(?:^|[ \t])(?:--body-file\b|-[A-Za-z]*F)', shell):
-                        reason = 'Shell heredocs for PR creation require the literal PR body helper'
+                    if re.search(create, shell) and re.search(body_option, shell):
+                        reason = 'Shell heredocs and stdin for PR creation require the literal PR body stdin form'
             if reason is None:
                 separated = re.sub(r'''['"\\]''', ' ', command).casefold()
                 normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()
@@ -4856,8 +4856,9 @@ def pre(data):
                       and (re.search(r'\bgh\b', separated) or re.search(r'\bgh\b', normalized))):
                     reason = 'heredoc with line continuation'
                 elif (thread_command_config(command) or '--config-env' in command
-                      or "$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
-                                             or re.search(r'\b(?:gh|api)\b', normalized))):
+                      or ("$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
+                                              or re.search(r'\b(?:gh|api)\b', normalized))
+                          and "$'" in writer_quoted_grep_data(command))):
                     reason = 'git config from the command line'
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__

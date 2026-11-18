@@ -157,15 +157,19 @@ Refuse missing, stale, expired, mismatched, ambiguous, or unlawfully obtained ev
 Use only whole-line grep for the exact stored `id = "<ID>"` line in each named file, with zero context.
 Read only the approved row extent, from its `[[` header to the line before the next table, or EOF for the last row.
 Refuse an ambiguous ID or extent. Forbid adjacent-row reads, broader searches, and whole-file reads or parsing.
+Require an active row at the bound main commit.
+Refuse an existing `[[retired]]` row on this same-row route.
+Preserve the retirement record.
+Use the [new lane-owned row review route](#new-lane-owned-row-review-route) for its replacement row.
+Require a new row ID and separate creation authority for the replacement.
 Require proof that each stored `old` anchor met its expected count before the breaking commit.
 Require proof that it counts zero at that commit and on the bound main.
 Require scoped source evidence that the named merge caused the zero count and that the repair lane changed no subject code.
 Use the bound pre-merge main and merged commit to show that the breaking PR changed the guarded code itself.
 Require positive evidence that this code change made the stored mutant impossible to apply at the guarded site.
 Require the frozen decision to bind this evidence to the follow-up under the owner standing grant before authorizing the edit.
-Require recorded evidence of the earlier retirement, designated-test change, or mutant adaptation under that grant.
+Require recorded evidence of a landed designated-test change or mutant adaptation under that grant.
 Require the disposition record to cite the landed row change and its CoC decision.
-For retirement, require evidence that the breaking PR deleted the guarded target code.
 Require a receipt for the independent not-weaker review of that disposition.
 Require that reviewer to differ from the breaking PR author and the person who applied the disposition.
 Bind the receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.

@@ -1809,11 +1809,23 @@ class ScopedDecisionRouteTests(unittest.TestCase):
         astra = (self.ship / 'agents/reviewer--astra.md').read_text()
         self.assertNotIn('owner-decisions.md#standalone-main-row-repair', astra)
 
+    def test_main_row_repair_routes_retired_rows_to_separate_creation(self):
+        self.check_route('Standalone main-row repair', (
+            'Require an active row at the bound main commit.',
+            'Refuse an existing `[[retired]]` row on this same-row route.',
+            'Preserve the retirement record.',
+            'Use the [new lane-owned row review route](#new-lane-owned-row-review-route) for its replacement row.',
+            'Require a new row ID and separate creation authority for the replacement.',
+        ))
+        self.check_route('New lane-owned row review route', (
+            'Apply this route only to future briefs after verified runtime adoption.',
+            'Preserve every existing refusal, tool and hook denial, and affected-session hold.',
+        ))
+
     def test_main_row_repair_requires_proof_of_earlier_reviewed_disposition_before_edit(self):
         self.check_route('Standalone main-row repair', (
-            'Require recorded evidence of the earlier retirement, designated-test change, or mutant adaptation under that grant.',
+            'Require recorded evidence of a landed designated-test change or mutant adaptation under that grant.',
             'Require the disposition record to cite the landed row change and its CoC decision.',
-            'For retirement, require evidence that the breaking PR deleted the guarded target code.',
             'Require a receipt for the independent not-weaker review of that disposition.',
             'Require that reviewer to differ from the breaking PR author and the person who applied the disposition.',
             'Bind the receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.',
