@@ -493,10 +493,13 @@ Green CI neither blocks this route nor replaces either review.
 
 Require the brief to name an exact CoC decision file by absolute path and SHA256.
 Verify its SHA256 and bindings before any protected read or edit.
+Match the computed SHA256 to a separate trusted CoC issuance record before any protected access.
+Obtain that record from a CoC-controlled source independent of the brief and decision file.
 The verified decision supplies only this route's scoped read and edit authority under the owner's testing delegation.
 Require the decision to bind the repository, PR, merge base SHA and pre-edit head SHA.
 Require it to bind the exact row-file path, unique row ID, full table extent including owned child tables, and one action.
 Require it to name the row creator, applying writer, reviewer and their exact protected access scopes.
+Bind the proposal author's identity to the proposal SHA256 in the decision.
 Bind the exact proposal to the decision: the full removal or the exact named fields with current and replacement values.
 Keep protected values in the admitted scope.
 Use the frozen proposal SHA256 in content-free briefs and receipts.
@@ -504,7 +507,9 @@ Read only the named row extent at the pre-edit head.
 Search or parse no protected file.
 
 Require an approving proposal review receipt before native Edit.
-Require the reviewer to differ from the row creator, PR author and applying writer.
+Require the reviewer to differ from the row creator, PR author, proposal author and applying writer in both reviews.
+For field edits, require review of the exact current and replacement values and how the designated test detects the proposed mutant.
+For removal, require the reviewer to verify the full removal extent, including all child tables that belong to the row.
 Bind both review receipts to the same decision SHA256, exact proposal SHA256, reviewer identity, approving verdict, admission and row scope.
 Bind the proposal receipt to the pre-edit head SHA.
 Bind the applied receipt to both the pre-edit and new head SHAs.
@@ -521,7 +526,11 @@ Require a correction commit with only the approved edit and the bound pre-edit h
 Require the same reviewer to verify the exact applied proposal on the frozen new head.
 Require that reviewer's not-weaker verdict on that head before publication.
 Require evidence that any removed row supplies no unique protection.
-Require the CoC to approve the applied receipt before publication.
+Require the CoC to approve the applied receipt before the correction push and all later publication steps.
+Require the driver to verify the live remote PR head equals the bound pre-edit SHA immediately before the correction push.
+Require the reviewed correction SHA as the only commit to push.
+Require the driver to verify the live remote PR head equals the reviewed correction SHA before every later publication step.
+Block publication on a missing or mismatched remote head.
 Invalidate each affected receipt and approval when its bound evidence changes.
 Keep every other route, effective refusal, protected hold, tool denial and hook denial unchanged.
 Grant zero runtime-adoption, execution, installation, retry or publication authority.

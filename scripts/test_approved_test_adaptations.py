@@ -1705,13 +1705,18 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     'Green CI neither blocks this route nor replaces either review.',
                     'Require the brief to name an exact CoC decision file by absolute path and SHA256.',
                     'Verify its SHA256 and bindings before any protected read or edit.',
+                    'Match the computed SHA256 to a separate trusted CoC issuance record before any protected access.',
+                    'Obtain that record from a CoC-controlled source independent of the brief and decision file.',
                     'Require the decision to bind the repository, PR, merge base SHA and pre-edit head SHA.',
                     'Require it to bind the exact row-file path, unique row ID, full table extent including owned child tables, and one action.',
+                    "Bind the proposal author's identity to the proposal SHA256 in the decision.",
                     'Bind the exact proposal to the decision: the full removal or the exact named fields with current and replacement values.',
                     'Read only the named row extent at the pre-edit head.',
                     'Search or parse no protected file.',
                     'Require an approving proposal review receipt before native Edit.',
-                    'Require the reviewer to differ from the row creator, PR author and applying writer.',
+                    'Require the reviewer to differ from the row creator, PR author, proposal author and applying writer in both reviews.',
+                    'For field edits, require review of the exact current and replacement values and how the designated test detects the proposed mutant.',
+                    'For removal, require the reviewer to verify the full removal extent, including all child tables that belong to the row.',
                     'Bind both review receipts to the same decision SHA256, exact proposal SHA256, reviewer identity, approving verdict, admission and row scope.',
                     'Bind the proposal receipt to the pre-edit head SHA.',
                     'Bind the applied receipt to both the pre-edit and new head SHAs.',
@@ -1722,14 +1727,40 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     'Preserve pins, assertions, bounds and all unrelated content byte for byte.',
                     'Recheck eligibility, both digests, the proposal receipt and the match immediately before Edit.',
                     'Refuse missing, stale, ambiguous, expired, mismatched or unlawfully obtained evidence.',
+                    'Require a correction commit with only the approved edit and the bound pre-edit head as its sole parent.',
                     'Require the same reviewer to verify the exact applied proposal on the frozen new head.',
                     "Require that reviewer's not-weaker verdict on that head before publication.",
                     'Require evidence that any removed row supplies no unique protection.',
+                    'Require the CoC to approve the applied receipt before the correction push and all later publication steps.',
+                    'Require the driver to verify the live remote PR head equals the bound pre-edit SHA immediately before the correction push.',
+                    'Require the reviewed correction SHA as the only commit to push.',
+                    'Require the driver to verify the live remote PR head equals the reviewed correction SHA before every later publication step.',
+                    'Block publication on a missing or mismatched remote head.',
                     'Keep every other route, effective refusal, protected hold, tool denial and hook denial unchanged.',
                     'Grant zero runtime-adoption, execution, installation, retry or publication authority.',
                 ):
                     self.assertIn(line, route.splitlines())
         self.assertEqual(routes, [routes[0]] * 3)
+
+        for name in ('reviewer--sol.md', 'reviewer--opus.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            _, _, after = text.partition('## Protected row admission\n')
+            admission, _, _ = after.partition('\n## Squash-merge containment\n')
+            with self.subTest(path=name):
+                for line in (
+                    "When the brief explicitly selects the Unmerged new-row correction route, follow its writer definition for both reviews.",
+                    'Keep the protected-read admission for your agent ID.',
+                    "Check the driver's verification against a separate trusted CoC issuance record before any protected access.",
+                    "Confirm that the proposal author's identity is bound to the proposal SHA256 in the decision.",
+                    'Refuse both reviews if you are the row creator, PR author, proposal author or applying writer.',
+                    'Read only the named extent at the pre-edit head.',
+                    'For field edits, inspect the exact current and replacement values inside the admitted scope.',
+                    'For field edits, trace how the designated test detects the claim violation caused by the proposed mutant.',
+                    'For field edits, compare the exact approved values with the admitted extent at the frozen new head.',
+                    'For removal, verify the full extent before Edit, including all child tables that belong to the row.',
+                    'For removal, require content-free evidence that the named row and its own child tables are absent.',
+                ):
+                    self.assertIn(line, admission.splitlines())
 
     def test_new_lane_owned_row_review_requires_exact_authority_and_receipt_contract(self):
         for name in ('reviewer--sol.md', 'reviewer--opus.md'):
