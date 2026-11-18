@@ -67,10 +67,10 @@ Task: <frozen goal, one paragraph>
 Repository: <owner/repo>   Worktree: <absolute path>   Branch: <name>   Base SHA: <sha>
 In scope: <files or areas>   Out of scope: <files or areas owned by other lanes>
 Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
-A hook refusal is final: report it and stop.
+After a hook refusal, retry in another form only when the new form meets the rule the refusal names; otherwise report it and ask your superior for permission.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
-The stop covers the refused call; the loaded formatting, coordination and method-only resend routes stay.
+The ship plugin's Loaded instructions and refusals section sets the retry rule and the ask-your-superior rule.
 Depends on: <lanes or none>
 Done when: <acceptance checks and permitted test commands>
 Mutation boundary: Execute mutation checks, anchor checks, and selectors only in the admitted battery STATIC part at the frozen head after GO; keep execution commands out of this brief.

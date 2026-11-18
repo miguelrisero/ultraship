@@ -432,7 +432,7 @@ EXPECTED_DISPOSITION_BOUNDARY = [
     'Source delivery grants zero runtime-adoption authority.',
     'Source delivery grants zero retry authority.',
     'Native Edit grants zero alternate form for an existing or recorded denied operation.',
-    'Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.',
+    'Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.',
     'Preserve every effective refusal, tool and hook denial, and affected-session hold.',
     'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.',
     'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.',
@@ -510,7 +510,7 @@ EXPECTED_NEW_ROW_BOUNDARY = [
     'Source delivery grants zero installation authority.',
     'Source delivery grants zero publication authority.',
     'Preserve every existing refusal, tool and hook denial, and affected-session hold.',
-    'Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.',
+    'Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.',
     'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.',
     'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.',
     *EXPECTED_CONTRACT_GAP_RULE,
@@ -1016,7 +1016,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         ):
             self.assertIn(phrase, boundary)
         for pattern in (r'future briefs.*verified runtime adoption', r'Native Edit.*zero.*alternate.*denied',
-                        r'actual cause.*fresh applicable disposition', r'(?:never|zero).*replay.*(?:equivalent|actor)',
+                        r'actual cause.*fresh applicable disposition', r'Retry.*another form only when.*refusal reason is fixed',
                         r'product-limit.*cost.*zero.*(?:protected|subject)',
                         r'literal.*(?:worktree|path).*allowlist', r'fsmonitor.*(?:external diff|text conversion)',
                         r'(?:inconsistent|changed).*checkpoint.*(?:invalid|block)|invalid.*(?:inconsistent|changed).*checkpoint',

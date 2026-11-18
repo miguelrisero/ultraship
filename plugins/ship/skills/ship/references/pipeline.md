@@ -15,7 +15,7 @@ Reviewers use Grep, Glob, and Read with exact absolute paths.
 An exact absolute path has no `~`, `.` or `..` segment, repeated or trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form.
 A directory path has no trailing `/`: `/abs/repo/backend/api/services`, not `/abs/repo/backend/api/services/`.
 When a hook refusal says to report the blocked scope, reviewers report that call as blocked scope in the verdict.
-Reviewers never resend that call in another form, including the path the refusal names; the coordinator decides a new brief.
+Reviewers may retry that call in another form when the new form meets the rule the refusal names, or ask the coordinator for permission or a new brief.
 Reviewers use LSP hover and documentSymbol on one file only.
 Reviewers use no MCP (`mcp__`) tools.
 Reviewers search only directories that contain no `tests/mutation/` directory.

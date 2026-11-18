@@ -31,7 +31,7 @@ Decision
 Next
 - <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>.
 <Every line: one point per sentence, at most 25 words each, with a space between words.>
-<Put the receipt marker exactly once; a second marker or marker name makes the refusal final.>"""
+<Put the receipt marker exactly once.>"""
 INPUT_TEMPLATE = '''Use exactly one output-kind meta tag: decision or result.
 Decision:
 <meta name="output-kind" content="decision">
@@ -43,7 +43,7 @@ Decision:
 Result alternative:
 <meta name="output-kind" content="result"><p>...</p>
 Write at most 25 words per sentence.
-Put the receipt marker exactly once; a second marker or marker name makes the refusal final.'''
+Put the receipt marker exactly once.'''
 
 
 class FindingsError(ValueError):
@@ -276,38 +276,6 @@ def signature(receipt, key):
     return hmac.new(key, canonical({k: v for k, v in receipt.items() if k != 'mac'}), hashlib.sha256).hexdigest()
 
 
-def pending_path(identity):
-    fields = [identity.get(field) for field in ('session_id', 'agent_id', 'tool_name', 'recipient')]
-    if isinstance(identity.get('tool_name'), str) and identity['tool_name'].endswith('create_input'):
-        fields.append(identity.get('input_key'))
-    key = hashlib.sha256(canonical(fields)).hexdigest()
-    return store_dir() / 'pending' / key
-
-
-def clear_pending(receipt, event):
-    identity = dict(receipt)
-    create_input = isinstance(identity.get('tool_name'), str) and identity['tool_name'].endswith('create_input')
-    if create_input:
-        identity['input_key'] = input_identity(event)['input_key']
-    paths = {pending_path(identity)}
-    if create_input:
-        # Ship releases before this change keep create_input entries at the four-field path.
-        fields = [identity.get(field) for field in ('session_id', 'agent_id', 'tool_name', 'recipient')]
-        paths.add(store_dir() / 'pending' / hashlib.sha256(canonical(fields)).hexdigest())
-    for path in paths:
-        try:
-            entry = json.loads(path.read_text())
-            same = entry['id'] == receipt['id']
-            if not same and entry['state'] == 'open':
-                sibling = read_receipt(entry['id'])
-                same = (sibling.get('input_sha256') == receipt.get('input_sha256')
-                        and sibling.get('tool_use_id') == receipt.get('tool_use_id'))
-            if same:
-                path.unlink(missing_ok=True)
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-
-
 def prune_receipts(directory):
     timestamp = now().timestamp()
     receipts = []
@@ -327,6 +295,7 @@ def prune_receipts(directory):
             path.unlink(missing_ok=True)
             path.with_suffix('.consumed').unlink(missing_ok=True)
             remaining -= 1
+    # Releases before 1.11.0 wrote these entries; they expire here.
     for name in ('pending', 'citation-refused'):
         for path in (store_dir() / name).glob('*'):
             try:
@@ -335,34 +304,6 @@ def prune_receipts(directory):
             except OSError:
                 pass
     return young
-
-
-def pending_entry(identity):
-    paths = [pending_path(identity)]
-    if isinstance(identity.get('tool_name'), str) and identity['tool_name'].endswith('create_input'):
-        # Ship releases before this change keep create_input entries at the four-field path.
-        fields = [identity.get(field) for field in ('session_id', 'agent_id', 'tool_name', 'recipient')]
-        paths.append(store_dir() / 'pending' / hashlib.sha256(canonical(fields)).hexdigest())
-    for index, path in enumerate(paths):
-        try:
-            entry = json.loads(path.read_text())
-            receipt_id = entry['id']
-            if entry['state'] not in ('open', 'spent') or not re.fullmatch(r'[0-9a-f]{32}', receipt_id):
-                raise ValueError('Invalid pending receipt entry.')
-            receipt_path = store_dir() / 'receipts' / (receipt_id + '.json')
-            receipt = json.loads(receipt_path.read_bytes())
-            created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
-            if timedelta(0) <= now() - created < timedelta(hours=24):
-                if index and ('input_key' in receipt
-                              or receipt.get('fields_sha256') != identity.get('fields_sha256')):
-                    return None
-                if receipt_path.with_suffix('.consumed').exists():
-                    entry['state'] = 'spent'
-                return entry
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-        path.unlink(missing_ok=True)
-    return None
 
 
 def mark_consumed(receipt_id):
@@ -375,37 +316,7 @@ def mark_consumed(receipt_id):
     return True
 
 
-def check_pending(event):
-    args = event.get('tool_input') or {}
-    tool = event.get('tool_name', '')
-    if tool == 'SendMessage':
-        prose = sendmessage_body(args)
-    elif tool.endswith(('create_input', 'update_input')):
-        content = args.get('content') or {}
-        if isinstance(content, str):
-            content = json.loads(content)
-        prose = content.get('html') or content.get('title')
-    else:
-        return
-    session = event.get('session_id')
-    if not prose or not isinstance(session, str) or not session:
-        return
-    entry = pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **input_identity(event)})
-    if entry and entry['state'] == 'open':
-        receipt_id = entry['id']
-        pending_message = ('A formatting-only refusal to this recipient is pending. Cite its receipt `'
-                           + receipt_id + '` with `<!-- ultraship-receipt:' + receipt_id + ' -->` in this message.')
-        try:
-            if not mark_consumed(receipt_id):
-                return
-        except OSError:
-            raise ValueError(pending_message) from None
-        raise ValueError('Receipt `' + receipt_id + '` is now spent. '
-                         'The message refused under receipt `' + receipt_id + '` stays refused. '
-                         'Later messages need no citation.')
-
-
-def write_receipt(event, findings, formatting_only, parent, resend_refused=False):
+def write_receipt(event, findings, formatting_only, parent):
     key = receipt_key()
     directory = store_dir() / 'receipts'
     directory.mkdir(mode=0o700, exist_ok=True)
@@ -413,8 +324,6 @@ def write_receipt(event, findings, formatting_only, parent, resend_refused=False
         raise OSError('Receipt store contains 2000 receipts younger than 24 hours.')
     session = event.get('session_id')
     identity = input_identity(event)
-    entry = None if resend_refused else pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **identity})
-    spent = entry is not None and entry['state'] == 'spent'
     receipt = {
         'id': uuid.uuid4().hex,
         'session_id': event.get('session_id'),
@@ -423,7 +332,7 @@ def write_receipt(event, findings, formatting_only, parent, resend_refused=False
         **identity,
         'findings': [finding[:500] for finding in findings],
         'formatting_only': formatting_only,
-        'resend_allowed': formatting_only and parent is None and not spent and isinstance(session, str) and bool(session),
+        'resend_allowed': formatting_only and isinstance(session, str) and bool(session),
         'parent': parent,
         'created_at': now().isoformat().replace('+00:00', 'Z'),
     }
@@ -438,16 +347,6 @@ def write_receipt(event, findings, formatting_only, parent, resend_refused=False
         os.replace(temporary, directory / (receipt['id'] + '.json'))
     finally:
         Path(temporary).unlink(missing_ok=True)
-    if receipt['resend_allowed'] or resend_refused:
-        pending = pending_path(receipt)
-        pending.parent.mkdir(mode=0o700, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(dir=pending.parent)
-        try:
-            with os.fdopen(fd, 'w') as output:
-                json.dump({'id': receipt['id'], 'state': 'spent' if resend_refused else 'open'}, output)
-            os.replace(temporary, pending)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
     prune_receipts(directory)
     return receipt
 
@@ -518,19 +417,6 @@ def consume_receipt(receipt_id, event, receipt):
             raise ValueError('Receipt expires after 24 hours.')
         if created > now():
             raise ValueError('Receipt creation is in the future.')
-        try:
-            fd = os.open(citation_refusal_path(receipt), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        except FileNotFoundError:
-            pass
-        else:
-            with os.fdopen(fd, 'rb') as source:
-                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                    raise ValueError('Citation refusal marker is not a regular file.')
-                refused_at = datetime.fromisoformat(source.read(64).decode().replace('Z', '+00:00'))
-            if refused_at.tzinfo is None:
-                raise ValueError('Citation refusal marker requires a UTC time.')
-            if created <= refused_at:
-                raise ValueError('A final citation refusal spent this receipt.')
         if not mark_consumed(receipt_id):
             raise ValueError('Receipt is consumed.')
         return receipt
@@ -538,55 +424,8 @@ def consume_receipt(receipt_id, event, receipt):
         raise ValueError('Invalid receipt citation: ' + str(exc)) from None
 
 
-def citation_refusal_path(identity):
-    fields = [identity.get(field) for field in
-              ('session_id', 'agent_id', 'tool_name', 'recipient', 'fields_sha256')]
-    return store_dir() / 'citation-refused' / hashlib.sha256(canonical(fields)).hexdigest()
-
-
-def write_citation_refusal(event):
-    session = event.get('session_id')
-    if not isinstance(session, str) or not session:
-        return
-    temporary = None
-    try:
-        path = citation_refusal_path({'session_id': session, 'agent_id': event.get('agent_id'),
-                                     **input_identity(event)})
-        store_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
-        path.parent.mkdir(mode=0o700, exist_ok=True)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
-            fcntl.flock(directory, fcntl.LOCK_EX)
-            refused_at = now()
-            try:
-                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-                with os.fdopen(fd, 'rb') as source:
-                    if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                        raise ValueError('Citation refusal marker is not a regular file.')
-                    current = datetime.fromisoformat(source.read(64).decode().replace('Z', '+00:00'))
-                if current.tzinfo is None:
-                    raise ValueError('Citation refusal marker requires a UTC time.')
-                refused_at = max(refused_at, current)
-            except (OSError, ValueError):
-                pass
-            fd, temporary = tempfile.mkstemp(dir=path.parent)
-            with os.fdopen(fd, 'w') as output:
-                output.write(refused_at.isoformat().replace('+00:00', 'Z'))
-            os.replace(temporary, path)
-        finally:
-            os.close(directory)
-    except OSError:
-        pass
-    finally:
-        if temporary is not None:
-            try:
-                Path(temporary).unlink(missing_ok=True)
-            except OSError:
-                pass
-
-
 def hook(event, parse_error=None):
-    parent, consumed = None, None
+    parent = None
     try:
         if parse_error is not None:
             raise parse_error
@@ -599,40 +438,32 @@ def hook(event, parse_error=None):
                         and owner == input_identity(event)['recipient'] and owner != event.get('agent_id')):
                     parent = None
                 else:
-                    consumed = consume_receipt(parent, event, receipt)
-        except ValueError:
-            write_citation_refusal(event)
-            raise
+                    consume_receipt(parent, event, receipt)
+        except ValueError as exc:
+            # A bad citation is a format fault; the fresh receipt lets the sender resend with a fix.
+            raise FormatError([str(exc)]) from None
         if event.get('tool_name') not in ('Agent', 'Task'):
-            if not parent:
-                check_pending(event)
             outgoing(event)
-        if consumed:
-            clear_pending(consumed, event)
         return
     except Exception as exc:
         findings = exc.findings if isinstance(exc, FindingsError) else [str(exc)]
         formatting_only = isinstance(exc, FindingsError) and exc.formatting_only
     reason = 'Output contract: ' + ' '.join(findings)
     try:
-        receipt = write_receipt(event, findings, formatting_only, parent, resend_refused=consumed is not None)
+        receipt = write_receipt(event, findings, formatting_only, parent)
     except Exception:
-        reason += ' No receipt was written, so no resend of this message is allowed in any form.'
+        reason += ' No receipt was written. Fix the findings and resend without a receipt marker.'
     else:
         if receipt['resend_allowed']:
             template = INPUT_TEMPLATE
             if event.get('tool_name') == 'SendMessage':
                 template = PEER_TEMPLATE
-            reason += (' You may resend once with the same action, recipient, scope and content, changed only in format.'
+            reason += (' Resend with the findings fixed; keep the same action, recipient and scope.'
                        + ' Resend with this shape:\n' + template)
-        else:
-            reason += ' This refusal is not formatting-only, so no resend of this message is allowed in any form.' if not formatting_only else ''
-            if parent:
-                reason += ' Its receipt is used and no further resend of this message is allowed.'
-            elif formatting_only and isinstance(event.get('session_id'), str) and event['session_id']:
-                reason += (' This refusal permits no resend, because a receipt to this recipient '
-                           'was spent within 24 hours.')
-        reason += ' Receipt: `' + receipt['id'] + '`.'
+        elif not formatting_only:
+            reason += (' This refusal is not formatting-only. Resend after the content meets the rule above,'
+                       ' or ask your superior for permission.')
+        reason +=' Receipt: `' + receipt['id'] + '`.'
         if receipt['resend_allowed']:
             reason += ' To resend, put `<!-- ultraship-receipt:' + receipt['id'] + ' -->` in the resent prose.'
     print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',

@@ -1173,9 +1173,9 @@ class ExecutionPolicyTests(unittest.TestCase):
             ('Protected content retains its grants and review without added access', (
                 'protected content', 'exact existing grants', 'independent review', 'zero protected access',
             )),
-            ('An effective refusal blocks equivalent operations and substitute actors', (
-                'effective refusal', 'blocks equivalent native reads', 'native edits',
-                'alternate execution', 'substitute actors',
+            ('A refusal applies the retry rule and keeps protected rows on their route', (
+                'after a hook or permission refusal', 'retry rule',
+                'a protected row edit follows only its row route',
             )),
             ('The recipe requires verification of the exact brief scope', (
                 "verify the brief's exact file scope",
@@ -1183,8 +1183,8 @@ class ExecutionPolicyTests(unittest.TestCase):
             ('The recipe requires applicable operation authority', (
                 'applicable operation authority',
             )),
-            ('The ordinary recipe applies before effective holds', (
-                'before any effective refusal or hold',
+            ('The ordinary recipe applies before holds or as a rule-meeting retry', (
+                'before any refusal or hold, or as a retry that meets the rule a refusal names',
             )),
             ('Source delivery grants zero session adoption authority', (
                 'zero session adoption authority',
@@ -1202,10 +1202,10 @@ class ExecutionPolicyTests(unittest.TestCase):
                 sections.append(section)
                 self.assertIn(heading, text, f'{name}: requires the Native file edits section')
                 self.assertIn(
-                    'After a method-only denial, apply the owner-decisions method-only rule: '
-                    'one native Edit of the already-approved text, then a separate commit step.',
+                    'After a hook denies only the method of an ordinary-file edit, '
+                    'use native Edit for the approved text, then commit as a separate step.',
                     section,
-                    f'{name}: requires the complete method-only denial rule in the recipe',
+                    f'{name}: requires the method-denial retry in the recipe',
                 )
                 normalized = ' '.join(section.lower().replace('`', '').split())
                 for message, phrases in requirements:

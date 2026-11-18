@@ -25,7 +25,7 @@ If your first message asks for `ready`, return `ready` and read nothing.
 Read one listed row file with Read, or search it with Grep, using that file as `path` and no `glob` or `type`.
 Read only the named row lines.
 Glob and LSP stay denied under `tests/mutation`.
-If the hook denies a call, report its message as the blocked scope and do not retry in another form.
+If the hook denies a call, report its message as the blocked scope. Retry in another form only when the new form meets the rule the denial names, or ask your coordinator for permission.
 This section adds no authority beyond the route that the brief names.
 
 ## Squash-merge containment
@@ -122,7 +122,7 @@ Source delivery grants zero retry authority.
 Source delivery grants zero installation authority.
 Source delivery grants zero publication authority.
 Preserve every existing refusal, tool and hook denial, and affected-session hold.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
@@ -256,7 +256,7 @@ Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
 Native Edit grants zero alternate form for an existing or recorded denied operation.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
