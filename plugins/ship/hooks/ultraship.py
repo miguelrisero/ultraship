@@ -4168,7 +4168,9 @@ def review_thread_denial(command, data_mode=False):
         calls = [index for index, (value, _) in enumerate(words)
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
         text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words))
-        if hidden_gh_api_calls(text) > len(calls):
+        # The recursive pass above already checked gh api calls inside quoted words.
+        nested = sum(hidden_gh_api_calls(re.sub(r'''['"\\]''', '', value)) for value, raw in words if value != raw)
+        if hidden_gh_api_calls(text) > len(calls) + nested:
             return 'review-thread guard parse failure'
         text = text.casefold()
         for index, (value, raw) in enumerate(words):
@@ -4679,8 +4681,8 @@ def pre(data):
                       or "$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
                                              or re.search(r'\b(?:gh|api)\b', normalized))):
                     reason = 'git config from the command line'
-        except Exception:
-            reason = 'review-thread guard parse failure'
+        except Exception as error:
+            reason = 'review-thread guard exception: ' + type(error).__name__
         if reason:
             deny("Ship replies to and resolves review threads only through `skills/babysit/scripts/thread_reply.py`, "
                  "which first checks that the thread belongs to the PR's own repository and number. Rule: " + reason + '.')
