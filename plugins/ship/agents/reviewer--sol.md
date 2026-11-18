@@ -28,24 +28,6 @@ Glob and LSP stay denied under `tests/mutation`.
 If the hook denies a call, report its message as the blocked scope and do not retry in another form.
 This section adds no authority beyond the route that the brief names.
 
-When the brief explicitly selects the Unmerged new-row correction route, follow its writer definition for both reviews.
-Only this review takes precedence over the default Lane-derived row review for that route.
-Keep the protected-read admission for your agent ID.
-Check the driver's verification against a separate trusted CoC issuance record before any protected access.
-Check the verified decision SHA256, proposal SHA256, bindings and eligibility evidence before any protected read.
-Confirm that the proposal author's identity is bound to the proposal SHA256 in the decision.
-Refuse both reviews if you are the row creator, PR author, proposal author or applying writer.
-Read only the named extent at the pre-edit head.
-For field edits, inspect the exact current and replacement values inside the admitted scope.
-For field edits, trace how the designated test detects the claim violation caused by the proposed mutant.
-For field edits, compare the exact approved values with the admitted extent at the frozen new head.
-For removal, verify the full extent before Edit, including all child tables that belong to the row.
-Require content-free evidence that the edit preserves all content outside the named extent at the frozen new head.
-For removal, require content-free evidence that the named row and its own child tables are absent.
-Use admitted source and test evidence to assess the proposal's protection before Edit and confirm it on the frozen new head.
-Require that evidence to show that any removed row supplies no unique protection.
-Return a content-free receipt for each review as the writer route requires.
-
 ## Squash-merge containment
 
 Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
@@ -163,6 +145,26 @@ Bind the receipt to the draft PR number and frozen final commit.
 A push that moves the draft head away from the frozen final commit invalidates the receipt and its approval.
 Before each publication step, confirm that the PR head equals the frozen final commit.
 Return a ready PR to draft before any further push, then repeat the review and approval.
+
+## Review of an unmerged new-row correction
+
+When the brief explicitly selects the Unmerged new-row correction route, follow its writer definition for both reviews.
+Only this review takes precedence over the default Lane-derived row review for that route.
+Keep the protected-read admission for your agent ID.
+Check the driver's verification against a separate trusted CoC issuance record before any protected access.
+Check the verified decision SHA256, proposal SHA256, bindings and eligibility evidence before any protected read.
+Confirm that the proposal author's identity is bound to the proposal SHA256 in the decision.
+Refuse both reviews if you are the row creator, PR author, proposal author or applying writer.
+Read only the named extent at the pre-edit head.
+For field edits, inspect the exact current and replacement values inside the admitted scope.
+For field edits, trace how the designated test detects the claim violation caused by the proposed mutant.
+For field edits, compare the exact approved values with the admitted extent at the frozen new head.
+For removal, verify the full extent before Edit, including all child tables that belong to the row.
+Require content-free evidence that the edit preserves all content outside the named extent at the frozen new head.
+For removal, require content-free evidence that the named row and its own child tables are absent.
+Use admitted source and test evidence to assess the proposal's protection before Edit and confirm it on the frozen new head.
+Require that evidence to show that any removed row supplies no unique protection.
+Return a content-free receipt for each review as the writer route requires.
 
 ## Lane-owned disposition review
 

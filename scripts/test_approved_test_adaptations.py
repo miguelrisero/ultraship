@@ -1732,8 +1732,12 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     "Require that reviewer's not-weaker verdict on that head before publication.",
                     'Require evidence that any removed row supplies no unique protection.',
                     'Require the CoC to approve the applied receipt before the correction push and all later publication steps.',
+                    'Require the driver to verify the PR is still open and unmerged immediately before the correction push.',
                     'Require the driver to verify the live remote PR head equals the bound pre-edit SHA immediately before the correction push.',
                     'Require the reviewed correction SHA as the only commit to push.',
+                    'Require the admitted push to reject an absent remote branch or a branch whose SHA differs from the bound pre-edit SHA.',
+                    'Keep the force-push ban.',
+                    'Block the correction push if the admitted push cannot enforce the exact remote branch check.',
                     'Require the driver to verify the live remote PR head equals the reviewed correction SHA before every later publication step.',
                     'Block publication on a missing or mismatched remote head.',
                     'Keep every other route, effective refusal, protected hold, tool denial and hook denial unchanged.',
@@ -1744,8 +1748,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
 
         for name in ('reviewer--sol.md', 'reviewer--opus.md'):
             text = (ROOT / 'plugins/ship/agents' / name).read_text()
-            _, _, after = text.partition('## Protected row admission\n')
-            admission, _, _ = after.partition('\n## Squash-merge containment\n')
+            _, _, after = text.partition('## Review of an unmerged new-row correction\n')
+            review, _, _ = after.partition('\n## ')
             with self.subTest(path=name):
                 for line in (
                     "When the brief explicitly selects the Unmerged new-row correction route, follow its writer definition for both reviews.",
@@ -1758,9 +1762,10 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     'For field edits, trace how the designated test detects the claim violation caused by the proposed mutant.',
                     'For field edits, compare the exact approved values with the admitted extent at the frozen new head.',
                     'For removal, verify the full extent before Edit, including all child tables that belong to the row.',
+                    'Require content-free evidence that the edit preserves all content outside the named extent at the frozen new head.',
                     'For removal, require content-free evidence that the named row and its own child tables are absent.',
                 ):
-                    self.assertIn(line, admission.splitlines())
+                    self.assertIn(line, review.splitlines())
 
     def test_new_lane_owned_row_review_requires_exact_authority_and_receipt_contract(self):
         for name in ('reviewer--sol.md', 'reviewer--opus.md'):

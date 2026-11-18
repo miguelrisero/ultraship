@@ -527,8 +527,12 @@ Require the same reviewer to verify the exact applied proposal on the frozen new
 Require that reviewer's not-weaker verdict on that head before publication.
 Require evidence that any removed row supplies no unique protection.
 Require the CoC to approve the applied receipt before the correction push and all later publication steps.
+Require the driver to verify the PR is still open and unmerged immediately before the correction push.
 Require the driver to verify the live remote PR head equals the bound pre-edit SHA immediately before the correction push.
 Require the reviewed correction SHA as the only commit to push.
+Require the admitted push to reject an absent remote branch or a branch whose SHA differs from the bound pre-edit SHA.
+Keep the force-push ban.
+Block the correction push if the admitted push cannot enforce the exact remote branch check.
 Require the driver to verify the live remote PR head equals the reviewed correction SHA before every later publication step.
 Block publication on a missing or mismatched remote head.
 Invalidate each affected receipt and approval when its bound evidence changes.
