@@ -1579,6 +1579,21 @@ class ReviewThreadReadTests(unittest.TestCase):
                    "}}'")
         self.assertEqual(ultraship.review_thread_denial(command), 'gh api write outside the helper')
 
+    def test_paginated_graphql_read_requires_one_page_info_response_key(self):
+        query = ("gh api graphql --paginate -f query='query($endCursor:String)"
+                 '{repository(owner:"example-org",name:"example-repo"){pullRequest(number:456){'
+                 'reviewThreads(first:20,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{id}}'
+                 'comments(first:5){%s}'
+                 "}}}'")
+        denied = 'gh api write outside the helper'
+        for sibling, reason in (
+            ('pageInfo{hasNextPage endCursor}', denied),
+            ('pageInfo:nodes{id}', denied),
+            ('metadata:pageInfo{hasNextPage endCursor}', None),
+        ):
+            with self.subTest(sibling=sibling):
+                self.assertEqual(ultraship.review_thread_denial(query % sibling), reason)
+
     def test_graphql_read_exception_excludes_writes_and_unproven_fields(self):
         query = ("-f query='query($owner:String!,$endCursor:String)"
                  '{repository(owner:$owner,name:"example-repo"){pullRequest(number:456)'

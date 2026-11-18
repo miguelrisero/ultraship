@@ -4023,9 +4023,19 @@ def graphql_read_document(document, required_variables=(), paginate=False):
             kind, value = tokens[position]
             position = group(position, value) if kind == 'punct' and value in '([{' else position + 1
 
+    def page_info_key(item):
+        return (tokens[item] == ('name', 'pageInfo')
+                and tokens[item - 1] not in (('punct', ':'), ('punct', '@'), ('punct', '...'))
+                and tokens[item - 2:item] != [('punct', '...'), ('name', 'on')])
+
     cursor_argument = [('name', 'after'), ('punct', ':'), ('punct', '$'), ('name', 'endCursor')]
-    found, position = False, cursor + 1
+    page_info, bound_page_info, position = None, None, cursor + 1
     while position < end - 1:
+        # gh looks up the response key across the whole result.
+        if page_info_key(position):
+            if page_info is not None:
+                return False
+            page_info = position
         if tokens[position] != ('punct', '('):
             position += 1
             continue
@@ -4034,7 +4044,7 @@ def graphql_read_document(document, required_variables=(), paginate=False):
         if (tokens[arguments - 1][0] != 'name' or tokens[arguments - 2] == ('punct', '@') or not any(
                 tokens[item:item + 4] == cursor_argument for item in direct_items(arguments, position))):
             continue
-        if found:
+        if bound_page_info is not None:
             return False
         selection = position
         while tokens[selection] == ('punct', '@'):
@@ -4045,9 +4055,7 @@ def graphql_read_document(document, required_variables=(), paginate=False):
         if selection_end is None:
             return False
         for item in direct_items(selection, selection_end):
-            if (tokens[item] != ('name', 'pageInfo') or tokens[item - 1] == ('punct', ':')
-                    or tokens[item - 2:item] == [('punct', '...'), ('name', 'on')]
-                    or tokens[item + 1] != ('punct', '{')):
+            if not page_info_key(item) or tokens[item + 1] != ('punct', '{'):
                 continue
             fields = {tokens[field][1] for field in direct_items(item + 1, group(item + 1, '{'))
                       if tokens[field][0] == 'name' and tokens[field - 1] not in (
@@ -4055,11 +4063,11 @@ def graphql_read_document(document, required_variables=(), paginate=False):
                       and (tokens[field + 1][0] == 'name' or tokens[field + 1] in (
                           ('punct', '}'), ('punct', '...')))}
             if {'hasNextPage', 'endCursor'} <= fields:
-                found = True
+                bound_page_info = item
                 break
         else:
             return False
-    return found
+    return bound_page_info is not None and page_info == bound_page_info
 
 
 def review_data_segment(words):
