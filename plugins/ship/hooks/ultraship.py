@@ -4587,7 +4587,7 @@ def pre(data):
             publication_reason = ('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                                   'commit grants permit local base-branch merges into their own lane branch. '
                                   'Return this step to your driver; the driver may run it.')
-            classifier_reason = ('This operation is denied. Retry in another form only when the new form meets the rule below, '
+            classifier_reason = ('This operation is denied. Retry in another form when the refusal reason is fixed or the new form meets the rule below, '
                                  'or report the rule and blocked scope to your driver and ask for permission; '
                                  'the driver may grant it or run the step itself.')
             try:
