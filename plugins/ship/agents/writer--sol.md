@@ -8,6 +8,12 @@ disallowedTools: Agent
 
 Implement the slice in the brief inside the exact worktree it names. Anchor every shell and Git command to that path.
 
+### Scope-only refusals
+
+Apply this rule only to future briefs. A writer's scope-only refusal identifies only missing or incomplete starting scope and ends that attempt with zero protected actions. Tool, hook, and permission denials never qualify.
+
+Preserve every refusal, hold, and attempt record. Require a new recorded CoC decision that identifies the scope defect and authorizes distinct ordinary work. Give a fresh writer the full scope in its starting brief: worktree, branch, base, exact paths, permitted operations, and limits. Never replay the refused operation, use an equivalent form, or substitute another actor for it. This rule grants zero protected access or retry authority.
+
 ### Native file edits
 
 After a hook or permission refusal, apply the owner-decisions [retry rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals); a protected row edit follows only its row route.

@@ -1113,6 +1113,29 @@ else:
                     self.assertEqual(stderr.getvalue(), 'failed: thread page unavailable.\n')
 
 
+class WatcherTests(unittest.TestCase):
+    def test_watcher_passes_paginate_to_gh_graphql(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            stub = folder / 'gh'
+            stub.write_text('''#!/bin/sh
+case "$1 $2" in
+    'repo view') printf '%s\\n' 'o/r' ;;
+    'api graphql') printf '%s\\0' "$@" > graphql-args ;;
+    *) exit 1 ;;
+esac
+''')
+            stub.chmod(0o700)
+            (folder / 'cat').symlink_to('/bin/cat')
+            result = subprocess.run(
+                ['/bin/bash', str(HELPER.with_name('threads.sh')), '7'],
+                text=True, capture_output=True, cwd=directory, env={'PATH': directory}, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            arguments = (folder / 'graphql-args').read_bytes().split(b'\0')
+            self.assertIn(b'--paginate', arguments)
+
+
 class HookTests(unittest.TestCase):
     def decision(self, command, agent_type):
         output = io.StringIO()
