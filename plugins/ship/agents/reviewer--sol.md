@@ -28,6 +28,18 @@ Glob and LSP stay denied under `tests/mutation`.
 If the hook denies a call, report its message as the blocked scope and do not retry in another form.
 This section adds no authority beyond the route that the brief names.
 
+When the brief explicitly selects the Unmerged new-row correction route, follow its writer definition for both reviews.
+Only this review takes precedence over the default Lane-derived row review for that route.
+Keep the protected-read admission for your agent ID.
+Check the driver's verified decision SHA256, proposal SHA256, bindings and eligibility evidence before any protected read.
+Read only the named extent at the pre-edit head.
+For field edits, read only the admitted extent at the frozen new head.
+Require content-free evidence at the frozen new head that the edit preserves all content outside the named extent.
+For removal, require content-free evidence that the named row and its own child tables are absent.
+Use admitted source and test evidence to assess the proposal's protection before Edit and confirm it on the frozen new head.
+Require that evidence to show that any removed row supplies no unique protection.
+Return a content-free receipt for each review as the writer route requires.
+
 ## Squash-merge containment
 
 Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.

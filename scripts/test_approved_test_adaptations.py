@@ -239,7 +239,8 @@ EXPECTED_REWRITTEN_IDENTICAL_FIT = [
 
 EXPECTED_SHARED_MUTANT_RULE = (
     'The ban on weakening a test and the independent not-weaker review still apply.\n'
-    'Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route or Rewritten-code row route.\n'
+    'Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route, '
+    'Rewritten-code row route, or eligible Unmerged new-row correction route.\n'
     'Changed mutant semantics on the lane-owned disposition route require the exact written CoC decision and independent semantic review '
     'under its separately admitted gates.\nThe Rewritten-code row route requires its exact CoC decision and independent semantic review.'
 )
@@ -1682,6 +1683,53 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     for phrase in (selection, *EXPECTED_NEW_ROW_CREATION[1:3],
                                    'Require scoped creation authority for the author and applying writer as separate recorded evidence.'):
                         self.assertIn(phrase, lines)
+
+    def test_unmerged_new_row_correction_requires_exact_scope_and_two_reviews(self):
+        heading = '### Unmerged new-row correction route'
+        routes = []
+        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+            with self.subTest(path=name):
+                self.assertEqual(text.splitlines().count(heading), 1)
+                _, _, after = text.partition(heading + '\n')
+                route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after,
+                                 maxsplit=1, flags=re.MULTILINE)[0]
+                routes.append(route)
+                for line in (
+                    'Use this route outside category 5 only when the brief explicitly selects it for one PR-owned new row.',
+                    'Apply this route only to future briefs after verified runtime adoption.',
+                    'Keep the refusal and affected-session boundary in New lane-owned row creation.',
+                    'Require lawful content-free eligibility evidence for an open, unmerged PR at the pre-edit head.',
+                    'Require that evidence to show that the same PR created the file and row.',
+                    'Require proof that the exact row ID was absent at the merge base.',
+                    'Green CI neither blocks this route nor replaces either review.',
+                    'Require the brief to name an exact CoC decision file by absolute path and SHA256.',
+                    'Verify its SHA256 and bindings before any protected read or edit.',
+                    'Require the decision to bind the repository, PR, merge base SHA and pre-edit head SHA.',
+                    'Require it to bind the exact row-file path, unique row ID, full table extent including owned child tables, and one action.',
+                    'Bind the exact proposal to the decision: the full removal or the exact named fields with current and replacement values.',
+                    'Read only the named row extent at the pre-edit head.',
+                    'Search or parse no protected file.',
+                    'Require an approving proposal review receipt before native Edit.',
+                    'Require the reviewer to differ from the row creator, PR author and applying writer.',
+                    'Bind both review receipts to the same decision SHA256, exact proposal SHA256, reviewer identity, approving verdict, admission and row scope.',
+                    'Bind the proposal receipt to the pre-edit head SHA.',
+                    'Bind the applied receipt to both the pre-edit and new head SHAs.',
+                    'Use one native Edit with `replace_all=false`.',
+                    'Require a unique `old_string` that contains the exact row ID and stays within the approved extent.',
+                    'Remove the whole row table and its own child tables, or edit only the named `mutant`, `claim` or `test` fields.',
+                    'For removal, replace the full table extent with empty text.',
+                    'Preserve pins, assertions, bounds and all unrelated content byte for byte.',
+                    'Recheck eligibility, both digests, the proposal receipt and the match immediately before Edit.',
+                    'Refuse missing, stale, ambiguous, expired, mismatched or unlawfully obtained evidence.',
+                    'Require the same reviewer to verify the exact applied proposal on the frozen new head.',
+                    "Require that reviewer's not-weaker verdict on that head before publication.",
+                    'Require evidence that any removed row supplies no unique protection.',
+                    'Keep every other route, effective refusal, protected hold, tool denial and hook denial unchanged.',
+                    'Grant zero runtime-adoption, execution, installation, retry or publication authority.',
+                ):
+                    self.assertIn(line, route.splitlines())
+        self.assertEqual(routes, [routes[0]] * 3)
 
     def test_new_lane_owned_row_review_requires_exact_authority_and_receipt_contract(self):
         for name in ('reviewer--sol.md', 'reviewer--opus.md'):

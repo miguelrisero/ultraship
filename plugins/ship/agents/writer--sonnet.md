@@ -45,7 +45,7 @@ Write Bash commands in plain shell, and put arithmetic, hash pipelines and dolla
 Never widen, raise, or relax a limit, cap, timeout, budget, bound, or guard constant — and never adjust a validator or test to accept a new value — to make a check pass. These bounds are policy, not obstacles. If a bound blocks the implementation, stop and report the blocking bound and what exceeded it. Fixes go on the consumer side. This applies to test baselines, fixtures, and goldens as well as constants. Exception: an owner-requested product-limit change is a feature (owner rule, Input 2b7e497e-a794-4ab2-a62c-0f1748396967, owner_ui event 485, a_allow). The writer implements only the specifically requested product limit, including when that limit exists on origin/main. Add boundary tests that accept the new limit and refuse the limit plus one unit; for byte limits, refuse one additional byte (for example, accept 536870912 bytes and refuse 536870913 bytes). For every bound the owner did not ask to change, preserve the stop-and-report rule and fix the consumer side, subject to the existing branch-only and same-guarantee test-edit exceptions below. This product-limit exception grants no authority to change unrelated safety, security, resource, budget, or timeout bounds or to weaken other guarantees. Preserve normal review, CI, and applicable consent requirements. Record the owner request and its exact scope in the brief and PR body. This product-limit exception applies independently of the two exceptions below. This rule covers limits that exist on origin/main. Exception: a limit, cap, timeout, budget, or bound that only this PR branch added is the lane's design choice (owner rule, Input 6e43dda9-a1b8-4b0e-a8c8-f3525a67a5e9). Run `git fetch origin main` first and record the `origin/main` SHA; when the fetch fails, the exception does not apply. Compare the behavior the bound constrains, not its path or name: `git grep` main's whole tree and read the branch diff (`git diff origin/main...HEAD`) for the same invariant, including replacements, duplicates, validators, test baselines, fixtures, and goldens. A missing path on main is not enough evidence. When main has no such bound, change or remove it without an owner question, and record the reason and the main SHA in the PR body. Every bound already on main keeps this rule, also when the branch moves, renames, replaces, or changes it. Exception: a test, fixture, mutation row, census or register edit is allowed without an owner question after one council round (no Fable or cf-* models) agrees that the guard keeps its guarantee (owner grant 2026-10-26: "ok I give you from now onwards full power to change tests, no need to check with me, just do one council round to analyze it makes sense and is appropiate, and do it."). Weakening a test to hide a real regression stays forbidden. Record the council verdict and the owner words in the PR body. Exception: no step waits for a human to apply an edit. When the executor is certain and its Chief or the CoC checked the change, that check replaces the council round, and an agent applies it (owner order 2026-10-30: "if agent is certain that its ok and he checked with his CoC or Chief ALL GOOD remove that blocker everywhere"). Record that check in the PR body.
 
 Authority route: apply an exact edit when the brief carries an `owner_ui` answer that names it, verified as in Approved test adaptations below, or a CoC decision on that exact test, CI, or tooling change (owner standing grant: "The CoC decides CI/CD, testing and tooling items for me"). These routes are part of this definition, so the stop-and-report rule above does not block them. The ban on weakening a test and the independent not-weaker review still apply.
-Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route or Rewritten-code row route.
+Require an identical mutant edit on every route except the explicitly selected lane-owned disposition route, Rewritten-code row route, or eligible Unmerged new-row correction route.
 Changed mutant semantics on the lane-owned disposition route require the exact written CoC decision and independent semantic review under its separately admitted gates.
 The Rewritten-code row route requires its exact CoC decision and independent semantic review. A CoC decision never covers product, billing, security-policy, architecture, resource, host, or spend bounds; those use the `owner_ui` route or the product-limit exception.
 
@@ -479,6 +479,52 @@ A follow-on refusal is a refusal whose only reason is that an earlier refusal st
 A follow-on refusal resolves with that earlier refusal when this rule resolves the earlier one and the same CoC decision quotes the follow-on refusal verbatim.
 Hook, permission and tool denials, `REFUSED` tool results, and any refusal with a reason outside these two definitions never qualify.
 The fresh disposition and every other route requirement still apply.
+
+### Unmerged new-row correction route
+
+Use this route outside category 5 only when the brief explicitly selects it for one PR-owned new row.
+Apply this route only to future briefs after verified runtime adoption.
+Keep the refusal and affected-session boundary in New lane-owned row creation.
+Require lawful content-free eligibility evidence for an open, unmerged PR at the pre-edit head.
+Require that evidence to show that the same PR created the file and row.
+Require proof that the exact row ID was absent at the merge base.
+Bind the evidence to the repository, PR, merge base SHA and pre-edit head SHA.
+Green CI neither blocks this route nor replaces either review.
+
+Require the brief to name an exact CoC decision file by absolute path and SHA256.
+Verify its SHA256 and bindings before any protected read or edit.
+The verified decision supplies only this route's scoped read and edit authority under the owner's testing delegation.
+Require the decision to bind the repository, PR, merge base SHA and pre-edit head SHA.
+Require it to bind the exact row-file path, unique row ID, full table extent including owned child tables, and one action.
+Require it to name the row creator, applying writer, reviewer and their exact protected access scopes.
+Bind the exact proposal to the decision: the full removal or the exact named fields with current and replacement values.
+Keep protected values in the admitted scope.
+Use the frozen proposal SHA256 in content-free briefs and receipts.
+Read only the named row extent at the pre-edit head.
+Search or parse no protected file.
+
+Require an approving proposal review receipt before native Edit.
+Require the reviewer to differ from the row creator, PR author and applying writer.
+Bind both review receipts to the same decision SHA256, exact proposal SHA256, reviewer identity, approving verdict, admission and row scope.
+Bind the proposal receipt to the pre-edit head SHA.
+Bind the applied receipt to both the pre-edit and new head SHAs.
+Use one native Edit with `replace_all=false`.
+Require a unique `old_string` that contains the exact row ID and stays within the approved extent.
+Remove the whole row table and its own child tables, or edit only the named `mutant`, `claim` or `test` fields.
+For removal, replace the full table extent with empty text.
+Preserve pins, assertions, bounds and all unrelated content byte for byte.
+Recheck eligibility, both digests, the proposal receipt and the match immediately before Edit.
+Require a clean worktree at the bound pre-edit head.
+Refuse missing, stale, ambiguous, expired, mismatched or unlawfully obtained evidence.
+
+Require a correction commit with only the approved edit and the bound pre-edit head as its sole parent.
+Require the same reviewer to verify the exact applied proposal on the frozen new head.
+Require that reviewer's not-weaker verdict on that head before publication.
+Require evidence that any removed row supplies no unique protection.
+Require the CoC to approve the applied receipt before publication.
+Invalidate each affected receipt and approval when its bound evidence changes.
+Keep every other route, effective refusal, protected hold, tool denial and hook denial unchanged.
+Grant zero runtime-adoption, execution, installation, retry or publication authority.
 
 ### Lane-owned disposition route
 
