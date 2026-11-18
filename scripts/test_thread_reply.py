@@ -117,12 +117,10 @@ REFUSE = (
     'S=\'gh api repos/o/r/pulls/7/comments\'; bash -c "$S"',
     "bash -c 'gh pr view 7'",
     'gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$THREAD"',
-    "gh api graphql -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}' -F owner=o -F name=r",
     "gh api graphql --paginate -f query='query($endCursor:String){viewer{repositories(first:10,after:$endCursor){nodes{name}}}}'",
     'gh api repos/o/r/issues/7/comments -f body=hello',
     'gh api graphql -f "query=query{viewer{login}}"',
     'gh api graphql -f query=query{viewer{login}}',
-    "gh api graphql -f 'query=query($id:ID!){node(id:$id){id}}' -F id=PRRT_x",
     'bash -c \'gh api graphql -f "query=query{viewer{login}}"\'',
     'gh api repos/{owner}/{repo}/issues/7/comments -f body=hello',
     'gh api repos/o/r/issues/7/comments -f body="$BODY"',
@@ -207,6 +205,8 @@ REFUSE = (
 )
 
 ADMIT = (
+    "gh api graphql -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}' -F owner=o -F name=r",
+    "gh api graphql -f 'query=query($id:ID!){node(id:$id){id}}' -F id=PRRT_x",
     "gh api graphql -f query='query{viewer{login}}'",
     "gh api graphql -f query='query{viewer{login}}' && gh api https://api.github.com/user",
     'python3 /abs/plugins/ship/skills/babysit/scripts/thread_reply.py reply https://github.com/o/r/pull/7 PRRT_kwDOabc /abs/.scratch/reply.md',
