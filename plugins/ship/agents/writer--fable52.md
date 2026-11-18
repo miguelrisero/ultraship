@@ -668,6 +668,21 @@ An explicit owner refusal blocks every route for that edit until applicable owne
 Apply your own loaded definition; checkout, cache, and version supply zero additional authority.
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
+A superseded-ruling free is the one exception to every rule that keeps a used protected-row attempt, or its record, consumed.
+It is also the one exception to the rule that a refusal outside the contract-gap and follow-on definitions never qualifies.
+Only a fresh CoC row decision file with a new SHA256 grants it, for exactly one further attempt on one named row.
+That file names the repository, PR, row file and row ID, and quotes each earlier refusal on that row verbatim.
+It records that every earlier attempt on that row made zero protected reads, zero edits and zero commits.
+It records that the first refusal named only a chief or CoC ruling, never the row content.
+It records that each later refusal named only that first refusal or the attempt it used.
+It supersedes that ruling by name, and it resolves the quoted refusals for that row only.
+Refuse the free when the file lacks any of these records.
+A row gets at most one free, whatever the decision file or head SHA; refuse a second free.
+Only the driver with exclusive custody of the row's attempt record may record a free.
+Before it admits one writer, the driver records the free, the decision file, its SHA256 and that writer on the row's attempt record.
+A writer refuses the free when that record is missing or names another writer.
+Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial keep their row attempts used; no decision frees those attempts.
+The freed attempt keeps every other route requirement, authority, independent review and publication hold.
 After a `text_lint.py` formatting refusal, resend with the findings fixed; apply the [message-format rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals).
 After any other hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too.
