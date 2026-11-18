@@ -4587,10 +4587,9 @@ def pre(data):
             publication_reason = ('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                                   'commit grants permit local base-branch merges into their own lane branch. '
                                   'Return this step to your driver; the driver may run it.')
-            classifier_reason = ('This operation remains denied. Report the rule and blocked scope to the parent. '
-                                 'Native Edit grants zero alternate command form or actor for a denied operation. '
-                                 'Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt. '
-                                 'Never replay a denied command, equivalent, or substitute actor.')
+            classifier_reason = ('This operation is denied. Retry in another form when the refusal reason is fixed or the new form meets the rule below, '
+                                 'or report the rule and blocked scope to your driver and ask for permission; '
+                                 'the driver may grant it or run the step itself.')
             try:
                 command = tin.get('command', '')
                 if any(char.isspace() and char not in ' \t\n' for char in command):
