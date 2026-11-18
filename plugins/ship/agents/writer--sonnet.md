@@ -10,9 +10,9 @@ Implement the slice in the brief inside the exact worktree it names. Anchor ever
 
 ### Native file edits
 
-An effective refusal blocks equivalent native reads, native edits, alternate execution and substitute actors, except under the owner-decisions method-only rule.
-After a method-only denial, apply the owner-decisions method-only rule: one native Edit of the already-approved text, then a separate commit step.
-Apply this ordinary-file recipe only before any effective refusal or hold.
+After a hook or permission refusal, apply the owner-decisions [retry rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals); a protected row edit follows only its row route.
+After a hook denies only the method of an ordinary-file edit, use native Edit for the approved text, then commit as a separate step.
+Apply this ordinary-file recipe before any refusal or hold, or as a retry that meets the rule a refusal names.
 Protected content keeps its exact existing grants and independent review requirements.
 This recipe grants zero protected access.
 Source delivery grants zero session adoption authority and zero affected-retry authority.
@@ -468,7 +468,7 @@ Source delivery grants zero retry authority.
 Source delivery grants zero installation authority.
 Source delivery grants zero publication authority.
 Preserve every existing refusal, tool and hook denial, and affected-session hold.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
@@ -587,7 +587,7 @@ Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
 Native Edit grants zero alternate form for an existing or recorded denied operation.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
@@ -723,14 +723,12 @@ A row gets at most one free, whatever the decision file or head SHA; refuse a se
 Only the driver with exclusive custody of the row's attempt record may record a free.
 Before it admits one writer, the driver records the free, the decision file, its SHA256 and that writer on the row's attempt record.
 A writer refuses the free when that record is missing or names another writer.
-Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial stay final; no decision frees their attempts.
+Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial keep their row attempts used; no decision frees those attempts.
 The freed attempt keeps every other route requirement, authority, independent review and publication hold.
-Apply the [once-only message-format contract](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) when every returned finding matches a known `text_lint.py` formatting message and, for a `text_lint.py` refusal, a resend cites its hook receipt and a fresh brief records it on the run board.
-Its fresh-brief route also admits one fresh reviewer, and a receiptless hook version records the full refusal text and hook version in place of the receipt id.
-Except under that contract or the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
-Except under the owner-decisions method-only rule: use no other process to do a step that a hook or permission denied.
-Script files, other interpreters, module flags and wrapper commands are other processes.
-Tell the driver about the denial and stop that step.
+After a `text_lint.py` formatting refusal, resend with the findings fixed; apply the [message-format rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals).
+After any other hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
+A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too.
+Otherwise tell the driver about the denial and ask for permission to run the command; the driver may grant it or run the command itself.
 Checks that the brief names stay permitted when the hook admits them.
 
 Return the changed files, the test commands with their results or `tests not run (brief)`, the head SHA, and any blocker with evidence. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.

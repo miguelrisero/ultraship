@@ -1,4 +1,4 @@
-"""Writer contract files forbid doing a denied step through another process."""
+"""Writer contract files let another process retry a denied step only when it meets the named rule."""
 from pathlib import Path
 import unittest
 
@@ -12,15 +12,20 @@ REFERENCE_FILE = 'plugins/ship/skills/ship/references/owner-decisions.md'
 HEADING = 'Loaded instructions and refusals\n'
 CHECKS_SENTENCE = 'Checks that the brief names stay permitted when the hook admits them.'
 WRITER_SENTENCES = (
-    'Except under the owner-decisions method-only rule: use no other process to do a step that a hook or permission denied.',
-    'Script files, other interpreters, module flags and wrapper commands are other processes.',
-    'Tell the driver about the denial and stop that step.',
+    'After any other hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.',
+    'A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too.',
+    'Otherwise tell the driver about the denial and ask for permission to run the command; the driver may grant it or run the command itself.',
     CHECKS_SENTENCE,
 )
 REFERENCE_SENTENCES = (
-    'Except under the ordinary-file method-only rule below: a writer uses no other process to do a step that a hook or permission denied.',
-    'Script files, other interpreters, module flags and wrapper commands are other processes.',
-    'The writer tells the driver about the denial and stops that step.',
+    'Retry rule: after a hook or permission refusal, an agent may retry in another form when the refusal reason is fixed or the new form meets the rule the refusal names.',
+    'A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too.',
+    'An agent may always ask its superior for permission to run the refused command.',
+    'A writer asks its driver, a reviewer asks its coordinator, a driver asks its chief, and a chief asks the CoC.',
+    'The superior may grant the request, or run the command itself when it considers that appropriate.',
+    'The superior records the grant or the run in the lane state file.',
+    'Never ask the owner to paste or run a command.',
+    'A retry in another form never bypasses a safety block.',
     CHECKS_SENTENCE,
 )
 SUPERSEDED_RULING_SENTENCES = (
@@ -37,7 +42,7 @@ SUPERSEDED_RULING_SENTENCES = (
     "Only the driver with exclusive custody of the row's attempt record may record a free.",
     "Before it admits one writer, the driver records the free, the decision file, its SHA256 and that writer on the row's attempt record.",
     'A writer refuses the free when that record is missing or names another writer.',
-    'Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial stay final; no decision frees their attempts.',
+    'Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial keep their row attempts used; no decision frees those attempts.',
     'The freed attempt keeps every other route requirement, authority, independent review and publication hold.',
 )
 
@@ -56,10 +61,10 @@ class WriterDeniedProcessTests(unittest.TestCase):
                 for sentence in sentences:
                     self.assertIn(sentence, section)
 
-    def test_writer_files_carry_the_denied_process_rule_in_the_refusals_section(self):
+    def test_writer_files_carry_the_retry_rule_in_the_refusals_section(self):
         self.check(WRITER_FILES, WRITER_SENTENCES)
 
-    def test_shared_reference_scopes_the_rule_to_writers_in_the_refusals_section(self):
+    def test_shared_reference_carries_the_retry_and_superior_rule(self):
         self.check((REFERENCE_FILE,), REFERENCE_SENTENCES)
 
     def test_writers_carry_the_superseded_ruling_rule_once(self):

@@ -1561,25 +1561,33 @@ class ReviewThreadReadTests(unittest.TestCase):
             watcher_read + ' -F owner=another-org',
             watcher_read + ' -F undeclared=x',
             watcher_read.replace(',$endCursor:String', ''),
+            watcher_read.replace('pageInfo{hasNextPage endCursor}', ''),
+            watcher_read.replace('pageInfo{hasNextPage endCursor}', 'pageInfo{hasNextPage}'),
+            watcher_read.replace('pageInfo{hasNextPage endCursor}nodes{id',
+                                 'nodes{id pageInfo{hasNextPage endCursor}'),
             watcher_read.replace('-f query=', '-f= query='),
         ):
             with self.subTest(command=command):
                 self.assertEqual(ultraship.review_thread_denial(command), 'gh api write outside the helper')
 
     def test_graphql_read_exception_excludes_writes_and_unproven_fields(self):
-        query = "-f query='query { viewer { login } }'"
-        read = f'gh api graphql --paginate {query}'
+        query = ("-f query='query($owner:String!,$endCursor:String)"
+                 '{repository(owner:$owner,name:"example-repo"){pullRequest(number:456)'
+                 '{reviewThreads(first:20,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{id}}}}}\'')
+        owner = '-F owner=example-org'
+        read = f'gh api graphql --paginate {query} {owner}'
+        self.assertIsNone(ultraship.review_thread_denial(read))
         write = 'gh api write outside the helper'
         for command, reason in (
             ("gh api graphql --paginate -f query='mutation { example { id } }'", write),
             ('gh api repos/o/r/issues -X POST -f title=example', write),
             (f'{read} {query}', write),
-            (f'{read} -F owner=@example.txt', write),
-            (f'{read} -F owner="{{owner}}"', write),
-            (f'{read} -F owner="$OWNER"', write),
+            (read.replace(owner, '-F owner=@example.txt'), write),
+            (read.replace(owner, '-F owner="{owner}"'), write),
+            (read.replace(owner, '-F owner="$OWNER"'), write),
             (f'{read} -X PATCH', write),
-            (f'gh api graphql/ --paginate {query}', write),
-            ("gh api graphql --paginate -f= query='query { viewer { login } }'", write),
+            (read.replace('api graphql', 'api graphql/'), write),
+            (read.replace('-f query=', '-f= query='), write),
             (f'{read} --input example.json', 'opaque GraphQL query'),
             ('gh api graphql --paginate -f query="$QUERY"', 'opaque GraphQL query'),
         ):

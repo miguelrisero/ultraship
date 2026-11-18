@@ -112,23 +112,24 @@ class BriefSafetyTests(unittest.TestCase):
             section = (ROOT / name).read_text().split(heading + '\n', 1)[1].split('\n## ', 1)[0]
             for requirement in (
                 'Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>',
-                'A hook refusal is final: report it and stop.',
+                'After a hook refusal, retry in another form when the refusal reason is fixed or the new form meets the rule the refusal names. '
+                'You may always ask your superior for permission to run the refused command.',
                 'Never print a key value; never post outside bettergroupinc and miguelrisero.',
                 'Never chain a glob listing into a write command.',
             ):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, section)
             if heading == '## Brief template':
-                self.assertIn('The stop covers the refused call; the loaded formatting, coordination and method-only resend routes stay.', section)
+                self.assertIn("The ship plugin's Loaded instructions and refusals section sets the retry rule and the ask-your-superior rule.", section)
             else:
                 with self.subTest(path=name):
                     self.assertIn('Require this field and these sentences verbatim in every brief:', section)
-                    self.assertIn('```\nThe stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.', section)
+                    self.assertIn('```\nA reviewer reports a refused call as blocked scope and continues other permitted scope.', section)
                     target = '#loaded-instructions-and-refusals'
                     if heading != '## Helper standing request':
                         target = '../ship/references/owner-decisions.md' + target
-                    self.assertIn('The formatting, coordination and method-only routes in '
-                                  f'[Loaded instructions and refusals]({target}) stay.', section)
+                    self.assertIn(f'[Loaded instructions and refusals]({target}) sets the retry rule '
+                                  'and the ask-your-superior rule.', section)
             if heading == '## Brief safety':
                 self.assertIn('Apply this rule to every triage, writer and reviewer brief.', section)
             if heading == '## Helper standing request':

@@ -3951,7 +3951,7 @@ def writer_gh_denial(command, depth=0):
 GRAPHQL_TOKEN = re.compile(r'''(?P<ignored>[ \t\r\n,''' + chr(0xFEFF) + r''']+|\#[^\x00-\x08\x0a-\x1f]*)|(?P<block>"""(?:\\"""|(?!"""|\\""")[^\x00-\x08\x0b\x0c\x0e-\x1f])*""")|(?P<string>(?!""")"(?:[^"\\\x00-\x08\x0a-\x1f]|\\(?:["\\/bfnrt]|u[0-9A-Fa-f]{4}))*")|(?P<name>[_A-Za-z][_0-9A-Za-z]*)|(?P<number>-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?(?![._0-9A-Za-z]))|(?P<punct>\.\.\.|[!$&():=@\[\]{|}])''')
 
 
-def graphql_read_document(document, required_variables=()):
+def graphql_read_document(document, required_variables=(), paginate=False):
     tokens, cursor = [], 0
     while cursor < len(document):
         match = GRAPHQL_TOKEN.match(document, cursor)
@@ -4010,7 +4010,54 @@ def graphql_read_document(document, required_variables=()):
             if cursor is None:
                 return False
     end = group(cursor, '{')
-    return end == len(tokens) and end > cursor + 2 and declared.issuperset(required_variables)
+    if end != len(tokens) or end <= cursor + 2 or not declared.issuperset(required_variables):
+        return False
+    if not paginate:
+        return True
+
+    # Skip nested groups so metadata must belong to the connection that uses the cursor.
+    def direct_items(start, stop):
+        position = start + 1
+        while position < stop - 1:
+            yield position
+            kind, value = tokens[position]
+            position = group(position, value) if kind == 'punct' and value in '([{' else position + 1
+
+    cursor_argument = [('name', 'after'), ('punct', ':'), ('punct', '$'), ('name', 'endCursor')]
+    found, position = False, cursor + 1
+    while position < end - 1:
+        if tokens[position] != ('punct', '('):
+            position += 1
+            continue
+        arguments = position
+        position = group(arguments, '(')
+        if (tokens[arguments - 1][0] != 'name' or tokens[arguments - 2] == ('punct', '@') or not any(
+                tokens[item:item + 4] == cursor_argument for item in direct_items(arguments, position))):
+            continue
+        selection = position
+        while tokens[selection] == ('punct', '@'):
+            if tokens[selection + 1][0] != 'name':
+                return False
+            selection = optional_arguments(selection + 2)
+        selection_end = group(selection, '{')
+        if selection_end is None:
+            return False
+        for item in direct_items(selection, selection_end):
+            if (tokens[item] != ('name', 'pageInfo') or tokens[item - 1] == ('punct', ':')
+                    or tokens[item - 2:item] == [('punct', '...'), ('name', 'on')]
+                    or tokens[item + 1] != ('punct', '{')):
+                continue
+            fields = {tokens[field][1] for field in direct_items(item + 1, group(item + 1, '{'))
+                      if tokens[field][0] == 'name' and tokens[field - 1] not in (
+                          ('punct', ':'), ('punct', '@'), ('punct', '...'))
+                      and (tokens[field + 1][0] == 'name' or tokens[field + 1] in (
+                          ('punct', '}'), ('punct', '...')))}
+            if {'hasNextPage', 'endCursor'} <= fields:
+                found = True
+                break
+        else:
+            return False
+    return found
 
 
 def review_data_segment(words):
@@ -4325,7 +4372,7 @@ def review_thread_denial(command, data_mode=False):
             required_variables = scalar_fields | {'endCursor'} if paginate else scalar_fields
             if (static_read and endpoint == 'graphql' and document is not None
                     and not any('$' in outside_single_quotes(raw) for _, raw in arguments)
-                    and graphql_read_document(document, required_variables)):
+                    and graphql_read_document(document, required_variables, paginate=paginate)):
                 continue
             method = methods[-1] if methods else ('POST' if field_count else 'GET')
             if method not in ('GET', 'HEAD'):
@@ -4612,10 +4659,9 @@ def pre(data):
             publication_reason = ('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                                   'commit grants permit local base-branch merges into their own lane branch. '
                                   'Return this step to your driver; the driver may run it.')
-            classifier_reason = ('This operation remains denied. Report the rule and blocked scope to the parent. '
-                                 'Native Edit grants zero alternate command form or actor for a denied operation. '
-                                 'Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt. '
-                                 'Never replay a denied command, equivalent, or substitute actor.')
+            classifier_reason = ('This operation is denied. Retry in another form when the refusal reason is fixed or the new form meets the rule below, '
+                                 'or report the rule and blocked scope to your driver and ask for permission; '
+                                 'the driver may grant it or run the step itself.')
             try:
                 command = tin.get('command', '')
                 if any(char.isspace() and char not in ' \t\n' for char in command):
