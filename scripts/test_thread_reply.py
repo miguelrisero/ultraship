@@ -158,7 +158,6 @@ REFUSE = (
     'timeout 60 flock /tmp/x -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
     'echo api repos/o/r/pulls/7/comments -f body=x | xargs gh',
     r'gh api repos/o/r/pulls/7; sudo -s g\"h\" api repos/o/r/pulls/7/comments -f body=x',
-    'gh pr create --title "fix(ship): refuse gh api writes" --body-file body.md',
     "env --split-string='gh api repos/o/r/pulls/7/comments --input reply.json'",
     "env -S'gh api repos/o/r/pulls/7/comments --input reply.json'",
     "env -iS'gh api repos/o/r/pulls/7/comments --input reply.json'",
@@ -263,6 +262,13 @@ ADMIT = (
     'gh pr view 7 >| out.txt',
     'gh api repos/o/r/pulls/7 | head',
     'gh pr ready https://github.com/o/r/pull/7',
+    'gh pr create --title "fix(ship): refuse gh api writes" --body-file body.md',
+)
+
+# Two real push checks that read `gh api` once inside a quoted `$(...)`.
+QUOTED_READ_PUSHES = (
+    "set -euo pipefail\nroot=/w\nw=\"$root/wt/a-pdf-filename\"\ns=\"$root/.scratch/a-pdf-filename\"\napproved=https://github.com/miguelrisero/shunt.git\nbase=e22b65642a4135a90f2abe564528952fe020ca1d\nexport LC_ALL=C\ntest \"$(cat \"$s/upstream-push-preflight.exit\")\" = 0\ntest ! -s \"$s/upstream-push-preflight.stderr\"\ntest \"$(cat \"$s/upstream-push-preflight.stdout\")\" = \"$(printf 'To %s\\n*\\tHEAD:refs/heads/fix/responses-untitled-document-filename\\t[new branch]\\nDone' \"$approved\")\"\ntest \"$(cat \"$s/upstream-push-preflight.command\")\" = 'LC_ALL=C git -C /w/wt/a-pdf-filename -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git push --dry-run --porcelain origin HEAD:refs/heads/fix/responses-untitled-document-filename'\nendpoint=$(git -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git remote get-url --push --all origin 2>/dev/null && printf END)\ntest \"$endpoint\" = \"$(printf '%s\\nEND' \"$approved\")\"\ngit -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git remote get-url --push --all origin\ntest \"$(git -C \"$w\" rev-parse --show-toplevel)\" = \"$w\"\ntest \"$(git -C \"$w\" rev-parse HEAD)\" = ceb993337fe1cd408610fe942e6b0802fd6175bb\ntest \"$(git -C \"$w\" branch --show-current)\" = fix/responses-untitled-document-filename\ntest -z \"$(git -C \"$w\" status --porcelain=v1)\"\ntest -z \"$(git -C \"$w\" rev-parse --abbrev-ref '@{u}' 2>/dev/null || :)\"\ntest \"$(git -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git ls-remote --symref \"$approved\" HEAD refs/heads/fix/responses-untitled-document-filename)\" = \"$(printf 'ref: refs/heads/main\\tHEAD\\n%s\\tHEAD' \"$base\")\"\ntest \"$(gh api repos/pleaseai/shunt/branches/main --jq .commit.sha)\" = \"$base\"\ngit -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git push origin HEAD:refs/heads/fix/responses-untitled-document-filename\ngit -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git ls-remote --exit-code \"$approved\" refs/heads/fix/responses-untitled-document-filename | tee \"$s/upstream-push-ref.txt\"\ntest \"$(cat \"$s/upstream-push-ref.txt\")\" = \"$(printf 'ceb993337fe1cd408610fe942e6b0802fd6175bb\\trefs/heads/fix/responses-untitled-document-filename')\"",
+    "set -euo pipefail\nroot=/w\nw=\"$root/wt/e-cache-ttl\"\ns=\"$root/.scratch/e-cache-ttl\"\napproved=https://github.com/miguelrisero/shunt.git\nbase=e22b65642a4135a90f2abe564528952fe020ca1d\nexport LC_ALL=C\ntest \"$(cat \"$s/upstream-push-preflight.exit\")\" = 0\ntest ! -s \"$s/upstream-push-preflight.stderr\"\ntest \"$(cat \"$s/upstream-push-preflight.stdout\")\" = \"$(printf 'To %s\\n*\\tHEAD:refs/heads/feat/metrics-anthropic-cache-ttl-writes\\t[new branch]\\nDone' \"$approved\")\"\ntest \"$(cat \"$s/upstream-push-preflight.command\")\" = 'LC_ALL=C git -C /w/wt/e-cache-ttl -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git push --dry-run --porcelain origin HEAD:refs/heads/feat/metrics-anthropic-cache-ttl-writes'\nendpoint=$(git -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git remote get-url --push --all origin 2>/dev/null && printf END)\ntest \"$endpoint\" = \"$(printf '%s\\nEND' \"$approved\")\"\ngit -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git remote get-url --push --all origin\ntest \"$(git -C \"$w\" rev-parse --show-toplevel)\" = \"$w\"\ntest \"$(git -C \"$w\" rev-parse HEAD 'HEAD^{tree}')\" = \"$(printf '57c2a9debe55e43db4a5c0ef78cfe52d95ad3313\\n0fe40cf2bae042e0a48508a25b19eaef229d269a')\"\ntest \"$(git -C \"$w\" branch --show-current)\" = feat/metrics-anthropic-cache-ttl-writes\ntest -z \"$(git -C \"$w\" status --porcelain=v1)\"\ntest -z \"$(git -C \"$w\" rev-parse --abbrev-ref '@{u}' 2>/dev/null || :)\"\ntest \"$(git -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git ls-remote --symref \"$approved\" HEAD refs/heads/feat/metrics-anthropic-cache-ttl-writes)\" = \"$(printf 'ref: refs/heads/main\\tHEAD\\n%s\\tHEAD' \"$base\")\"\ntest \"$(gh api repos/pleaseai/shunt/branches/main --jq .commit.sha)\" = \"$base\"",
 )
 
 
@@ -1148,6 +1154,19 @@ class HookTests(unittest.TestCase):
                 with self.subTest(agent_type=agent_type, command=command):
                     self.assertEqual(self.decision(command, agent_type), {})
 
+    def test_quoted_gh_api_read_counts_once(self):
+        commands = QUOTED_READ_PUSHES + ('test "$(gh api repos/o/r/branches/main --jq .commit.sha)" = abc',)
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command[:60], caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+
+    def test_quoted_gh_api_write_stays_refused(self):
+        command = 'test "$(gh api -X POST repos/o/r/issues/7/comments -f body=x)" = abc'
+        for caller in ('', 'ship:driver', 'ship:writer--sol'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller).get('permissionDecision'), 'deny')
+
     def test_static_graphql_read_documents(self):
         documents = (
             '{repository(owner:"o",name:"r"){pullRequests(first:5){nodes{number files(first:10){nodes{path}}}}}}',
@@ -1476,7 +1495,7 @@ class HookTests(unittest.TestCase):
                 with self.subTest(agent_type=agent_type):
                     result = self.decision('echo hello', agent_type)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn('review-thread guard parse failure', result['permissionDecisionReason'])
+                    self.assertIn('review-thread guard exception: ValueError', result['permissionDecisionReason'])
 
 
 if __name__ == '__main__':
