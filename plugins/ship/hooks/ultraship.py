@@ -3968,7 +3968,7 @@ def writer_gh_denial(command, depth=0):
 GRAPHQL_TOKEN = re.compile(r'''(?P<ignored>[ \t\r\n,''' + chr(0xFEFF) + r''']+|\#[^\x00-\x08\x0a-\x1f]*)|(?P<block>"""(?:\\"""|(?!"""|\\""")[^\x00-\x08\x0b\x0c\x0e-\x1f])*""")|(?P<string>(?!""")"(?:[^"\\\x00-\x08\x0a-\x1f]|\\(?:["\\/bfnrt]|u[0-9A-Fa-f]{4}))*")|(?P<name>[_A-Za-z][_0-9A-Za-z]*)|(?P<number>-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?(?![._0-9A-Za-z]))|(?P<punct>\.\.\.|[!$&():=@\[\]{|}])''')
 
 
-def graphql_read_document(document):
+def graphql_read_document(document, required_variables=(), paginate=False):
     tokens, cursor = [], 0
     while cursor < len(document):
         match = GRAPHQL_TOKEN.match(document, cursor)
@@ -4000,14 +4000,25 @@ def graphql_read_document(document):
             return group(position, '(')
         return position
 
-    cursor = 0
+    cursor, declared = 0, set()
     if tokens and tokens[0] == ('name', 'query'):
         cursor = 1
         if cursor < len(tokens) and tokens[cursor][0] == 'name':
             cursor += 1
+        position = cursor + 1
         cursor = optional_arguments(cursor)
         if cursor is None:
             return False
+        while position < cursor - 1:
+            kind, value = tokens[position]
+            if kind == 'punct' and value in '([{':
+                position = group(position, value)
+                continue
+            if (kind == 'punct' and value == '$' and position + 3 < cursor - 1
+                    and tokens[position + 1][0] == 'name' and tokens[position + 2] == ('punct', ':')
+                    and (tokens[position + 3][0] == 'name' or tokens[position + 3] == ('punct', '['))):
+                declared.add(tokens[position + 1][1])
+            position += 1
         while cursor < len(tokens) and tokens[cursor] == ('punct', '@'):
             cursor += 1
             if cursor >= len(tokens) or tokens[cursor][0] != 'name':
@@ -4016,7 +4027,79 @@ def graphql_read_document(document):
             if cursor is None:
                 return False
     end = group(cursor, '{')
-    return end == len(tokens) and end > cursor + 2
+    if end != len(tokens) or end <= cursor + 2 or not declared.issuperset(required_variables):
+        return False
+    if not paginate:
+        return True
+
+    # Skip nested groups so metadata must belong to the connection that uses the cursor.
+    def direct_items(start, stop):
+        position = start + 1
+        while position < stop - 1:
+            yield position
+            kind, value = tokens[position]
+            position = group(position, value) if kind == 'punct' and value in '([{' else position + 1
+
+    def page_info_key(item):
+        return (tokens[item] == ('name', 'pageInfo')
+                and tokens[item - 1] not in (('punct', ':'), ('punct', '@'), ('punct', '...'))
+                and tokens[item - 2:item] != [('punct', '...'), ('name', 'on')])
+
+    cursor_argument = [('name', 'after'), ('punct', ':'), ('punct', '$'), ('name', 'endCursor')]
+    singular_parents = ['repository', 'pullRequest']
+    selection_names, parents = {}, []
+    page_info, bound_page_info, position = None, None, cursor + 1
+    while position < end - 1:
+        # gh looks up the response key across the whole result.
+        if page_info_key(position):
+            if page_info is not None:
+                return False
+            page_info = position
+        if tokens[position] == ('punct', '{'):
+            parents.append(selection_names.get(position))
+        elif tokens[position] == ('punct', '}'):
+            parents.pop()
+        if tokens[position] != ('punct', '('):
+            position += 1
+            continue
+        arguments = position
+        position = group(arguments, '(')
+        kind, field = tokens[arguments - 1]
+        if kind != 'name' or tokens[arguments - 2] == ('punct', '@'):
+            continue
+        cursor_count = sum(tokens[item:item + 4] == cursor_argument for item in direct_items(arguments, position))
+        # A single selection under a list can return several cursors.
+        if cursor_count and (cursor_count != 1 or bound_page_info is not None
+                             or parents != singular_parents or field != 'reviewThreads'):
+            return False
+        if not cursor_count and field not in singular_parents:
+            continue
+        selection = position
+        while tokens[selection] == ('punct', '@'):
+            if tokens[selection + 1][0] != 'name':
+                return False
+            selection = optional_arguments(selection + 2)
+        if not cursor_count:
+            if tokens[selection] == ('punct', '{'):
+                selection_names[selection] = field
+            continue
+        selection_end = group(selection, '{')
+        if selection_end is None:
+            return False
+        for item in direct_items(selection, selection_end):
+            if not page_info_key(item) or tokens[item + 1] != ('punct', '{'):
+                continue
+            fields = {tokens[field][1] for field in direct_items(item + 1, group(item + 1, '{'))
+                      if tokens[field][0] == 'name' and tokens[field - 1] not in (
+                          ('punct', ':'), ('punct', '@'), ('punct', '...'))
+                      and (tokens[field + 1][0] == 'name' or tokens[field + 1] in (
+                          ('punct', '}'), ('punct', '...')))}
+            if {'hasNextPage', 'endCursor'} <= fields:
+                bound_page_info = item
+                break
+        else:
+            return False
+    return bound_page_info is not None and page_info == bound_page_info
 
 
 def review_data_segment(words):
@@ -4234,6 +4317,7 @@ def review_thread_denial(command, data_mode=False):
                 return 'review-thread guard parse failure'
             cursor, parsed, options = 0, True, True
             static_read, field_count, document = True, 0, None
+            scalar_fields, paginate = set(), False
             expanded_values = set()
             value_options = {'-H', '-X', '-f', '-F', '-q', '-t', '-p', '--method', '--field', '--raw-field',
                              '--input', '--header', '--jq', '--template', '--hostname', '--cache', '--preview'}
@@ -4261,11 +4345,13 @@ def review_thread_denial(command, data_mode=False):
                             continue
                         option = '-' + value[letter]
                         prefix = value[:letter + 1]
-                        attached = value[letter + 1:].removeprefix('=') or None
+                        suffix = value[letter + 1:]
+                        static_read = static_read and suffix != '='
+                        attached = suffix.removeprefix('=') or None
                         break
                 if option in value_options:
-                    static_read = (static_read and option in ('-f', '--raw-field', '-q', '--jq', '-t', '--template')
-                                   and not (option in ('-f', '--raw-field') and attached is not None))
+                    static_read = static_read and option in (
+                        '-f', '--raw-field', '-F', '--field', '-q', '--jq', '-t', '--template')
                     if attached is not None:
                         option_value = attached
                         option_raw = raw.removeprefix(prefix) if raw.startswith(prefix) else raw
@@ -4282,15 +4368,24 @@ def review_thread_denial(command, data_mode=False):
                     elif option in ('-f', '-F', '--field', '--raw-field', '--input'):
                         field_count += 1
                         inputs = inputs or option == '--input'
+                        static_read = static_read and attached is None
                         if option_value.startswith('query='):
+                            static_read = static_read and query is None and option in ('-f', '--raw-field')
                             query_value = option_value[6:]
                             single = re.fullmatch(r"query='[^']*'|'query=[^']*'", option_raw) is not None
                             query = bool(query_value) and not query_value.startswith('@') and (
                                 single or not any(char in option_raw for char in '$`\\'))
                             if single:
                                 document = query_value
+                        else:
+                            name = option_value.split('=', 1)[0]
+                            # Typed fields also support file and placeholder expansion.
+                            static_read = (static_read and name not in scalar_fields and re.fullmatch(
+                                r'[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_./+=-]*', option_value) is not None)
+                            scalar_fields.add(name)
                 elif options and (value in switches or option is None and value.startswith('-i')):
-                    static_read = static_read and value in ('-i', '--include', '--silent')
+                    static_read = static_read and value in ('-i', '--include', '--silent', '--paginate')
+                    paginate = paginate or value == '--paginate'
                 elif options and value.startswith('-') or endpoint is not None:
                     parsed = False
                 else:
@@ -4332,8 +4427,10 @@ def review_thread_denial(command, data_mode=False):
             if write and (not visible or full_url and host != 'api.github.com'
                           or re.search(r'(?:^|/)pulls/[^/]+/comments(?:/|$)', route)):
                 return 'REST review-comment write or opaque endpoint'
-            if (static_read and endpoint == 'graphql' and field_count == 1 and document is not None
-                    and graphql_read_document(document)):
+            required_variables = scalar_fields | {'endCursor'} if paginate else scalar_fields
+            if (static_read and endpoint == 'graphql' and document is not None
+                    and not any('$' in outside_single_quotes(raw) for _, raw in arguments)
+                    and graphql_read_document(document, required_variables, paginate=paginate)):
                 continue
             method = methods[-1] if methods else ('POST' if field_count else 'GET')
             if method not in ('GET', 'HEAD'):
