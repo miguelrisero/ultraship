@@ -30,8 +30,7 @@ Decision
 - <The action you take or ask for, within existing authority.>
 Next
 - <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>.
-<Every line: one point per sentence, at most 25 words each, with a space between words.>
-<Put the receipt marker exactly once; a second marker or marker name makes the refusal final.>"""
+<Every line: one point per sentence, at most 25 words each, with a space between words.>"""
 INPUT_TEMPLATE = '''Use exactly one output-kind meta tag: decision or result.
 Decision:
 <meta name="output-kind" content="decision">
@@ -42,8 +41,7 @@ Decision:
 <h2>If no answer</h2><p>...</p>
 Result alternative:
 <meta name="output-kind" content="result"><p>...</p>
-Write at most 25 words per sentence.
-Put the receipt marker exactly once; a second marker or marker name makes the refusal final.'''
+Write at most 25 words per sentence.'''
 
 
 class FindingsError(ValueError):
@@ -119,7 +117,8 @@ def hold_wall(text):
         prose = re.sub(r'`[^`]*`', '', view)
         words = ' '.join(t for t in prose.split() if not re.search(r'https?://|/', t))
         if len(HOLD_WORDS.findall(words)) >= 6:
-            raise ValueError('Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.')
+            raise FormatError(['Keep any new hold in one line, drop restated standing holds, '
+                               'and send what changed and the next action.'])
 
 
 def check(text, kind='result'):
@@ -375,37 +374,7 @@ def mark_consumed(receipt_id):
     return True
 
 
-def check_pending(event):
-    args = event.get('tool_input') or {}
-    tool = event.get('tool_name', '')
-    if tool == 'SendMessage':
-        prose = sendmessage_body(args)
-    elif tool.endswith(('create_input', 'update_input')):
-        content = args.get('content') or {}
-        if isinstance(content, str):
-            content = json.loads(content)
-        prose = content.get('html') or content.get('title')
-    else:
-        return
-    session = event.get('session_id')
-    if not prose or not isinstance(session, str) or not session:
-        return
-    entry = pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **input_identity(event)})
-    if entry and entry['state'] == 'open':
-        receipt_id = entry['id']
-        pending_message = ('A formatting-only refusal to this recipient is pending. Cite its receipt `'
-                           + receipt_id + '` with `<!-- ultraship-receipt:' + receipt_id + ' -->` in this message.')
-        try:
-            if not mark_consumed(receipt_id):
-                return
-        except OSError:
-            raise ValueError(pending_message) from None
-        raise ValueError('Receipt `' + receipt_id + '` is now spent. '
-                         'The message refused under receipt `' + receipt_id + '` stays refused. '
-                         'Later messages need no citation.')
-
-
-def write_receipt(event, findings, formatting_only, parent, resend_refused=False):
+def write_receipt(event, findings, formatting_only, parent):
     key = receipt_key()
     directory = store_dir() / 'receipts'
     directory.mkdir(mode=0o700, exist_ok=True)
@@ -413,7 +382,7 @@ def write_receipt(event, findings, formatting_only, parent, resend_refused=False
         raise OSError('Receipt store contains 2000 receipts younger than 24 hours.')
     session = event.get('session_id')
     identity = input_identity(event)
-    entry = None if resend_refused else pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **identity})
+    entry = pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **identity})
     spent = entry is not None and entry['state'] == 'spent'
     receipt = {
         'id': uuid.uuid4().hex,
@@ -438,13 +407,13 @@ def write_receipt(event, findings, formatting_only, parent, resend_refused=False
         os.replace(temporary, directory / (receipt['id'] + '.json'))
     finally:
         Path(temporary).unlink(missing_ok=True)
-    if receipt['resend_allowed'] or resend_refused:
+    if receipt['resend_allowed']:
         pending = pending_path(receipt)
         pending.parent.mkdir(mode=0o700, exist_ok=True)
         fd, temporary = tempfile.mkstemp(dir=pending.parent)
         try:
             with os.fdopen(fd, 'w') as output:
-                json.dump({'id': receipt['id'], 'state': 'spent' if resend_refused else 'open'}, output)
+                json.dump({'id': receipt['id'], 'state': 'open'}, output)
             os.replace(temporary, pending)
         finally:
             Path(temporary).unlink(missing_ok=True)
@@ -585,58 +554,51 @@ def write_citation_refusal(event):
                 pass
 
 
+def emit(output):
+    print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', **output}}))
+
+
 def hook(event, parse_error=None):
-    parent, consumed = None, None
+    """Deny only a receipt citation that fails its MAC or custody checks; a format finding warns and allows."""
+    findings, parent = [], None
     try:
         if parse_error is not None:
-            raise parse_error
-        try:
-            parent = citation(event)
-            if parent:
-                receipt = read_receipt(parent)
-                owner = receipt.get('agent_id')
-                if (receipt.get('id') == parent and isinstance(owner, str)
-                        and owner == input_identity(event)['recipient'] and owner != event.get('agent_id')):
-                    parent = None
-                else:
-                    consumed = consume_receipt(parent, event, receipt)
-        except ValueError:
-            write_citation_refusal(event)
-            raise
-        if event.get('tool_name') not in ('Agent', 'Task'):
-            if not parent:
-                check_pending(event)
-            outgoing(event)
-        if consumed:
-            clear_pending(consumed, event)
-        return
-    except Exception as exc:
-        findings = exc.findings if isinstance(exc, FindingsError) else [str(exc)]
-        formatting_only = isinstance(exc, FindingsError) and exc.formatting_only
-    reason = 'Output contract: ' + ' '.join(findings)
-    try:
-        receipt = write_receipt(event, findings, formatting_only, parent, resend_refused=consumed is not None)
-    except Exception:
-        reason += ' No receipt was written, so no resend of this message is allowed in any form.'
-    else:
-        if receipt['resend_allowed']:
-            template = INPUT_TEMPLATE
-            if event.get('tool_name') == 'SendMessage':
-                template = PEER_TEMPLATE
-            reason += (' You may resend once with the same action, recipient, scope and content, changed only in format.'
-                       + ' Resend with this shape:\n' + template)
+            findings = ['Hook event unreadable: ' + str(parse_error)]
         else:
-            reason += ' This refusal is not formatting-only, so no resend of this message is allowed in any form.' if not formatting_only else ''
-            if parent:
-                reason += ' Its receipt is used and no further resend of this message is allowed.'
-            elif formatting_only and isinstance(event.get('session_id'), str) and event['session_id']:
-                reason += (' This refusal permits no resend, because a receipt to this recipient '
-                           'was spent within 24 hours.')
-        reason += ' Receipt: `' + receipt['id'] + '`.'
-        if receipt['resend_allowed']:
-            reason += ' To resend, put `<!-- ultraship-receipt:' + receipt['id'] + ' -->` in the resent prose.'
-    print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
-        'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))
+            consumed = None
+            try:
+                parent = citation(event)
+                if parent:
+                    receipt = read_receipt(parent)
+                    owner = receipt.get('agent_id')
+                    if (receipt.get('id') == parent and isinstance(owner, str)
+                            and owner == input_identity(event)['recipient'] and owner != event.get('agent_id')):
+                        parent = None
+                    else:
+                        consumed = consume_receipt(parent, event, receipt)
+            except ValueError:
+                write_citation_refusal(event)
+                raise
+            if event.get('tool_name') not in ('Agent', 'Task'):
+                try:
+                    outgoing(event)
+                except Exception as exc:
+                    findings = exc.findings if isinstance(exc, FindingsError) else [str(exc)]
+            if consumed:
+                clear_pending(consumed, event)
+    except Exception as exc:
+        reason = ('Output contract: ' + str(exc) + ' Send the message again without the receipt marker;'
+                  ' a format finding needs no receipt.')
+        try:
+            reason += ' Receipt: `' + write_receipt(event, [str(exc)], False, parent)['id'] + '`.'
+        except Exception:
+            pass
+        emit({'permissionDecision': 'deny', 'permissionDecisionReason': reason})
+        return
+    if findings:
+        template = PEER_TEMPLATE if event.get('tool_name') == 'SendMessage' else INPUT_TEMPLATE
+        emit({'additionalContext': 'Output contract warning: ' + ' '.join(findings)
+              + ' This call proceeds. Use this shape in your next message:\n' + template})
 
 
 def self_test():
