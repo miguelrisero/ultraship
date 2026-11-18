@@ -134,8 +134,9 @@ Apply it outside category 5 and the PR-owned row routes.
 Require a repair-only lane whose entire diff changes only the named rows' paired `old` and `new` fields.
 Use this route only as the follow-up row repair for code from an earlier merged PR.
 Before any protected access, read `~/.claude/CLAUDE.md` directly under `CoC decisions (standing grant)`.
-Verify the CoC testing delegation and the clause that requires a follow-up row for new code with independent not-weaker review.
-Require the CoC decision to identify this repair as that follow-up for the named breaking PR.
+Verify the CoC testing delegation and the clause for adapting rows when a PR makes the stored mutant impossible to apply.
+Verify that the clause requires a follow-up row for new code and independent not-weaker review.
+Require the frozen CoC decision to identify this repair as the follow-up for the named breaking PR under that grant.
 Record the path, heading, verified grant, and verification time.
 Refuse a missing, unreadable, or mismatched grant; accept zero relay and require zero per-row owner events.
 
@@ -159,7 +160,10 @@ Refuse an ambiguous ID or extent. Forbid adjacent-row reads, broader searches, a
 Require proof that each stored `old` anchor met its expected count before the breaking commit.
 Require proof that it counts zero at that commit and on the bound main.
 Require scoped source evidence that the named merge caused the zero count and that the repair lane changed no subject code.
-Require that proof before authorizing the edit. A count alone supplies zero causality evidence.
+Use the bound pre-merge main and merged commit to show that the breaking PR changed the guarded code itself.
+Require positive evidence that this code change made the stored mutant impossible to apply at the guarded site.
+Require the frozen decision to bind this evidence to the follow-up under the owner standing grant before authorizing the edit.
+A zero count alone supplies zero repair authority.
 Before editing, confirm that the lane head equals the bound pre-edit commit and that the named rows and subjects match bound main.
 Use one native Edit per row with `replace_all=false` and a unique `old_string` within the approved extent that includes the row ID.
 Refuse a missing or ambiguous match without widening the scope. A hook refusal ends the step.

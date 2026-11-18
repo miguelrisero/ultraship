@@ -1114,11 +1114,12 @@ else:
 
 
 class HookTests(unittest.TestCase):
-    def decision(self, command, agent_type):
+    def decision(self, command, agent_type, cwd=None):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             try:
-                ultraship.pre({'agent_type': agent_type, 'tool_name': 'Bash', 'tool_input': {'command': command}})
+                ultraship.pre({'agent_type': agent_type, 'cwd': cwd, 'tool_name': 'Bash',
+                               'tool_input': {'command': command}})
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
@@ -1170,13 +1171,18 @@ class HookTests(unittest.TestCase):
     def test_quoted_grep_pattern_in_pipeline_is_data(self):
         command = '''cd /repo && grep -nE 'gh [^"]+' docs/notes.md | head -n 5'''
         nested_write = 'test "$(gh api -X POST repos/o/r/pulls/7/comments -f body=x)" = abc'
-        for caller in ('', 'ship:driver'):
+        for caller in ('', 'ship:driver', 'ship:writer--sol'):
             with self.subTest(caller=caller):
                 self.assertEqual(self.decision(command, caller), {})
                 result = self.decision(command + ' && ' + nested_write, caller)
                 self.assertEqual(result.get('permissionDecision'), 'deny')
-                self.assertIn(' Rule: REST review-comment write or opaque endpoint.',
-                              result['permissionDecisionReason'])
+                rule = ('writer GitHub read-only rule' if caller == 'ship:writer--sol'
+                        else 'REST review-comment write or opaque endpoint.')
+                self.assertIn(' Rule: ' + rule, result['permissionDecisionReason'])
+        expanded = 'grep -nE "$(gh pr create --title x)" docs/notes.md | head -n 5'
+        result = self.decision(expanded, 'ship:writer--sol')
+        self.assertEqual(result.get('permissionDecision'), 'deny')
+        self.assertIn('Writers never push', result['permissionDecisionReason'])
 
     def test_static_graphql_read_documents(self):
         documents = (
@@ -1545,12 +1551,50 @@ class HookTests(unittest.TestCase):
     def test_pr_create_reads_quoted_markdown_body(self):
         command = ("cat > .scratch/pr-body.md <<'BODY'\n"
                    f'See the review thread at `{COMMENT}`.\n'
+                   'The command accepts a `--config-env` flag.\n'
                    'BODY\n'
                    'gh pr create --title "docs: link the review thread" --body-file .scratch/pr-body.md')
-        for caller in ('', 'ship:driver'):
-            with self.subTest(caller=caller):
-                self.assertEqual(self.decision(command, caller), {})
-        self.assertEqual(self.decision(command, 'ship:writer--sol').get('permissionDecision'), 'deny')
+        with tempfile.TemporaryDirectory() as root:
+            workspace = Path(root).resolve()
+            scratch = workspace / '.scratch'
+            scratch.mkdir(mode=0o700)
+            checkout = workspace / 'checkout'
+            checkout.mkdir()
+            cwd = str(workspace)
+            absolute = command.replace('.scratch/pr-body.md', str(scratch / 'pr-body.md'))
+            for caller in ('', 'ship:driver'):
+                with self.subTest(caller=caller):
+                    self.assertEqual(self.decision(command, caller, cwd), {})
+                    self.assertEqual(self.decision(f'cd {checkout} && {absolute}', caller, str(checkout)), {})
+                    live_config = 'git --config-env=core.pager=PAGER log -1'
+                    result = self.decision(live_config, caller, cwd)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn('git config from the command line', result['permissionDecisionReason'])
+            result = self.decision(command, 'ship:writer--sol', cwd)
+            self.assertEqual(result.get('permissionDecision'), 'deny')
+            self.assertIn('Writers never push', result['permissionDecisionReason'])
+            self.assertFalse((scratch / 'pr-body.md').exists())
+
+    def test_pr_create_refuses_unsafe_body_destinations(self):
+        with tempfile.TemporaryDirectory() as root:
+            workspace = Path(root).resolve()
+            scratch = workspace / '.scratch'
+            scratch.mkdir(mode=0o700)
+            (scratch / 'existing.md').touch()
+            (scratch / 'link.md').symlink_to(workspace / 'absent.md')
+            (scratch / 'link-dir').symlink_to(workspace, target_is_directory=True)
+            checkout = workspace / 'checkout'
+            checkout.mkdir()
+            (checkout / '.scratch').symlink_to(scratch, target_is_directory=True)
+            for cwd, path in ((workspace, '.scratch/existing.md'), (workspace, '.scratch/link.md'),
+                              (workspace, '.scratch/link-dir/body.md'), (workspace, 'outside.md'),
+                              (workspace, '.scratch/missing/body.md'), (checkout, '.scratch/body.md')):
+                command = (f"cat > {path} <<'BODY'\nMarkdown\nBODY\n"
+                           f'gh pr create --title "docs: body" --body-file {path}')
+                with self.subTest(cwd=cwd, path=path):
+                    result = self.decision(command, 'ship:driver', str(cwd))
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn('PR body destination must be fresh', result['permissionDecisionReason'])
 
     def test_guard_exception_denies_every_caller(self):
         with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):

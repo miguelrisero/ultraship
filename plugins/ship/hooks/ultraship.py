@@ -889,14 +889,53 @@ def literal_ps_awk_filter(command):
                   r"'([^'\r\n]*)'(?=[ \t]*(?:$|;|&&|\|\||\)))", data, command)
 
 
-def cat_heredoc_data(command, *, pr_create_body=False):
+def fresh_pr_body_path(written, cwd, folder):
+    # shortcut: paths can change after the hook check; enforce file identity when opening the file in a sandbox.
+    if not isinstance(cwd, str) or not os.path.isabs(cwd) or written.startswith('-'):
+        return False
+    base = Path(cwd)
+    try:
+        if str(base) != cwd or not base.is_dir() or base.resolve(strict=True) != base:
+            return False
+        for parent in (base, *base.parents):
+            scratch = parent / '.scratch'
+            try:
+                status = scratch.lstat()
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISDIR(status.st_mode) or status.st_uid != os.getuid() or status.st_mode & 0o022:
+                return False
+            break
+        else:
+            return False
+        if folder:
+            # Require an explicit path so CDPATH cannot select another directory.
+            if folder != '.' and not folder.startswith(('/', './')):
+                return False
+            base = base / folder
+            if '..' in base.parts or not base.is_dir() or base.resolve(strict=True) != base:
+                return False
+        destination = base / written
+        if ('..' in destination.parts or not destination.is_relative_to(scratch)
+                or not destination.parent.is_dir() or destination.parent.resolve(strict=True) != destination.parent):
+            return False
+        try:
+            destination.lstat()
+        except FileNotFoundError:
+            return True
+    except (OSError, RuntimeError):
+        return False
+    return False
+
+
+def cat_heredoc_data(command, *, pr_create_body=False, cwd=None):
     # ponytail: PATH or link aliases can reach the written file; sandbox execution to enforce filesystem identity.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
     path = r'[\w./-]+'
     header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
               rf'(?:<<(-?)[ \t]*{delimiter}[ \t]+>>?[ \t]*{path}'
               rf'|>>?[ \t]*{path}[ \t]+<<(-?)[ \t]*{delimiter})[ \t]*\n$')
-    if pr_create_body and any(char.isspace() and char not in ' \t\n' for char in command):
+    if pr_create_body and ('\\\n' in command or any(char.isspace() and char not in ' \t\n' for char in command)):
         return command
     lines = command.splitlines(keepends=True)
     match = re.fullmatch(header, lines[0]) if lines else None
@@ -917,7 +956,8 @@ def cat_heredoc_data(command, *, pr_create_body=False):
                 if written.endswith('.md') and re.fullmatch(
                         rf'[ \t]*gh[ \t]+pr[ \t]+create[ \t]+--title[ \t]+{title}[ \t]+--body-file[ \t]+'
                         rf'''(?:{body_path}|'{body_path}'|"{body_path}")[ \t]*\n?''', remainder):
-                    return shell
+                    folder = re.match(rf'^[ \t]*cd +({path}) +&& +', lines[0])
+                    return shell if fresh_pr_body_path(written, cwd, folder[1] if folder else None) else None
                 return command
             ruff = (r'(?:ruff|/[\w./-]+/\.venv/bin/ruff)[ \t]+'
                     r'(?:check|format)(?:[ \t]+[A-Za-z0-9./_=\-]+)*')
@@ -3617,9 +3657,33 @@ def writer_repository_selector(option, value):
     return option == '--work-tree' and value == '.'
 
 
+def writer_quoted_grep_data(command):
+    if "'" not in command or '"' not in command:
+        return command
+    try:
+        tokens = shell_raw_words(command)
+    except ValueError:
+        return command
+    words, spans = [], []
+    for token in [*tokens, (';', '', 0, 0)]:
+        if token[0] not in {';', '&', '|', '(', ')', '`', '\n'}:
+            words.append(token)
+            continue
+        if words and words[0][0] == 'grep' and literal_search_shell(' '.join(word[0] for word in words)):
+            for index, (raw, value, start, end) in enumerate(words[1:], 1):
+                if (raw.startswith("'") and '"' in value and re.search(r'\bgh\b', value)
+                        and not hidden_gh_api_calls(value.replace('"', '').replace('\\', ''))
+                        and read_only_argument_word(command, tokens, words, index)):
+                    spans.append((start, end))
+        words = []
+    for start, end in reversed(spans):
+        command = command[:start] + "'pattern'" + command[end:]
+    return command
+
+
 def writer_gh_denial_main(command, depth=0):
     if depth == 0:
-        command = commit_message_removed(command)
+        command = writer_quoted_grep_data(commit_message_removed(command))
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = re.sub(r'''['"\\]''', '', command)
     if not re.search(r'\bgh\b', unquoted):
@@ -3724,7 +3788,7 @@ def writer_gh_denial_main(command, depth=0):
 
 def writer_gh_denial(command, depth=0):
     if depth == 0:
-        command = commit_message_removed(command)
+        command = writer_quoted_grep_data(commit_message_removed(command))
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = writer_trigger_text(command)
     if not re.search(r'\bgh\b|GIT_|\b(?:EDITOR|VISUAL|PAGER)\b|\bgit\b|ext::|-[iv0]*S|--s', unquoted):
@@ -4167,8 +4231,6 @@ def review_thread_denial(command, data_mode=False):
     if '$' not in command and re.fullmatch(
             r"git commit(?: +-[A-Za-z]+| +--[a-z-]+)*(?: +-m +'[^']*'(?: +-[A-Za-z]+| +--[a-z-]+)*)+ *", command):
         return None
-    if '--body-file' in command:
-        command = cat_heredoc_data(command, pr_create_body=True)
     command = command.replace('\\\n', '')
     normalized = re.sub(r'''['"\\]''', '', command).casefold()
     if re.search(r'\bgh\b', normalized) and '`' in outside_single_quotes(command):
@@ -4797,7 +4859,10 @@ def pre(data):
     if tool == 'Bash':
         try:
             command = tin.get('command', '')
-            reason = review_thread_denial(command)
+            if '--body-file' in command:
+                command = cat_heredoc_data(command, pr_create_body=True, cwd=data.get('cwd'))
+            reason = ('PR body destination must be fresh in the caller scratch directory'
+                      if command is None else review_thread_denial(command))
             if reason is None:
                 separated = re.sub(r'''['"\\]''', ' ', command).casefold()
                 normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()
