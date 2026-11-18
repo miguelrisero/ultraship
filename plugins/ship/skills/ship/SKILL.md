@@ -44,6 +44,12 @@ Batch actionable and terminal reports; keep unchanged routine reports silent.
 For chief-managed work, only the CoC publishes canonical owner decisions and results in CoC workspace Inputs; chief-local Inputs never satisfy delivery.
 Preserve actual owner Input event delivery and the canonical CoC Input ID → exact owner answer event → continuing driver → result Input receipt.
 
+Apply [standalone main-row repair](references/owner-decisions.md#standalone-main-row-repair) only for the exact repair-only lane that names it.
+This separate route excepts the PR-owned causality, per-row owner-event, and protected lookup rules only for its exact frozen scope.
+Keep reviewer admission, execution admission, and the matching frozen receipt as separate gates.
+Apply [scoped owner event verification](references/owner-decisions.md#scoped-owner-event-verification) only as the named lane's brief-level exception to its Input call ban.
+Preserve every other Input ban, reviewer MCP denial, and independent hook and tool restriction.
+
 - Read [roster](references/roster.md) before the first dispatch. Use each scoped `ship:*` agent and leave the Agent `model` field unset. A hook denies overrides.
 - On an unavailable agent, dispatch the next agent in its fallback chain and record the substitution in the ledger note.
 - Code goes to `ship:writer--sol`, one slice at a time, in the assigned worktree. Continue an existing writer with SendMessage for fixes on its slice.

@@ -1746,5 +1746,84 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertEqual(text.count(phrase), 1)
 
 
+class ScopedDecisionRouteTests(unittest.TestCase):
+    ship = ROOT / 'plugins/ship'
+    reference = ship / 'skills/ship/references/owner-decisions.md'
+    lanes = ('driver.md', 'driver--sol.md', 'writer--sol.md', 'writer--sonnet.md',
+             'writer--fable52.md')
+    reviewers = ('reviewer--sol.md', 'reviewer--opus.md')
+    skill = ship / 'skills/ship/SKILL.md'
+
+    def check_route(self, heading, clauses):
+        marker = f'## {heading}\n'
+        text = self.reference.read_text()
+        self.assertEqual(text.count(marker), 1)
+        section = text.split(marker, 1)[1].split('\n## ', 1)[0]
+        for clause in clauses:
+            with self.subTest(clause=clause):
+                self.assertIn(clause, section)
+
+    def test_main_row_repair_requires_exact_causal_scope_and_separate_gates(self):
+        self.check_route('Standalone main-row repair', (
+            'only to future briefs after verified runtime adoption',
+            'Require a repair-only lane',
+            'read `~/.claude/CLAUDE.md` directly under `CoC decisions (standing grant)`',
+            'accept zero relay and require zero per-row owner events',
+            'CoC-frozen decision file by absolute path and SHA256',
+            'exact repair lane and branch, and repair PR URL when assigned',
+            'full main and pre-edit commit and tree identities',
+            'earlier breaking PR, full merged commit SHA, and pre-merge main SHA',
+            'each exact stored row ID, canonical row file, subject file, and approved line extent',
+            'only whole-line grep for the exact stored `id = "<ID>"` line',
+            'Read only the approved row extent, from its `[[` header to the line before the next table',
+            'met its expected count before the breaking commit',
+            'counts zero at that commit and on the bound main',
+            'source evidence that the named merge caused the zero count',
+            'A hook refusal ends the step',
+            'Change only `old` and `new`',
+            'Preserve the identical mutant operation',
+            'reviewer who differs from the PR author and the applying writer',
+            'before any reviewer row read',
+            'the same guarantee for every row',
+            'Require a CoC-approved frozen review receipt before publication',
+            'Bind its path and SHA256 to the decision file path and SHA256',
+            'Recheck those bindings and the publication head before publishing',
+            'separate applicable execution admission',
+            'Preserve all other routes, higher-priority instructions, effective refusals, hook and tool denials',
+        ))
+        for path in (self.skill, *(self.ship / 'agents' / name for name in self.lanes + self.reviewers)):
+            with self.subTest(path=path):
+                self.assertIn('owner-decisions.md#standalone-main-row-repair', path.read_text())
+        for name in self.reviewers:
+            with self.subTest(reviewer=name):
+                text = (self.ship / 'agents' / name).read_text()
+                self.assertIn('in place of the default Lane-derived row review only for its exact frozen scope', text)
+                self.assertIn('Require protected row admission separately from the CoC decision', text)
+        astra = (self.ship / 'agents/reviewer--astra.md').read_text()
+        self.assertNotIn('owner-decisions.md#standalone-main-row-repair', astra)
+
+    def test_scoped_owner_event_verification_preserves_all_other_input_bans(self):
+        self.check_route('Scoped owner event verification', (
+            'Confirm that your loaded role or skill implements this exception',
+            "named lane's brief to select it and cite a CoC-frozen decision file by absolute path and SHA256",
+            'Verify the digest and exact scope before any call',
+            'exact lane, its repository and task or PR scope, and the owner events to verify',
+            'the permitted tool for each exact Input and workspace UUID',
+            'Permit only `get_input` or `get_input_events` for those exact IDs, solely to verify the named owner events',
+            'supplies zero owner consent or action authority',
+            "only to the named lane's brief-level ban on Input calls",
+            'Keep every other Input call under the ban',
+            'Preserve reviewer MCP denials, all independent hook and tool restrictions, and every effective refusal',
+        ))
+        for path in (self.skill, *(self.ship / 'agents' / name for name in self.lanes)):
+            with self.subTest(path=path):
+                self.assertIn('owner-decisions.md#scoped-owner-event-verification', path.read_text())
+        for path in (self.ship / 'agents').glob('reviewer--*.md'):
+            with self.subTest(reviewer=path.name):
+                text = path.read_text()
+                self.assertNotIn('owner-decisions.md#scoped-owner-event-verification', text)
+                self.assertIn('tools: Read, Grep, Glob, LSP, WebFetch, WebSearch\n', text)
+
+
 if __name__ == '__main__':
     unittest.main()
