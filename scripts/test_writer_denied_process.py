@@ -34,6 +34,7 @@ SUPERSEDED_RULING_SENTENCES = (
     'It supersedes that ruling by name, and it resolves the quoted refusals for that row only.',
     'Refuse the free when the file lacks any of these records.',
     'A row gets at most one free, whatever the decision file or head SHA; refuse a second free.',
+    "Only the driver with exclusive custody of the row's attempt record may record a free.",
     "Before it admits one writer, the driver records the free, the decision file, its SHA256 and that writer on the row's attempt record.",
     'A writer refuses the free when that record is missing or names another writer.',
     'Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial stay final; no decision frees their attempts.',
@@ -74,7 +75,7 @@ class WriterDeniedProcessTests(unittest.TestCase):
         self.assertEqual(section.count(paragraph), 1)
 
     def test_one_free_frees_exactly_one_further_attempt(self):
-        self.check((*WRITER_FILES, REFERENCE_FILE), tuple(SUPERSEDED_RULING_SENTENCES[i] for i in (0, 2, 10, 11)))
+        self.check((*WRITER_FILES, REFERENCE_FILE), tuple(SUPERSEDED_RULING_SENTENCES[i] for i in (0, 2, 10, 11, 12)))
 
     def test_second_free_for_the_same_row_refuses(self):
         self.check((*WRITER_FILES, REFERENCE_FILE), (SUPERSEDED_RULING_SENTENCES[9],))
@@ -83,7 +84,7 @@ class WriterDeniedProcessTests(unittest.TestCase):
         self.check((*WRITER_FILES, REFERENCE_FILE), tuple(SUPERSEDED_RULING_SENTENCES[i] for i in (4, 8)))
 
     def test_content_refusal_stays_final(self):
-        self.check((*WRITER_FILES, REFERENCE_FILE), tuple(SUPERSEDED_RULING_SENTENCES[i] for i in (5, 12)))
+        self.check((*WRITER_FILES, REFERENCE_FILE), tuple(SUPERSEDED_RULING_SENTENCES[i] for i in (5, 13)))
 
     def test_free_lifts_the_never_qualify_rule(self):
         self.check((*WRITER_FILES, REFERENCE_FILE), (SUPERSEDED_RULING_SENTENCES[1],))
@@ -92,14 +93,18 @@ class WriterDeniedProcessTests(unittest.TestCase):
         reference = (ROOT / REFERENCE_FILE).read_text(encoding='utf-8')
         section = reference.split('## Row re-anchor tool brief\n', 1)[1].split('\n## ', 1)[0]
         before, template, after = section.split('```')
+        unused = 'The tool attempt for this grant and head is therefore unused.'
         lines = (
             "For a superseded-ruling free, add one line after `- Earlier attempts:` that names "
             "the free's decision file, its SHA256 and the attempt record entry.",
             'Add that decision file to `Readable files:`.',
+            f'In that brief, replace `{unused}` with '
+            '`The attempt is used, and the superseded-ruling free authorizes one further attempt.`',
         )
         for line in lines:
             self.assertIn(line, before + after)
             self.assertNotIn(line, template)
+        self.assertIn(unused, template)
 
 
 if __name__ == '__main__':

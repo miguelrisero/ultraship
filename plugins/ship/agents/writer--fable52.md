@@ -678,6 +678,7 @@ It records that each later refusal named only that first refusal or the attempt 
 It supersedes that ruling by name, and it resolves the quoted refusals for that row only.
 Refuse the free when the file lacks any of these records.
 A row gets at most one free, whatever the decision file or head SHA; refuse a second free.
+Only the driver with exclusive custody of the row's attempt record may record a free.
 Before it admits one writer, the driver records the free, the decision file, its SHA256 and that writer on the row's attempt record.
 A writer refuses the free when that record is missing or names another writer.
 Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial stay final; no decision frees their attempts.
