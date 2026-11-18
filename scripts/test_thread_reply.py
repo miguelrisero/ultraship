@@ -1184,6 +1184,12 @@ class HookTests(unittest.TestCase):
         self.assertEqual(result.get('permissionDecision'), 'deny')
         self.assertIn('Writers never push', result['permissionDecisionReason'])
 
+    def test_writer_quoted_grep_end_anchor_is_data(self):
+        command = '''cd /repo && grep -nE 'gh [^"]+$' docs/notes.md | head -n 5'''
+        self.assertIsNone(ultraship.writer_gh_denial_main(command))
+        self.assertIsNone(ultraship.writer_gh_denial(command))
+        self.assertEqual(self.decision(command, 'ship:writer--sol'), {})
+
     def test_static_graphql_read_documents(self):
         documents = (
             '{repository(owner:"o",name:"r"){pullRequests(first:5){nodes{number files(first:10){nodes{path}}}}}}',
@@ -1549,31 +1555,67 @@ class HookTests(unittest.TestCase):
                     self.assertIn(' Rule: ' + rule + '.', result['permissionDecisionReason'])
 
     def test_pr_create_reads_quoted_markdown_body(self):
-        command = ("cat > .scratch/pr-body.md <<'BODY'\n"
-                   f'See the review thread at `{COMMENT}`.\n'
-                   'The command accepts a `--config-env` flag.\n'
-                   'BODY\n'
-                   'gh pr create --title "docs: link the review thread" --body-file .scratch/pr-body.md')
-        with tempfile.TemporaryDirectory() as root:
-            workspace = Path(root).resolve()
-            scratch = workspace / '.scratch'
+        helper = ROOT / 'plugins/ship/skills/ship/scripts/pr_create_body.py'
+        name, repo, head = 'pr-body-lane.md', 'github.com/miguelrisero/example', 'docs/lane'
+        title = 'docs: link the review thread'
+        body = f'See the review thread at `{COMMENT}`.\nThe command accepts a `--config-env` flag.\n'
+        command = f"/usr/bin/python3 -I '{helper}' {name} {repo} {head} \"{title}\" <<'BODY'\n{body}BODY"
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+                for unsupported in (f'env {command}', command.replace("<<'BODY'", '<<BODY', 1),
+                                    command + '\ngh pr view 7', command.replace(str(helper), '/tmp/' + helper.name, 1)):
+                    self.assertEqual(self.decision(unsupported, caller).get('permissionDecision'), 'deny')
+                live_config = 'git --config-env=core.pager=PAGER log -1'
+                result = self.decision(live_config, caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn('git config from the command line', result['permissionDecisionReason'])
+        result = self.decision(command, 'ship:writer--sol')
+        self.assertEqual(result.get('permissionDecision'), 'deny')
+        self.assertIn('Writers never push', result['permissionDecisionReason'])
+
+    def test_pr_body_helper_uses_one_descriptor_and_refuses_existing_link(self):
+        helper = ROOT / 'plugins/ship/skills/ship/scripts/pr_create_body.py'
+        spec = importlib.util.spec_from_file_location('pr_create_body', helper)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        name, repo, head, title = 'pr-body-lane.md', 'github.com/miguelrisero/example', 'docs/lane', 'docs: body'
+        body = f'# Review\n\nSee `{COMMENT}`.\n'.encode()
+        vector = ['gh', 'pr', 'create', '--repo', repo, '--head', head, '--title', title, '--body-file', '-']
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            scratch = root / '.scratch'
             scratch.mkdir(mode=0o700)
-            checkout = workspace / 'checkout'
+            checkout = root / 'checkout'
             checkout.mkdir()
-            cwd = str(workspace)
-            absolute = command.replace('.scratch/pr-body.md', str(scratch / 'pr-body.md'))
-            for caller in ('', 'ship:driver'):
-                with self.subTest(caller=caller):
-                    self.assertEqual(self.decision(command, caller, cwd), {})
-                    self.assertEqual(self.decision(f'cd {checkout} && {absolute}', caller, str(checkout)), {})
-                    live_config = 'git --config-env=core.pager=PAGER log -1'
-                    result = self.decision(live_config, caller, cwd)
-                    self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn('git config from the command line', result['permissionDecisionReason'])
-            result = self.decision(command, 'ship:writer--sol', cwd)
-            self.assertEqual(result.get('permissionDecision'), 'deny')
-            self.assertIn('Writers never push', result['permissionDecisionReason'])
-            self.assertFalse((scratch / 'pr-body.md').exists())
+            path = scratch / name
+            target = root / 'target.md'
+            target.write_bytes(b'untouched')
+            path.symlink_to(target)
+            cwd_fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.chdir(checkout)
+                with patch.object(module.subprocess, 'run', return_value=Mock(returncode=0)) as run:
+                    with self.assertRaises(FileExistsError):
+                        module.create_pr(name, repo, head, title, io.BytesIO(body))
+                    run.assert_not_called()
+                    self.assertTrue(path.is_symlink())
+                    self.assertEqual(target.read_bytes(), b'untouched')
+                    path.unlink()
+
+                    def check_body(arguments, *, stdin, env):
+                        self.assertEqual(arguments, vector)
+                        self.assertEqual(os.fstat(stdin.fileno()).st_nlink, 0)
+                        self.assertEqual(os.read(stdin.fileno(), len(body) + 1), body)
+                        return Mock(returncode=0)
+
+                    run.side_effect = check_body
+                    self.assertEqual(module.create_pr(name, repo, head, title, io.BytesIO(body)), 0)
+                    run.assert_called_once()
+                    self.assertFalse(path.exists())
+            finally:
+                os.fchdir(cwd_fd)
+                os.close(cwd_fd)
 
     def test_pr_create_refuses_unsafe_body_destinations(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1594,7 +1636,8 @@ class HookTests(unittest.TestCase):
                 with self.subTest(cwd=cwd, path=path):
                     result = self.decision(command, 'ship:driver', str(cwd))
                     self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn('PR body destination must be fresh', result['permissionDecisionReason'])
+                    self.assertIn('Shell heredocs for PR creation require the literal PR body helper',
+                                  result['permissionDecisionReason'])
 
     def test_guard_exception_denies_every_caller(self):
         with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):

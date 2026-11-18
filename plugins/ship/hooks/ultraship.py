@@ -889,54 +889,31 @@ def literal_ps_awk_filter(command):
                   r"'([^'\r\n]*)'(?=[ \t]*(?:$|;|&&|\|\||\)))", data, command)
 
 
-def fresh_pr_body_path(written, cwd, folder):
-    # shortcut: paths can change after the hook check; enforce file identity when opening the file in a sandbox.
-    if not isinstance(cwd, str) or not os.path.isabs(cwd) or written.startswith('-'):
-        return False
-    base = Path(cwd)
-    try:
-        if str(base) != cwd or not base.is_dir() or base.resolve(strict=True) != base:
-            return False
-        for parent in (base, *base.parents):
-            scratch = parent / '.scratch'
-            try:
-                status = scratch.lstat()
-            except FileNotFoundError:
-                continue
-            if not stat.S_ISDIR(status.st_mode) or status.st_uid != os.getuid() or status.st_mode & 0o022:
-                return False
-            break
-        else:
-            return False
-        if folder:
-            # Require an explicit path so CDPATH cannot select another directory.
-            if folder != '.' and not folder.startswith(('/', './')):
-                return False
-            base = base / folder
-            if '..' in base.parts or not base.is_dir() or base.resolve(strict=True) != base:
-                return False
-        destination = base / written
-        if ('..' in destination.parts or not destination.is_relative_to(scratch)
-                or not destination.parent.is_dir() or destination.parent.resolve(strict=True) != destination.parent):
-            return False
-        try:
-            destination.lstat()
-        except FileNotFoundError:
-            return True
-    except (OSError, RuntimeError):
-        return False
-    return False
+PR_BODY_HELPER = 'pr_create_body.py'
 
 
-def cat_heredoc_data(command, *, pr_create_body=False, cwd=None):
+def pr_create_body_shell(command):
+    """Project one exact helper call onto the PR command it executes."""
+    helper = str(Path(__file__).resolve().parents[1] / 'skills/ship/scripts' / PR_BODY_HELPER)
+    if "'" in helper or any(ord(char) < 32 for char in helper) or '\x00' in command:
+        return None
+    lines = command.removesuffix('\n').split('\n')
+    title = r'''(?:'[^'\x00-\x1f\x7f]+'|"[^"$`\\!\x00-\x1f\x7f]+")'''
+    header = re.fullmatch(rf"/usr/bin/python3 -I '{re.escape(helper)}' pr-body-[A-Za-z0-9_-]+\.md "
+                          r"(github\.com/(?:bettergroupinc|miguelrisero)/[A-Za-z0-9_.-]+) "
+                          rf"([A-Za-z0-9_][A-Za-z0-9_./-]*) ({title}) <<'([A-Za-z_][A-Za-z_0-9]*)'", lines[0])
+    if header and len(lines) > 1 and lines[-1] == header[4] and header[4] not in lines[1:-1]:
+        return f'gh pr create --repo {header[1]} --head {header[2]} --title {header[3]} --body-file -'
+    return None
+
+
+def cat_heredoc_data(command):
     # ponytail: PATH or link aliases can reach the written file; sandbox execution to enforce filesystem identity.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
     path = r'[\w./-]+'
     header = (rf'^[ \t]*(?:cd +{path} +&& +)?cat[ \t]+'
               rf'(?:<<(-?)[ \t]*{delimiter}[ \t]+>>?[ \t]*{path}'
               rf'|>>?[ \t]*{path}[ \t]+<<(-?)[ \t]*{delimiter})[ \t]*\n$')
-    if pr_create_body and ('\\\n' in command or any(char.isspace() and char not in ' \t\n' for char in command)):
-        return command
     lines = command.splitlines(keepends=True)
     match = re.fullmatch(header, lines[0]) if lines else None
     if not match:
@@ -949,16 +926,6 @@ def cat_heredoc_data(command, *, pr_create_body=False, cwd=None):
             remainder = ''.join(lines[end + 1:])
             shell = re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
             written = re.search(r'>>?[ \t]*([\w./-]+)', lines[0])[1]
-            if pr_create_body:
-                # A literal PR create reads the same file as Markdown and runs no body text.
-                body_path = re.escape(written)
-                title = r'''(?:'[^'\r\n]+'|"[^"$`\\!\r\n]+")'''
-                if written.endswith('.md') and re.fullmatch(
-                        rf'[ \t]*gh[ \t]+pr[ \t]+create[ \t]+--title[ \t]+{title}[ \t]+--body-file[ \t]+'
-                        rf'''(?:{body_path}|'{body_path}'|"{body_path}")[ \t]*\n?''', remainder):
-                    folder = re.match(rf'^[ \t]*cd +({path}) +&& +', lines[0])
-                    return shell if fresh_pr_body_path(written, cwd, folder[1] if folder else None) else None
-                return command
             ruff = (r'(?:ruff|/[\w./-]+/\.venv/bin/ruff)[ \t]+'
                     r'(?:check|format)(?:[ \t]+[A-Za-z0-9./_=\-]+)*')
             segments = [part.strip() for part in re.split(r'&&|;|\n', remainder) if part.strip()]
@@ -1204,9 +1171,15 @@ SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh',
 STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su', 'trap'}
 
 
-def read_only_argument_word(command, tokens, words, index):
+def read_only_argument_word(command, tokens, words, index, *, literal_grep_anchor=False):
     # These commands never run an argument word within read-only pipelines after a literal directory change.
-    if not index or any(char in command for char in '$`<~'):
+    if not index:
+        return False
+    checked = command
+    raw, _, _, end = words[index]
+    if literal_grep_anchor and words[0][0] == 'grep' and re.fullmatch(r"'[^'\r\n]*\$'", raw):
+        checked = command[:end - 2] + command[end - 1:]
+    if any(char in checked for char in '$`<~'):
         return False
     try:
         original = shell_raw_words(command)
@@ -3673,7 +3646,7 @@ def writer_quoted_grep_data(command):
             for index, (raw, value, start, end) in enumerate(words[1:], 1):
                 if (raw.startswith("'") and '"' in value and re.search(r'\bgh\b', value)
                         and not hidden_gh_api_calls(value.replace('"', '').replace('\\', ''))
-                        and read_only_argument_word(command, tokens, words, index)):
+                        and read_only_argument_word(command, tokens, words, index, literal_grep_anchor=True)):
                     spans.append((start, end))
         words = []
     for start, end in reversed(spans):
@@ -4771,6 +4744,12 @@ def pre(data):
         trigger = command.translate(str.maketrans('', '', "'\"\\")).casefold()
         if '--row-file' in trigger or '--row-id' in trigger or 'row_reanchor' in trigger and '--row-' in trigger:
             row_reanchor_gate(data, command)
+    pr_body_command = None
+    if tool == 'Bash' and PR_BODY_HELPER in trigger:
+        pr_body_command = pr_create_body_shell(command)
+        if pr_body_command is None or (agent_type and not role(data, 'writer')
+                                       and not re.match(r'^(ship:)?driver(--|$)', agent_type)):
+            deny('Only the main session and the driver may use the literal PR body helper form in the Ship pipeline.')
     if role(data, 'writer'):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
                     'mcp__bettercoding__set_input_status'):
@@ -4783,7 +4762,7 @@ def pre(data):
                                  'or report the rule and blocked scope to your driver and ask for permission; '
                                  'the driver may grant it or run the step itself.')
             try:
-                command = tin.get('command', '')
+                command = pr_body_command or tin.get('command', '')
                 if any(char.isspace() and char not in ' \t\n' for char in command):
                     deny(classifier_reason + ' Rule: line separator rule.')
                 reason = process_heredoc_denial(command)
@@ -4858,11 +4837,16 @@ def pre(data):
                 deny('Writers do not edit GitHub CLI configuration.')
     if tool == 'Bash':
         try:
-            command = tin.get('command', '')
-            if '--body-file' in command:
-                command = cat_heredoc_data(command, pr_create_body=True, cwd=data.get('cwd'))
-            reason = ('PR body destination must be fresh in the caller scratch directory'
-                      if command is None else review_thread_denial(command))
+            command = pr_body_command or tin.get('command', '')
+            reason = review_thread_denial(command)
+            if reason is None and '<<' in command:
+                create = r'\bgh[ \t]+pr[ \t]+create\b'
+                raw = re.sub(r'''['"\\]''', '', command.replace('\\\n', ''))
+                if re.search(create, raw):
+                    shell = shell_without_heredoc_bodies(command)
+                    shell = re.sub(r'''['"\\]''', '', shell.replace('\\\n', ''))
+                    if re.search(create, shell) and re.search(r'(?:^|[ \t])(?:--body-file\b|-[A-Za-z]*F)', shell):
+                        reason = 'Shell heredocs for PR creation require the literal PR body helper'
             if reason is None:
                 separated = re.sub(r'''['"\\]''', ' ', command).casefold()
                 normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()

@@ -143,6 +143,23 @@ Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into 
      Never use an abbreviated or default push. Never target a default branch.
 4. Open one PR at the first push, or update the open PR. Open it before any proof work: mutation batteries and live checks run after the PR exists. Put scope, behavior, verification steps, and risks in the body.
 
+For an authorized PR creation with an inline Markdown body, run the installed helper from the lane worktree.
+Replace the example script path with its literal absolute path in the loaded Ship plugin.
+Use the verified `github.com/owner/repo` and branch, and choose a fresh `pr-body-*.md` name.
+Pass one single-quoted heredoc in a standalone call. Keep the closing marker on its own final line.
+
+```bash
+/usr/bin/python3 -I '/absolute/ship/skills/ship/scripts/pr_create_body.py' pr-body-lane.md github.com/bettergroupinc/example docs/lane 'docs: describe the lane' <<'BODY'
+## Scope
+Describe the scope here.
+BODY
+```
+
+The helper requires an existing, owner-controlled `.scratch` at the worktree or an ancestor.
+The helper looks for `gh` in `/usr/local/bin`, `/usr/bin`, and `/bin`.
+It opens the body exclusively without following links and sends the same descriptor to `gh pr create --body-file -`.
+Keep shell-written heredoc body files outside this route. Keep writer publication and review-thread rules in force.
+
 ## 10. Babysit
 
 Run `ship:babysit` on the PR until required CI is green and zero threads are unresolved. Append one row per round, and a final `babysit` row with verdict `pass`.

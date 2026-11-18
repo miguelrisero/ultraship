@@ -163,7 +163,17 @@ Require scoped source evidence that the named merge caused the zero count and th
 Use the bound pre-merge main and merged commit to show that the breaking PR changed the guarded code itself.
 Require positive evidence that this code change made the stored mutant impossible to apply at the guarded site.
 Require the frozen decision to bind this evidence to the follow-up under the owner standing grant before authorizing the edit.
-A zero count alone supplies zero repair authority.
+Require recorded evidence of the earlier retirement, designated-test change, or mutant adaptation under that grant.
+Require the disposition record to cite the landed row change and its CoC decision.
+For retirement, require evidence that the breaking PR deleted the guarded target code.
+Require a receipt for the independent not-weaker review of that disposition.
+Require that reviewer to differ from the breaking PR author and the person who applied the disposition.
+Bind the receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.
+Verify that the reviewed disposition is the one that landed for the named row.
+Record both items and their verifiable evidence references in the frozen edit decision.
+Bind both items to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.
+Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched record or review.
+A zero count alone supplies zero repair authority. A disposition label supplies zero proof.
 Before editing, confirm that the lane head equals the bound pre-edit commit and that the named rows and subjects match bound main.
 Use one native Edit per row with `replace_all=false` and a unique `old_string` within the approved extent that includes the row ID.
 Refuse a missing or ambiguous match without widening the scope. A hook refusal ends the step.

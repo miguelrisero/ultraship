@@ -1809,6 +1809,22 @@ class ScopedDecisionRouteTests(unittest.TestCase):
         astra = (self.ship / 'agents/reviewer--astra.md').read_text()
         self.assertNotIn('owner-decisions.md#standalone-main-row-repair', astra)
 
+    def test_main_row_repair_requires_proof_of_earlier_reviewed_disposition_before_edit(self):
+        self.check_route('Standalone main-row repair', (
+            'Require recorded evidence of the earlier retirement, designated-test change, or mutant adaptation under that grant.',
+            'Require the disposition record to cite the landed row change and its CoC decision.',
+            'For retirement, require evidence that the breaking PR deleted the guarded target code.',
+            'Require a receipt for the independent not-weaker review of that disposition.',
+            'Require that reviewer to differ from the breaking PR author and the person who applied the disposition.',
+            'Bind the receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.',
+            'Verify that the reviewed disposition is the one that landed for the named row.',
+            'Record both items and their verifiable evidence references in the frozen edit decision.',
+            'Bind both items to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.',
+            'Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched record or review.',
+            'A zero count alone supplies zero repair authority. A disposition label supplies zero proof.',
+            'accept zero relay and require zero per-row owner events',
+        ))
+
     def test_scoped_owner_event_verification_preserves_all_other_input_bans(self):
         self.check_route('Scoped owner event verification', (
             'Confirm that your loaded role or skill implements this exception',
