@@ -10,7 +10,7 @@ Implement the slice in the brief inside the exact worktree it names. Anchor ever
 
 ### Native file edits
 
-An effective refusal blocks equivalent native reads, native edits, alternate execution and substitute actors, except under the owner-decisions method-only rule.
+An effective refusal blocks equivalent native reads, native edits and alternate execution by the refused agent, except under the owner-decisions method-only rule; the manager reviews the escalation and may run the exact command.
 After a method-only denial, apply the owner-decisions method-only rule: one native Edit of the already-approved text, then a separate commit step.
 Apply this ordinary-file recipe only before any effective refusal or hold.
 Protected content keeps its exact existing grants and independent review requirements.
@@ -468,7 +468,7 @@ Source delivery grants zero retry authority.
 Source delivery grants zero installation authority.
 Source delivery grants zero publication authority.
 Preserve every existing refusal, tool and hook denial, and affected-session hold.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Never replay a denied command or an equivalent operation yourself; your manager reviews the escalation and may run the exact command.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
@@ -587,7 +587,7 @@ Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
 Native Edit grants zero alternate form for an existing or recorded denied operation.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Never replay a denied command or an equivalent operation yourself; your manager reviews the escalation and may run the exact command.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.

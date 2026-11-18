@@ -23,7 +23,7 @@ Require this field and these sentences verbatim in every brief:
 
 ```text
 Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
-A hook refusal is final: report it and stop.
+A hook refusal escalates to your manager: report the escalation id and stop this step.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 ```

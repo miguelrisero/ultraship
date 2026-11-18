@@ -48,6 +48,7 @@ Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-s
 | Role guard | PreToolUse `Bash`, `Edit`, `Write` | Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch. The ban covers every path. The hook denies common CLI forms and harness-config edits. |
 | Reviewer, triage and verifier boundary | PreToolUse `Read`, `Grep`, `Glob`, `LSP`, `WebFetch`, `mcp__fff__*` | Reviewers, triage and verifiers pass exact canonical absolute paths and scope every search. The hook denies `tests/mutation` paths, `.git` paths, Claude data under `~/.claude` and `CLAUDE_CONFIG_DIR` (except `CLAUDE.md`, `plugins/cache`, and `plugins/marketplaces`), and the `mcp__fff__*` tools and the three `mcp__bettercoding__` Input tools, the only `mcp__` tools the hook sees. A driver-written admission record admits Read or Grep of the exact row files it lists. |
 | Review-thread guard | PreToolUse `Bash`, every caller | Requires `thread_reply.py` for review-thread replies and resolves. The helper checks the thread's repository and PR number through GitHub. |
+| Refusal escalation | PreToolUse `Bash`, SubagentStop | Records each classifier refusal for the lane's manager. Runs a manager-approved exact command once. See [Refusal escalation](skills/ship/references/owner-decisions.md#refusal-escalation). |
 | Row re-anchor gate | PreToolUse `Bash`, every caller | Admits only the exact isolated `row_reanchor.py` command for a writer with a matching driver-written admission record. |
 | Research budget | PreToolUse discovery tools | Denies the 41st discovery call of a researcher |
 | Ledger owed | SubagentStop, Stop | Retains pending evidence; blocks once per canonical owed state; accounts each result against its agent ID |
@@ -76,6 +77,8 @@ The hook sees these tools: `Agent`, `Task`, `Bash`, `Edit`, `Write`, `NotebookEd
 An exception inside the `pre` hook denies every tool call for every caller. A process failure blocks every tool the PreToolUse hooks see. This includes missing `python3`, syntax or import errors, timeouts, and bad exit codes. Input that fails JSON parsing or contains a value other than an object denies the call.
 
 Hook state lives in `${XDG_STATE_HOME:-~/.local/state}/ultraship`.
+
+Escalation records and decisions live in its `escalations` folder. The hook writes them, signed with the text_lint receipt key. Set `ULTRASHIP_COC_DIR` to the CoC workspace folder; without it, no session can approve a main-session escalation.
 
 A checkout with its Git directory inside the checkout uses `<common-git-dir>/ship/ledger/<branch>.tsv`. An existing parent `.scratch` identifies the workspace for a direct-child linked checkout. A common Git directory inside that workspace also uses the common-directory default. An external common Git directory selects `<workspace>/.scratch/ship-ledgers/<canonical-checkout-sha256>/<branch>.tsv`. The resolver canonicalizes roots and rejects symlink escapes. Ambiguous layouts require an absolute `SHIP_LEDGER_DIR`.
 

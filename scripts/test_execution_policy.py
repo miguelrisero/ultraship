@@ -1173,9 +1173,9 @@ class ExecutionPolicyTests(unittest.TestCase):
             ('Protected content retains its grants and review without added access', (
                 'protected content', 'exact existing grants', 'independent review', 'zero protected access',
             )),
-            ('An effective refusal blocks equivalent operations and substitute actors', (
+            ('An effective refusal blocks equivalent operations and escalates to the manager', (
                 'effective refusal', 'blocks equivalent native reads', 'native edits',
-                'alternate execution', 'substitute actors',
+                'alternate execution', 'manager reviews the escalation',
             )),
             ('The recipe requires verification of the exact brief scope', (
                 "verify the brief's exact file scope",

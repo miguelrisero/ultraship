@@ -4,6 +4,7 @@ import ast
 import calendar
 import fcntl
 import fnmatch
+import functools
 import hashlib
 import importlib.util
 import json
@@ -3477,6 +3478,59 @@ def deny(reason):
     sys.exit(0)
 
 
+GIT_STEP = r'\bgit\b[^;&|\n]*'
+ABSOLUTE_HOLDS = (
+    ('secret read', re.compile(r'(?:^|[\s/=<"\'])\.env\b(?!\.example)|\bcredentials?(?:\.json)?\b|\.netrc\b|\.ssh/|\.aws/'
+                               r'|\bgh\s+auth\s+token\b|\$\{?\w*(?:token|key|secret)\w*|\bprintenv\b[^;&|\n]*(?:token|key|secret)')),
+    ('production write', re.compile(r'\brender\s+(?:deploys?|services?|jobs?)\b|\bneonctl\b[^;&|\n]*\b(?:delete|reset|restore|'
+                                    r'update|create|set-default)\b|\bvercel\s+(?:promote|rollback|env\s+(?:add|rm)|alias)\b')),
+    ('destructive git', re.compile(GIT_STEP + r'\bpush\b[^;&|\n]*(?:\s-[a-z]*f|\s--force|\s\+\S|\s--delete\b|\s-d\b|\s--mirror\b|\s:\S)'
+                                   + '|' + GIT_STEP + r'\breset\b[^;&|\n]*\s--hard\b'
+                                   + '|' + GIT_STEP + r'\bclean\b[^;&|\n]*\s-[a-z]*f'
+                                   + '|' + GIT_STEP + r'\bbranch\b[^;&|\n]*\s-[a-z]*D'
+                                   + r'|\bfilter-(?:repo|branch)\b|\bupdate-ref\b[^;&|\n]*\s-d\b')),
+    ('owner-only setting', re.compile(r'/protection\b|/rulesets?\b|\bgh\s+(?:secret|variable)\s+(?:set|delete|remove)\b'
+                                      r'|\bgh\s+repo\s+(?:edit|delete|rename|archive)\b'
+                                      r'|\bgh\s+api\b[^;&|\n]*(?:-x|--method)[\s=]*(?:patch|put|delete)\b[^;&|\n]*\brepos/[\w.-]+/[\w.-]+(?:[\s\'"]|$)')),
+    ('escalation or receipt store write', re.compile(r'ultraship/(?:escalations|text-lint)\b')),
+)
+
+
+def absolute_hold(command):
+    """Name the class of a command that no manager approval runs, or None."""
+    text = re.sub(r'''['"\\]''', '', command)
+    # shortcut: a text match, so a command built at runtime slips past it; upgrade with an execution sandbox.
+    for name, pattern in ABSOLUTE_HOLDS:
+        if pattern.search(text if name == 'destructive git' else text.casefold()):
+            return name
+    if WRITER_BASH.search(text):
+        return 'production write'
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def load_escalation():
+    spec = importlib.util.spec_from_file_location('ultraship_escalation', Path(__file__).resolve().with_name('escalation.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def refuse(data, reason):
+    """Deny a classifier refusal and escalate it to the caller's manager."""
+    try:
+        entry = load_escalation().record(data, reason)
+    except Exception as error:
+        traceback.print_exc()
+        deny(reason + ' The escalation record failed (' + type(error).__name__ + '); report this refusal to your manager '
+             'and stop this step.')
+    if entry is None:
+        deny(reason + ' This call has no session, so no escalation record; report this refusal to your manager '
+             'and stop this step.')
+    deny(reason + ' Escalated to ' + load_escalation().manager_label(entry) + ' as '
+         + entry['id'] + '; stop this step and wait.')
+
+
 def ledger_script():
     return Path(__file__).resolve().parents[1] / 'skills/ship/scripts/ledger.py'
 
@@ -4356,6 +4410,7 @@ def receipt_custody(data, read_search=False):
         return
     state_root = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
     receipt_store = state_root / 'ultraship' / 'text-lint'
+    escalation_store = state_root / 'ultraship' / 'escalations'
 
     def normalized(value):
         value = value.casefold().translate(str.maketrans('', '', "\"'\\"))
@@ -4365,12 +4420,13 @@ def receipt_custody(data, read_search=False):
         path = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(value))
         return {normalized(os.path.abspath(path)), normalized(os.path.realpath(path))}
 
-    receipt_paths = resolved(str(receipt_store))
+    receipt_paths = resolved(str(receipt_store)) | resolved(str(escalation_store))
     state_paths = resolved(str(state_root))
 
     def receipt_text(value):
         value = normalized(value)
-        return any(path in value for path in receipt_paths) or 'ultraship' + '/text-lint' in value
+        return (any(path in value for path in receipt_paths) or 'ultraship' + '/text-lint' in value
+                or 'ultraship' + '/escalations' in value)
 
     def receipt_path(value, ancestors=False, state_only=False):
         if not isinstance(value, str) or not value:
@@ -4443,6 +4499,9 @@ def receipt_custody(data, read_search=False):
                     and not any(char.isspace() and char not in ' \t\n' for char in raw))
                     and (re.search(r'text_lint(\.py)?\s+hook\b', command) or any(token in command for token in
                          ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
+                # Only the hook writes escalation decisions; a Bash call never loads the module that signs them.
+                or (re.search(r'escalation\.py|\b(?:import|from)\s+escalation\b', command) and any(token in command for token in
+                    ('import', 'run_path', '__import__', 'spec_from_file_location', 'exec(')))
                 or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
             deny(RECEIPT_CUSTODY)
 
@@ -4549,6 +4608,24 @@ def pre(data):
     except Exception:
         traceback.print_exc()
         deny(RECEIPT_CUSTODY_FAILED)
+    approval = None
+    if tool == 'Bash':
+        command = str(tin.get('command', ''))
+        escalation = load_escalation()
+        request = escalation.cli_decision(command)
+        if request:
+            verb, identifier, reason = request
+            entry = escalation.get(identifier)
+            refusal = escalation.decide(data, verb, identifier, reason, entry and absolute_hold(entry['command']))
+            if refusal:
+                deny('Escalation ' + verb + ' refused: ' + refusal + '.')
+            return
+        if not data.get('agent_id') and escalation.approved(data, command, consume=False):
+            hold = absolute_hold(command)
+            if hold:
+                deny('A manager approval cannot run this command. Rule: absolute hold (' + hold + '). '
+                     'Only the owner decides it.')
+            approval = escalation.approved(data, command)
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
         deny('ship agents pin their own model. Remove the `model` field and call the scoped agent '
              'or the next agent in its fallback chain.')
@@ -4587,65 +4664,65 @@ def pre(data):
             publication_reason = ('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                                   'commit grants permit local base-branch merges into their own lane branch. '
                                   'Return this step to your driver; the driver may run it.')
-            classifier_reason = ('This operation remains denied. Report the rule and blocked scope to the parent. '
-                                 'Native Edit grants zero alternate command form or actor for a denied operation. '
-                                 'Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt. '
-                                 'Never replay a denied command, equivalent, or substitute actor.')
+            classifier_reason = ('This operation remains denied for you. Report the rule and blocked scope to the parent. '
+                                 'Native Edit grants zero alternate command form for a denied operation. '
+                                 'Never replay a denied command or an equivalent yourself; your manager reviews the '
+                                 'escalation and may run the exact command.')
             try:
                 command = tin.get('command', '')
                 if any(char.isspace() and char not in ' \t\n' for char in command):
-                    deny(classifier_reason + ' Rule: line separator rule.')
+                    refuse(data, classifier_reason + ' Rule: line separator rule.')
                 reason = process_heredoc_denial(command)
                 if reason:
-                    deny(classifier_reason + ' Rule: ' + reason + '.'
+                    refuse(data, classifier_reason + ' Rule: ' + reason + '.'
                          + (GIT_COMMIT_SHAPE if git_commit_step(command) else ''))
                 # Publish words inside an inert heredoc are file text; every executable part keeps the scan.
                 file_text_removed = python_heredoc_shell(cat_heredoc_data(command), inert_only=True)
                 reason = git_push(command)
                 if reason:
                     denial_reason = classifier_reason if reason == 'heredoc-then-run rule' else publication_reason
-                    deny(denial_reason + ' Rule: ' + reason + '.')
+                    refuse(data, denial_reason + ' Rule: ' + reason + '.')
                 match = WRITER_BASH.search(file_text_removed)
                 if match:
-                    deny(publication_reason + ' Rule: WRITER_BASH ' + repr(match[2].strip()) + '.')
+                    refuse(data, publication_reason + ' Rule: WRITER_BASH ' + repr(match[2].strip()) + '.')
                 reason = writer_gh_denial_main(file_text_removed)
                 if reason:
-                    deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + reason)
+                    refuse(data, publication_reason + ' Rule: writer GitHub read-only rule: ' + reason)
                 names_gh = re.search(r'\bgh\b', writer_trigger_text(file_text_removed))
                 github_reason = writer_gh_denial(file_text_removed)
                 if names_gh and github_reason:
-                    deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + github_reason)
+                    refuse(data, publication_reason + ' Rule: writer GitHub read-only rule: ' + github_reason)
                 reason = process_heredoc_denial(command, readers=True)
                 if reason:
-                    deny(classifier_reason + ' Rule: ' + reason + '.'
+                    refuse(data, classifier_reason + ' Rule: ' + reason + '.'
                          + (GIT_COMMIT_SHAPE if git_commit_step(command) else ''))
                 try:
                     list(shell_substitution_bodies(shell_without_heredoc_bodies(command)))
                 except ValueError as error:
                     if str(error) == 'shell comment substitution':
-                        deny(classifier_reason + ' Rule: inline interpreter code rule (comment).')
+                        refuse(data, classifier_reason + ' Rule: inline interpreter code rule (comment).')
                     if str(error) == 'shell substitution boundary':
-                        deny(classifier_reason + ' Rule: inline interpreter code rule (substitution boundary).')
+                        refuse(data, classifier_reason + ' Rule: inline interpreter code rule (substitution boundary).')
                     raise
                 reason = python_inline_denial(command)
                 if reason:
-                    deny(classifier_reason + ' Rule: ' + reason + '.')
+                    refuse(data, classifier_reason + ' Rule: ' + reason + '.')
                 reason = inline_interpreter_denial(command, data.get('cwd'))
                 if reason:
-                    deny(classifier_reason + ' Rule: ' + reason + '.')
+                    refuse(data, classifier_reason + ' Rule: ' + reason + '.')
                 try:
                     list(shell_substitution_bodies(shell_without_heredoc_bodies(command), arithmetic_quotes=True))
                 except ValueError as error:
                     if str(error) == 'shell substitution boundary':
-                        deny(classifier_reason + ' Rule: inline interpreter code rule (substitution boundary).')
+                        refuse(data, classifier_reason + ' Rule: inline interpreter code rule (substitution boundary).')
                     raise
                 reason = writer_git_file_denial(command, data.get('cwd'))
                 if reason:
-                    deny(publication_reason + ' Rule: ' + reason)
+                    refuse(data, publication_reason + ' Rule: ' + reason)
                 if not names_gh and github_reason:
-                    deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + github_reason)
+                    refuse(data, publication_reason + ' Rule: writer GitHub read-only rule: ' + github_reason)
             except Exception:
-                deny(classifier_reason + ' Rule: classifier exception.')
+                refuse(data, classifier_reason + ' Rule: classifier exception.')
         target = tin.get('file_path') or tin.get('notebook_path') or ''
         if tool in ('Edit', 'Write', 'NotebookEdit') and writer_git_control_path(
                 os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(target))):
@@ -4665,7 +4742,7 @@ def pre(data):
             destination = destination.resolve()
             if any(destination.is_relative_to(path.expanduser().resolve()) for path in gh_paths):
                 deny('Writers do not edit GitHub CLI configuration.')
-    if tool == 'Bash':
+    if tool == 'Bash' and not approval:
         try:
             command = tin.get('command', '')
             reason = review_thread_denial(command)
@@ -4684,7 +4761,7 @@ def pre(data):
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__
         if reason:
-            deny("Ship replies to and resolves review threads only through `skills/babysit/scripts/thread_reply.py`, "
+            refuse(data, "Ship replies to and resolves review threads only through `skills/babysit/scripts/thread_reply.py`, "
                  "which first checks that the thread belongs to the PR's own repository and number. Rule: " + reason + '.')
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
@@ -4878,6 +4955,15 @@ def run_identity(index, row):
 
 
 def subagent_stop(data):
+    try:
+        waiting = [] if data.get('stop_hook_active') else load_escalation().pending(data.get('agent_id'))
+    except Exception:
+        traceback.print_exc()
+        waiting = []
+    if waiting:
+        # A SubagentStop hook cannot write to the parent session, so the subagent's final report carries the ids.
+        print(json.dumps({'decision': 'block', 'reason': 'Escalations ' + ', '.join(waiting) + ' wait for your manager. '
+                          'End now with a final report that lists each escalation id and the step it blocks.'}))
     if LEDGER_ROLES.match(data.get('agent_type') or ''):
         path = owed_file(data)
         path.parent.mkdir(parents=True, exist_ok=True)
