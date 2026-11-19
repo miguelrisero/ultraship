@@ -1537,7 +1537,8 @@ class HookTests(unittest.TestCase):
         cases = (
             ("git -c core.quotepath=off grep -c 'api$' -- plugins", 'ambiguous shell quote pattern'),
             ("git grep -c $'api' -- plugins", 'ambiguous shell quote pattern'),
-            ('GIT_CONFIG_COUNT=2 git -C /tmp/repo log --oneline -3 && gh pr view 7', 'git configuration token'),
+            ('GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=off '
+             'git -C /tmp/repo log --oneline -3 && gh pr view 7', 'git configuration token'),
             ('git -C /tmp/repo --config-env=core.pager=PAGER log --oneline -3 && gh pr view 7',
              'git configuration environment option'),
         )
