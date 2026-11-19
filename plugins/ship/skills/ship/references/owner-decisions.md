@@ -181,7 +181,8 @@ A CoC decision receipt needs no landed disposition and no prior disposition revi
 For a CoC decision receipt, the independent repair review below is the one not-weaker review.
 Record the disposition and its evidence references in the frozen edit decision, with the receipt path and SHA256 for a CoC receipt.
 Bind them to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.
-Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or review.
+Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or landed-disposition review.
+For a CoC decision receipt, require the independent repair review below before publication.
 A zero count alone supplies zero repair authority. A disposition label supplies zero proof.
 Before editing, confirm that the lane head equals the bound pre-edit commit and that the named rows and subjects match bound main.
 Use one native Edit per row with `replace_all=false` and a unique `old_string` within the approved extent that includes the row ID.

@@ -246,14 +246,21 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The tool prints the record path and every record field as `key=value` lines, with no row text.
    The record expires on any head change. Rerun the tool at the frozen head before review; that run changes zero statements.
    The driver copies the printed fields of that run into the reviewer brief. The reviewer reads no file under `.git`.
+   A nonzero count at the frozen head unfreezes it: the writer commits the edit and reruns the tool at the new head.
 6. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
 7. Review: one independent reviewer confirms that every changed, retired or added row is not weaker.
    Not weaker means the same test, the same claim and the same mutant intent, or a replacement that guards as tightly.
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
+   The driver supplies read-only checkouts at the base and the frozen head. The admission record lists the row file in each checkout.
+   Any later push to the PR needs a new review at the pushed head. Return a ready PR to draft before that push.
+   Mark it ready again only after the new review passes.
 8. The mutation proof runs after merge, under its execution admission.
 
 Send these rows to the CoC: a new or changed mutant on an existing row, a changed designated test, a retirement without a replacement, and a row that the PR's own diff does not break.
 Send a changed claim to the CoC too. The CoC approves it only with a current task-specific owner event.
+A CoC approval names the row, the fields and their replacement values.
+The writer applies only those fields with native Edit and `replace_all=false`, then commits the row file alone.
+Step 7 reviews that row, and a follow-up row guards any new code.
 The CoC audits a 10% sample of lane-owned row changes.
 The writer locates a named row by its row ID and reads only that row's lines. It never parses or searches a whole row file.
 Keep row TOML text and pair bytes out of messages, briefs and PR bodies. Name each edit by path, row ID and field.

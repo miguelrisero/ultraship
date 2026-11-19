@@ -36,6 +36,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The tool prints the record path and every record field as `key=value` lines, with no row text.',
                 'The driver copies the printed fields of that run into the reviewer brief. The reviewer reads no file under `.git`.',
                 'The record expires on any head change. Rerun the tool at the frozen head before review; that run changes zero statements.',
+                'A nonzero count at the frozen head unfreezes it: the writer commits the edit and reruns the tool at the new head.',
                 'the anchor guard requires each anchor count to equal the row\'s expected count, not only a nonzero count.',
                 'The mutation proof runs after merge, under its execution admission.',
             ):
@@ -55,6 +56,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The driver applies zero protected edits. Writers keep zero publication authority.',
                 "Send these rows to the CoC: a new or changed mutant on an existing row, a changed designated test, a retirement without a replacement, and a row that the PR's own diff does not break.",
                 'Send a changed claim to the CoC too. The CoC approves it only with a current task-specific owner event.',
+                'A CoC approval names the row, the fields and their replacement values.',
+                'The writer applies only those fields with native Edit and `replace_all=false`, then commits the row file alone.',
+                'Step 7 reviews that row, and a follow-up row guards any new code.',
                 'The CoC audits a 10% sample of lane-owned row changes.',
             ):
                 with self.subTest(path=name, requirement=requirement):
@@ -75,6 +79,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The driver marks the draft ready only after the review in step 7 passes at the exact head.',
                 'one independent reviewer confirms that every changed, retired or added row is not weaker.',
                 'The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record]',
+                'The driver supplies read-only checkouts at the base and the frozen head. The admission record lists the row file in each checkout.',
+                'Any later push to the PR needs a new review at the pushed head. Return a ready PR to draft before that push.',
+                'Mark it ready again only after the new review passes.',
             ):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, route)
@@ -105,9 +112,11 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.',
                 'For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.',
                 'Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.',
-                'For each added row, confirm that its row ID is absent at the base.',
+                'Read each row in the base checkout and the frozen-head checkout that the admission record lists.',
+                'For each added row, grep the base copy of the row file for its ID and confirm zero matches.',
                 'Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.',
-                'Return a blocking finding for a changed claim, a changed mutant, a changed test or a weaker row. The CoC decides those rows.',
+                'For a CoC-approved row change, confirm that only the fields the CoC decision names changed, and that the row is not weaker.',
+                'Return a blocking finding for an unapproved changed claim, mutant or test, or a weaker row. The CoC decides those rows.',
                 'A changed claim also needs a current task-specific owner event, which the CoC obtains.',
                 'Report only paths, row IDs, fields and content-free findings. Quote no row text.',
                 'You keep zero edit, execution and publication authority.',
@@ -319,7 +328,7 @@ class ScopedDecisionRouteTests(unittest.TestCase):
             'For a landed disposition, verify that the reviewed disposition is the one that landed for the named row.',
             'Record the disposition and its evidence references in the frozen edit decision, with the receipt path and SHA256 for a CoC receipt.',
             'Bind them to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.',
-            'Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or review.',
+            'Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or landed-disposition review.',
             'A zero count alone supplies zero repair authority. A disposition label supplies zero proof.',
             'accept zero relay and require zero per-row owner events',
         ))
@@ -332,8 +341,9 @@ class ScopedDecisionRouteTests(unittest.TestCase):
             'Name the receipt by absolute path and SHA256. Verify the digest before any protected access.',
             'A CoC decision receipt needs no landed disposition and no prior disposition review.',
             'For a CoC decision receipt, the independent repair review below is the one not-weaker review.',
+            'For a CoC decision receipt, require the independent repair review below before publication.',
             'Record the disposition and its evidence references in the frozen edit decision, with the receipt path and SHA256 for a CoC receipt.',
-            'Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or review.',
+            'Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or landed-disposition review.',
         ))
 
     def test_ordinary_file_checkpoint_binds_literal_scope_and_unchanged_source(self):
