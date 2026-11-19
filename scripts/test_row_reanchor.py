@@ -276,7 +276,9 @@ class ToolTests(unittest.TestCase):
 
     def test_restoration_keeps_lane_edit_in_the_deleted_row_hunk(self):
         prefix, table, suffix = self.restoration_fixture()
-        lane_prefix = prefix.removesuffix('\n') + '# lane comment\n'
+        base_prefix = prefix.removesuffix('\n') + '# base comment\n'
+        self.base = self.commit_rows(base_prefix + table + suffix)
+        lane_prefix = base_prefix.replace('# base comment', '# lane comment')
         self.commit_rows(lane_prefix + suffix)
         restoration = self.commit_rows(lane_prefix + table + suffix)
         _, output = self.invoke(restoration=restoration)
@@ -354,6 +356,23 @@ class ToolTests(unittest.TestCase):
         prefix, table, suffix = self.restoration_fixture()
         self.commit_rows(prefix.removesuffix('\n') + '# lane comment\n' + suffix)
         restoration = self.commit_rows(prefix + table + suffix)
+        self.invoke(2, 'restoration changed bytes outside restored rows', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_a_comment_in_the_deleted_rows_place(self):
+        prefix, table, suffix = self.restoration_fixture()
+        lane_prefix = prefix.removesuffix('\n') + '# lane comment\n'
+        self.commit_rows(lane_prefix + suffix)
+        restoration = self.commit_rows(lane_prefix + table + suffix)
+        self.invoke(2, 'restored row position is ambiguous', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_a_leading_blank_when_restoring_a_deleted_file(self):
+        _, table, _ = self.restoration_fixture()
+        self.base = self.commit_rows(table)
+        self.git('rm', '--', self.row.name)
+        self.git('commit', '-qm', 'delete row file')
+        restoration = self.commit_rows('\n' + table)
         self.invoke(2, 'restoration changed bytes outside restored rows', restoration=restoration)
         self.assertFalse(self.record_path().exists())
 
@@ -448,6 +467,15 @@ class ToolTests(unittest.TestCase):
         self.commit_rows(prefix + suffix)
         restoration = self.commit_rows(prefix + table + table + suffix)
         self.commit_rows(prefix + table + suffix)
+        self.invoke(2, 'row ID must match exactly once', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_duplicate_row_id_under_quoted_header(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.commit_rows(prefix + suffix)
+        restored = prefix + table + suffix
+        restoration = self.commit_rows(restored + '\n[["row"]]\nid = "target"\n')
+        self.commit_rows(restored)
         self.invoke(2, 'row ID must match exactly once', restoration=restoration)
         self.assertFalse(self.record_path().exists())
 

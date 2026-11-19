@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Derive a row's paired fields while preserving its whole-file mutant hunks."""
 import argparse
+from collections import Counter
 from contextlib import contextmanager
 import difflib
 import fcntl
-from itertools import chain, product
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -143,7 +143,7 @@ def is_row(item):
     return isinstance(item[0], tuple)
 
 
-def restoration_candidates(base, head):
+def restoration_items(base, head):
     def alignment(items):
         # Keep separators on the same side of a row when repeated blanks align.
         keys, following_row = [], None
@@ -153,32 +153,24 @@ def restoration_candidates(base, head):
                 following_row = item[0] if is_row(item) else None
         return keys[::-1]
 
-    chunks = []
-    count = 1
     for number, (tag, i1, i2, j1, j2) in enumerate(opcodes(alignment(base), alignment(head))):
         base_chunk, head_chunk = base[i1:i2], head[j1:j2]
         marker = number if tag != 'equal' and any(map(is_row, base_chunk)) else None
         kept = [(item, not is_row(item), marker) for item in head_chunk]
-        if tag == 'equal':
-            chunks.append((kept,))
-            continue
-        require(not any(map(is_row, head_chunk)), 'restored row moved')
+        if tag != 'equal':
+            require(not any(map(is_row, head_chunk)), 'restored row moved')
         if marker is None:
-            chunks.append((kept,))
+            yield from kept
             continue
         fixed = [index for index, item in enumerate(base_chunk) if not is_row(item) and not item[1]]
         added = [(item, False, marker) for item in base_chunk]
         if fixed:
             first, last = fixed[0], fixed[-1]
             require(not any(map(is_row, base_chunk[first:last + 1])), 'restored row position is ambiguous')
-            chunks.append((added[:first] + kept + added[last + 1:],))
-        elif kept:
-            count *= 2
-            require(count <= 64, 'restored row position is ambiguous')
-            chunks.append((added + kept, kept + added))
+            yield from added[:first] + kept + added[last + 1:]
         else:
-            chunks.append((added,))
-    return (chain.from_iterable(chunks) for chunks in product(*chunks))
+            require(all(item[1] for item in head_chunk), 'restored row position is ambiguous')
+            yield from added + kept
 
 
 def restoration_layout(items):
@@ -192,8 +184,8 @@ def restoration_layout(items):
     return content, gaps
 
 
-def restoration_position(candidate, actual, actual_gaps, row_id):
-    content, gaps = restoration_layout(candidate)
+def restoration_position(expected_items, actual, actual_gaps, row_id):
+    content, gaps = restoration_layout(expected_items)
     if [item for item, _, _ in content] != actual:
         return None
     head_count, position = 0, None
@@ -204,8 +196,10 @@ def restoration_position(candidate, actual, actual_gaps, row_id):
         if expected == actual_gap:
             head_count += sum(from_head for _, from_head in gap)
         else:
-            beside_row = (left and is_row(left[0])) or (right and is_row(right[0]))
-            within_chunk = left and right and left[2] is not None and left[2] == right[2]
+            if left is None or right is None:
+                return None
+            beside_row = is_row(left[0]) or is_row(right[0])
+            within_chunk = left[2] is not None and left[2] == right[2]
             if not (beside_row or within_chunk):
                 return None
             # Count only head lines that survive in the restoration's separator gap.
@@ -226,6 +220,11 @@ def restoration_check(base_text, start_text, restored_text, row_id):
     f_rows, f_split, f_blanks = scan_rows(restored_text)
     eb = scanned_extents(b_rows, b_split)
     eh, ef = scanned_extents(h_rows, h_split), scanned_extents(f_rows, f_split)
+    for text, extents in ((base_text, eb), (start_text, eh), (restored_text, ef)):
+        parsed_rows = tomllib.loads(text).get('row', [])
+        require(isinstance(parsed_rows, list) and all(isinstance(row, dict) for row in parsed_rows)
+                and Counter(row['id'] for row in parsed_rows if 'id' in row) == Counter(extents.keys()),
+                'row ID must match exactly once')
 
     def row_lines(source, extents, key):
         return source[slice(*extents[key])] if key in extents else None
@@ -239,18 +238,6 @@ def restoration_check(base_text, start_text, restored_text, row_id):
     restored_ids = [key for key in ef if key in eb
                     and row_lines(f, ef, key) == row_lines(b, eb, key)
                     and row_lines(f, ef, key) != row_lines(h, eh, key)]
-    base = mask_rows(b, eb, restored_ids, separator_lines(b_rows, b_blanks))
-    head = mask_rows(h, eh, restored_ids, separator_lines(h_rows, h_blanks))
-    final = mask_rows(f, ef, restored_ids, separator_lines(f_rows, f_blanks))
-    content, gaps = restoration_layout((item, False, None) for item in final)
-    actual = [item for item, _, _ in content]
-    actual_gaps = [[line for line, _ in gap] for gap in gaps]
-    insert_after = None
-    for candidate in restoration_candidates(base, head):
-        insert_after = restoration_position(candidate, actual, actual_gaps, row_id)
-        if insert_after is not None:
-            break
-    require(insert_after is not None, 'restoration changed bytes outside restored rows')
 
     def outside_rows(source, rows, extents, blanks):
         omitted = blanks.copy()
@@ -265,6 +252,15 @@ def restoration_check(base_text, start_text, restored_text, row_id):
 
     require(outside_rows(f, f_rows, ef, f_blanks) == outside_rows(h, h_rows, eh, h_blanks),
             'restoration changed bytes outside restored rows')
+
+    base = mask_rows(b, eb, restored_ids, separator_lines(b_rows, b_blanks))
+    head = mask_rows(h, eh, restored_ids, separator_lines(h_rows, h_blanks))
+    final = mask_rows(f, ef, restored_ids, separator_lines(f_rows, f_blanks))
+    content, gaps = restoration_layout((item, False, None) for item in final)
+    actual = [item for item, _, _ in content]
+    actual_gaps = [[line for line, _ in gap] for gap in gaps]
+    insert_after = restoration_position(restoration_items(base, head), actual, actual_gaps, row_id)
+    require(insert_after is not None, 'restoration changed bytes outside restored rows')
 
     def line_range(extents):
         if row_id in extents:
