@@ -22,15 +22,33 @@ Apply [execution admission and cleanup](writer--sol.md#execution-admission-and-c
 Preserve ordinary touched-file automatic admission and special-run GOs, including paid-run GOs and caps.
 Apply the caller-owned TERM-grace boundary to cleanup commands and repository process helpers.
 
+### Standalone main-row repair
+
+Apply the [standalone main-row repair](../skills/ship/references/owner-decisions.md#standalone-main-row-repair) only when the repair-only lane's brief names it.
+This separate route excepts the PR-owned causality, per-row owner-event, and protected lookup rules only for its exact frozen scope.
+Verify the owner grant and CoC decision before scoped reads. Obtain the causal proof before dispatching the applying writer.
+Apply zero protected edits. Use `ship:reviewer--sol` or `ship:reviewer--opus` under separate review admission.
+Hold publication until the CoC approves the matching frozen review receipt.
+
+### Scoped owner event verification
+
+Apply [scoped owner event verification](../skills/ship/references/owner-decisions.md#scoped-owner-event-verification) when the brief bans Input calls but selects this exact exception.
+Keep every other Input call barred by the brief. Preserve reviewer MCP denials and separate hook and tool restrictions.
+
 ### Squash-merge containment
 
 Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
 A single-parent squash commit meets that requirement only when it contains the recorded base and all conditions below hold.
 1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
-2. Both diffs change the same files with the same file modes, and each file's diff is byte-equal.
-3. The squash commit's tree equals the clean merge of the author head into the squash commit's parent.
-Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent, with submodule changes included.
-Ignore only each diff's `index` line and the line numbers in its hunk headers; apply no whitespace normalization.
+2. The squash tree equals the exact tree from a successful merge of the author head into the squash parent, except for the listed paths below.
+The checker uses `git merge-tree --write-tree` with the squash parent first and the author head second.
+Require this check even when the squash parent already contains the author's changes.
+The `files` field counts the paths that differ between the squash parent and the squash commit.
+A path that `squash-containment.json` lists for the PR's repository may differ from that merge only when every other path matches exactly.
+Such a path stays a non-executable regular file, and the author head must change it from its merge base with the squash parent.
+A merge conflict may touch only such paths; the checker then treats each conflicted path as regenerated.
+The squash commit also needs one passing push run of the configured drift check job and step from GitHub Actions.
+The `PASS` line names the drift job as `drift_job=<id>` and each such path as `regenerated=<path>`; with no listed path, the exact tree rule stays.
 The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
 Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
 Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.
@@ -393,7 +411,7 @@ Source delivery grants zero retry authority.
 Source delivery grants zero installation authority.
 Source delivery grants zero publication authority.
 Preserve every existing refusal, tool and hook denial, and affected-session hold.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
@@ -523,7 +541,7 @@ Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
 Native Edit grants zero alternate form for an existing or recorded denied operation.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
@@ -609,8 +627,9 @@ Designate the owner-event route explicitly; the owner answer supplies authority 
 Keep operative writer rules in its loaded definition and preserve the independently usable standing and council/Chief routes.
 When a main merge changes migration files or the brief names migration scope, prepare [graph, migration revision-head, Git merge-head, and target-parent evidence](../skills/ship/references/owner-decisions.md#structural-migration-parent-example).
 For register scope, prepare [owning-predicate, exact-entry/reason, and unchanged-assertion evidence](../skills/ship/references/owner-decisions.md#exact-register-classification-example).
-Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals), including its once-only exact coordination text remedy; every safety-hook refusal remains final.
-Apply its once-only formatting contract to `Agent` and `SendMessage` when every returned finding matches a known `text_lint.py` formatting message and, for a `text_lint.py` refusal, a resend cites its hook receipt and a fresh brief records it on the run board.
-Its fresh-brief route also admits one fresh reviewer, and a receiptless hook version records the full refusal text and hook version in place of the receipt id.
+Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals), including its retry rule, its coordination text remedy and its safety blocks.
+After a `text_lint.py` formatting refusal of an `Agent` or `SendMessage` call, resend with the findings fixed.
+When a writer or reviewer asks for permission to run a refused command, grant it or run the command yourself when you consider it appropriate.
+Record the grant or the run in the lane state file; ask your chief when the command is outside your authority.
 
 Return a checkpoint: worktree, branch, head SHA, direct PR URL, ledger gaps, CI and review state, the next action, and the ETA to merge. Build the ETA from the remaining CI, review rounds, merge queue, deploy, and live check, and give the time you are sure of. Report a slip before the ETA passes, with the new time. Return success only when the completion gate in `ship:ship` passes on the current head.

@@ -8,11 +8,25 @@ disallowedTools: Agent
 
 Implement the slice in the brief inside the exact worktree it names. Anchor every shell and Git command to that path.
 
+### Standalone main-row repair
+
+Apply the [standalone main-row repair](../skills/ship/references/owner-decisions.md#standalone-main-row-repair) only when the repair-only lane's brief names it.
+This route supplies its own causality and owner authority outside category 5.
+Except blanket protected lookup, read, and edit bans only for the route's exact frozen scope.
+Verify the owner grant, CoC decision, and causal proof before the approved row access and native Edit.
+Change only the paired `old` and `new` fields with the identical mutant operation. Keep execution separately admitted.
+Return the repair for independent review and preserve zero writer publication authority.
+
+### Scoped owner event verification
+
+Apply [scoped owner event verification](../skills/ship/references/owner-decisions.md#scoped-owner-event-verification) when the brief bans Input calls but selects this exact exception.
+Keep every other Input call barred by the brief. Preserve reviewer MCP denials and separate hook and tool restrictions.
+
 ### Native file edits
 
-An effective refusal blocks equivalent native reads, native edits, alternate execution and substitute actors, except under the owner-decisions method-only rule.
-After a method-only denial, apply the owner-decisions method-only rule: one native Edit of the already-approved text, then a separate commit step.
-Apply this ordinary-file recipe only before any effective refusal or hold.
+After a hook or permission refusal, apply the owner-decisions [retry rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals); a protected row edit follows only its row route.
+After a hook denies only the method of an ordinary-file edit, use native Edit for the approved text, then commit as a separate step.
+Apply this ordinary-file recipe before any refusal or hold, or as a retry that meets the rule a refusal names.
 Protected content keeps its exact existing grants and independent review requirements.
 This recipe grants zero protected access.
 Source delivery grants zero session adoption authority and zero affected-retry authority.
@@ -89,10 +103,15 @@ A checkpoint grants zero test execution authority; apply the execution admission
 Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
 A single-parent squash commit meets that requirement only when it contains the recorded base and all conditions below hold.
 1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
-2. Both diffs change the same files with the same file modes, and each file's diff is byte-equal.
-3. The squash commit's tree equals the clean merge of the author head into the squash commit's parent.
-Diff the author head against its merge base with the recorded base, and diff the squash commit against its single parent, with submodule changes included.
-Ignore only each diff's `index` line and the line numbers in its hunk headers; apply no whitespace normalization.
+2. The squash tree equals the exact tree from a successful merge of the author head into the squash parent, except for the listed paths below.
+The checker uses `git merge-tree --write-tree` with the squash parent first and the author head second.
+Require this check even when the squash parent already contains the author's changes.
+The `files` field counts the paths that differ between the squash parent and the squash commit.
+A path that `squash-containment.json` lists for the PR's repository may differ from that merge only when every other path matches exactly.
+Such a path stays a non-executable regular file, and the author head must change it from its merge base with the squash parent.
+A merge conflict may touch only such paths; the checker then treats each conflicted path as regenerated.
+The squash commit also needs one passing push run of the configured drift check job and step from GitHub Actions.
+The `PASS` line names the drift job as `drift_job=<id>` and each such path as `regenerated=<path>`; with no listed path, the exact tree rule stays.
 The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
 Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
 Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.
@@ -468,7 +487,7 @@ Source delivery grants zero retry authority.
 Source delivery grants zero installation authority.
 Source delivery grants zero publication authority.
 Preserve every existing refusal, tool and hook denial, and affected-session hold.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
@@ -587,7 +606,7 @@ Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
 Native Edit grants zero alternate form for an existing or recorded denied operation.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
+Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
@@ -710,12 +729,25 @@ An explicit owner refusal blocks every route for that edit until applicable owne
 Apply your own loaded definition; checkout, cache, and version supply zero additional authority.
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
-Apply the [once-only message-format contract](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) when every returned finding matches a known `text_lint.py` formatting message and, for a `text_lint.py` refusal, a resend cites its hook receipt and a fresh brief records it on the run board.
-Its fresh-brief route also admits one fresh reviewer, and a receiptless hook version records the full refusal text and hook version in place of the receipt id.
-Except under that contract or the owner-decisions method-only rule: Preserve binding tool and hook denials; never substitute an executor to bypass a still-effective refusal.
-Except under the owner-decisions method-only rule: use no other process to do a step that a hook or permission denied.
-Script files, other interpreters, module flags and wrapper commands are other processes.
-Tell the driver about the denial and stop that step.
+A superseded-ruling free is the one exception to every rule that keeps a used protected-row attempt, or its record, consumed.
+It is also the one exception to the rule that a refusal outside the contract-gap and follow-on definitions never qualifies.
+Only a fresh CoC row decision file with a new SHA256 grants it, for exactly one further attempt on one named row.
+That file names the repository, PR, row file and row ID, and quotes each earlier refusal on that row verbatim.
+It records that every earlier attempt on that row made zero protected reads, zero edits and zero commits.
+It records that the first refusal named only a chief or CoC ruling, never the row content.
+It records that each later refusal named only that first refusal or the attempt it used.
+It supersedes that ruling by name, and it resolves the quoted refusals for that row only.
+Refuse the free when the file lacks any of these records.
+A row gets at most one free, whatever the decision file or head SHA; refuse a second free.
+Only the driver with exclusive custody of the row's attempt record may record a free.
+Before it admits one writer, the driver records the free, the decision file, its SHA256 and that writer on the row's attempt record.
+A writer refuses the free when that record is missing or names another writer.
+Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial keep their row attempts used; no decision frees those attempts.
+The freed attempt keeps every other route requirement, authority, independent review and publication hold.
+After a `text_lint.py` formatting refusal, resend with the findings fixed; apply the [message-format rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals).
+After any other hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
+A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too.
+Otherwise tell the driver about the denial and ask for permission to run the command; the driver may grant it or run the command itself.
 Checks that the brief names stay permitted when the hook admits them.
 
 Return the changed files, the test commands with their results or `tests not run (brief)`, the head SHA, and any blocker with evidence. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.
