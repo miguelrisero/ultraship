@@ -108,6 +108,100 @@ Retain that record for the fallback when the writer lacks the tool or its call f
 Preserve a direct authoritative mismatch as blocked; the fallback supplies verified provenance, never a substitute owner approval.
 Record the accepted evidence and exact scope in the brief and PR body.
 
+## Scoped owner event verification
+
+Apply this exception only to future briefs after verified runtime adoption.
+Confirm that your loaded role or skill implements this exception.
+Require the named lane's brief to select it and cite a CoC-frozen decision file by absolute path and SHA256.
+Verify the digest and exact scope before any call.
+Require the file to name the exact lane, its repository and task or PR scope, and the owner events to verify.
+Require the file to list the permitted tool for each exact Input and workspace UUID.
+Permit only `get_input` or `get_input_events` for those exact IDs, solely to verify the named owner events.
+Refuse any missing, stale, expired, ambiguous, or mismatched binding.
+Apply the [owner answer checks](#consume-and-finish) and the applicable event route's provenance and scope checks.
+Match the returned Input, workspace, current version, event identity, and answer to the authorized scope.
+An authoritative mismatch blocks verification without fallback.
+The file permits verification only and supplies zero owner consent or action authority.
+This exception applies only to the named lane's brief-level ban on Input calls.
+Keep every other Input call under the ban, including listing, creation, updates, answers, and closure.
+Keep aliases, alternate tool routes, and substitute actors outside this exception.
+Preserve reviewer MCP denials, all independent hook and tool restrictions, and every effective refusal.
+
+## Standalone main-row repair
+
+Apply this route only to future briefs after verified runtime adoption.
+Apply it outside category 5 and the PR-owned row routes.
+Require a repair-only lane whose entire diff changes only the named rows' paired `old` and `new` fields.
+Use this route only as the follow-up row repair for code from an earlier merged PR.
+Before any protected access, read `~/.claude/CLAUDE.md` directly under `CoC decisions (standing grant)`.
+Verify the CoC testing delegation and the clause for adapting rows when a PR makes the stored mutant impossible to apply.
+Verify that the clause requires a follow-up row for new code and independent not-weaker review.
+Require the frozen CoC decision to identify this repair as the follow-up for the named breaking PR under that grant.
+Record the path, heading, verified grant, and verification time.
+Refuse a missing, unreadable, or mismatched grant; accept zero relay and require zero per-row owner events.
+
+Require the brief to name the CoC-frozen decision file by absolute path and SHA256.
+Bind the repository, exact repair lane and branch, and repair PR URL when assigned.
+Bind the permitted actors and operations, and the full main and pre-edit commit and tree identities.
+Bind every affected row to its earlier breaking PR, full merged commit SHA, and pre-merge main SHA.
+Verify that the breaking commit is an ancestor of or equals the bound main commit.
+Bind each exact stored row ID, canonical row file, subject file, and approved line extent to the applicable commit.
+Keep each decision file immutable. Freeze a new file for any additional scope or evidence.
+A discovery decision permits only its named reads. Bind the causal proof and `old`/`new` field scope in the edit decision.
+Before review, bind the frozen before and after commits, read-only trees, and exact row extents in a decision file that also binds the edit decision.
+Verify the digest and every applicable binding before access or editing.
+The read-only reviewer checks the driver's digest evidence and the frozen file's bindings without running a digest command.
+List the decision files, shared reference, owner grant, and exact role-specific read paths in each applicable brief.
+Refuse missing, stale, expired, mismatched, ambiguous, or unlawfully obtained evidence.
+
+Use only whole-line grep for the exact stored `id = "<ID>"` line in each named file, with zero context.
+Read only the approved row extent, from its `[[` header to the line before the next table, or EOF for the last row.
+Refuse an ambiguous ID or extent. Forbid adjacent-row reads, broader searches, and whole-file reads or parsing.
+Require an active row at the bound main commit.
+Refuse an existing `[[retired]]` row on this same-row route.
+Preserve the retirement record.
+Use the [new lane-owned row review route](#new-lane-owned-row-review-route) for its replacement row.
+Require a new row ID and separate creation authority for the replacement.
+Require proof that each stored `old` anchor met its expected count before the breaking commit.
+Require proof that it counts zero at that commit and on the bound main.
+Require scoped source evidence that the named merge caused the zero count and that the repair lane changed no subject code.
+Use the bound pre-merge main and merged commit to show that the breaking PR changed the guarded code itself.
+Require positive evidence that this code change made the stored mutant impossible to apply at the guarded site.
+Require the frozen decision to bind this evidence to the follow-up under the owner standing grant before authorizing the edit.
+Require recorded evidence of a landed designated-test change or mutant adaptation under that grant.
+Require the disposition record to cite the landed row change and its CoC decision.
+Require a receipt for the independent not-weaker review of that disposition.
+Require that reviewer to differ from the breaking PR author and the person who applied the disposition.
+Bind the receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.
+Verify that the reviewed disposition is the one that landed for the named row.
+Record both items and their verifiable evidence references in the frozen edit decision.
+Bind both items to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.
+Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched record or review.
+A zero count alone supplies zero repair authority. A disposition label supplies zero proof.
+Before editing, confirm that the lane head equals the bound pre-edit commit and that the named rows and subjects match bound main.
+Use one native Edit per row with `replace_all=false` and a unique `old_string` within the approved extent that includes the row ID.
+Refuse a missing or ambiguous match without widening the scope. A hook refusal ends the step.
+Change only `old` and `new`. Require the repaired anchor to count exactly once at the current source site.
+Preserve the identical mutant operation, row ID, claim, subject, designated test, assertions, pins, bounds, and every other field.
+The driver applies zero protected edits. The writer has zero publication authority.
+
+Require independent read-only review by a reviewer who differs from the PR author and the applying writer.
+Bind the repair PR URL before review, even when the edit decision identified the lane by branch alone.
+The brief may independently authorize an unpublished draft to supply that URL.
+Keep the draft under every existing push and publication hold.
+Require the separate [reviewer admission record](#reviewer-admission-record-for-protected-row-reads) before any reviewer row read.
+Compare only the approved row extents in the frozen before and after trees.
+Confirm the causal proof, paired-field-only repair, identical mutant operation, and the same guarantee for every row.
+Require content-free evidence that the repair diff contains zero other edits.
+Require a CoC-approved frozen review receipt before publication. Bind its path and SHA256 to the decision file path and SHA256.
+Match the receipt to the reviewer, approving verdict, admission, repository, lane and PR, exact rows and fields, source evidence, and frozen final commit.
+Recheck those bindings and the publication head before publishing. Any change to the bound authority, scope, source, or evidence invalidates approval.
+Keep protected bytes out of briefs, reports, receipts, and PR bodies.
+Keep all mutation, checker, selector, CI, and GO requirements under separate applicable execution admission.
+Keep mutation proof after merge and preserve the existing CI runner and merge queue authority.
+Source delivery grants zero runtime-adoption, retry, installation, or publication authority.
+Preserve all other routes, higher-priority instructions, effective refusals, hook and tool denials, and affected-session holds.
+
 ## New lane-owned row review route
 
 Apply this route only to future briefs after verified runtime adoption.
@@ -143,7 +237,7 @@ Return a ready PR to draft before any further push, then repeat the review and a
 ## Reviewer admission record for protected row reads
 
 The pre hook denies every reviewer read under a `tests/mutation` path unless the driver admits it first.
-Every route that needs row reads uses this flow: lane-derived, lane-owned, retirement, and owner-approved subject.
+Every route that needs row reads uses this flow: lane-derived, lane-owned, retirement, owner-approved subject, and standalone main-row repair.
 
 1. Dispatch a reviewer whose loaded definition implements the selected route. `ship:reviewer--sol` and `ship:reviewer--opus` implement every reviewer row route; `ship:reviewer--astra` implements only the new lane-owned row review route. Make the first message ask it to return `ready` and read nothing.
 2. Take the agent ID from the Agent tool result.
