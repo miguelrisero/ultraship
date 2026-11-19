@@ -8,8 +8,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = {
-    'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.2-sol', 'gpt-6-luna',
-    'kimi-k3', 'claude-fable-5-2', 'claude-opus-5-5', 'claude-sonnet-5-5',
+    'gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6-luna',
+    'claude-fable-5-2', 'claude-opus-5-5', 'claude-sonnet-5-5',
     'inherit',
 }
 EFFORTS = {'low', 'medium', 'high', 'xhigh', 'max'}
@@ -57,8 +57,6 @@ def inspect_text(text, path):
             errors.append('unsupported effort: ' + fields['effort'])
         if fields.get('model') == 'claude-opus-5-5' and fields.get('effort') == 'max':
             errors.append('opus agents run at xhigh, never max')
-        if fields.get('model') == 'gpt-6.1-sol' and fields.get('effort', 'high') != 'high':
-            errors.append('sol agents run at high')
         if fields.get('model') == 'gpt-6.2-sol' and fields.get('effort') != 'xhigh':
             errors.append('gpt-6.2-sol agents require explicit xhigh effort')
         if fields['name'].startswith('writer--') and 'Agent' not in fields.get('disallowedTools', ''):
@@ -135,19 +133,16 @@ def check(base=None):
 
 
 def self_test():
-    text = '---\nname: test\ndescription: Short trigger.\nmodel: gpt-6-astra\n---\n'
+    text = '---\nname: test\ndescription: Short trigger.\nmodel: gpt-6.2-astra\n---\n'
     assert inspect_text(text, Path('agents/test.md')) == []
     assert inspect_text(text.replace('Short trigger.', 'x' * 501), Path('SKILL.md'))
-    assert inspect_text(text.replace('gpt-6-astra', 'unknown-model'), Path('agents/test.md'))
+    assert inspect_text(text.replace('gpt-6.2-astra', 'unknown-model'), Path('agents/test.md'))
     assert inspect_text(text.replace('model:', 'effort: huge\nmodel:'), Path('agents/test.md'))
     assert inspect_text(text.replace('name: test', 'name: writer--x'), Path('agents/test.md'))
-    assert inspect_text(text.replace('gpt-6-astra', 'claude-opus-5-5').replace('model:', 'effort: max\nmodel:'), Path('agents/test.md'))
-    assert not inspect_text(text.replace('gpt-6-astra', 'claude-opus-5-5').replace('model:', 'effort: xhigh\nmodel:'), Path('agents/test.md'))
+    assert inspect_text(text.replace('gpt-6.2-astra', 'claude-opus-5-5').replace('model:', 'effort: max\nmodel:'), Path('agents/test.md'))
+    assert not inspect_text(text.replace('gpt-6.2-astra', 'claude-opus-5-5').replace('model:', 'effort: xhigh\nmodel:'), Path('agents/test.md'))
     assert not inspect_text(text.replace('name: test', 'name: writer--x\ndisallowedTools: Agent'), Path('agents/test.md'))
-    assert inspect_text(text.replace('gpt-6-astra', 'gpt-6.1-sol').replace('model:', 'effort: xhigh\nmodel:'), Path('agents/test.md'))
-    assert not inspect_text(text.replace('gpt-6-astra', 'gpt-6.1-sol').replace('model:', 'effort: high\nmodel:'), Path('agents/test.md'))
-    assert not inspect_text(text.replace('gpt-6-astra', 'gpt-6.1-sol'), Path('agents/test.md'))
-    sol = text.replace('gpt-6-astra', 'gpt-6.2-sol')
+    sol = text.replace('gpt-6.2-astra', 'gpt-6.2-sol')
     assert inspect_text(sol, Path('agents/test.md')) == ['gpt-6.2-sol agents require explicit xhigh effort']
     assert not inspect_text(sol.replace('model:', 'effort: xhigh\nmodel:'), Path('agents/test.md'))
     for effort in EFFORTS - {'xhigh'}:

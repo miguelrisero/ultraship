@@ -12,7 +12,7 @@ How I ship code with Claude Code: a model-pinned review pipeline (`ship`) and a 
 
 Then set up the tools the agents use:
 
-1. [Better Shunt](docs/setup-shunt.md): a local gateway that routes GPT and Kimi model IDs.
+1. [Better Shunt](docs/setup-shunt.md): a local gateway that routes GPT model IDs.
 2. [fff](docs/setup-fff.md): an indexed file and content search MCP server.
 3. [BetterCoding](docs/setup-bettercoding.md): isolated workspaces for agent sessions. Optional.
 
@@ -42,22 +42,22 @@ Use `/ship:ship <task>` alone for one task. Full mode adds a plan, a high panel,
 | Opt-in Fable 5.2 writer and reviewer, only when the brief or the owner names Fable 5.2 | `claude-fable-5-2` | high (writer), xhigh (reviewer) | `gpt-6.2-sol` (writer, xhigh), `claude-opus-5-5` (reviewer) |
 | Slice review, selection, fix read, high and final panels, closing pass | `gpt-6.2-sol` | xhigh | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
 | Deep review, simplify | `claude-opus-5-5` | xhigh | `claude-sonnet-5-5` |
-| Required panel seat, billing and authorization verifier | `claude-opus-5-5` | xhigh | `gpt-6-astra` (xhigh) |
+| Required panel seat, billing and authorization verifier | `claude-opus-5-5` | xhigh | `gpt-6.2-astra` (xhigh) |
 | Babysit triage | `gpt-6.2-sol` | xhigh | `gpt-6.2-sol` (reviewer, xhigh), `claude-sonnet-5-5` (reviewer) |
 | Research | `gpt-6-luna` | medium | `claude-sonnet-5-5` |
 | Chief | session model (`claude-opus-5-5`) | — | — |
 | Driver | `claude-opus-5-5` | xhigh | `gpt-6.2-sol` (xhigh), at low Claude quota only |
 
-Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effort max. Sol runs `gpt-6.2-sol` at explicit effort xhigh. The validator also accepts `gpt-6.1-sol` with high or omitted effort for compatibility. The full roster, with panels, is in [`plugins/ship/skills/ship/references/roster.md`](plugins/ship/skills/ship/references/roster.md).
+Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effort max. Sol runs `gpt-6.2-sol` at explicit effort xhigh. The full roster, with panels, is in [`plugins/ship/skills/ship/references/roster.md`](plugins/ship/skills/ship/references/roster.md).
 
 ## Panels
 
 | Panel | Seats | Use |
 |---|---|---|
 | `light` | Luna, Astra, Sol | Cheap checks |
-| `design` | Astra, Opus | Design and architecture |
-| `high` | Sol | Plan refutation and branch review |
-| `final` | Sol, Opus, Kimi | Final review before push |
+| `design` | Astra, Opus, Luna | Design and architecture |
+| `high` | Sol, Astra, Opus | Plan refutation and branch review |
+| `final` | Sol, Opus, Luna | Final review before push |
 
 ## Rules the plugins enforce
 
