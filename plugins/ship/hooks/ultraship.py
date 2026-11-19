@@ -1281,7 +1281,7 @@ def read_only_argument_word(command, tokens, words, index, *, literal_grep_ancho
 def literal_search_patterns(words):
     """Recognize literal search arguments and complete -e operands."""
     name, *args = (word[0] for word in words)
-    plain = r'[\w./][\w./=-]*'
+    plain = r'[\w./][\w./-]*'
     if name == 'git':
         if args[:1] == ['-C']:
             if len(args) < 2 or not re.fullmatch(plain, args[1]):
@@ -1301,7 +1301,9 @@ def literal_search_patterns(words):
     for raw in args:
         if re.fullmatch(plain, raw) or raw == '--' and name == 'git':
             return all(re.fullmatch(plain, word) for word in args)
-        if not re.fullmatch(r'[\w./=-]+', raw) or not re.fullmatch(READ_ONLY_OPTIONS[name], raw):
+        if not re.fullmatch(READ_ONLY_OPTIONS[name], raw):
+            return False
+        if name == 'rg' and raw.startswith('--glob=') and not re.fullmatch(plain, raw.removeprefix('--glob=')):
             return False
         if raw == '-e':
             if not re.fullmatch(rf"{plain}|'(?!-)[^'\r\n]*'", next(args, '')):
