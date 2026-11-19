@@ -47,6 +47,16 @@ Accept only a recorded `PASS` line that names the same PR URL, recorded base, au
 Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.
 Every other commit keeps the containment requirement unchanged.
 
+## Standalone main-row repair review
+
+Apply the [standalone main-row repair](../skills/ship/references/owner-decisions.md#standalone-main-row-repair) only when the repair-only lane's brief names it.
+Use this route in place of the default Lane-derived row review only for its exact frozen scope.
+Except the general protected search ban only for admitted whole-line ID grep and approved row-extent reads.
+Verify the standing grant directly and check the frozen decision bindings before any protected read.
+Require protected row admission separately from the CoC decision. Preserve the reviewer MCP ban and all hook and tool restrictions.
+Confirm the same guarantee and identical mutant operation. Return a content-free verdict for the frozen review receipt.
+This route grants zero edit, execution, or publication authority.
+
 ## Owner-approved protected-row subject review
 
 Use this read-only route only when the brief names the owner-approved protected-row subject route.

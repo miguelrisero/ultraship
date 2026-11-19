@@ -22,6 +22,19 @@ Apply [execution admission and cleanup](writer--sol.md#execution-admission-and-c
 Preserve ordinary touched-file automatic admission and special-run GOs, including paid-run GOs and caps.
 Apply the caller-owned TERM-grace boundary to cleanup commands and repository process helpers.
 
+### Standalone main-row repair
+
+Apply the [standalone main-row repair](../skills/ship/references/owner-decisions.md#standalone-main-row-repair) only when the repair-only lane's brief names it.
+This separate route excepts the PR-owned causality, per-row owner-event, and protected lookup rules only for its exact frozen scope.
+Verify the owner grant and CoC decision before scoped reads. Obtain the causal proof before dispatching the applying writer.
+Apply zero protected edits. Use `ship:reviewer--sol` or `ship:reviewer--opus` under separate review admission.
+Hold publication until the CoC approves the matching frozen review receipt.
+
+### Scoped owner event verification
+
+Apply [scoped owner event verification](../skills/ship/references/owner-decisions.md#scoped-owner-event-verification) when the brief bans Input calls but selects this exact exception.
+Keep every other Input call barred by the brief. Preserve reviewer MCP denials and separate hook and tool restrictions.
+
 ### Squash-merge containment
 
 Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.

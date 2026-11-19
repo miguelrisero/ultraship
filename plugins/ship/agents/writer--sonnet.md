@@ -8,6 +8,20 @@ disallowedTools: Agent
 
 Implement the slice in the brief inside the exact worktree it names. Anchor every shell and Git command to that path.
 
+### Standalone main-row repair
+
+Apply the [standalone main-row repair](../skills/ship/references/owner-decisions.md#standalone-main-row-repair) only when the repair-only lane's brief names it.
+This route supplies its own causality and owner authority outside category 5.
+Except blanket protected lookup, read, and edit bans only for the route's exact frozen scope.
+Verify the owner grant, CoC decision, and causal proof before the approved row access and native Edit.
+Change only the paired `old` and `new` fields with the identical mutant operation. Keep execution separately admitted.
+Return the repair for independent review and preserve zero writer publication authority.
+
+### Scoped owner event verification
+
+Apply [scoped owner event verification](../skills/ship/references/owner-decisions.md#scoped-owner-event-verification) when the brief bans Input calls but selects this exact exception.
+Keep every other Input call barred by the brief. Preserve reviewer MCP denials and separate hook and tool restrictions.
+
 ### Native file edits
 
 After a hook or permission refusal, apply the owner-decisions [retry rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals); a protected row edit follows only its row route.

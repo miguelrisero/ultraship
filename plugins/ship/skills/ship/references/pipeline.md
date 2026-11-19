@@ -23,6 +23,11 @@ Report a failed or empty scoped search to the coordinator; never widen the searc
 Triage and verifier briefs follow these reviewer search rules.
 An explicit repository-root path does not authorize broader discovery.
 
+For [standalone main-row repair](owner-decisions.md#standalone-main-row-repair), except the default row path exclusion only for the separately admitted reviewer and approved row extents.
+Keep ordinary review briefs free of protected paths and row hunks.
+Require the matching frozen review receipt before publication, even when step 9 would otherwise permit it.
+Preserve execution admission and the reviewer MCP ban under both [scoped decision routes](owner-decisions.md#scoped-owner-event-verification).
+
 | # | Step | Ledger step | Agents |
 |---|---|---|---|
 | 1 | Guard the branch, open the run | `run-start` | driver |
