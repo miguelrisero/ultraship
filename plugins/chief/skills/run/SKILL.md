@@ -25,7 +25,9 @@ A refusal never ends the work.
 After a refusal, find the cause and retry in a compliant form, or ask your superior how to proceed.
 A writer asks its driver, a driver asks its chief, and a chief asks the CoC.
 The ask never blocks your other work.
-Only the CoC decides whether an owner-only item becomes an owner Input; agents never ask the owner.
+Only the CoC decides whether an owner-only item becomes an owner Input.
+No agent, the CoC included, sends the owner a refusal, hook or tooling question.
+Product, billing, security policy and big architecture decisions still reach the owner through the CoC.
 The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items still need a compliant form or the authority they lacked.
 A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
 Grant a lane request, or run the refused command yourself, when you consider it appropriate; record the grant or the run in the lane state file.
