@@ -502,6 +502,154 @@ class ReceiptCustodyTests(unittest.TestCase):
                 with self.subTest(token=before + after, caller=caller):
                     self.assert_custody_denial({**event, 'agent_type': caller, 'tool_input': {'command': split}})
 
+    def test_account_auto_denies_a_copy_of_the_ledger(self):
+        copy = self.cwd / 'copied-ledger.py'
+        copy.write_bytes(LEDGER.read_bytes())
+        self.assert_custody_denial({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
+                                   'tool_input': {'command': 'python3 ./copied-ledger.py account-auto pending.tsv'}})
+
+    def test_writer_cannot_account_with_current_or_cached_ledger(self):
+        relative = '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
+        cached = Path.home() / relative
+        cached.parent.mkdir(parents=True)
+        cached.touch()
+        (self.cwd / 'ledger.py').symlink_to(LEDGER)
+        paths = (shlex.quote(str(LEDGER)), './ledger.py', f'"$HOME/{relative}"',
+                 f'"${{HOME}}/{relative}"', f'~/{relative}')
+        commands = [f'python3 {script} account-auto pending.tsv' for script in paths]
+        commands.append('bash -c ' + shlex.quote(commands[2]))
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_custody_denial({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
+                                           'tool_input': {'command': command}})
+
+    def assert_account_custody_denial(self, command, caller='ship:driver--sol'):
+        self.assert_custody_denial(
+            {'agent_type': caller, 'tool_name': 'Bash', 'tool_input': {'command': command}},
+            'Use the exact Stop command for your session (account custody rule). Report the blocked scope to the driver.')
+
+    def assert_account_command_allowed(self, command, caller='ship:driver--sol', **event):
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            try:
+                ultraship.guarded_pre({'cwd': str(self.cwd), **event, 'agent_type': caller,
+                                       'tool_name': 'Bash', 'tool_input': {'command': command}})
+            except SystemExit:
+                self.fail(output.getvalue())
+        self.assertEqual(output.getvalue(), '')
+
+    def test_account_custody_allows_commit_message_heredoc(self):
+        self.assert_account_command_allowed(
+            'git commit -m "$(cat <<\'EOF\'\nfix: check the account\n\nThe ledger\'s label (reviewed).\nEOF\n)"\n',
+            caller='ship:writer--sol')
+
+    def test_account_custody_allows_a_long_quoted_argument(self):
+        self.assert_account_command_allowed(f'echo "{"a" * 300}" account')
+
+    def test_account_custody_denies_commit_message_with_session_variable(self):
+        self.assert_account_custody_denial("git commit -m 'Explain account-auto and CLAUDE_CODE_SESSION_ID'",
+                                           caller='ship:writer--sol')
+
+    def test_account_custody_denies_session_override_without_ledger_name(self):
+        (self.cwd / 'helper.py').write_bytes(LEDGER.read_bytes())
+        self.assert_account_custody_denial('CLAUDE_CODE_SESSION_ID=s1 echo ./helper.py account-auto ./s1.tsv')
+
+    def test_account_custody_allows_own_stop_command_with_session_variable_in_path(self):
+        event = self.own_account_event()
+        state = ultraship.STATE / 'CLAUDE_CODE_SESSION_ID'
+        with patch.object(ultraship, 'STATE', state):
+            command = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+            self.assert_account_command_allowed(command, session_id=event['session_id'])
+
+    def test_account_auto_denies_commands_that_name_the_session_variable(self):
+        for command in (
+            'CLAUDE_CODE_SESSION_ID=s1 echo account-auto ./ledger',
+            'export CLAUDE_CODE_SESSION_ID=s1; echo account-auto ./ledger',
+            'env CLAUDE_CODE_SESSION_ID=s1 echo account-auto ./ledger',
+            'env -u CLAUDE_CODE_SESSION_ID echo account-auto ./ledger',
+            'unset CLAUDE_CODE_SESSION_ID; echo account-auto ./missing/ledger',
+            'echo account-auto claude_code_session_id ./ledger',
+        ):
+            with self.subTest(command=command):
+                self.assert_account_custody_denial(command)
+
+    def assert_ledger_expansion_denied(self, command):
+        for caller in ('ship:driver--sol', 'ship:writer--sol'):
+            with self.subTest(caller=caller):
+                self.assert_account_custody_denial(command, caller)
+
+    def test_ledger_custody_blocks_variable_expansion(self):
+        self.assert_ledger_expansion_denied(f'word=account; echo {shlex.quote(str(LEDGER))} "$word-sample"')
+
+    def test_ledger_custody_blocks_ansi_c_quoting(self):
+        self.assert_ledger_expansion_denied(f"echo {shlex.quote(str(LEDGER))} $'account\\x2dsample'")
+
+    def test_ledger_custody_blocks_command_substitution(self):
+        self.assert_ledger_expansion_denied(f'echo {shlex.quote(str(LEDGER))} "$(printf account)"')
+
+    def test_account_custody_resolves_installed_ledger_paths(self):
+        os.environ.pop('CLAUDE_CONFIG_DIR', None)
+        cached = Path.home() / '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
+        cached.parent.mkdir(parents=True)
+        cached.touch()
+        command = f'word=account; echo {shlex.quote(str(cached))} "$word-sample"'
+        for fixture in (command, 'bash -c ' + shlex.quote(command)):
+            with self.subTest(fixture=fixture):
+                self.assert_account_custody_denial(fixture)
+        (self.cwd / 'helper').symlink_to(cached)
+        self.assert_account_custody_denial('echo ./helper account-auto')
+
+    def test_account_custody_recognizes_a_symlinked_installation(self):
+        os.environ.pop('CLAUDE_CONFIG_DIR', None)
+        cached = Path.home() / '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
+        cached.parent.mkdir(parents=True)
+        target = self.cwd / 'placeholder.py'
+        target.touch()
+        cached.symlink_to(target)
+        self.assert_account_custody_denial(f'echo {shlex.quote(str(cached))} accounting')
+
+    def test_account_custody_recognizes_a_symlinked_installation_with_parent_segment(self):
+        os.environ.pop('CLAUDE_CONFIG_DIR', None)
+        cached = Path.home() / '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
+        cached.parent.mkdir(parents=True)
+        target = self.cwd / 'placeholder.py'
+        target.touch()
+        cached.symlink_to(target)
+        path = cached.parent / '..' / 'scripts' / cached.name
+        self.assert_account_custody_denial(f'echo {shlex.quote(str(path))} account')
+
+    def test_account_custody_denies_accounting_after_redirection(self):
+        os.environ.pop('CLAUDE_CONFIG_DIR', None)
+        cached = Path.home() / '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
+        cached.parent.mkdir(parents=True)
+        cached.touch()
+        (self.cwd / 'helper').symlink_to(cached)
+        self.assert_account_custody_denial('echo ./helper 2>/dev/null account-auto ./other.tsv')
+
+    def test_account_custody_checks_substitution_after_ledger_reference(self):
+        self.assert_account_custody_denial(f'echo {shlex.quote(str(LEDGER))} `printf accounting`')
+
+    def test_account_custody_checks_opening_parenthesis_after_ledger_reference(self):
+        self.assert_account_custody_denial(f'echo account {shlex.quote(str(LEDGER))} <(printf sample)')
+
+    def test_account_custody_stops_at_command_separator(self):
+        self.assert_account_command_allowed(f'echo {shlex.quote(str(LEDGER))}; echo account')
+
+    def test_account_custody_denies_parse_error_with_ledger(self):
+        self.assert_account_custody_denial("echo ledger 'account")
+
+    def test_account_auto_denies_ledger_path_resolution_error(self):
+        (self.cwd / 'loop').symlink_to('loop')
+        self.assert_account_custody_denial('echo ./loop account')
+
+    def test_ledger_append_allows_account_in_a_literal_note(self):
+        command = (f'python3 {shlex.quote(str(LEDGER))} append slices driver {"a" * 40}'
+                   " pass 'Review of the account completed'")
+        self.assert_account_command_allowed(command)
+
+    def test_ledger_run_start_allows_account_in_board_path(self):
+        command = f'python3 {shlex.quote(str(LEDGER))} run-start light lane ./account-board.md'
+        self.assert_account_command_allowed(command)
+
     def test_own_account_call_denies_other_commands_and_callers(self):
         event = self.own_account_event()
         command = event['tool_input']['command']
