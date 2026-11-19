@@ -921,7 +921,7 @@ class ReviewerSearchTests(unittest.TestCase):
                 printed.assert_called_once()
                 decision = json.loads(output.getvalue())['hookSpecificOutput']
                 self.assertEqual(decision['permissionDecision'], 'deny')
-                self.assertEqual(decision['permissionDecisionReason'],
+                self.assertEqual(decision['permissionDecisionReason'].split('\n', 1)[0],
                                  'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
                                  'Report the blocked scope to the driver.')
 
@@ -946,8 +946,9 @@ class ReviewerSearchTests(unittest.TestCase):
     def test_a_trailing_slash_refusal_ends_with_the_report_line_and_matches_reviewer_guidance(self):
         decision = self.decision('Grep', {'path': self.root + '/src/', 'pattern': 'identifier'})
         self.assertEqual(decision.get('permissionDecision'), 'deny')
-        reason = decision['permissionDecisionReason']
+        reason, _, retry = decision['permissionDecisionReason'].partition('\n')
         self.assertTrue(reason.endswith('NFC form. Report the blocked scope to the coordinator.'), reason)
+        self.assertIn('Keep the work pending.', retry)
         rule = reason[reason.index('no `~`'):reason.index(' Report the blocked scope')]
         agents = LEDGER_AGENTS
         self.assertTrue(agents)
@@ -1080,16 +1081,13 @@ class ExecutionPolicyTests(unittest.TestCase):
             with self.subTest(path=name):
                 self.assertEqual(admission.splitlines().count(requirement), 1)
 
-    def test_each_writer_requires_plain_checks_and_preserves_retirement_heredocs(self):
+    def test_each_writer_requires_plain_checks(self):
         for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
             text = read('plugins/ship/agents/' + name)
             admission = text.partition('### Execution admission and cleanup\n')[2].split('\n### ', 1)[0]
-            for requirement in (
-                'Run each check as its own plain command, with no inline interpreter code.',
-                'The named `python3 -I -` heredocs of the retirement routes stay as each route specifies.',
-            ):
-                with self.subTest(path=name, requirement=requirement):
-                    self.assertEqual(admission.splitlines().count(requirement), 1)
+            with self.subTest(path=name):
+                self.assertEqual(admission.splitlines().count(
+                    'Run each check as its own plain command, with no inline interpreter code.'), 1)
 
     def test_each_writer_distinguishes_ordinary_admission_from_special_gos(self):
         for name in ('writer--sol.md', 'writer--sonnet.md'):

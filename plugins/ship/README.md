@@ -55,6 +55,29 @@ Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-s
 
 The ship hooks need Claude Code 2.1.295 or later.
 
+The prose hook checks `SendMessage`, `create_input`, and `update_input` text.
+Only owner-facing text gets the 25-word sentence limit and the section checks.
+The `decision` and `result` CLI modes check owner-facing text. The `peer` mode checks peer text.
+Decision Inputs need the five decision sections. Result Inputs can use free-form text.
+`Agent` and `Task` prompts get receipt checks only.
+
+Set `SHIP_LINT_OFF` to a comma-separated list of rule names, such as `glued,sentence`.
+Use `all` to disable every rule in this list.
+Input classification, safety, and receipt checks stay active.
+
+| Rule | Check |
+|---|---|
+| `glued` | Glued words and compressed shorthand |
+| `sentence` | Sentences longer than 25 words in owner-facing text |
+| `sections` | Missing sections in decision text |
+| `hold` | Repeated standing holds in peer status messages |
+| `unicode` | Invalid Unicode in message and Input fields |
+
+The first four rules warn and let the call proceed.
+Input HTML requires exactly one `output-kind` marker with the value `decision` or `result`.
+Invalid Unicode and classification findings give an exact remedy for a resend.
+Keep the action, recipient, and non-prose fields the same on a resend.
+
 The review-thread guard scans command text. It admits one static, single-quoted GraphQL query through a narrow `gh api graphql` read route. The data argument rule applies only when every command is plain `printf`, `echo`, safe-option `grep`, `ps` or a literal assignment. A command substitution keeps the full runner check. Script files run by path, `gh` aliases and extensions, and command words built from variables or globs escape its checks. It also misses opaque URLs in other clients and files written by Write or Edit then run. Interpreter scripts such as `python3 -c` or `node -e` can run `gh` outside this check. Shell runners can also build `gh` from escapes or expansions. The upgrade path is a GitHub token that the driver cannot use for review-thread writes.
 
 This boundary checks names and paths. It cannot see a copy of a protected row kept under another name, such as a scratch file. GitHub addresses content by ID, such as a blob or a `.diff`, with no path, so the hook denies `WebFetch` for these agents when the raw or decoded URL names `github.com`, `githubusercontent.com` or a subdomain after Unicode normalization, and denies any host that stays non-ASCII. A URL on another code host that addresses content by ID carries no path, so the hook cannot check it.
@@ -68,8 +91,8 @@ The command must match its canonical protected row file and row ID.
 Only the driver and the main session write this folder through Write, Edit or NotebookEdit.
 The Bash custody check matches `ultraship/row-reanchor` as command text.
 The tool derives both fields from Git blobs, preserves the whole-file mutant hunks, and prints only results.
-A tool refusal or hook denial ends the attempt.
-See [Row re-anchor tool admission record](skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
+Keep the row task pending after a refusal. Record the outcome and request a permitted route from the driver.
+See the [lane-owned row route](skills/ship/SKILL.md#lane-owned-row-route) and its [tool admission record](skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
 
 The hook sees these tools: `Agent`, `Task`, `Bash`, `Edit`, `Write`, `NotebookEdit`, `WebSearch`, `Read`, `Grep`, `Glob`, `LSP`, `WebFetch`, `mcp__fff__*`, and the three `mcp__bettercoding__` Input tools (`create_input`, `update_input`, `set_input_status`). Reviewer, triage and verifier agents list no MCP tools, so no other `mcp__` tool reaches these agents.
 
@@ -96,7 +119,7 @@ Pass each option once, with its value as a separate word, in any order.
 
 Use the literal absolute path of the installed plugin's script; the writer hook refuses a shell expansion in that command word.
 The writer hook also refuses literals combining `$` with interpreter-like text, ANSI-C quoting, and raw whitespace beyond space, tab, and newline.
-A hook refusal ends the lane's attempt.
+Keep the count pending after a refusal. Use the literal helper form above only when it meets the named rule. Ask the driver for a permitted proof route when the literal itself is blocked.
 
 The repository path must be canonical and absolute; the commit must be a full lowercase SHA.
 The subject must be a normalized repository-relative POSIX path.

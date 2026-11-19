@@ -1,5 +1,8 @@
 """Synthetic re-anchor and exact-command admission guarantees."""
+from argparse import Namespace
+from concurrent.futures import ThreadPoolExecutor
 import contextlib
+import fcntl
 import importlib.util
 import io
 import json
@@ -7,6 +10,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from threading import Event
 import time
 import tomllib
 import unittest
@@ -93,8 +97,8 @@ class ToolTests(unittest.TestCase):
         self.assertIn('replacement,', row['new'])
         row['old'], row['new'] = parsed_before['row'][0]['old'], parsed_before['row'][0]['new']
         self.assertEqual(parsed_before, parsed_after)
-        _, before_fields = reanchor.row_statements(before.decode(), 'target')
-        _, after_fields = reanchor.row_statements(after.decode(), 'target')
+        _, before_fields, _ = reanchor.row_statements(before.decode(), 'target')
+        _, after_fields, _ = reanchor.row_statements(after.decode(), 'target')
         for key in ('old', 'new'):
             self.assertNotEqual(before_fields[key][2], after_fields[key][2])
         def without_pair(text, fields):
@@ -105,6 +109,263 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(without_pair(before.decode(), before_fields), without_pair(after.decode(), after_fields))
         self.assertIn('changed_statements=2', output)
         self.assertIn('tomllib=PASS', output)
+
+    def record_path(self):
+        return self.root / self.git('rev-parse', '--git-path', 'ship/row-auth.json')
+
+    def test_record_schema_path_and_permissions_in_linked_worktree(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        original_record = self.record_path()
+        linked = self.root / 'linked'
+        self.git('worktree', 'add', '-qb', 'linked-lane', str(linked), self.head_sha)
+        self.root, self.row = linked, linked / self.row.name
+        record = self.record_path()
+        _, output = self.invoke()
+        self.assertEqual(output.splitlines()[-1], f'record={record}')
+        self.assertTrue(record.is_absolute())
+        self.assertFalse(original_record.exists())
+        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(record.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(json.loads(record.read_bytes()), {
+            'schema': 1, 'lane': 'linked-lane', 'base': self.base, 'head': self.head_sha,
+            'rows': [{'row_file': 'rows.toml', 'row_id': 'target', 'subject': 'subject.txt',
+                      'expected_count': 1, 'head_old_count': 1, 'hunk_count': 2,
+                      'mutant_unchanged': True, 'changed_statements': 0,
+                      'base_lines': [4, 10], 'lines': [4, 10]}],
+        })
+
+    def test_printed_fields_match_the_record_entry(self):
+        self.setup_pair(literal=True, extra='[row.mutant]\noperator = "replace"\n')
+        self.invoke()
+        self.head_sha = self.commit()
+        _, output = self.invoke()
+        record = self.record_path()
+        data = json.loads(record.read_bytes())
+        entry, = data.pop('rows')
+        self.assertEqual(entry['base_lines'], [4, 39])
+        self.assertEqual(entry['lines'], [4, 12])
+        fields = dict(line.split('=', 1) for line in output.splitlines()[1:])
+        for key, value in {**data, **entry, 'record': str(record)}.items():
+            self.assertEqual(fields[key], value if isinstance(value, str) else json.dumps(value))
+
+    def test_edit_does_not_create_or_change_a_record(self):
+        self.setup_pair()
+        record = self.record_path()
+        prior = b'{"schema": 1, "lane": "expired", "rows": []}'
+        for exists in (False, True):
+            with self.subTest(existing_record=exists):
+                if exists:
+                    record.write_bytes(prior)
+                before, output = self.invoke()
+                self.assertEqual(output.splitlines()[-1], 'record=none')
+                self.assertIn('changed_statements=2', output.splitlines())
+                self.assertNotEqual(self.row.read_bytes(), before)
+                if exists:
+                    self.assertEqual(record.read_bytes(), prior)
+                else:
+                    self.assertFalse(record.exists())
+                self.row.write_bytes(before)
+
+    def test_record_expires_on_new_head_and_rerun_changes_zero_statements(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        self.invoke()
+        record = self.record_path()
+        old_record = json.loads(record.read_bytes())
+        target = old_record['rows'][0]
+        old_record['rows'].append({**target, 'row_id': 'other'})
+        record.write_text(json.dumps(old_record))
+        self.head_sha = self.commit()
+        before, output = self.invoke()
+        self.assertEqual(self.row.read_bytes(), before)
+        self.assertIn('changed_statements=0', output.splitlines())
+        self.assertEqual(json.loads(record.read_bytes()), {
+            **old_record, 'head': self.head_sha, 'rows': [{**target, 'changed_statements': 0}],
+        })
+
+    def test_same_head_replaces_one_entry_and_keeps_other_rows(self):
+        self.setup_pair('start\nend\n', 'start\ninserted\nend\n', 'start\nend\n', literal=True)
+        other_row = self.row.with_name('other.toml')
+        other_row.write_bytes(self.row.read_bytes())
+        self.git('add', '--', other_row.name)
+        self.base = self.head_sha = self.commit()
+        self.invoke()
+        self.invoke(**{'row-file': str(other_row)})
+        record = self.record_path()
+        before = json.loads(record.read_bytes())
+        self.assertEqual([(row['row_file'], row['row_id']) for row in before['rows']],
+                         [('rows.toml', 'target'), ('other.toml', 'target')])
+        expected = {**before, 'rows': [dict(row) for row in before['rows']]}
+        before['rows'][0]['changed_statements'] = 2
+        record.write_text(json.dumps(before))
+        original, output = self.invoke()
+        self.assertEqual(self.row.read_bytes(), original)
+        self.assertIn('changed_statements=0', output.splitlines())
+        self.assertEqual(json.loads(record.read_bytes()), expected)
+
+    def test_concurrent_tool_writers_keep_both_entries(self):
+        self.setup_pair()
+        other_row = self.row.with_name('other.toml')
+        other_row.write_bytes(self.row.read_bytes().replace(b'id = "target"', b'id = "other"'))
+        head_subject = self.subject.read_bytes()
+        self.subject.write_text(self.old)
+        self.git('add', '--', other_row.name)
+        self.base = self.commit()
+        self.subject.write_bytes(head_subject)
+        self.head_sha = self.commit()
+        self.invoke()
+        self.invoke(**{'row-file': str(other_row), 'row-id': 'other'})
+        self.git('add', '--', other_row.name)
+        self.head_sha = self.commit()
+        with ThreadPoolExecutor(max_workers=2) as writers:
+            first = writers.submit(self.invoke)
+            second = writers.submit(self.invoke, **{'row-file': str(other_row), 'row-id': 'other'})
+            first.result()
+            second.result()
+        entries = json.loads(self.record_path().read_bytes())['rows']
+        self.assertCountEqual([(row['row_file'], row['row_id']) for row in entries],
+                              [('rows.toml', 'target'), ('other.toml', 'other')])
+
+    def run_with_lock_held(self, while_locked):
+        record = self.record_path()
+        record.parent.mkdir(mode=0o700, exist_ok=True)
+        output = io.StringIO()
+        args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
+                         base=self.base, head=self.head_sha)
+        lock_checked_or_done = Event()
+        flock = fcntl.flock
+
+        def observe_lock(descriptor, operation):
+            self.assertEqual(operation, fcntl.LOCK_EX)
+            with self.assertRaises(BlockingIOError):
+                flock(descriptor, operation | fcntl.LOCK_NB)
+            lock_checked_or_done.set()
+            return flock(descriptor, operation)
+
+        env = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+        with patch.dict(os.environ, env), contextlib.redirect_stdout(output), \
+                ThreadPoolExecutor(max_workers=1) as writer:
+            with record.with_suffix('.lock').open('a+b') as lock:
+                flock(lock.fileno(), fcntl.LOCK_EX)
+                with patch.object(reanchor.fcntl, 'flock', side_effect=observe_lock):
+                    deadline = time.monotonic() + 5
+                    result = writer.submit(reanchor.run, args)
+                    result.add_done_callback(lambda _: lock_checked_or_done.set())
+                    self.assertTrue(lock_checked_or_done.wait(deadline - time.monotonic()),
+                                    'tool did not attempt to acquire the lock')
+                    if result.done():
+                        result.result()
+                        self.fail('tool finished while the record lock was held')
+                    while_locked()
+            result.result(timeout=deadline - time.monotonic())
+        return output.getvalue()
+
+    def test_record_write_waits_for_exclusive_lock(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        record = self.record_path()
+        prior = json.dumps({'schema': 1, 'lane': self.git('branch', '--show-current'),
+                            'base': self.base, 'head': self.head_sha, 'rows': []}).encode()
+        record.write_bytes(prior)
+        self.run_with_lock_held(lambda: self.assertEqual(record.read_bytes(), prior))
+        entry, = json.loads(record.read_bytes())['rows']
+        self.assertEqual((entry['row_file'], entry['row_id']), ('rows.toml', 'target'))
+
+    def test_row_edit_waits_for_exclusive_lock_before_checking_bytes(self):
+        self.setup_pair()
+        original = self.row.read_bytes()
+        read_bytes = Path.read_bytes
+        replace = os.replace
+        flock = fcntl.flock
+        row_reads = []
+        lock_path = self.record_path().with_suffix('.lock')
+
+        def observe_read(path):
+            if path == self.row:
+                row_reads.append(path)
+            return read_bytes(path)
+
+        def observe_replace(source, target):
+            if target == self.row:
+                with lock_path.open('r+b') as lock, self.assertRaises(BlockingIOError):
+                    flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            replace(source, target)
+
+        def check_waiting_edit():
+            self.assertEqual(row_reads, [self.row])
+            self.assertEqual(read_bytes(self.row), original)
+
+        with patch.object(Path, 'read_bytes', observe_read), patch.object(os, 'replace', observe_replace):
+            output = self.run_with_lock_held(check_waiting_edit)
+        row, = tomllib.loads(self.row.read_text())['row']
+        self.assertEqual(row['old'], self.head)
+        self.assertIn('record=none', output.splitlines())
+        self.assertFalse(self.record_path().exists())
+
+    def test_subject_commit_while_waiting_for_lock_refuses_without_writing(self):
+        self.setup_pair()
+        original = self.row.read_bytes()
+        record = self.record_path()
+        record.parent.mkdir(mode=0o700)
+        prior = b'{"schema": 1, "lane": "expired", "rows": []}'
+        record.write_bytes(prior)
+
+        def commit_subject_change():
+            self.subject.write_text(self.subject.read_text().replace('grown_b()', 'new_at_head()'))
+            self.assertNotEqual(self.commit(), self.head_sha)
+            self.assertEqual(self.row.read_bytes(), original)
+
+        with self.assertRaisesRegex(reanchor.Refused, '^HEAD changed during derivation$'):
+            self.run_with_lock_held(commit_subject_change)
+        self.assertEqual(self.row.read_bytes(), original)
+        self.assertEqual(record.read_bytes(), prior)
+
+    def test_subject_commit_after_staging_refuses_both_replacements(self):
+        self.setup_pair()
+        record = self.record_path()
+        record.parent.mkdir(mode=0o700)
+        prior = b'{"schema": 1, "lane": "expired", "rows": []}'
+        record.write_bytes(prior)
+        staged_bytes = reanchor.staged_bytes
+        output = io.StringIO()
+        env = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+
+        for destination in (self.row, record):
+            with self.subTest(destination=destination):
+                if destination == record:
+                    self.invoke()
+                    self.head_sha = self.commit()
+                original = self.row.read_bytes()
+                args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
+                                 base=self.base, head=self.head_sha)
+
+                @contextlib.contextmanager
+                def stage_then_commit(path, data, mode):
+                    with staged_bytes(path, data, mode) as stage:
+                        self.assertEqual(path, destination)
+                        with self.subject.open('a') as subject:
+                            subject.write('subject changed during staging\n')
+                        self.assertNotEqual(self.commit(), self.head_sha)
+                        yield stage
+
+                with patch.dict(os.environ, env), contextlib.redirect_stdout(output), \
+                        patch.object(reanchor, 'staged_bytes', stage_then_commit):
+                    with self.assertRaisesRegex(reanchor.Refused, '^HEAD changed during staged write$'):
+                        reanchor.run(args)
+                self.assertEqual(self.row.read_bytes(), original)
+                self.assertEqual(record.read_bytes(), prior)
+                self.head_sha = self.git('rev-parse', 'HEAD')
+        self.assertEqual(output.getvalue(), '')
+
+    def test_detached_head_refuses_before_writing(self):
+        self.setup_pair()
+        self.git('checkout', '--detach', '-q', self.head_sha)
+        self.invoke(2, 'lane branch required')
+        self.assertFalse(self.record_path().parent.exists())
 
     def test_control_characters_quotes_backslashes_and_unicode_round_trip(self):
         old = 'unique_start\nremove_first()\n' + SENTINEL + ' "café" \\path\t\x01\x7f\u2028\nremove()\nend\n'
@@ -155,7 +416,7 @@ class ToolTests(unittest.TestCase):
 
     def test_base_old_count_must_equal_one(self):
         self.setup_pair()
-        self.git('checkout', '-q', self.base)
+        self.git('checkout', '-qb', 'duplicate-base', self.base)
         self.subject.write_text(self.old + self.old)
         self.base = self.commit()
         self.head_sha = self.base
@@ -207,6 +468,11 @@ class ToolTests(unittest.TestCase):
         self.invoke()
         self.assertEqual(tomllib.loads(self.row.read_text())['row'][0]['mutant'], {'operator': 'replace'})
 
+    def test_disjoint_child_table_refuses_without_recording_a_partial_range(self):
+        self.setup_pair(extra='[other]\nkey = "value"\n["row".mutant]\noperator = "replace"\n')
+        self.invoke(2, 'row table is not contiguous')
+        self.assertFalse(self.record_path().exists())
+
     def test_nested_statement_is_frozen(self):
         self.setup_pair(extra='[row.mutant]\noperator = "replace"\n')
         self.row.write_text(self.row.read_text().replace('operator =', 'operator  ='))
@@ -242,6 +508,35 @@ class ToolTests(unittest.TestCase):
             self.assertEqual(reanchor.main(), 2)
         self.assertEqual(output.getvalue(), 'REFUSED: OSError\n')
         self.assertEqual(self.row.read_bytes(), original)
+        self.assertEqual(list(self.root.glob('.row-reanchor-*')), [])
+
+    def test_record_replace_failure_preserves_original_row_and_prior_record(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        record = self.record_path()
+        prior = b'{"schema": 1, "lane": "expired", "rows": []}'
+        record.write_bytes(prior)
+        original = self.row.read_bytes()
+        argv = [str(TOOL), '--row-file', str(self.row), '--row-id', 'target', '--subject', 'subject.txt',
+                '--base', self.base, '--head', self.head_sha]
+        replace = os.replace
+
+        def fail_record_replace(source, target):
+            if target == record:
+                self.assertEqual(self.row.read_bytes(), original)
+                raise OSError(SENTINEL)
+            replace(source, target)
+
+        output = io.StringIO()
+        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
+                patch('sys.argv', argv), patch.object(reanchor.os, 'replace', side_effect=fail_record_replace), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(reanchor.main(), 2)
+        self.assertEqual(output.getvalue(), 'REFUSED: OSError\n')
+        self.assertEqual(self.row.read_bytes(), original)
+        self.assertEqual(record.read_bytes(), prior)
+        self.assertCountEqual(record.parent.iterdir(), [record, record.with_suffix('.lock')])
         self.assertEqual(list(self.root.glob('.row-reanchor-*')), [])
 
 

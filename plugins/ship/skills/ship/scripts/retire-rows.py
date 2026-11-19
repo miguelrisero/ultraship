@@ -48,14 +48,17 @@ def main(args):
             raise ValueError('rows must be a nonempty list')
         ids = set()
         for row in rows:
-            if (not isinstance(row, dict) or set(row) != {'id', 'reason'}
+            if (not isinstance(row, dict) or set(row) != {'id', 'reason', 'replacement'}
                     or any(not isinstance(value, str) or not value for value in row.values())):
-                raise ValueError('each row must contain exactly nonempty id and reason strings')
+                raise ValueError('each row must contain exactly nonempty id, reason and replacement strings')
+            if row['replacement'] == row['id']:
+                raise ValueError('replacement must differ from id')
             if row['id'] in ids:
                 raise ValueError('row ids must be unique')
             ids.add(row['id'])
         text = ''.join('\n[[retired]]\nid = ' + basic(row['id'])
-                       + '\nreason = ' + basic(row['reason']) + '\n' for row in rows)
+                       + '\nreason = ' + basic(row['reason'])
+                       + '\nreplacement = ' + basic(row['replacement']) + '\n' for row in rows)
         if tomllib.loads(text) != {'retired': rows}:
             raise ValueError('appended text does not preserve retirement records')
         text.encode('utf-8')

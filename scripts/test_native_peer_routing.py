@@ -3,14 +3,22 @@ from contextlib import redirect_stdout
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import re
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class NativePeerRoutingTests(unittest.TestCase):
+    def setUp(self):
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop('SHIP_LINT_OFF', None)
+
     def test_output_lint_self_test_and_outgoing_hook_registration(self):
         path = ROOT / 'plugins/ship/hooks/text_lint.py'
         spec = importlib.util.spec_from_file_location('ship_text_lint', path)
@@ -109,6 +117,12 @@ class NativePeerRoutingTests(unittest.TestCase):
 
 
 class BriefSafetyTests(unittest.TestCase):
+    def setUp(self):
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop('SHIP_LINT_OFF', None)
+
     def test_each_template_requires_read_scope_and_safety_sentences(self):
         for name, heading in (
             ('plugins/chief/skills/run/references/dispatch.md', '## Brief template'),

@@ -52,7 +52,9 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'blocked as their own rules say.',
             'A retry in another form never bypasses a safety block.',
             'A superior grants or runs a command only within its own authority, and its own hooks and permissions apply.',
-            'Protected mutation-row edits keep the row routes and the granted protected-row re-anchor below.',
+            'Protected mutation-row edits use only the [lane-owned row route](../SKILL.md#lane-owned-row-route), '
+            'the [standalone main-row repair](#standalone-main-row-repair) and their tools.',
+            'Push, merge and protected-write refusals stay final; a retry in another form never bypasses them.',
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, self.refusals)
@@ -92,71 +94,19 @@ class CoordinationRemedyContractTests(unittest.TestCase):
         self.assertIn('Preserve a direct authoritative mismatch as blocked; '
                       'the fallback supplies verified provenance, never a substitute owner approval.', self.owner)
 
-    def test_protected_row_method_only_retry_admits_one_native_edit_on_the_named_row(self):
-        for requirement in (
-            'Granted protected-row re-anchor: a hook can deny only the shell method,',
-            "When that re-anchor is on the explicit-pair or lane-derived route that its verified owner grant covers, "
-            "one fresh writer applies that route's approved edit once with native Edit and `replace_all=false`.",
-            'The brief names the CI-named row file and the unique row ID.',
-            "The edit changes only that row's paired `old` and `new` fields with the identical mutant edit: "
-            "the CoC-approved pair on the explicit-pair route, or the subject's new source text on the lane-derived route.",
-            "Require that route's independent not-weaker review before the push.",
-        ):
-            with self.subTest(requirement=requirement):
-                self.assertIn(requirement, self.refusals)
-
-    def test_protected_row_method_only_retry_refuses_wider_or_repeated_edits(self):
-        refusal = self.refusals.split(
-            'Refuse a native Edit outside the named file, row or paired fields', 1
-        )[1].split('.', 1)[0]
-        for case in ('a second attempt', 'a denial of the native Edit itself',
-                     'every content, scope or protected-access denial'):
-            with self.subTest(case=case):
-                self.assertIn(case, refusal)
-
-    def test_lane_derived_route_names_the_granted_re_anchor_exception(self):
-        for name in (
-            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
-            'plugins/ship/agents/writer--fable52.md', 'plugins/ship/agents/driver.md',
-            'plugins/ship/agents/driver--sol.md', 'plugins/ship/skills/ship/SKILL.md',
-        ):
-            text = (ROOT / name).read_text()
-            _, heading, after = text.partition('#### Lane-derived route\n')
-            route = re.split(r'^ {0,3}#{1,6}(?:[ \t]+|$)', after,
-                             maxsplit=1, flags=re.MULTILINE)[0]
-            with self.subTest(path=name):
-                self.assertTrue(heading)
-                self.assertIn(
-                    "After a hook denies only the method of this route's row edit, apply the owner-decisions "
-                    'granted protected-row re-anchor; it is the one exception to the alternate-form sentence below.',
-                    route,
-                )
-                self.assertIn(
-                    "When the brief names the sanctioned row re-anchor tool, run it once in place of native Edit "
-                    "with the brief's row file, row ID, subject, base and head; the tool derives and checks both "
-                    'fields and prints only results. A tool refusal or hook denial ends the attempt. '
-                    'This tool is the only process form for a protected row edit.', route,
-                )
-                self.assertIn(
-                    "The tool's statement scan and whole-file `tomllib` check print no row text and are the only "
-                    'exception to the no-whole-file-parse rule; the writer still reads no row lines.', route,
-                )
-        self.assertIn(
-            "On the lane-derived route, when the brief names the sanctioned row re-anchor tool, run it once "
-            "in place of native Edit with the brief's row file, row ID, subject, base and head; the tool derives "
-            'and checks both fields and prints only results. A tool refusal or hook denial ends the attempt. '
-            'This tool is the only process form for a protected row edit. '
-            "The tool's statement scan and whole-file `tomllib` check print no row text and are the only "
-            'exception to the no-whole-file-parse rule; the writer still reads no row lines.', self.refusals,
-        )
+    def test_hook_refusal_keeps_work_pending(self):
+        self.assertIn('A hook refusal never drops work: keep the task pending, then retry in a fixed form or ask the superior.',
+                      self.refusals)
+        ship = (ROOT / 'plugins/ship/skills/ship/SKILL.md').read_text()
+        self.assertIn('Pause a refused tool step and keep the work pending.', ship)
+        self.assertIn('Retry under the refusal rule or ask your superior.', ship)
 
     def test_message_warnings_and_receipt_refusals_keep_existing_authority(self):
         for requirement in (
             'Message-format rule: `text_lint.py` warns about prose formatting and lets the call proceed.',
-            'Examples include glued words, sentence or word limits, and a missing `Facts` heading.',
+            'Examples include glued words and sentence or word limits.',
             'Preserve the action, recipient, scope, authority, non-prose fields, owner provenance, and choice identifiers.',
-            'A missing `Facts` heading organizes supported existing facts only; '
-            'invent zero facts, evidence, approval, or authority.',
+            'Invent zero facts, evidence, approval, or authority while you apply it.',
             'Keep the Input classification requirement and receipt validation in force.',
             'After a receipt citation refusal, remove the receipt marker and resend with the same action, recipient and scope.',
             'Only the hook writes receipt state; agents never read, write or reset the receipt store.',
@@ -168,7 +118,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
         self.assertIn('preserve existing published choice IDs during retries.', self.owner)
 
     def test_contract_drops_final_and_once_only_wording(self):
-        for removed in ('remains final', 'stay final', 'stays refused', 'once-only', 'in every form',
+        for removed in ('remains final', 'stays refused', 'once-only', 'in every form',
+                        'superseded-ruling free', 'contract-gap refusal', 'ends the attempt',
                         'substitute actor', 'substitute an executor', 'no resend', 'final corrected brief'):
             with self.subTest(removed=removed):
                 self.assertNotIn(removed, self.refusals)

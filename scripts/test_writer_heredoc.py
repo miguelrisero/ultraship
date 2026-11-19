@@ -813,7 +813,7 @@ class WriterHeredocTests(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'), reason)
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'), reason)
 
     def test_double_quoted_substitutions_scan_interpreter_bodies(self):
         """Catch split interpreter names inside double-quoted substitution bodies."""
@@ -1210,7 +1210,7 @@ class WriterHeredocTests(unittest.TestCase):
             for command in commands:
                 with self.subTest(command=command):
                     self.assertTrue(self.denied(command), self.reason)
-                    self.assertEqual(self.reason.rsplit('Rule: ', 1)[-1].removesuffix('.'), reason)
+                    self.assertEqual(self.reason.split('\n', 1)[0].rsplit('Rule: ', 1)[-1].removesuffix('.'), reason)
 
     SUBSCRIPT_NAMES = (
         "'a[$(no\"\"de -\"\"e \"process.exit(42)\")]'",

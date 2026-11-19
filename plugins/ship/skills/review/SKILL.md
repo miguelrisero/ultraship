@@ -62,6 +62,7 @@ Reviewers use no MCP (`mcp__`) tools.
 Reviewers search only directories that contain no `tests/mutation/` directory.
 Report a failed or empty scoped search to the coordinator; never widen the search scope.
 An explicit repository-root path does not authorize broader discovery.
+Send named protected rows through the separate [lane-owned row review](../../agents/reviewer--sol.md#lane-owned-row-review) with reviewer admission.
 
 - For broad discovery, use `ship:researcher--luna`.
 - Split the diff into bounded slices. Give each slice to a `ship:reviewer--opus` seat with the scope, SHA, evidence, reference path, and read-only boundary. Cover every applicable lens; combine related lenses.
