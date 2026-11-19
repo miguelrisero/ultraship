@@ -46,25 +46,50 @@ def configured_rule(pr):
     return repo, config.get(repo)
 
 
-def regenerated_paths(allowed, parent, tree, squash_tree):
+def merge_tree(parent, author):
+    try:
+        output = git('merge-tree', '--write-tree', '--no-messages', '--name-only', '-z', parent, author)
+    except subprocess.CalledProcessError as exc:
+        if exc.returncode != 1:
+            raise
+        tree, *names = exc.stdout.rstrip(b'\0').split(b'\0')
+        if not tree or not names:
+            raise
+        return tree, {fsdecode(name) for name in names}, exc
+    return output.rstrip(b'\0\n'), set(), None
+
+
+def tree_entry(tree, path):
+    for entry in git('ls-tree', '--full-tree', '-z', tree, '--', path).split(b'\0'):
+        header, _, name = entry.partition(b'\t')
+        if fsdecode(name) == path:
+            return header
+    return b''
+
+
+def regenerated_paths(allowed, conflicts, parent, author, tree, squash_tree):
     if not allowed:
         raise ValueError(TREE_MISMATCH)
     raw = git(*DIFF_TREE, tree, squash_tree)
-    if not raw:
+    if tree != squash_tree and not raw:
         raise ValueError(TREE_MISMATCH)
-    fields = iter(raw[:-1].split(b'\0'))
-    paths = []
+    fields = iter(raw.split(b'\0')[:-1])
+    paths = set(conflicts)
     for header, name in zip(fields, fields, strict=True):
-        old_mode, new_mode, _, _, status = header[1:].split()
+        status = header.split()[-1]
         path = fsdecode(name)
-        if path not in allowed or status != b'M' or old_mode != b'100644' or new_mode != b'100644':
+        if path not in allowed or status != b'M':
             raise ValueError(TREE_MISMATCH)
-        paths.append(path)
-    root = fsdecode(git('rev-parse', '--show-toplevel').removesuffix(b'\n'))
-    for path in paths:
-        if not git('-C', root, *DIFF_TREE, parent, tree, '--', path):
-            raise ValueError(f'regenerated path {path} is unchanged in the clean merge')
-    return paths
+        paths.add(path)
+    merge_base = git('merge-base', parent, author).strip()
+    ordered = sorted(paths)
+    for path in ordered:
+        for candidate in (tree, squash_tree):
+            if tree_entry(candidate, path).split()[:2] != [b'100644', b'blob']:
+                raise ValueError(TREE_MISMATCH)
+        if tree_entry(merge_base, path) == tree_entry(author, path):
+            raise ValueError(f'regenerated path {path} is unchanged in the author head')
+    return ordered
 
 
 def github_object(endpoint, *fields):
@@ -138,13 +163,21 @@ def main(args):
             raise ValueError('squash commit must have exactly one parent')
         parent, = parents
         git('merge-base', '--is-ancestor', base, squash)
-        tree = git('merge-tree', '--write-tree', '--no-messages', parent, author).strip()
+        tree, conflicts, merge_error = merge_tree(parent, author)
         squash_tree = git('rev-parse', f'{squash}^{{tree}}').strip()
         paths = []
         suffix = ''
-        if tree != squash_tree:
-            repo, rule = configured_rule(pr)
-            paths = regenerated_paths(rule['paths'] if rule else [], parent, tree, squash_tree)
+        if conflicts or tree != squash_tree:
+            try:
+                repo, rule = configured_rule(pr)
+            except (OSError, ValueError):
+                if merge_error:
+                    raise merge_error from None
+                raise
+            allowed = rule['paths'] if rule else []
+            if conflicts.difference(allowed):
+                raise merge_error
+            paths = regenerated_paths(allowed, conflicts, parent, author, tree, squash_tree)
         files = git('diff-tree', '-r', '--name-only', '-z', '--no-renames', '--no-relative',
                     '--ignore-submodules=none', parent, squash).count(b'\0')
         info = json.loads(run('gh', 'pr', 'view', pr, '--json', 'state,mergeCommit'))
