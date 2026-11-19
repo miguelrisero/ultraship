@@ -1,6 +1,6 @@
 """Outgoing prose lint: glued word-number shorthand and restated-hold walls."""
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
@@ -27,7 +27,7 @@ spec.loader.exec_module(text_lint)
 class TextLintTests(unittest.TestCase):
     def setUp(self):
         temporary = self.enterContext(tempfile.TemporaryDirectory())
-        self.enterContext(patch.dict(os.environ, {'XDG_STATE_HOME': temporary}))
+        self.enterContext(patch.dict(os.environ, {'XDG_STATE_HOME': temporary, 'SHIP_LINT_OFF': ''}))
         self.state = Path(temporary) / 'ultraship' / 'text-lint'
         self.clock = datetime(2026, 11, 15, 12, tzinfo=timezone.utc)
         self.enterContext(patch.object(text_lint, 'now', return_value=self.clock))
@@ -35,24 +35,22 @@ class TextLintTests(unittest.TestCase):
     def test_self_test(self):
         text_lint.self_test()
 
-    def test_sendmessage_reports_the_exact_missing_facts_remedy(self):
-        message = ('The review passes.\n'
-                   'Facts: The checks pass.\n'
-                   'Decision: Continue.\n'
-                   'Next: The driver resumes at 2026-11-13T18:00:00Z.')
-        event = {'tool_name': 'SendMessage',
-                 'tool_input': {'to': 'chief', 'message': message}}
-        text_lint.outgoing(event)
-        event['tool_input']['message'] = message.replace('Facts:', 'Evidence:')
-
-        with self.assertRaises(ValueError) as refusal:
-            text_lint.outgoing(event)
-
-        self.assertEqual(str(refusal.exception), 'Missing section: Facts')
-
-    WARN = ' This call proceeds. Use this shape next time:\n'
+    WARN = ' This call proceeds. Follow this guidance next time:\n'
+    GLUED_TEXT = 'Send deadline2026 by8November00.'
+    GLUED_FINDING = 'Separate glued words with spaces; remove compressed shorthand.'
+    CLASSIFICATION_RETRY = (
+        'Set exactly one output-kind meta tag to match the Input intent:\n'
+        '<meta name="output-kind" content="decision"> or <meta name="output-kind" content="result">.\n'
+        'Resend the same Input with its recipient, choices, and other fields unchanged.')
+    UNICODE_RETRY = 'Replace surrogate code points with valid Unicode characters. Resend the same call.'
     NO_RESEND = (' This refusal is not formatting-only. Resend after the content meets the rule above,'
                  ' or ask your superior for permission.')
+
+    def cli_output(self, kind, text):
+        output = io.StringIO()
+        with patch('sys.argv', ['text_lint.py', kind]), patch('sys.stdin', io.StringIO(text)), redirect_stderr(output):
+            runpy.run_path(str(ROOT / 'plugins/ship/hooks/text_lint.py'), run_name='__main__')
+        return output.getvalue()
 
     def hook_output(self, event):
         output = io.StringIO()
@@ -85,8 +83,9 @@ class TextLintTests(unittest.TestCase):
         receipt = json.loads((self.state / 'receipts' / (receipt_id + '.json')).read_text())
         suffix = ' Receipt: `' + receipt_id + '`.'
         self.assertIn('Keep the work pending.', reason)
-        if self.NO_RESEND not in reason:
-            self.assertIn('Remove the receipt marker and resend', reason)
+        self.assertTrue(any(remedy in reason for remedy in (
+            self.NO_RESEND, self.CLASSIFICATION_RETRY, self.UNICODE_RETRY,
+            'Remove the receipt marker and resend with the same action, recipient and scope.')), reason)
         self.assertTrue(reason.endswith(suffix), reason)
         self.last_receipt = receipt
         return reason[:-len(suffix)]
@@ -109,56 +108,20 @@ class TextLintTests(unittest.TestCase):
         message = message or 'The review passes.\nFacts: Checks pass.\nDecision: Continue.\nNext: Resume.'
         return self.event(message + '\n<!-- ultraship-receipt:' + receipt_id + ' -->')
 
-    def test_subagent_format_warning_has_next_message_template(self):
-        """Catch a child resend shape that drops the required sections."""
-        for recipient in ('main', 'a' + '0' * 16):
-            for prose, error in (
-                    (' '.join(['word'] * 26) + '.', 'Write at most 25 words per sentence.'),
-                    ('Send deadline2026 by8November00.',
-                     'Separate glued words with spaces; remove compressed shorthand.')):
-                with self.subTest(recipient=recipient, error=error):
-                    message = prose + '\nFacts: Checks pass.\nDecision: Continue.\nNext: Resume.'
-                    event = {'session_id': recipient + error, 'tool_name': 'SendMessage',
-                             'tool_input': {'to': recipient, 'message': message}}
-                    self.assertEqual(self.hook_warning(event),
-                                     'Output contract warning: ' + error + self.WARN
-                                     + text_lint.PEER_TEMPLATE)
-
-    def test_one_warning_names_format_and_section_findings(self):
-        for recipient in ('main', 'a' + '0' * 16, 'peer'):
+    def test_peer_and_subagent_questions_skip_sentence_and_sections(self):
+        question = 'Can ' + ' '.join(['word'] * 24) + ' wait?'
+        for recipient in ('main', 'a' + '0' * 16, 'chief', 'peer'):
             with self.subTest(recipient=recipient):
-                event = {'session_id': recipient, 'tool_name': 'SendMessage',
-                         'tool_input': {'to': recipient, 'message': 'Send deadline2026 by8November00.'}}
-                reason = self.hook_warning(event)
-                self.assertEqual(reason,
-                                 'Output contract warning: Separate glued words with spaces; remove compressed shorthand. '
-                                 'Missing section: Facts Missing section: Decision Missing section: Next'
-                                 + self.WARN + text_lint.PEER_TEMPLATE)
-                self.assertIn('at most 25 words each, with a space between words', reason)
-                for heading in ('\nFacts\n', '\nDecision\n', '\nNext\n'):
-                    self.assertIn(heading, reason)
+                self.assertIsNone(self.hook_output(self.event(question, to=recipient)))
+        self.assertEqual(self.cli_output('peer', question), '')
 
-    def test_subagent_missing_section_warning_has_peer_template(self):
-        """Catch a child remedy that omits required peer headings."""
-        for prose in ('The review passes.', ' '.join(['word'] * 26) + '.'):
-            with self.subTest(prose=prose):
-                message = prose + '\nDecision: Continue.\nNext: Resume.'
-                event = {'session_id': prose, 'tool_name': 'SendMessage',
-                         'tool_input': {'to': 'main', 'message': message}}
-                prefix = ('Write at most 25 words per sentence. '
-                          if prose.startswith('word') else '')
-                self.assertEqual(self.hook_warning(event),
-                                 'Output contract warning: ' + prefix + 'Missing section: Facts'
-                                 + self.WARN + text_lint.PEER_TEMPLATE)
-
-    def test_peer_owner_helper_label_keeps_sentence_limit(self):
-        for prefix in ('', '- '):
-            with self.subTest(prefix=prefix):
-                message = (prefix + 'Owner helper request: ' + ' '.join(['word'] * 40)
-                           + '\nFacts: Checks pass.\nDecision: Continue.\nNext: Resume.')
-                with self.assertRaises(text_lint.FormatError) as refusal:
-                    text_lint.check(message, 'peer')
-                self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+    def test_peer_warning_has_exact_glued_word_guidance(self):
+        for recipient in ('main', 'a' + '0' * 16, 'chief', 'peer'):
+            with self.subTest(recipient=recipient):
+                self.assertEqual(self.hook_warning(self.event(self.GLUED_TEXT, to=recipient)),
+                                 'Output contract warning: ' + self.GLUED_FINDING + self.WARN
+                                 + 'Lead with the outcome and its meaning. Separate words with spaces.')
+        self.assertFalse(self.state.exists())
 
     def test_peer_owner_helper_request_on_its_own_line_passes(self):
         message = ('Owner helper request:\n'
@@ -172,30 +135,14 @@ class TextLintTests(unittest.TestCase):
                    'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.')
         text_lint.check(message, 'peer')
 
-    def test_peer_sections_survive_tag_like_text(self):
+    def test_peer_tag_like_text_needs_no_sections(self):
         for line in ("cat <<'PY'; x<y", 'cat <<EOF'):
             with self.subTest(line=line):
-                message = ('Facts: Checks pass.\n' + line
-                           + '\nDecision: Continue.\nNext: Resume.')
-                text_lint.check(message, 'peer')
+                text_lint.check('Facts: Checks pass.\n' + line + '\nNext: Resume.', 'peer')
 
-    def test_peer_tag_like_text_keeps_missing_decision(self):
-        for line in ("cat <<'PY'; x<y", 'cat <<EOF'):
-            with self.subTest(line=line):
-                message = 'Facts: Checks pass.\n' + line + '\nNext: Resume.'
-                with self.assertRaises(text_lint.FormatError) as refusal:
-                    text_lint.check(message, 'peer')
-                self.assertEqual(refusal.exception.findings, ['Missing section: Decision'])
-
-    def test_peer_heredoc_keeps_later_sentence_limit(self):
-        message = ('Facts: Checks pass.\ncat <<EOF\n'
-                   'Owner helper request: one two three four five six seven eight nine ten '
-                   'eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen '
-                   'nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix.\n'
-                   'Decision: Continue.\nNext: Resume.')
-        with self.assertRaises(text_lint.FormatError) as refusal:
-            text_lint.check(message, 'peer')
-        self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+    def test_peer_heredoc_needs_no_sentence_check(self):
+        message = 'Sample:\ncat <<EOF\nOwner helper request: ' + ' '.join(['word'] * 26)
+        self.assertIsNone(self.hook_output(self.event(message)))
 
     def test_peer_bold_glued_words_keep_token_check(self):
         message = ('Facts: <b>deadline2026</b> <b>by8November00</b>\n'
@@ -299,15 +246,17 @@ class TextLintTests(unittest.TestCase):
                 self.assertEqual(refusal.exception.findings,
                                  ['Separate glued words with spaces; remove compressed shorthand.'])
 
-    def test_peer_sentence_check_keeps_main_html_view(self):
-        message = ('Facts: one two three four five six seven eight nine ten eleven twelve <!--\n--> '
-                   'thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone '
-                   'twentytwo twentythree twentyfour twentyfive twentysix.\n'
-                   'Decision: Continue.\nNext: Resume.')
-        event = {'tool_name': 'SendMessage', 'tool_input': {'to': 'peer', 'message': message}}
-        with self.assertRaises(text_lint.FormatError) as refusal:
-            text_lint.outgoing(event)
-        self.assertEqual(refusal.exception.findings, ['Write at most 25 words per sentence.'])
+    def test_owner_sentence_limit_uses_visible_html(self):
+        first = 'word ' * 12
+        for kind in ('decision', 'result'):
+            for count in (25, 26):
+                with self.subTest(kind=kind, count=count):
+                    body = '<p>' + first + '<!--\n--> ' + ' '.join(['word'] * (count - 12)) + '.</p>'
+                    if kind == 'decision':
+                        body += ('<h2>What is wrong</h2><h2>Why now</h2><h2>Options</h2>'
+                                 '<h2>Recommendation</h2><h2>If no answer</h2>')
+                    self.assertEqual(self.cli_output(kind, body), '' if count == 25 else
+                                     'Output contract warning: Write at most 25 words per sentence.\n')
 
     def test_peer_hold_wall_reads_text_after_tag_like_text(self):
         message = ('Facts: Checks wait.\ncat <<EOF\n'
@@ -330,14 +279,6 @@ class TextLintTests(unittest.TestCase):
         with self.assertRaises(text_lint.FormatError) as refusal:
             text_lint.check(message, 'decision')
         self.assertEqual(refusal.exception.findings, ['Missing section: Recommendation'])
-
-    def test_peer_warning_has_next_message_template(self):
-        """Catch a peer formatting warning that denies the call."""
-        event = self.event()
-        self.assertEqual(self.hook_warning(event),
-                         'Output contract warning: Missing section: Facts Missing section: Decision '
-                         'Missing section: Next' + self.WARN + text_lint.PEER_TEMPLATE)
-        self.assertFalse(self.state.exists())
 
     def test_input_format_warning_has_next_message_template(self):
         """Catch Input warnings that deny the call or omit the Input shape."""
@@ -367,11 +308,44 @@ class TextLintTests(unittest.TestCase):
                 event = {'tool_name': 'mcp__bettercoding__' + tool,
                          'tool_input': {'content': {'html': '<p>The release waits.</p>'}}}
                 reason = self.hook_refusal(event)
-                self.assertIn('Input HTML requires one explicit output-kind classification: decision or result.', reason)
-                self.assertIn('Keep the work pending.', reason)
-                self.assertIn('Use this shape:\nUse exactly one output-kind meta tag:', reason)
+                self.assertEqual(reason, 'Output contract: Input HTML requires one explicit output-kind '
+                                 'classification: decision or result. Keep the work pending. '
+                                 + self.CLASSIFICATION_RETRY)
+                self.assertFalse(self.last_receipt['resend_allowed'])
                 event['tool_input']['content']['html'] = '<meta name="output-kind" content="result"><p>The release waits.</p>'
                 self.assertIsNone(self.hook_output(event))
+
+    def test_each_lint_switch_skips_its_rule(self):
+        long_result = '<meta name="output-kind" content="result"><p>' + 'word ' * 26 + '.</p>'
+        decision = '<meta name="output-kind" content="decision"><p>Please decide.</p>'
+        wall = 'Preserve every hold. Custody stays. Admission waits. Preserve the refusal.'
+        cases = (
+            ('glued', self.event(self.GLUED_TEXT), self.GLUED_FINDING),
+            ('sentence', self.input_event('result', long_result), 'Write at most 25 words per sentence.'),
+            ('sections', self.input_event('decision', decision), 'Missing section: Recommendation'),
+            ('hold', self.event(wall), 'Keep any new hold in one line'),
+            ('unicode', self.event(summary='\ud800'), 'Use valid Unicode in the message or Input.'),
+            ('classification', self.input_event('input'), 'Input HTML requires one explicit output-kind classification:'),
+        )
+        for rule, event, finding in cases:
+            with self.subTest(rule=rule):
+                result = self.hook_output(event)
+                self.assertIn(finding, result.get('additionalContext') or result['permissionDecisionReason'])
+                for setting in (rule, 'all'):
+                    with patch.dict(os.environ, {'SHIP_LINT_OFF': setting}):
+                        self.assertIsNone(self.hook_output(event))
+
+    def test_lint_switch_list_skips_only_named_rules(self):
+        decision = ('<meta name="output-kind" content="decision"><p>' + self.GLUED_TEXT + ' '
+                    + 'word ' * 26 + '.</p>')
+        event = self.input_event('decision', decision)
+        with patch.dict(os.environ, {'SHIP_LINT_OFF': ' glued, sentence , unknown '}):
+            findings = self.hook_warning(event).split(self.WARN, 1)[0]
+            self.assertNotIn(self.GLUED_FINDING, findings)
+            self.assertNotIn('Write at most 25 words per sentence.', findings)
+            self.assertIn('Missing section: Recommendation', findings)
+            self.assertEqual(self.cli_output('result', decision), '')
+            self.assertIn('Missing section: Recommendation', self.cli_output('decision', decision))
 
     def test_malformed_payload_remains_denied(self):
         reason = self.hook_refusal({'tool_name': 'SendMessage', 'tool_input': ['malformed']})
@@ -406,8 +380,8 @@ class TextLintTests(unittest.TestCase):
 
     def test_mixed_format_findings_warn_in_one_response(self):
         wall = 'Preserve every hold. Custody stays. Admission waits. Preserve the refusal.'
-        warning = self.hook_warning(self.event(wall))
-        self.assertIn('Missing section: Facts', warning)
+        warning = self.hook_warning(self.event(self.GLUED_TEXT + ' ' + wall))
+        self.assertIn(self.GLUED_FINDING, warning)
         self.assertIn('Keep any new hold in one line', warning)
         self.assertFalse(self.state.exists())
 
@@ -654,10 +628,10 @@ class TextLintTests(unittest.TestCase):
 
     def test_relay_with_format_finding_warns_without_consuming_receipt(self):
         receipt_id = self.seed()
-        relay = self.resend(receipt_id, 'Decision: Continue.\nNext: Resume.')
+        relay = self.resend(receipt_id, self.GLUED_TEXT)
         relay['agent_id'] = None
         relay['tool_input']['to'] = 'agent-one'
-        self.assertIn('Missing section: Facts', self.hook_warning(relay))
+        self.assertIn(self.GLUED_FINDING, self.hook_warning(relay))
         self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
         self.assertIsNone(self.hook_output(self.resend(receipt_id)))
 
@@ -758,7 +732,7 @@ class TextLintTests(unittest.TestCase):
 
     def test_cited_resend_with_format_finding_warns_and_consumes(self):
         receipt_id = self.seed()
-        self.assertIn('Missing section: Facts', self.hook_warning(self.resend(receipt_id, 'The review passes.')))
+        self.assertIn(self.GLUED_FINDING, self.hook_warning(self.resend(receipt_id, self.GLUED_TEXT)))
         self.assertTrue((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
         self.assertIsNone(self.hook_output(self.event('Facts: Checks pass.\nDecision: Continue.\nNext: Resume.')))
 
@@ -848,14 +822,18 @@ class TextLintTests(unittest.TestCase):
                 event = self.event('\ud800' + suffix)
                 result = self.entrypoint_output(json.dumps(event))
                 self.assertEqual(result.get('permissionDecision'), 'deny')
-                self.assertIn('valid Unicode', result['permissionDecisionReason'])
+                self.assertIn('Use valid Unicode in the message or Input. Keep the work pending. '
+                              + self.UNICODE_RETRY, result['permissionDecisionReason'])
+                event['tool_input']['message'] = 'é' + suffix
+                self.assertIsNone(self.hook_output(event))
 
     def test_invalid_unicode_in_message_summary_remains_denied(self):
         event = self.event('Facts: Checks pass.\nDecision: Continue.\nNext: Resume.', summary='\ud800')
         result = self.hook_output(event)
         self.assertIsNotNone(result)
         self.assertEqual(result.get('permissionDecision'), 'deny')
-        self.assertIn('valid Unicode', result['permissionDecisionReason'])
+        self.assertIn('Use valid Unicode in the message or Input. Keep the work pending. '
+                      + self.UNICODE_RETRY, result['permissionDecisionReason'])
 
     def test_conflicting_classification_attributes_keep_input_denied(self):
         for tool in ('create_input', 'update_input'):
@@ -868,13 +846,15 @@ class TextLintTests(unittest.TestCase):
                              'tool_input': {'content': {'html': tag + '<p>Please decide.</p>'}}}
                     result = self.hook_output(event)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn('output-kind classification', result['permissionDecisionReason'])
+                    self.assertIn('Input HTML requires one explicit output-kind classification: decision or result. '
+                                  'Keep the work pending. ' + self.CLASSIFICATION_RETRY,
+                                  result['permissionDecisionReason'])
 
     def test_format_warning_without_session_needs_no_receipt(self):
         for session in (None, '', 123):
-            event = self.event()
+            event = self.event(self.GLUED_TEXT)
             event['session_id'] = session
-            self.assertIn('Missing section: Facts', self.hook_warning(event))
+            self.assertIn(self.GLUED_FINDING, self.hook_warning(event))
             self.assertFalse(self.state.exists())
 
     def test_future_receipt_refused_at_one_microsecond(self):
@@ -885,9 +865,8 @@ class TextLintTests(unittest.TestCase):
         self.assertFalse((self.state / 'receipts' / (receipt['id'] + '.consumed')).exists())
 
     def test_uncited_corrected_message_passes_after_a_format_warning(self):
-        self.assertIn('Missing section: Facts', self.hook_warning(self.event()))
-        valid = 'Facts: Checks pass.\nDecision: Continue.\nNext: Resume.'
-        self.assertIsNone(self.hook_output(self.event(valid)))
+        self.assertIn(self.GLUED_FINDING, self.hook_warning(self.event(self.GLUED_TEXT)))
+        self.assertIsNone(self.hook_output(self.event('Send the 2026 deadline by November 8.')))
         self.assertFalse(self.state.exists())
 
     def test_agent_citation_never_consumes_a_send_receipt(self):
@@ -950,6 +929,33 @@ class TextLintTests(unittest.TestCase):
         non_format_id = text_lint.write_receipt(self.event(), ['Content refusal'], False, None)['id']
         self.assertIn('Receipt does not permit a resend', self.hook_refusal(self.resend(non_format_id)))
         self.assertIsNone(self.hook_output(self.event('Facts: Checks pass.\nDecision: Continue.\nNext: Resume.')))
+
+    def test_all_lint_off_preserves_safety_denials(self):
+        env = {**os.environ, 'SHIP_LINT_OFF': 'all', 'GH_CONFIG_DIR': str(self.state.parent / 'gh')}
+        cases = (
+            ('Bash', {'command': 'git push origin HEAD'}, 'Writers never push'),
+            ('Bash', {'command': 'gh pr merge 1'}, 'Writers never push'),
+            ('Bash', {'command': 'gh workflow run deploy.yml'}, 'Writers never push'),
+            ('Write', {'file_path': str(self.state.parent / 'gh/hosts.yml')},
+             'Writers do not edit GitHub CLI configuration.'),
+            ('Write', {'file_path': str(self.state.parent / '.claude/settings.json')},
+             'Writers do not edit harness configuration.'),
+            ('Read', {'file_path': str(self.state / 'key')}, 'custody rule'),
+            ('Agent', {'subagent_type': 'ship:writer--sol', 'model': 'opus'}, 'pin their own model'),
+            ('mcp__bettercoding__create_input', {}, 'Only the driver maintains Inputs.'),
+        )
+        for tool, inputs, reason in cases:
+            with self.subTest(tool=tool, reason=reason):
+                event = {'agent_type': 'ship:writer--sol', 'cwd': str(ROOT),
+                         'tool_name': tool, 'tool_input': inputs}
+                process = subprocess.run([sys.executable, str(ROOT / 'plugins/ship/hooks/ultraship.py'), 'pre'],
+                                         input=json.dumps(event), text=True, capture_output=True, env=env, cwd=ROOT, check=True)
+                denial = json.loads(process.stdout)['hookSpecificOutput']
+                self.assertEqual(denial['permissionDecision'], 'deny')
+                self.assertIn(reason, denial['permissionDecisionReason'])
+        with patch.dict(os.environ, {'SHIP_LINT_OFF': 'all'}):
+            self.assertIn('Invalid receipt citation:', self.hook_refusal(self.resend('0' * 32)))
+            self.assertFalse(self.last_receipt['resend_allowed'])
 
     def test_failed_first_key_write_allows_next_refusal_receipt(self):
         event = self.resend('0' * 32)

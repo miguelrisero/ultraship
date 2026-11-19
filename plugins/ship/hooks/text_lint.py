@@ -23,14 +23,11 @@ HOLD_WORDS = re.compile(r'\b(preserv\w*|holds?|custody|custodian|admission|admit
 # The harness addresses an in-session subagent by its agent ID and a background subagent's parent as `main`.
 SUBAGENT = re.compile(r'main|a[0-9a-f]{16}')
 RECEIPT_MARKER = re.compile(r'<!-- ultraship-receipt:[0-9a-f]{32} -->')
-PEER_TEMPLATE = """<Outcome in one sentence, and what it means for the recipient.>
-Facts
-- <Verified fact with its source: PR number, run ID or UTC time.>
-Decision
-- <The action you take or ask for, within existing authority.>
-Next
-- <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>.
-<Every line: one point per sentence, at most 25 words each, with a space between words.>"""
+PEER_TEMPLATE = 'Lead with the outcome and its meaning. Separate words with spaces.'
+CLASSIFICATION_RETRY = ('Set exactly one output-kind meta tag to match the Input intent:\n'
+                        '<meta name="output-kind" content="decision"> or <meta name="output-kind" content="result">.\n'
+                        'Resend the same Input with its recipient, choices, and other fields unchanged.')
+UNICODE_RETRY = 'Replace surrogate code points with valid Unicode characters. Resend the same call.'
 INPUT_TEMPLATE = '''Use exactly one output-kind meta tag: decision or result.
 Decision:
 <meta name="output-kind" content="decision">
@@ -45,9 +42,10 @@ Write at most 25 words per sentence.'''
 
 
 class FindingsError(ValueError):
-    def __init__(self, findings, formatting_only=False):
+    def __init__(self, findings, formatting_only=False, remedies=()):
         self.findings = findings
         self.formatting_only = formatting_only
+        self.remedies = remedies
         super().__init__(' '.join(findings))
 
 
@@ -110,9 +108,13 @@ def peer_text(text):
     return html.unescape(RECEIPT_MARKER.sub('', text))
 
 
+def lint_off():
+    return {name.strip() for name in os.environ.get('SHIP_LINT_OFF', '').split(',')}
+
+
 def hold_wall(text):
     """Six or more hold words in a status message restate standing holds; a brief carries its restrictions."""
-    if 'Owner helper request:' in text:
+    if lint_off() & {'all', 'hold'} or 'Owner helper request:' in text:
         return
     # Main's HTML view joins a word that a tag splits; the split view also reads text after a stray `<`.
     for view in (re.sub(r'[<>]', ' ', peer_text(text)), ''.join(VisibleText(text).parts)):
@@ -123,34 +125,34 @@ def hold_wall(text):
 
 
 def check_unicode(text):
-    if re.search(r'[\ud800-\udfff]', text):
-        raise ValueError('Use valid Unicode in the message or Input.')
+    if re.search(r'[\ud800-\udfff]', text) and not lint_off() & {'all', 'unicode'}:
+        raise FindingsError(['Use valid Unicode in the message or Input.'], remedies=(UNICODE_RETRY,))
 
 
 def check(text, kind='result'):
     check_unicode(text)
+    off = lint_off()
     visible = ''.join(VisibleText(text).parts)
-    plain = peer_text(text) if kind == 'peer' else visible
-    # A peer reads plain text; main's HTML view of the raw text keeps every word and sentence refusal main made.
-    views = (plain, visible) if kind == 'peer' else (plain,)
-    shorthand = long_sentence = False
-    for index, view in enumerate(views):
-        prose = re.sub(r'`[^`]*`', '', view)
-        token_prose = re.sub(r'[<>]', ' ', prose) if kind == 'peer' and index == 0 else prose
-        tokens = [t for t in token_prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
-        long = [t for t in tokens if len(t) >= 22]
-        shorthand |= len(long) >= 3 or bool(tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2
-        long_sentence |= any(len(s.split()) > 25 for s in re.split(r'(?<=[.!?])\s+|\n+', prose))
     errors = []
-    if shorthand:
-        errors.append('Separate glued words with spaces; remove compressed shorthand.')
-    if long_sentence:
-        errors.append('Write at most 25 words per sentence.')
-    sections = ('Facts', 'Decision', 'Next') if kind == 'peer' else (
-        ('What is wrong', 'Why now', 'Options', 'Recommendation', 'If no answer') if kind == 'decision' else ())
-    for section in sections:
-        if not re.search(r'^\s*(?:#{1,6}\s*)?' + re.escape(section) + r'\b', plain, re.M | re.I):
-            errors.append('Missing section: ' + section)
+    if not off & {'all', 'glued'}:
+        # HTML can join fragments of a glued word that the plain view separates.
+        views = (peer_text(text), visible) if kind == 'peer' else (visible,)
+        for index, view in enumerate(views):
+            prose = re.sub(r'`[^`]*`', '', view)
+            token_prose = re.sub(r'[<>]', ' ', prose) if kind == 'peer' and index == 0 else prose
+            tokens = [t for t in token_prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
+            long = [t for t in tokens if len(t) >= 22]
+            if len(long) >= 3 or (tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2:
+                errors.append('Separate glued words with spaces; remove compressed shorthand.')
+                break
+    if kind in ('decision', 'result') and not off & {'all', 'sentence'}:
+        prose = re.sub(r'`[^`]*`', '', visible)
+        if any(len(s.split()) > 25 for s in re.split(r'(?<=[.!?])\s+|\n+', prose)):
+            errors.append('Write at most 25 words per sentence.')
+    if kind == 'decision' and not off & {'all', 'sections'}:
+        for section in ('What is wrong', 'Why now', 'Options', 'Recommendation', 'If no answer'):
+            if not re.search(r'^\s*(?:#{1,6}\s*)?' + re.escape(section) + r'\b', visible, re.M | re.I):
+                errors.append('Missing section: ' + section)
     if errors:
         raise FormatError(errors)
 
@@ -160,14 +162,16 @@ def sendmessage_body(args):
 
 
 def outgoing(event):
-    findings, formatting_only = [], True
+    findings, remedies, formatting_only = [], [], True
 
     def collect(function, *args):
         nonlocal formatting_only
         try:
             function(*args)
-        except FormatError as exc:
+        except FindingsError as exc:
             findings.extend(exc.findings)
+            remedies.extend(remedy for remedy in exc.remedies if remedy not in remedies)
+            formatting_only &= exc.formatting_only
         except Exception as exc:
             findings.append(str(exc))
             formatting_only = False
@@ -193,8 +197,9 @@ def outgoing(event):
             body = content.get('html', '')
             kinds = VisibleText(body).kinds
             valid_kind = len(kinds) == 1 and kinds[0] in ('decision', 'result')
-            if not valid_kind:
+            if not valid_kind and not lint_off() & {'all', 'classification'}:
                 findings.append('Input HTML requires one explicit output-kind classification: decision or result.')
+                remedies.append(CLASSIFICATION_RETRY)
                 formatting_only = False
             collect(check, content.get('title', ''))
             collect(check, body, kinds[0] if valid_kind else 'result')
@@ -203,7 +208,7 @@ def outgoing(event):
     if findings:
         if formatting_only:
             raise FormatError(findings)
-        raise FindingsError(findings)
+        raise FindingsError(findings, remedies=remedies)
 
 
 def now():
@@ -459,8 +464,10 @@ def hook(event, parse_error=None):
     except FormatError as exc:
         template = PEER_TEMPLATE if event.get('tool_name') == 'SendMessage' else INPUT_TEMPLATE
         output = {'additionalContext': 'Output contract warning: ' + str(exc)
-                  + ' This call proceeds. Use this shape next time:\n' + template}
+                  + ' This call proceeds. Follow this guidance next time:\n' + template}
     except Exception as exc:
+        if isinstance(exc, FindingsError) and exc.remedies:
+            retry = ' ' + ' '.join(exc.remedies)
         if not retry:
             retry = (' This refusal is not formatting-only. Resend after the content meets the rule above,'
                      ' or ask your superior for permission.')
@@ -479,7 +486,7 @@ def hook(event, parse_error=None):
 def self_test():
     peer = 'The review passes. The driver can continue.\nFacts: The checks pass.\nDecision: Continue.\nNext: The driver resumes at 2026-10-31T12:00:00Z.'
     decision = '<meta name="output-kind" content="decision"><h2>What is wrong</h2><p>The release waits.</p><h2>Why now</h2><p>The deadline approaches.</p><h2>Options A to C</h2><p>A: Hold. B: Release. C: Defer.</p><h2>Recommendation</h2><p>Choose A.</p><h2>If no answer</h2><p>Keep the hold.</p>'
-    check(peer, 'peer')
+    check(' '.join(['word'] * 26) + '.', 'peer')
     for tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input'):
         outgoing({'tool_name': tool, 'tool_input': {'content': {'html': decision, 'contract': {'choices': [], 'allow_text': True}}}})
         outgoing({'tool_name': tool, 'tool_input': {'request_answer': True, 'content': {'html': '<meta name="output-kind" content="result"><p>The release completes.</p>', 'contract': {'choices': [{'id': 'ok', 'label': 'Useful'}], 'allow_text': True}}}})
@@ -505,7 +512,6 @@ def self_test():
                        ("Send the deadline2026 note by the by8November00's end.", 'result'),
                        (' '.join(['z' * 22] + ['word'] * 11), 'result'),
                        (' '.join(['word'] * 26) + '.', 'result'),
-                       (peer.replace('Facts:', 'Evidence:'), 'peer'),
                        (decision.replace('Recommendation', 'Advice'), 'decision')]:
         try:
             check(text, kind)
@@ -527,4 +533,9 @@ if __name__ == '__main__':
         else:
             hook(event)
     else:
-        check(sys.stdin.read(), sys.argv[1] if len(sys.argv) > 1 else 'result')
+        try:
+            check(sys.stdin.read(), sys.argv[1] if len(sys.argv) > 1 else 'result')
+        except FormatError as exc:
+            print('Output contract warning: ' + str(exc), file=sys.stderr)
+        except FindingsError as exc:
+            sys.exit(str(exc) + ' ' + ' '.join(exc.remedies))
