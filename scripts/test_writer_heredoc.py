@@ -712,16 +712,22 @@ class WriterHeredocTests(unittest.TestCase):
         for command in (
             "git -C /work/lane grep -n -e '$(shell' -e 'include ' -- Makefile",
             "grep -n -e '$(shell' -e 'include ' Makefile",
-            "rg -n -e '$(shell' -e 'include ' Makefile",
+            "rg --no-config -n -e '$(shell' -e 'include ' Makefile",
             "cd /work/lane && git grep -n -e '$(shell' -e 'include ' -- Makefile && git status --short -- a.py",
             "grep -C 2 -e '$(shell' -e y f",
-            "grep '$(python3 -c code)' -e y f",
             "grep -e '`x`' -e code f",
+            "grep -e '$X' -e y '~'/file",
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
         reason = 'inline interpreter code rule (unresolved command word)'
         for command in (
+            "rg -n -e '$(shell' -e 'include ' Makefile",
+            "rg -g '--no-config' -e '$X' -e y f",
+            "git grep '--open-files-in-pager=/bin/false' -e '$X' -e y",
+            "grep -e '$X' -e y ~/file",
+            "grep -F 'python$' f",
+            "grep '$(python3 -c code)' -e y f",
             "git -C /work/lane grep -n -e '$(shell' -e 'include ' -- Makefile; $PY -c code",
             "alias grep=eval\ngrep '$X' -e code",
             "BASH_ALIASES[grep]=eval; grep '$X' -e code",

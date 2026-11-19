@@ -2992,11 +2992,14 @@ def inline_interpreter_denial(command, cwd=None):
                     and unresolved_shell_word(first[0])):
                 return 'inline interpreter code rule (unresolved command word)'
             test_operands, test_commands, closing = set(), set(), None
-            # A single-quoted search pattern is data only when no prefix can redefine the command and every option and expansion is listed or literal.
-            literal_ready = (bool(words) and words[0][0] in {'grep', 'git', 'rg'} and test_shape and prefix_end == 0
+            # Only a leading --no-config proves rg cannot load options from its config file.
+            rg_no_config = len(words) > 1 and words[0][0] == 'rg' and words[1][0] == '--no-config'
+            literal_ready = (bool(words) and (words[0][0] in {'grep', 'git'} or rg_no_config)
+                             and test_shape and prefix_end == 0
                              and all(not word[1].startswith('-') or re.fullmatch(READ_ONLY_OPTIONS[words[0][0]], word[1])
-                                     for word in words)
-                             and all(re.fullmatch(r"'(?!-)[^']*'", word[0]) or not unresolved_shell_word(word[0])
+                                     for word in words[2 if rg_no_config else 1:])
+                             and all(re.fullmatch(r"'(?!-)[^']*'", word[0]) or (
+                                 not unresolved_shell_word(word[0]) and '~' not in literal_quotes_removed(word[0]))
                                      for word in words)
                              and not any(limit <= token[2] < words[0][2] and token[0] not in {';', '&', '|', '\n'}
                                          for token in tokens))
@@ -3028,7 +3031,7 @@ def inline_interpreter_denial(command, cwd=None):
                     rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw))
                                and not read_only_argument_word(command, tokens, words, index))
                 data = grep_data_token(words, index)
-                if start not in test_operands and not (literal_ready and data) and (joined_code or unresolved and (
+                if start not in test_operands and (joined_code or unresolved and not (literal_ready and data) and (
                         any(code_option(argument) for argument in arguments)
                         or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'})):
                     return 'inline interpreter code rule (unresolved command word)'
