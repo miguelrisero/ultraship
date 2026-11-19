@@ -948,6 +948,31 @@ class WorkspaceRowAdmissionTests(unittest.TestCase):
         path.write_text(json.dumps({**self.fields, **fields}))
         path.chmod(0o600)
 
+    def test_missing_record_guides_workspace_admission(self):
+        result = hook('pre', self.payload, self.env)
+        self.assertTrue(denied(result))
+        reason = result['hookSpecificOutput']['permissionDecisionReason']
+        self.assertIn(str(self.root / 'state/ultraship/row-review/r1.json'), reason)
+        self.assertIn(str(self.record), reason)
+
+        for agent in ('ship:driver', ''):
+            with self.subTest(agent=agent):
+                self.assertFalse(denied(hook('pre', {**self.payload, 'agent_type': agent,
+                                                    'tool_name': 'Write',
+                                                    'tool_input': {'file_path': str(self.record)}}, self.env)))
+
+        self.write_record()
+        self.assertFalse(denied(hook('pre', self.payload, self.env)))
+        self.assertFalse(denied(hook('pre', {**self.payload, 'tool_name': 'Grep',
+                                            'tool_input': {'path': str(self.row), 'pattern': 'id'}}, self.env)))
+
+    def test_missing_record_without_workspace_names_scratch_requirement(self):
+        with (patch.object(ultraship, 'STATE', self.root / 'state'),
+              patch.object(ultraship.Path, 'is_dir', return_value=False)):
+            fields, reason = ultraship.row_record({**self.payload, 'cwd': '/'}, 'row-review', workspace_fallback=True)
+        self.assertIsNone(fields)
+        self.assertIn('needs a `.scratch` folder', reason)
+
     def test_valid_workspace_record_uses_nearest_workspace(self):
         self.write_record(self.root / '.scratch/ultraship/row-review/r1.json')
         self.assertTrue(denied(hook('pre', self.payload, self.env)))
