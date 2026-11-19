@@ -4867,8 +4867,20 @@ def pre(data):
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__
         if reason:
+            agent_type = data.get('agent_type') or ''
+            if role(data, 'writer'):
+                superior = 'your driver'
+            elif agent_type in ('driver', 'ship:driver') or role(data, 'driver'):
+                superior = 'your chief'
+            elif LEDGER_ROLES.match(agent_type):
+                superior = 'your coordinator'
+            else:
+                superior = 'the superior named in your brief'
             deny("Ship replies to and resolves review threads only through `skills/babysit/scripts/thread_reply.py`, "
-                 "which first checks that the thread belongs to the PR's own repository and number. Rule: " + reason + '.')
+                 "which first checks that the thread belongs to the PR's own repository and number. Rule: " + reason + '.'
+                 ' Keep the task. Report the blocked step and named rule to ' + superior + '.'
+                 + (' If the brief names no superior, report it here.' if superior == 'the superior named in your brief' else '')
+                 + ' Continue independent work within your authority.')
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
         counter.parent.mkdir(parents=True, exist_ok=True)
