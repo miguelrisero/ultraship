@@ -5423,9 +5423,14 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
     run = run_identity(start, history[start])
     end = next((i for i in starts if i > start), len(history))
     end = next((i for i in range(start + 1, end) if history[i][1] == 'run-end'), end)
-    if binding is not None and (int(epoch) < int(history[start][0]) or (
-            end < len(history) and history[end][1] == 'run-end' and int(epoch) > int(history[end][0]))):
-        raise ValueError('Notification epoch falls outside the bound ship run')
+    if binding is not None:
+        when = int(epoch)
+        inside = when >= int(history[start][0])
+        if end < len(history):
+            boundary = int(history[end][0])
+            inside = inside and (when < boundary if history[end][1] == 'run-start' else when <= boundary)
+        if not inside:
+            raise ValueError('Notification epoch falls outside the bound ship run')
     if saved is not None:
         if saved[0] != str(home) or saved[1] != run:
             raise ReceiptIntegrityError('Accounting receipt names a different ledger or run')

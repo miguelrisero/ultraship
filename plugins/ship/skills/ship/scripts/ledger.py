@@ -9,11 +9,11 @@ import hashlib
 import json
 import os
 import re
-import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -132,6 +132,37 @@ def rows(path):
 def find_non_git_agent_run(cwd, agent, agent_id, histories, saved, receipt_error):
     if 'SHIP_LEDGER_DIR' in os.environ:
         return None
+    checked, budget = histories.setdefault(None, ({}, [time.monotonic() + 5, 20000]))
+    if time.monotonic() >= budget[0]:
+        raise ValueError('Workspace ledger inventory exceeds 5 seconds')
+
+    # A timed-out worker must never change the Stop's shared accounting state.
+    snapshot, remaining_dirs = checked.copy(), [budget[1]]
+    outcome = []
+
+    def lookup():
+        try:
+            result = _find_non_git_agent_run(cwd, agent, agent_id, snapshot, saved, receipt_error, remaining_dirs)
+        except Exception as exc:
+            outcome.append((None, exc))
+        else:
+            outcome.append((result, None))
+
+    worker = threading.Thread(target=lookup, daemon=True)
+    worker.start()
+    worker.join(max(0, budget[0] - time.monotonic()))
+    if worker.is_alive() or time.monotonic() >= budget[0]:
+        raise ValueError('Workspace ledger inventory exceeds 5 seconds')
+    budget[1] = remaining_dirs[0]
+    result, error = outcome[0]
+    if error is not None:
+        raise error
+    checked.update(snapshot)
+    histories.update(snapshot)
+    return result
+
+
+def _find_non_git_agent_run(cwd, agent, agent_id, checked, saved, receipt_error, remaining_dirs):
     workspace = Path(cwd).resolve()
     try:
         (workspace / '.git').lstat()
@@ -145,9 +176,6 @@ def find_non_git_agent_run(cwd, agent, agent_id, histories, saved, receipt_error
     if probe.returncode != 128 or not probe.stderr.startswith('fatal: not a git repository ('):
         return None
 
-    def census_timeout(*_):
-        raise ValueError('Workspace ledger inventory exceeds 5 seconds')
-
     def listing_error(exc):
         raise exc
 
@@ -160,52 +188,41 @@ def find_non_git_agent_run(cwd, agent, agent_id, histories, saved, receipt_error
             with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)) as fh:
                 if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
                     raise ValueError(f'Workspace ledger must be a regular file: {path}')
-                histories[path] = [line.split('\t') for line in fh.read().splitlines() if line]
-            checked.add(path)
-        return histories[path]
+                checked[path] = [line.split('\t') for line in fh.read().splitlines() if line]
+        return checked[path]
 
-    checked, budget = histories.setdefault(None, (set(), [time.monotonic() + 5, 20000]))
-    remaining = budget[0] - time.monotonic()
-    if remaining <= 0:
-        census_timeout()
-    previous = signal.signal(signal.SIGALRM, census_timeout)
-    try:
-        signal.setitimer(signal.ITIMER_REAL, remaining)
-        if saved is not None:
-            home = Path(saved[0])
-            if (not home.is_relative_to(workspace) or home.suffix != '.tsv' or
-                    not ledger_directory(home.parent.relative_to(workspace)) or home.resolve() != home):
-                raise receipt_error('Accounting receipt ledger is outside the workspace layouts')
-            read_rows(home)
-            return home, saved[1], None
+    if saved is not None:
+        home = Path(saved[0])
+        if (not home.is_relative_to(workspace) or home.suffix != '.tsv' or
+                not ledger_directory(home.parent.relative_to(workspace)) or home.resolve() != home):
+            raise receipt_error('Accounting receipt ledger is outside the workspace layouts')
+        read_rows(home)
+        return home, saved[1], None
 
-        count = 0
-        for root, _, files in os.walk(workspace, onerror=listing_error, followlinks=False):
-            if budget[1] == 0:
-                raise ValueError('Workspace ledger inventory exceeds 20000 directories')
-            budget[1] -= 1
-            directory = Path(root)
-            if not ledger_directory(directory.relative_to(workspace)):
+    count = 0
+    for root, _, files in os.walk(workspace, onerror=listing_error, followlinks=False):
+        if remaining_dirs[0] == 0:
+            raise ValueError('Workspace ledger inventory exceeds 20000 directories')
+        remaining_dirs[0] -= 1
+        directory = Path(root)
+        if not ledger_directory(directory.relative_to(workspace)):
+            continue
+        for name in files:
+            path = directory / name
+            if path.suffix != '.tsv' or path.resolve() != path:
                 continue
-            for name in files:
-                path = directory / name
-                if path.suffix != '.tsv' or path.resolve() != path:
-                    continue
-                start = None
-                for index, row in enumerate(read_rows(path)):
-                    if row[1] == 'run-start':
-                        start = index
-                    elif row[1] not in MARKS and agent_key(row[2]) == (agent, agent_id):
-                        count += 1
-                        home, run_start, match = path, start, index
-        if count != 1:
-            raise ValueError(f'Found {count} ledger rows for agent {agent}@{agent_id}; expected exactly one')
-        if run_start is None:
-            raise ValueError(f'Ledger row for agent {agent}@{agent_id} has no preceding run-start')
-        return home, run_identity(run_start, histories[home][run_start]), match
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
+            start = None
+            for index, row in enumerate(read_rows(path)):
+                if row[1] == 'run-start':
+                    start = index
+                elif row[1] not in MARKS and agent_key(row[2]) == (agent, agent_id):
+                    count += 1
+                    home, run_start, match = path, start, index
+    if count != 1:
+        raise ValueError(f'Found {count} ledger rows for agent {agent}@{agent_id}; expected exactly one')
+    if run_start is None:
+        raise ValueError(f'Ledger row for agent {agent}@{agent_id} has no preceding run-start')
+    return home, run_identity(run_start, checked[home][run_start]), match
 
 
 def open_run(path):

@@ -254,6 +254,31 @@ class LedgerDirTests(unittest.TestCase):
         finally:
             hidden.chmod(0o700)
 
+    def test_stop_blocks_when_the_git_probe_exceeds_the_inventory_deadline(self):
+        owed, pending, _ = self.record_non_git_result()
+        bin_dir = self.base / 'bin'
+        bin_dir.mkdir()
+        fake_git = bin_dir / 'git'
+        fake_git.write_text('#!/bin/sh\nexec sleep 7\n')
+        fake_git.chmod(0o700)
+        env = {**self.env, 'PATH': f'{bin_dir}{os.pathsep}{self.env["PATH"]}'}
+        blocked = json.loads(self.hook('stop', cwd=str(self.workspace), env=env))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn('Workspace ledger inventory exceeds 5 seconds', blocked['reason'])
+        self.assertEqual(owed.read_bytes(), pending)
+
+    def test_stop_blocks_non_git_match_after_the_next_run_starts(self):
+        owed, evidence, agent = self.record_non_git_result()
+        pending = b'21\t' + evidence.split(b'\t', 1)[1]
+        owed.write_bytes(pending)
+        self.resolve().write_text(f'10\trun-start\tlight\tsha\topen\trun-1\n'
+                                  f'19\tdeep-review\t{agent}\tsha\tpass\t\n'
+                                  '20\trun-start\tlight\tsha\topen\trun-2\n')
+        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn('Notification epoch falls outside the bound ship run', blocked['reason'])
+        self.assertEqual(owed.read_bytes(), pending)
+
     def test_stop_blocks_non_git_match_after_the_run_end(self):
         owed, evidence, agent = self.record_non_git_result()
         pending = b'20\t' + evidence.split(b'\t', 1)[1]
