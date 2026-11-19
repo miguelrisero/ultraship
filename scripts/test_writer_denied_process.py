@@ -109,6 +109,41 @@ class WriterDeniedProcessTests(unittest.TestCase):
         self.check((REFERENCE_FILE,), (f'\n{reference}\n',))
         self.check(WRITER_FILES, (f'\n{writer}\n',))
 
+    def test_scope_refusal_rule_limits_refusal_resolution(self):
+        cause = 'The sole stated cause is that a CoC decision asks for an action the writer contract forbids.'
+        resolution = (
+            'Only a new CoC decision with a new SHA256 can resolve that refusal for that cause.',
+            'Require the new decision to quote the refusal verbatim.',
+            'Require it to name the earlier decision by path and SHA256.',
+            'Require it to remove the cause so that every action it grants fits the writer contract.',
+            'The new decision grants nothing the writer contract forbids, '
+            'and widens no read scope, protected row authority or other guard.',
+            'Each action it grants still needs its own route and the authority that route names; '
+            'this rule grants no authority.',
+            'Never run the refused action under either decision.',
+            'Verify the new decision in full before the next attempt.',
+            'Compare each action it grants with the writer contract and its route before the next attempt.',
+            'Keep the refusal pending when that comparison is inconclusive or finds an action the writer contract forbids.',
+            'Follow every other route requirement.',
+            'This rule lifts no hook, permission, tool or owner refusal, and no security, secret or production gate.',
+            'It lifts no refusal of a push or a merge, and an explicit owner refusal still needs applicable owner authority.',
+        )
+        reference = ' '.join((
+            "Scope-refusal rule: it applies only to an agent's own refusal for the sole cause below.",
+            cause,
+            'Quote the refusal and its cause to your superior, who relays them up the superior chain to the CoC.',
+            *resolution,
+        ))
+        writer = '\n'.join((
+            'This [scope-refusal rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) '
+            'applies only to your own refusal for the sole cause below.',
+            cause,
+            'Quote the refusal and its cause to your driver.',
+            *resolution,
+        ))
+        self.check((REFERENCE_FILE,), (f'\n{reference}\n',))
+        self.check(WRITER_FILES, (f'\n{writer}\n',))
+
     def test_drivers_relay_decision_defect_refusals_and_corrected_decisions(self):
         for name in ('driver.md', 'driver--sol.md'):
             with self.subTest(file=name):
