@@ -4177,13 +4177,48 @@ def hidden_gh_api_calls(text):
     return max(counts)
 
 
+def review_thread_repo_read_quotes(command):
+    # shortcut: recognize the single-line preflight grammar; use a shell parser for broader syntax.
+    if '"$(gh' not in command or '\x00' in command or any(c.isspace() and c not in ' \t' for c in command):
+        return command
+    name = r'[A-Za-z_][A-Za-z0-9_]*'
+    plain = r'[A-Za-z0-9_./:@=+,%\-]'
+    single = r"'[^']*'"
+    variable = rf'\$(?:{name}(?![A-Za-z0-9_])|\{{{name}(?:%/\*|:-{plain}+)?\}})'
+    git_read = (r'\$\(git[ \t]+(?:rev-parse[ \t]+(?:--show-toplevel|HEAD)'
+                r"|rev-parse[ \t]+--abbrev-ref[ \t]+'@\{u\}'[ \t]+2>/dev/null[ \t]+\|\|[ \t]+:"
+                r'|branch[ \t]+--show-current|status[ \t]+--porcelain=v1'
+                r'|remote[ \t]+get-url[ \t]+--push[ \t]+--all[ \t]+origin)\)')
+    double = rf'"(?:[^"$`\\!]|{variable}|{git_read})*"'
+    word = rf'(?:{plain}|{single}|{double}|{variable}|{git_read})+'
+    repo_test = (r'test[ \t]+"\$\(gh[ \t]+repo[ \t]+view[ \t]+(?!-)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
+                 r'[ \t]+--json[ \t]+nameWithOwner,defaultBranchRef[ \t]+--jq[ \t]+'
+                 r"""'(?P<jq>\.nameWithOwner\+" "\+\.defaultBranchRef\.name)'\)"[ \t]+=[ \t]+""" + single)
+    branch_case = rf'case[ \t]+"\${name}"[ \t]+in[ \t]+{plain}+\|\*/{plain}+\)[ \t]+exit[ \t]+[0-9]+;;[ \t]+esac'
+    simple = rf'(?:test|gh|git|cd|awk|python3|printf|curl|jq)(?:[ \t]+(?:{word}|>[ \t]+{word}))*'
+    step = re.compile(rf'[ \t]*(?:{repo_test}|{branch_case}|set[ \t]+-euo[ \t]+pipefail|{name}={word}|{simple})'
+                      r'[ \t]*(?P<separator>;|&&|\|\||\||$)')
+    parts, cursor = [], 0
+    while cursor < len(command):
+        match = step.match(command, cursor)
+        if not match or match.end() == len(command) and match['separator'] in ('&&', '||', '|'):
+            return command
+        start, end = match.span('jq')
+        # The outer shlex pass removes these escapes and passes the literal jq word to the nested scan.
+        parts.append(match[0] if start < 0 else
+                     command[cursor:start] + match['jq'].replace('"', r'\"') + command[end:match.end()])
+        cursor = match.end()
+    return ''.join(parts)
+
+
 # shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
-def review_thread_denial(command, data_mode=False):
+def review_thread_denial(command, data_mode=False, *, outer=True):
     if read_only_shell(command) or literal_search_shell(command):
         return None
     if '$' not in command and re.fullmatch(
             r"git commit(?: +-[A-Za-z]+| +--[a-z-]+)*(?: +-m +'[^']*'(?: +-[A-Za-z]+| +--[a-z-]+)*)+ *", command):
         return None
+    original = command
     command = command.replace('\\\n', '')
     normalized = re.sub(r'''['"\\]''', '', command).casefold()
     if re.search(r'\bgh\b', normalized) and '`' in outside_single_quotes(command):
@@ -4199,7 +4234,15 @@ def review_thread_denial(command, data_mode=False):
                                                'resolvereviewthread'))
             or re.search(r'comments/\S*/replies', mutation_text)):
         return 'raw review-thread mutation'
-    command = cat_heredoc_data(command)
+    reason = review_thread_scan(cat_heredoc_data(command), normalized, data_mode)
+    if outer and reason == 'unparsed shell syntax rule: No closing quotation':
+        quoted = review_thread_repo_read_quotes(original)
+        if quoted != original:
+            return review_thread_scan(quoted, normalized, data_mode)
+    return reason
+
+
+def review_thread_scan(command, normalized, data_mode):
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace = ' \t\r'
@@ -4262,7 +4305,7 @@ def review_thread_denial(command, data_mode=False):
             if any(gh_word(token) for token in re.split(r'[\s;&|()<>`]+', text)):
                 api_calls = hidden_gh_api_calls(text)
                 argument_data = data_command and position > 0 and not api_calls
-                reason = review_thread_denial(text if argument_data else value, data_mode=argument_data)
+                reason = review_thread_denial(text if argument_data else value, data_mode=argument_data, outer=False)
                 if reason == 'unparsed shell syntax rule: No closing quotation' and (
                         position > 0 and words[0][1] == 'grep' and '"' in value and not api_calls
                         and re.fullmatch(r"'[^']*'", raw)

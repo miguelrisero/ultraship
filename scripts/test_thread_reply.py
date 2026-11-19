@@ -1682,6 +1682,48 @@ class HookTests(unittest.TestCase):
             with self.subTest(caller=caller):
                 self.assertEqual(self.decision(command, caller), {})
 
+    def test_preflight_with_nested_repo_read_keeps_role_limits(self):
+        command = (
+            r"""set -euo pipefail; w=/work/example/repo; d=${w%/*}/intake; cd "$w"; """
+            r"""test "$(git rev-parse --show-toplevel)" = "$w"; """
+            r"""test "$(git branch --show-current)" = lane/example; """
+            r"""test "$(git rev-parse HEAD)" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; """
+            r"""test -z "$(git status --porcelain=v1)"; """
+            r"""git remote get-url --push --all origin | python3 -I -c 'import sys; """
+            r"""u=sys.stdin.read().splitlines(); ok=u==["https://git.example.invalid/o/r.git"]; """
+            r"""print("Endpoint matches" if ok else "Endpoint differs"); sys.exit(not ok)'; """
+            r"""url=$(git remote get-url --push --all origin); """
+            r"""git ls-remote --symref "$url" HEAD > "$d/default.tsv"; """
+            r"""awk '$1=="ref:" && $2=="refs/heads/trunk" && $3=="HEAD" {n++} END{exit n!=1}' "$d/default.tsv"; """
+            r"""test "$(gh repo view o/r --json nameWithOwner,defaultBranchRef """
+            r"""--jq '.nameWithOwner+" "+.defaultBranchRef.name')" = 'o/r trunk'; """
+            r"""upstream=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null || :); """
+            r"""case "$upstream" in trunk|*/trunk) exit 1;; esac; """
+            r"""printf 'Branch: %s\nHead: %s\nEndpoint: %s\nUpstream: %s\n' """
+            r""""$(git branch --show-current)" "$(git rev-parse HEAD)" "$url" "${upstream:-none}"; """
+            r"""curl -fsS --max-time 15 'https://queue.example.invalid/mq/queue?limit=100' | """
+            r"""jq -e '(.truncated == false) and ([.entries[] | select(tostring | contains("example-id"))] | length == 0)'"""
+        )
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+        self.assertEqual(self.decision(command, 'ship:writer--sol').get('permissionDecision'), 'deny')
+
+        cases = (
+            (command + '; test "unfinished', 'unparsed shell syntax rule: No closing quotation'),
+            (command.replace(".defaultBranchRef.name')", ".defaultBranchRef.name'", 1),
+             'unparsed shell syntax rule: No closing quotation'),
+            (command.replace('; ', ';\n', 1), 'unparsed shell syntax rule: No closing quotation'),
+            (command + '; gh api -X POST repos/o/r/pulls/7/comments -f body=x',
+             'REST review-comment write or opaque endpoint'),
+        )
+        for shell, rule in cases:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(rule=rule, caller=caller):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
+
     def test_guard_exception_denies_every_caller(self):
         with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):
             for agent_type in ('', 'ship:driver', 'ship:writer--sol'):
