@@ -150,21 +150,18 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'exception to the no-whole-file-parse rule; the writer still reads no row lines.', self.refusals,
         )
 
-    def test_message_format_refusals_always_permit_a_fixed_resend(self):
+    def test_message_warnings_and_receipt_refusals_keep_existing_authority(self):
         for requirement in (
-            'Message-format rule: a `text_lint.py` refusal whose findings are all formatting findings '
-            'always permits a resend with the findings fixed.',
+            'Message-format rule: `text_lint.py` warns about prose formatting and lets the call proceed.',
             'Examples include glued words, sentence or word limits, and a missing `Facts` heading.',
-            'Apply only the exact formatting remedy; preserve the action, recipient, scope, '
-            'authority, non-prose fields, owner provenance, and choice identifiers.',
+            'Preserve the action, recipient, scope, authority, non-prose fields, owner provenance, and choice identifiers.',
             'A missing `Facts` heading organizes supported existing facts only; '
             'invent zero facts, evidence, approval, or authority.',
-            'Cite the receipt the refusal names as `<!-- ultraship-receipt:ID -->` in the resent prose, '
-            'or resend without a marker; the hook checks both.',
+            'Keep the Input classification requirement and receipt validation in force.',
+            'After a receipt citation refusal, remove the receipt marker and resend with the same action, recipient and scope.',
             'Only the hook writes receipt state; agents never read, write or reset the receipt store.',
-            'the hook refuses a receipt marker in an `Agent` or `Task` prompt.',
-            'A refusal that is not formatting-only permits a resend after the content meets the rule '
-            'the refusal names, or after the superior grants it.',
+            'Keep receipt markers out of `Agent` and `Task` prompts.',
+            'For a content refusal, fix the content to meet the named rule or ask the superior for permission within existing authority.',
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, self.refusals)

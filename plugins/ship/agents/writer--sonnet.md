@@ -744,8 +744,8 @@ Before it admits one writer, the driver records the free, the decision file, its
 A writer refuses the free when that record is missing or names another writer.
 Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial keep their row attempts used; no decision frees those attempts.
 The freed attempt keeps every other route requirement, authority, independent review and publication hold.
-After a `text_lint.py` formatting refusal, resend with the findings fixed; apply the [message-format rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals).
-After any other hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
+Apply a `text_lint.py` formatting warning to the next message. See the [message-format rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals).
+After a hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too.
 Otherwise tell the driver about the denial and ask for permission to run the command; the driver may grant it or run the command itself.
 Checks that the brief names stay permitted when the hook admits them.

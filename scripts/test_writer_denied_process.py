@@ -12,7 +12,7 @@ REFERENCE_FILE = 'plugins/ship/skills/ship/references/owner-decisions.md'
 HEADING = 'Loaded instructions and refusals\n'
 CHECKS_SENTENCE = 'Checks that the brief names stay permitted when the hook admits them.'
 WRITER_SENTENCES = (
-    'After any other hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.',
+    'After a hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.',
     'A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too.',
     'Otherwise tell the driver about the denial and ask for permission to run the command; the driver may grant it or run the command itself.',
     CHECKS_SENTENCE,
