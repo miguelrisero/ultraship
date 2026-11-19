@@ -1149,6 +1149,20 @@ class HookTests(unittest.TestCase):
                             'Ship replies to and resolves review threads only through '))
                         self.assertIn(' Rule: ', result['permissionDecisionReason'])
 
+    def test_refused_review_call_keeps_task_and_names_superior(self):
+        command = 'git --config-env=core.pager=PAGER log -1'
+        for caller, superior in (('', 'the superior named in your brief'),
+                                 ('ship:driver', 'your chief'),
+                                 ('ship:driver--sol', 'your chief'),
+                                 ('ship:reviewer--sol', 'your coordinator')):
+            with self.subTest(caller=caller):
+                denial = self.decision(command, caller)
+                self.assertEqual(denial.get('permissionDecision'), 'deny')
+                reason = denial['permissionDecisionReason']
+                self.assertIn('Keep the task.', reason)
+                self.assertIn('Report the blocked step and named rule to ' + superior, reason)
+                self.assertIn('Continue independent work within your authority.', reason)
+
     def test_admit_forms_for_main_and_driver(self):
         for agent_type in ('', 'ship:driver'):
             for command in ADMIT:
