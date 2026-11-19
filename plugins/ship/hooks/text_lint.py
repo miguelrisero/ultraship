@@ -30,8 +30,7 @@ Decision
 - <The action you take or ask for, within existing authority.>
 Next
 - <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>.
-<Every line: one point per sentence, at most 25 words each, with a space between words.>
-<Put the receipt marker exactly once.>"""
+<Every line: one point per sentence, at most 25 words each, with a space between words.>"""
 INPUT_TEMPLATE = '''Use exactly one output-kind meta tag: decision or result.
 Decision:
 <meta name="output-kind" content="decision">
@@ -42,8 +41,7 @@ Decision:
 <h2>If no answer</h2><p>...</p>
 Result alternative:
 <meta name="output-kind" content="result"><p>...</p>
-Write at most 25 words per sentence.
-Put the receipt marker exactly once.'''
+Write at most 25 words per sentence.'''
 
 
 class FindingsError(ValueError):
@@ -77,9 +75,11 @@ class VisibleText(HTMLParser):
             self.hidden.append(tag)
         if self.hidden:
             return
-        attrs = dict(attrs)
-        if tag == 'meta' and attrs.get('name') == 'output-kind':
-            self.kinds.append(attrs.get('content'))
+        if tag == 'meta':
+            names = [value for key, value in attrs if key == 'name']
+            if 'output-kind' in names:
+                contents = [value for key, value in attrs if key == 'content']
+                self.kinds.append(contents[0] if len(names) == len(contents) == 1 else None)
         if tag in self.BLOCKS:
             self.parts.append('\n')
         elif tag in ('td', 'th'):
@@ -119,10 +119,16 @@ def hold_wall(text):
         prose = re.sub(r'`[^`]*`', '', view)
         words = ' '.join(t for t in prose.split() if not re.search(r'https?://|/', t))
         if len(HOLD_WORDS.findall(words)) >= 6:
-            raise ValueError('Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.')
+            raise FormatError(['Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.'])
+
+
+def check_unicode(text):
+    if re.search(r'[\ud800-\udfff]', text):
+        raise ValueError('Use valid Unicode in the message or Input.')
 
 
 def check(text, kind='result'):
+    check_unicode(text)
     visible = ''.join(VisibleText(text).parts)
     plain = peer_text(text) if kind == 'peer' else visible
     # A peer reads plain text; main's HTML view of the raw text keeps every word and sentence refusal main made.
@@ -167,8 +173,12 @@ def outgoing(event):
             formatting_only = False
 
     def inspect():
+        nonlocal formatting_only
         tool, args = event.get('tool_name', ''), event.get('tool_input') or {}
         if tool == 'SendMessage':
+            for field in ('message', 'content', 'summary'):
+                if args.get(field) is not None:
+                    collect(check_unicode, args[field])
             text = sendmessage_body(args)
             if text:  # Native subscriptions and lifecycle controls can have no prose body.
                 collect(check, text, 'peer')
@@ -185,6 +195,7 @@ def outgoing(event):
             valid_kind = len(kinds) == 1 and kinds[0] in ('decision', 'result')
             if not valid_kind:
                 findings.append('Input HTML requires one explicit output-kind classification: decision or result.')
+                formatting_only = False
             collect(check, content.get('title', ''))
             collect(check, body, kinds[0] if valid_kind else 'result')
 
@@ -425,7 +436,7 @@ def consume_receipt(receipt_id, event, receipt):
 
 
 def hook(event, parse_error=None):
-    parent = None
+    parent, retry = None, ''
     try:
         if parse_error is not None:
             raise parse_error
@@ -439,35 +450,26 @@ def hook(event, parse_error=None):
                     parent = None
                 else:
                     consume_receipt(parent, event, receipt)
-        except ValueError as exc:
-            # A bad citation is a format fault; the fresh receipt lets the sender resend with a fix.
-            raise FormatError([str(exc)]) from None
+        except ValueError:
+            retry = ' Remove the receipt marker and resend with the same action, recipient and scope.'
+            raise
         if event.get('tool_name') not in ('Agent', 'Task'):
             outgoing(event)
         return
+    except FormatError as exc:
+        template = PEER_TEMPLATE if event.get('tool_name') == 'SendMessage' else INPUT_TEMPLATE
+        output = {'additionalContext': 'Output contract warning: ' + str(exc)
+                  + ' This call proceeds. Use this shape next time:\n' + template}
     except Exception as exc:
-        findings = exc.findings if isinstance(exc, FindingsError) else [str(exc)]
-        formatting_only = isinstance(exc, FindingsError) and exc.formatting_only
-    reason = 'Output contract: ' + ' '.join(findings)
-    try:
-        receipt = write_receipt(event, findings, formatting_only, parent)
-    except Exception:
-        reason += ' No receipt was written. Fix the findings and resend without a receipt marker.'
-    else:
-        if receipt['resend_allowed']:
-            template = INPUT_TEMPLATE
-            if event.get('tool_name') == 'SendMessage':
-                template = PEER_TEMPLATE
-            reason += (' Resend with the findings fixed; keep the same action, recipient and scope.'
-                       + ' Resend with this shape:\n' + template)
-        elif not formatting_only:
-            reason += (' This refusal is not formatting-only. Resend after the content meets the rule above,'
-                       ' or ask your superior for permission.')
-        reason +=' Receipt: `' + receipt['id'] + '`.'
-        if receipt['resend_allowed']:
-            reason += ' To resend, put `<!-- ultraship-receipt:' + receipt['id'] + ' -->` in the resent prose.'
-    print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
-        'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))
+        retry = retry or (' This refusal is not formatting-only. Resend after the content meets the rule above,'
+                          ' or ask your superior for permission.')
+        reason = 'Output contract: ' + str(exc) + retry
+        try:
+            reason += ' Receipt: `' + write_receipt(event, [str(exc)], False, parent)['id'] + '`.'
+        except Exception:
+            pass
+        output = {'permissionDecision': 'deny', 'permissionDecisionReason': reason}
+    print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', **output}}))
 
 
 def self_test():
