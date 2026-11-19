@@ -1,7 +1,8 @@
-"""Squash containment requires PR linkage and the exact clean merge tree."""
+"""Squash containment requires PR linkage and a clean merge with limited differences."""
 import json
 import os
 from pathlib import Path
+from shutil import copyfile
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,9 @@ A single-parent squash commit meets that requirement only when it contains the r
 The checker uses `git merge-tree --write-tree` with the squash parent first and the author head second.
 Require this check even when the squash parent already contains the author's changes.
 The `files` field counts the paths that differ between the squash parent and the squash commit.
+A path that `squash-containment.json` lists for the PR's repository may differ from that merge only when every other path matches exactly.
+Such a path keeps its file mode, and the merge must change it from the squash parent.
+The `PASS` line names each such path as `regenerated=<path>`; with no listed path, the exact tree rule stays.
 The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
 Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
 Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.
@@ -33,6 +37,12 @@ Every other commit keeps the containment requirement unchanged.
 
 
 class ContractTests(unittest.TestCase):
+    def test_shipped_config_lists_only_the_two_patricia_paths(self):
+        config = json.loads(SCRIPT.with_suffix('.json').read_text(encoding='utf-8'))
+        self.assertEqual(config, {'bettergroupinc/patricia-monorepo': [
+            'backend/api/openapi.json', 'frontend/packages/api-types/src/generated/api.ts',
+        ]})
+
     def test_each_contract_carries_the_exact_body_once(self):
         for path in CONTRACT_PATHS:
             with self.subTest(path=path):
@@ -87,14 +97,108 @@ class SquashContainmentTests(unittest.TestCase):
         self.git('add', '--', *files)
         self.git('commit', '-m', 'Fixture commit')
 
-    def check(self, squash=None, linked=None, state='MERGED', base=None, author=None):
+    def check(self, squash=None, linked=None, state='MERGED', base=None, author=None,
+              script=SCRIPT, pr=PR, cwd=None):
         squash = squash or self.squash
         info = {'state': state, 'mergeCommit': {'oid': linked or squash}}
         return subprocess.run(
-            [sys.executable, str(SCRIPT), PR, base or self.base, author or self.author, squash],
-            cwd=self.repo, env={**self.env, 'GH_JSON': json.dumps(info)},
+            [sys.executable, str(script), pr, base or self.base, author or self.author, squash],
+            cwd=cwd or self.repo, env={**self.env, 'GH_JSON': json.dumps(info)},
             capture_output=True, text=True,
         )
+
+    def script_with_config(self, config):
+        script = self.directory / SCRIPT.name
+        copyfile(SCRIPT, script)
+        script.with_suffix('.json').write_text(json.dumps(config), encoding='utf-8')
+        return script
+
+    def regenerated_squash(self, extra=None):
+        self.git('checkout', '-b', 'generated-main', self.base)
+        lines = ''.join(f'line {number}\n' for number in range(30))
+        self.commit({'generated.txt': lines})
+        base = self.git('rev-parse', 'HEAD')
+        self.git('checkout', '-b', 'generated-feature')
+        self.commit({'generated.txt': lines.replace('line 5\n', 'feature line\n'),
+                     'alpha.txt': 'feature alpha\n'})
+        author = self.git('rev-parse', 'HEAD')
+        self.git('checkout', 'generated-main')
+        self.commit({'generated.txt': lines.replace('line 25\n', 'main line\n')})
+        parent = self.git('rev-parse', 'HEAD')
+        self.git('merge', '--squash', 'generated-feature')
+        self.commit({'generated.txt': 'regenerated output\n', **(extra or {})})
+        return base, author, parent, self.git('rev-parse', 'HEAD')
+
+    def test_regenerated_path_passes_and_uses_the_repository_root(self):
+        base, author, parent, squash = self.regenerated_squash()
+        subdir = self.repo / 'subdir'
+        subdir.mkdir()
+        script = self.script_with_config({'example/repo': ['generated.txt']})
+        pr = 'https://github.com/Example/Repo/pull/1'
+        result = self.check(base=base, author=author, squash=squash, script=script, pr=pr, cwd=subdir)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, f'PASS pr={pr} base={base} author_head={author} '
+                         f'squash={squash} parent={parent} files=2 regenerated=generated.txt\n')
+
+    def test_regenerated_path_with_a_hand_written_difference_refuses(self):
+        base, author, _, squash = self.regenerated_squash({'alpha.txt': 'different alpha\n'})
+        script = self.script_with_config({'example/repo': ['generated.txt']})
+        self.assert_refuse(self.check(base=base, author=author, squash=squash, script=script),
+                           'squash tree differs')
+
+    def test_listed_path_unchanged_in_clean_merge_refuses(self):
+        self.commit({'unrelated.txt': 'regenerated output\n'})
+        squash = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-m', 'Regenerated squash')
+        script = self.script_with_config({'example/repo': ['unrelated.txt']})
+        result = self.check(squash=squash, script=script)
+        self.assert_refuse(result, 'regenerated')
+        self.assertIn('unrelated.txt', result.stdout)
+
+    def test_regenerated_path_requires_a_config_entry_for_the_pr_repository(self):
+        base, author, _, squash = self.regenerated_squash()
+        for config in ({'other/repo': ['generated.txt']}, {'example/repo': []}):
+            with self.subTest(config=config):
+                result = self.check(base=base, author=author, squash=squash,
+                                    script=self.script_with_config(config))
+                self.assert_refuse(result, 'squash tree differs')
+                self.assertEqual(result.stdout,
+                                 "REFUSE 'squash tree differs from the clean merge of the author head'\n")
+
+    def test_regenerated_path_requires_a_full_github_pr_url(self):
+        base, author, _, squash = self.regenerated_squash()
+        script = self.script_with_config({'example/repo': ['generated.txt']})
+        self.assert_refuse(self.check(base=base, author=author, squash=squash, script=script,
+                                      pr=PR + '/files'), 'squash tree differs')
+
+    def test_config_validation_applies_only_to_differing_trees(self):
+        base, author, _, squash = self.regenerated_squash()
+        for paths in ('generated.txt', ['generated.txt', None], ['generated.txt', ''],
+                      ['generated.txt', 'with space.txt']):
+            with self.subTest(paths=paths):
+                script = self.script_with_config({'example/repo': paths})
+                self.assert_refuse(self.check(base=base, author=author, squash=squash, script=script),
+                                   'invalid regenerated paths')
+                self.assertEqual(self.check(script=script).stdout, self.check().stdout)
+
+    def test_listed_path_mode_change_or_deletion_refuses(self):
+        script = self.script_with_config({'example/repo': ['alpha.txt']})
+        self.git('update-index', '--chmod=+x', 'alpha.txt')
+        tree = self.git('write-tree')
+        squash = self.git('commit-tree', tree, '-p', self.parent, '-m', 'Executable squash')
+        self.assert_refuse(self.check(squash=squash, script=script), 'squash tree differs')
+        self.git('rm', 'alpha.txt', '-f')
+        tree = self.git('write-tree')
+        squash = self.git('commit-tree', tree, '-p', self.parent, '-m', 'Deleted path squash')
+        self.assert_refuse(self.check(squash=squash, script=script), 'squash tree differs')
+
+    def test_multiple_regenerated_paths_pass_in_diff_tree_order(self):
+        base, author, parent, squash = self.regenerated_squash({'alpha.txt': 'regenerated alpha\n'})
+        script = self.script_with_config({'example/repo': ['generated.txt', 'alpha.txt']})
+        result = self.check(base=base, author=author, squash=squash, script=script)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, f'PASS pr={PR} base={base} author_head={author} '
+                         f'squash={squash} parent={parent} files=2 '
+                         'regenerated=alpha.txt regenerated=generated.txt\n')
 
     def assert_refuse(self, result, reason):
         self.assertEqual(result.returncode, 1, result.stderr)

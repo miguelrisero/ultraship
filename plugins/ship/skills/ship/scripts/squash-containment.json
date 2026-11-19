@@ -1,0 +1,6 @@
+{
+  "bettergroupinc/patricia-monorepo": [
+    "backend/api/openapi.json",
+    "frontend/packages/api-types/src/generated/api.ts"
+  ]
+}
