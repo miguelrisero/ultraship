@@ -168,23 +168,15 @@ Require scoped source evidence that the named merge caused the zero count and th
 Use the bound pre-merge main and merged commit to show that the breaking PR changed the guarded code itself.
 Require positive evidence that this code change made the stored mutant impossible to apply at the guarded site.
 Require the frozen decision to bind this evidence to the follow-up under the owner standing grant before authorizing the edit.
-Require one disposition for each row: a landed designated-test change or mutant adaptation under that grant, or a CoC decision receipt.
-A CoC decision receipt is the disposition only when the breaking change is not the repair lane's own diff and no landed disposition exists.
-The receipt states that it is the disposition and names the row ID, the breaking commit and the paired-field re-anchor.
-The receipt also records the evidence that no landed disposition exists for the row, with the commits it checked.
-Name the receipt by absolute path and SHA256. Verify the digest before any protected access.
-For a landed disposition, require the disposition record to cite the landed row change and its CoC decision.
-For a landed disposition, require a receipt for the independent not-weaker review of that disposition.
-For a landed disposition, require that reviewer to differ from the breaking PR author and the person who applied the disposition.
-For a landed disposition, bind the review receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.
-For a landed disposition, verify that the reviewed disposition is the one that landed for the named row.
-A CoC decision receipt needs no landed disposition and no prior disposition review.
-For a CoC decision receipt, the independent repair review below is the one not-weaker review.
-That reviewer also differs from the breaking PR author.
-Record the disposition and its evidence references in the frozen edit decision, with the receipt path and SHA256 for a CoC receipt.
-Bind them to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.
-Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or landed-disposition review.
-For a CoC decision receipt, require the independent repair review below before publication.
+Require recorded evidence of a landed designated-test change or mutant adaptation under that grant.
+Require the disposition record to cite the landed row change and its CoC decision.
+Require a receipt for the independent not-weaker review of that disposition.
+Require that reviewer to differ from the breaking PR author and the person who applied the disposition.
+Bind the receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.
+Verify that the reviewed disposition is the one that landed for the named row.
+Record both items and their verifiable evidence references in the frozen edit decision.
+Bind both items to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.
+Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched record or review.
 A zero count alone supplies zero repair authority. A disposition label supplies zero proof.
 Before editing, confirm that the lane head equals the bound pre-edit commit and that the named rows and subjects match bound main.
 Use one native Edit per row with `replace_all=false` and a unique `old_string` within the approved extent that includes the row ID.
