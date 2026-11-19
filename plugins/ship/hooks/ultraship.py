@@ -4460,6 +4460,14 @@ LITERAL_GIT_GREP_ANCHOR = re.compile(
     r"(?:[ \t]+(?!-)[\w./-]+)*(?:[ \t]+--(?:[ \t]+[\w./-]+)*)?[ \t]*\n?")
 
 
+# Match the wrapper as well as the pipeline so incomplete shell syntax keeps the fallback.
+LITERAL_GIT_COUNT_COMMAND = re.compile(
+    r'[ \t]*(?:cd[ \t]+(?!-)[A-Za-z0-9_./-]+[ \t]+&&[ \t]+)?'
+    r'echo[ \t]+"(?:[A-Za-z0-9_ .-]+:[ \t]+)?\$\([ \t]*git[ \t]+ls-tree[ \t]+-r[ \t]+--name-only'
+    r'[ \t]+[A-Za-z0-9_][A-Za-z0-9_./-]*[ \t]+--[ \t]+[A-Za-z0-9_./-]+'
+    r'''[ \t]*\|[ \t]*grep[ \t]+-c[ \t]+'(?!-)(?:[A-Za-z0-9_./-]|\\\.)+\$'[ \t]*\)"[ \t]*\n?''')
+
+
 def pr_comment_body_removed(command):
     """Mask the quoted body of one complete top-level PR comment for the thread guard."""
     # shortcut: omit escaped apostrophes in ANSI-C quotes until the shell dialect is known.
@@ -4850,7 +4858,8 @@ def pre(data):
                       or ("$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
                                               or re.search(r'\b(?:gh|api)\b', normalized))
                           and not LITERAL_GIT_GREP_ANCHOR.fullmatch(command)
-                          and "$'" in writer_quoted_grep_data(command))):
+                          and "$'" in writer_quoted_grep_data(command)
+                          and not LITERAL_GIT_COUNT_COMMAND.fullmatch(command))):
                     reason = 'git config from the command line'
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__

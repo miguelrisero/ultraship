@@ -1333,6 +1333,43 @@ class HookTests(unittest.TestCase):
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
 
+    def test_git_count_pipeline_treats_grep_anchor_as_data(self):
+        command = r'''echo "files: $(git ls-tree -r --name-only abc123 -- src/api/ | grep -c '\.toml$')"'''
+        refused = (
+            ('GIT_CONFIG_COUNT=2; ' + command, 'git config from the command line'),
+            (command + "; printf '%s' $'api'", 'git config from the command line'),
+            (command + '; echo "$(printf \'%s\' $\'api\')"', 'git config from the command line'),
+            (command + '; echo "$(gh api repos/o/r/pulls/7/comments -f body=x)"', 'REST review-comment write'),
+        )
+        for caller in ('', 'ship:driver'):
+            self.assertEqual(self.decision(command, caller), {})
+            self.assertEqual(self.decision('cd /work/example && ' + command, caller), {})
+            for shell, rule in refused:
+                with self.subTest(caller=caller, rule=rule):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(rule, result['permissionDecisionReason'])
+
+    def test_git_count_pipeline_requires_a_complete_literal_pipeline(self):
+        command = r'''echo "$(git ls-tree -r --name-only abc123 -- src/api/ | grep -c '\.toml$')"'''
+        other_shapes = (
+            command.replace(' | ', ' >| '),
+            command.replace(' | ', ' || '),
+            command.replace('abc123', '$TREE'),
+            command.replace('git ls-tree -r --name-only abc123 -- src/api/', 'printf api'),
+            command.replace("')", "' example.txt)"),
+            command.replace('$(', r'\$('),
+            'echo $(' + command,
+            command.removesuffix('"'),
+        )
+        for caller in ('', 'ship:driver'):
+            self.assertEqual(self.decision(command, caller), {})
+            for shell in other_shapes:
+                with self.subTest(caller=caller, shell=shell):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
+
     def test_graphql_read_route_refuses_other_documents_and_options(self):
         documents = ('mutation{createIssue{ id }}', 'subscription{events{id}}',
                      'fragment F on User {login}', 'query{viewer{login}} query{viewer{id}}',
