@@ -4784,11 +4784,13 @@ def row_record(data, folder, workspace_fallback=False):
 
 def row_reanchor_gate(data, command):
     tool = str(Path(__file__).resolve().parents[1] / 'skills/ship/scripts/row_reanchor.py')
-    form = ('python3 -I ' + tool + ' --row-file <abs> --row-id <id> --subject <rel> --base <ref> --head <ref>')
+    form = ('python3 -I ' + tool
+            + ' --row-file <abs> --row-id <id> --subject <rel> --base <ref> --head <ref> [--restoration <commit>]')
     reason = 'Row re-anchor gate requires exactly `' + form + '` and a matching driver-written row-reanchor admission record. '
     word = r'[A-Za-z0-9_./:@+,-]+'
     match = re.fullmatch(r'python3 -I (' + word + r') --row-file (' + word + r') --row-id (' + word
-                         + r') --subject (' + word + r') --base (' + word + r') --head (' + word + ')', command)
+                         + r') --subject (' + word + r') --base (' + word + r') --head (' + word
+                         + r')(?: --restoration ' + word + r')?', command)
     if not role(data, 'writer') or not match or match[1] != tool:
         deny(reason)
     fields, unmet = row_record(data, 'row-reanchor')
