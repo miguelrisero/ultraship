@@ -3,6 +3,7 @@
 import argparse
 from contextlib import ExitStack, contextmanager
 import difflib
+import fcntl
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -181,6 +182,17 @@ def write_row_and_record(path, identity, entry, row_file, original, result):
     else:
         path.parent.chmod(0o700)
 
+    # Keep a separate inode so replacing the record never replaces the lock.
+    lock = path.with_suffix('.lock')
+    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    with os.fdopen(descriptor, 'r+b') as handle:
+        metadata = os.fstat(handle.fileno())
+        require(stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1, 'invalid authorization record lock')
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        merge_row_and_record(path, identity, entry, row_file, original, result)
+
+
+def merge_row_and_record(path, identity, entry, row_file, original, result):
     rows = {}
     try:
         metadata = path.lstat()
@@ -241,8 +253,7 @@ def run(args):
     original = row_file.read_bytes()
     require(original == blob(head_sha, relative), 'working row file differs from head')
     text = original.decode('utf-8')
-    base_text = blob(base_sha, relative).decode('utf-8')
-    base_values, base_fields, base_extent = row_statements(base_text, args.row_id)
+    base_values, base_fields, _ = row_statements(blob(base_sha, relative).decode('utf-8'), args.row_id)
     head_values, head_fields, _ = row_statements(text, args.row_id)
     require(base_values['file'] == head_values['file'] == args.subject, 'subject mismatch')
     require([field[2] for key, field in base_fields.items() if key not in ('old', 'new')]
@@ -284,30 +295,16 @@ def run(args):
             'bytes outside paired statements differ')
     result = edited_text.encode('utf-8')
     require(row_file.read_bytes() == original, 'row file changed during derivation')
-    base_start, base_end = base_extent
-    edited_start, edited_end = edited_extent
-    base_equal = lines(base_text)[base_start - 1:base_end] == lines(edited_text)[edited_start - 1:edited_end]
     entry = {'row_file': relative, 'row_id': args.row_id, 'subject': args.subject,
              'expected_count': head_values.get('expect', 1), 'head_old_count': head.count(old),
              'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements),
-             'lines': edited_extent, 'base_lines': base_extent, 'base_equal': base_equal}
-    parents = git('rev-list', '--parents', '-n', '1', head_sha).decode().split()
-    require(len(parents) > 1, 'head first parent required')
-    identity = {'lane': lane, 'base': base_sha, 'head': head_sha, 'parent': parents[1]}
+             'lines': edited_extent}
+    identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
     write_row_and_record(record, identity, entry, row_file, original, result)
     print('PASS')
-    print('row_file=' + str(row_file))
-    print('row_id=' + args.row_id)
-    print('subject=' + args.subject)
-    print('base=' + base_sha)
-    print('head=' + head_sha)
-    print('base_span_lines=' + str(len(lines(base_values['old']))))
-    print('head_span_lines=' + str(len(lines(old))))
-    print('head_old_count=' + str(entry['head_old_count']))
-    print('hunk_count=' + str(count))
-    print('tomllib=PASS')
-    print('changed_statements=' + str(entry['changed_statements']))
-    print('record=' + str(record))
+    for key, value in {'schema': 1, **identity, **entry, 'base_span_lines': len(lines(base_values['old'])),
+                       'head_span_lines': len(lines(old)), 'tomllib': 'PASS', 'record': str(record)}.items():
+        print(key + '=' + (value if isinstance(value, str) and value.isprintable() else json.dumps(value)))
 
 
 class Parser(argparse.ArgumentParser):

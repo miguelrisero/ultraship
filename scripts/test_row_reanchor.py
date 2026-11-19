@@ -1,4 +1,5 @@
 """Synthetic re-anchor and exact-command admission guarantees."""
+from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import importlib.util
 import io
@@ -124,33 +125,21 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(record.parent.stat().st_mode & 0o777, 0o700)
         self.assertEqual(json.loads(record.read_bytes()), {
             'schema': 1, 'lane': 'linked-lane', 'base': self.base, 'head': self.head_sha,
-            'parent': self.base,
             'rows': [{'row_file': 'rows.toml', 'row_id': 'target', 'subject': 'subject.txt',
                       'expected_count': 1, 'head_old_count': 1, 'hunk_count': 2,
-                      'mutant_unchanged': True, 'changed_statements': 2,
-                      'lines': [4, 10], 'base_lines': [4, 10], 'base_equal': False}],
+                      'mutant_unchanged': True, 'changed_statements': 2, 'lines': [4, 10]}],
         })
 
-    def test_ranges_include_child_tables_and_report_base_equality_after_revert(self):
+    def test_printed_fields_match_the_record_entry(self):
         self.setup_pair(literal=True, extra='[row.mutant]\noperator = "replace"\n')
-        subject_commit = self.head_sha
-        self.invoke()
-        entry = json.loads(self.record_path().read_bytes())['rows'][0]
-        self.assertEqual(entry['base_lines'], [4, 39])
+        _, output = self.invoke()
+        record = self.record_path()
+        data = json.loads(record.read_bytes())
+        entry, = data.pop('rows')
         self.assertEqual(entry['lines'], [4, 12])
-        self.assertIs(entry['base_equal'], False)
-
-        row_commit = self.commit()
-        self.git('revert', '--no-edit', row_commit, subject_commit)
-        self.row.write_bytes(b'\n' + self.row.read_bytes())
-        self.head_sha = self.commit()
-        before, output = self.invoke()
-        self.assertEqual(self.row.read_bytes(), before)
-        self.assertIn('changed_statements=0', output.splitlines())
-        entry = json.loads(self.record_path().read_bytes())['rows'][0]
-        self.assertEqual(entry['base_lines'], [4, 39])
-        self.assertEqual(entry['lines'], [5, 40])
-        self.assertIs(entry['base_equal'], True)
+        fields = dict(line.split('=', 1) for line in output.splitlines()[1:])
+        for key, value in {**data, **entry, 'record': str(record)}.items():
+            self.assertEqual(fields[key], value if isinstance(value, str) else json.dumps(value))
 
     def test_record_expires_on_new_head_and_rerun_changes_zero_statements(self):
         self.setup_pair()
@@ -160,26 +149,13 @@ class ToolTests(unittest.TestCase):
         target = old_record['rows'][0]
         old_record['rows'].append({**target, 'row_id': 'other'})
         record.write_text(json.dumps(old_record))
-        parent = self.head_sha
         self.head_sha = self.commit()
         before, output = self.invoke()
         self.assertEqual(self.row.read_bytes(), before)
         self.assertIn('changed_statements=0', output.splitlines())
         self.assertEqual(json.loads(record.read_bytes()), {
-            **old_record, 'head': self.head_sha, 'parent': parent,
-            'rows': [{**target, 'changed_statements': 0}],
+            **old_record, 'head': self.head_sha, 'rows': [{**target, 'changed_statements': 0}],
         })
-
-    def test_record_expires_when_only_the_recorded_parent_differs(self):
-        self.setup_pair('start\nend\n', 'start\ninserted\nend\n', 'start\nend\n')
-        self.invoke()
-        record = self.record_path()
-        current = json.loads(record.read_bytes())
-        record.write_text(json.dumps({**current, 'parent': self.head_sha, 'rows': [
-            {**current['rows'][0], 'row_id': 'other'},
-        ]}))
-        self.invoke()
-        self.assertEqual(json.loads(record.read_bytes()), current)
 
     def test_same_head_replaces_one_entry_and_keeps_other_rows(self):
         self.setup_pair('start\nend\n', 'start\ninserted\nend\n', 'start\nend\n', literal=True)
@@ -200,6 +176,25 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(self.row.read_bytes(), original)
         self.assertIn('changed_statements=0', output.splitlines())
         self.assertEqual(json.loads(record.read_bytes()), expected)
+
+    def test_concurrent_tool_writers_keep_both_entries(self):
+        self.setup_pair()
+        other_row = self.row.with_name('other.toml')
+        other_row.write_bytes(self.row.read_bytes().replace(b'id = "target"', b'id = "other"'))
+        head_subject = self.subject.read_bytes()
+        self.subject.write_text(self.old)
+        self.git('add', '--', other_row.name)
+        self.base = self.commit()
+        self.subject.write_bytes(head_subject)
+        self.head_sha = self.commit()
+        with ThreadPoolExecutor(max_workers=2) as writers:
+            first = writers.submit(self.invoke)
+            second = writers.submit(self.invoke, **{'row-file': str(other_row), 'row-id': 'other'})
+            first.result()
+            second.result()
+        entries = json.loads(self.record_path().read_bytes())['rows']
+        self.assertCountEqual([(row['row_file'], row['row_id']) for row in entries],
+                              [('rows.toml', 'target'), ('other.toml', 'other')])
 
     def test_detached_head_refuses_before_writing(self):
         self.setup_pair()
@@ -375,7 +370,7 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(output.getvalue(), 'REFUSED: OSError\n')
         self.assertEqual(self.row.read_bytes(), original)
         self.assertEqual(record.read_bytes(), prior)
-        self.assertEqual(list(record.parent.iterdir()), [record])
+        self.assertCountEqual(record.parent.iterdir(), [record, record.with_suffix('.lock')])
         self.assertEqual(list(self.root.glob('.row-reanchor-*')), [])
 
 
