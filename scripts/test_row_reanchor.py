@@ -274,6 +274,51 @@ class ToolTests(unittest.TestCase):
         self.assertIn(f'restoration_parent={starting}', output.splitlines())
         self.assertIn('restoration_outside_equal=true', output.splitlines())
 
+    def test_restoration_keeps_lane_edit_in_the_deleted_row_hunk(self):
+        prefix, table, suffix = self.restoration_fixture()
+        lane_prefix = prefix.removesuffix('\n') + '# lane comment\n'
+        self.commit_rows(lane_prefix + suffix)
+        restoration = self.commit_rows(lane_prefix + table + suffix)
+        _, output = self.invoke(restoration=restoration)
+        self.assertEqual(self.row.read_text(), lane_prefix + table + suffix)
+        self.assertIn('insert_after=3', output.splitlines())
+
+    def test_restoration_removes_child_table_appended_to_the_row(self):
+        prefix, table, suffix = self.restoration_fixture()
+        child = '[row.extra]\nvalue = "lane"\n'
+        self.commit_rows(prefix + table.rstrip('\n') + '\n' + child + '\n' + suffix)
+        restoration = self.commit_rows(prefix + table + suffix)
+        _, output = self.invoke(restoration=restoration)
+        self.assertEqual(self.row.read_text(), prefix + table + suffix)
+        self.assertIn('starting_lines=[4, 14]', output.splitlines())
+
+    def test_restoration_positions_two_deleted_rows_with_identical_headers(self):
+        prefix, table, suffix = self.restoration_fixture()
+        other = table.replace('id = "target"', 'id = "second"')
+        middle = '[marker]\nname = "between"\n\n'
+        self.base = self.commit_rows(prefix + table + middle + other + suffix)
+        self.commit_rows(prefix + middle + suffix)
+        restoration = self.commit_rows(prefix + table + middle + other + suffix)
+        for row_id, position in (('target', 2), ('second', 5)):
+            _, output = self.invoke(restoration=restoration, **{'row-id': row_id})
+            self.assertIn(f'insert_after={position}', output.splitlines())
+        entries = json.loads(self.record_path().read_bytes())['rows']
+        self.assertEqual([(entry['row_id'], entry['insert_after']) for entry in entries],
+                         [('target', 2), ('second', 5)])
+
+    def test_restoration_accepts_revert_of_whole_row_file_deletion(self):
+        _, table, _ = self.restoration_fixture()
+        self.base = self.commit_rows(table)
+        self.git('rm', '--', self.row.name)
+        self.git('commit', '-qm', 'delete row file')
+        starting = self.git('rev-parse', 'HEAD')
+        self.git('revert', '--no-edit', starting)
+        self.head_sha = self.git('rev-parse', 'HEAD')
+        _, output = self.invoke(restoration=self.head_sha)
+        self.assertEqual(self.row.read_text(), table)
+        self.assertIn('starting_lines=null', output.splitlines())
+        self.assertIn('insert_after=0', output.splitlines())
+
     def test_restoration_rerun_at_later_head_uses_restoration_parent(self):
         prefix, table, suffix = self.restoration_fixture()
         starting = self.commit_rows(prefix + table.replace('claim =', 'claim  =') + suffix)
@@ -341,8 +386,32 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(self.row.read_text(), original)
 
     def test_restoration_refuses_unchanged_row(self):
-        self.restoration_fixture()
+        prefix, table, suffix = self.restoration_fixture()
+        self.commit_rows(prefix + table + suffix.replace('"retired"', '"lane-retired"'))
         self.invoke(2, 'restoration commit leaves the row unchanged', restoration=self.head_sha)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_another_changed_path(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.commit_rows(prefix + suffix)
+        (self.root / 'other.txt').write_text('another edit\n')
+        restoration = self.commit_rows(prefix + table + suffix)
+        self.invoke(2, 'restoration commit must change only the row file', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_a_row_moved_in_its_starting_head(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.commit_rows(prefix + suffix + '\n' + table.replace('claim =', 'claim  ='))
+        restoration = self.commit_rows(prefix + table + suffix)
+        self.invoke(2, 'restored row moved', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_a_deleted_row_between_two_changed_lines(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.base = self.commit_rows(prefix + '# first\n' + table + '# last\n' + suffix)
+        self.commit_rows(prefix + '# lane\n' + suffix)
+        restoration = self.commit_rows(prefix + '# lane\n' + table + suffix)
+        self.invoke(2, 'restored row position is ambiguous', restoration=restoration)
         self.assertFalse(self.record_path().exists())
 
     def test_restoration_refuses_the_merge_base_itself(self):
@@ -378,7 +447,7 @@ class ToolTests(unittest.TestCase):
         prefix, table, suffix = self.restoration_fixture()
         self.commit_rows(prefix + suffix)
         restoration = self.commit_rows(prefix + table + table + suffix)
-        self.head_sha = self.commit_rows(prefix + table + suffix)
+        self.commit_rows(prefix + table + suffix)
         self.invoke(2, 'row ID must match exactly once', restoration=restoration)
         self.assertFalse(self.record_path().exists())
 
@@ -387,7 +456,7 @@ class ToolTests(unittest.TestCase):
         record.parent.mkdir(mode=0o700, exist_ok=True)
         output = io.StringIO()
         args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
-                         base=self.base, head=self.head_sha)
+                         base=self.base, head=self.head_sha, restoration=None)
         lock_checked_or_done = Event()
         flock = fcntl.flock
 

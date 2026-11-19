@@ -4,6 +4,7 @@ import argparse
 from contextlib import contextmanager
 import difflib
 import fcntl
+from itertools import chain, product
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -101,11 +102,6 @@ def row_statements(text, row_id):
     return values, fields, (first + 1, selected[-1][1])
 
 
-def row_extents(text):
-    rows, split_rows, _ = scan_rows(text)
-    return scanned_extents(rows, split_rows)
-
-
 def scanned_extents(rows, split_rows):
     extents = {}
     for start, row in rows:
@@ -122,11 +118,113 @@ def opcodes(a, b):
     return difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
 
 
+def separator_lines(rows, blanks):
+    separators = blanks.copy()
+    for start, row in rows:
+        if row:
+            separators.difference_update(range(start, row[-1][1]))
+    return separators
+
+
+def mask_rows(source, extents, restored_ids, separators):
+    starts = {start: (key, end) for key, (start, end) in extents.items() if key in restored_ids}
+    masked, index = [], 0
+    while index < len(source):
+        if index in starts:
+            key, index = starts[index]
+            masked.append(((key,), False))
+        else:
+            masked.append((source[index], index in separators))
+            index += 1
+    return masked
+
+
+def is_row(item):
+    return isinstance(item[0], tuple)
+
+
+def restoration_candidates(base, head):
+    def alignment(items):
+        # Keep separators on the same side of a row when repeated blanks align.
+        keys, following_row = [], None
+        for item in reversed(items):
+            keys.append((item, following_row if item[1] else None))
+            if not item[1]:
+                following_row = item[0] if is_row(item) else None
+        return keys[::-1]
+
+    chunks = []
+    count = 1
+    for number, (tag, i1, i2, j1, j2) in enumerate(opcodes(alignment(base), alignment(head))):
+        base_chunk, head_chunk = base[i1:i2], head[j1:j2]
+        marker = number if tag != 'equal' and any(map(is_row, base_chunk)) else None
+        kept = [(item, not is_row(item), marker) for item in head_chunk]
+        if tag == 'equal':
+            chunks.append((kept,))
+            continue
+        require(not any(map(is_row, head_chunk)), 'restored row moved')
+        if marker is None:
+            chunks.append((kept,))
+            continue
+        fixed = [index for index, item in enumerate(base_chunk) if not is_row(item) and not item[1]]
+        added = [(item, False, marker) for item in base_chunk]
+        if fixed:
+            first, last = fixed[0], fixed[-1]
+            require(not any(map(is_row, base_chunk[first:last + 1])), 'restored row position is ambiguous')
+            chunks.append((added[:first] + kept + added[last + 1:],))
+        elif kept:
+            count *= 2
+            require(count <= 64, 'restored row position is ambiguous')
+            chunks.append((added + kept, kept + added))
+        else:
+            chunks.append((added,))
+    return (chain.from_iterable(chunks) for chunks in product(*chunks))
+
+
+def restoration_layout(items):
+    content, gaps = [], [[]]
+    for item, from_head, marker in items:
+        if item[1]:
+            gaps[-1].append((item[0], from_head))
+        else:
+            content.append((item, from_head, marker))
+            gaps.append([])
+    return content, gaps
+
+
+def restoration_position(candidate, actual, actual_gaps, row_id):
+    content, gaps = restoration_layout(candidate)
+    if [item for item, _, _ in content] != actual:
+        return None
+    head_count, position = 0, None
+    for index, (gap, actual_gap) in enumerate(zip(gaps, actual_gaps, strict=True)):
+        left = content[index - 1] if index else None
+        right = content[index] if index < len(content) else None
+        expected = [line for line, _ in gap]
+        if expected == actual_gap:
+            head_count += sum(from_head for _, from_head in gap)
+        else:
+            beside_row = (left and is_row(left[0])) or (right and is_row(right[0]))
+            within_chunk = left and right and left[2] is not None and left[2] == right[2]
+            if not (beside_row or within_chunk):
+                return None
+            # Count only head lines that survive in the restoration's separator gap.
+            for tag, start, end, _, _ in opcodes(expected, actual_gap):
+                if tag == 'equal':
+                    head_count += sum(from_head for _, from_head in gap[start:end])
+        if right:
+            if right[0][0] == (row_id,):
+                position = head_count
+            head_count += right[1]
+    return position
+
+
 def restoration_check(base_text, start_text, restored_text, row_id):
     b, h, f = map(lines, (base_text, start_text, restored_text))
-    eb = row_extents(base_text)
+    b_rows, b_split, b_blanks = scan_rows(base_text)
     h_rows, h_split, h_blanks = scan_rows(start_text)
     f_rows, f_split, f_blanks = scan_rows(restored_text)
+    eb = scanned_extents(b_rows, b_split)
     eh, ef = scanned_extents(h_rows, h_split), scanned_extents(f_rows, f_split)
 
     def row_lines(source, extents, key):
@@ -141,15 +239,18 @@ def restoration_check(base_text, start_text, restored_text, row_id):
     restored_ids = [key for key in ef if key in eb
                     and row_lines(f, ef, key) == row_lines(b, eb, key)
                     and row_lines(f, ef, key) != row_lines(h, eh, key)]
-    restored_extents = [eb[key] for key in restored_ids]
-    expected, from_head = [], []
-    for tag, i1, i2, j1, j2 in opcodes(b, h):
-        # For insertions, i1 == i2, so both bounds must be strict.
-        use_base = tag != 'equal' and any(i1 < end and start < i2 for start, end in restored_extents)
-        chunk = b[i1:i2] if use_base else h[j1:j2]
-        expected.extend(chunk)
-        from_head.extend([not use_base] * len(chunk))
-    require(expected == f, 'restoration changed bytes outside restored rows')
+    base = mask_rows(b, eb, restored_ids, separator_lines(b_rows, b_blanks))
+    head = mask_rows(h, eh, restored_ids, separator_lines(h_rows, h_blanks))
+    final = mask_rows(f, ef, restored_ids, separator_lines(f_rows, f_blanks))
+    content, gaps = restoration_layout((item, False, None) for item in final)
+    actual = [item for item, _, _ in content]
+    actual_gaps = [[line for line, _ in gap] for gap in gaps]
+    insert_after = None
+    for candidate in restoration_candidates(base, head):
+        insert_after = restoration_position(candidate, actual, actual_gaps, row_id)
+        if insert_after is not None:
+            break
+    require(insert_after is not None, 'restoration changed bytes outside restored rows')
 
     def outside_rows(source, rows, extents, blanks):
         omitted = blanks.copy()
@@ -172,7 +273,7 @@ def restoration_check(base_text, start_text, restored_text, row_id):
         return None
 
     return {'restoration_lines': line_range(ef), 'starting_lines': line_range(eh),
-            'insert_after': sum(from_head[:ef[row_id][0]]),
+            'insert_after': insert_after,
             'restored_rows': len(restored_ids), 'restoration_base_equal': True,
             'restoration_outside_equal': True}
 
@@ -303,6 +404,9 @@ def run(args):
         return subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', str(row_file.parent), *words],
                               check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
 
+    def commit_sha(ref):
+        return git('rev-parse', '--verify', '--end-of-options', ref + '^{commit}').decode().strip()
+
     root = Path(git('rev-parse', '--show-toplevel').decode().strip()).resolve()
     relative = row_file.relative_to(root).as_posix()
     subject = PurePosixPath(args.subject)
@@ -310,8 +414,7 @@ def run(args):
             and '..' not in subject.parts and subject.parts, 'subject must be repository-relative')
     lane = git('branch', '--show-current').decode().rstrip('\n')
     require(lane, 'lane branch required')
-    base_sha = git('rev-parse', '--verify', '--end-of-options', args.base + '^{commit}').decode().strip()
-    head_sha = git('rev-parse', '--verify', '--end-of-options', args.head + '^{commit}').decode().strip()
+    base_sha, head_sha = commit_sha(args.base), commit_sha(args.head)
     require(head_sha == git('rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
     record = Path(git('rev-parse', '--path-format=absolute', '--git-path', 'ship/row-auth.json').decode().rstrip('\n'))
 
@@ -323,9 +426,8 @@ def run(args):
     text = original.decode('utf-8')
     base_text = blob(base_sha, relative).decode('utf-8')
     restoration_fields = {}
-    restoration_ref = getattr(args, 'restoration', None)
-    if restoration_ref is not None:
-        restoration = git('rev-parse', '--verify', '--end-of-options', restoration_ref + '^{commit}').decode().strip()
+    if args.restoration is not None:
+        restoration = commit_sha(args.restoration)
         try:
             git('merge-base', '--is-ancestor', restoration, head_sha)
         except subprocess.CalledProcessError:
@@ -337,9 +439,19 @@ def run(args):
             git('merge-base', '--is-ancestor', base_sha, restoration_parent)
         except subprocess.CalledProcessError:
             raise Refused('merge base must be an ancestor of the restoration parent') from None
+        reason = 'restoration commit must change only the row file'
+        changes = git('diff-tree', '-r', '--raw', '--no-commit-id', '--no-renames', '-z',
+                      restoration_parent, restoration).split(b'\0')
+        path = relative.encode('utf-8')
+        require(len(changes) == 3 and changes[1] == path and changes[2] == b'', reason)
+        _, mode, _, _, status = changes[0].split()
+        base_entry = git('ls-tree', '--full-tree', '-z', base_sha, '--', ':(literal)' + relative)
+        require(mode in (b'100644', b'100755') and base_entry.startswith(mode + b' blob ')
+                and base_entry.endswith(b'\t' + path + b'\0'), reason)
+        start_text = '' if status == b'A' else blob(restoration_parent, relative).decode('utf-8')
         restoration_fields = {'restoration': restoration, 'restoration_parent': restoration_parent,
-                              **restoration_check(base_text, blob(restoration_parent, relative).decode('utf-8'),
-                                                  blob(restoration, relative).decode('utf-8'), args.row_id)}
+                              **restoration_check(base_text, start_text, blob(restoration, relative).decode('utf-8'),
+                                                  args.row_id)}
     base_values, base_fields, base_extent = row_statements(base_text, args.row_id)
     head_values, head_fields, _ = row_statements(text, args.row_id)
     require(base_values['file'] == head_values['file'] == args.subject, 'subject mismatch')
