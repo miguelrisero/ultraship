@@ -4,6 +4,7 @@
 Row: epoch<TAB>step<TAB>agent<TAB>sha<TAB>verdict<TAB>note
 A reviewer row names its agent as <agent-type>@<agent-id>; a result binds only to rows with its own agent ID.
 """
+import errno
 import fcntl
 import hashlib
 import json
@@ -172,14 +173,16 @@ def accounting_row(row, result_id, run):
     return value['result'] == result_id and value['run'] == run
 
 
-def account(pending, identifier, step, agent, sha, verdict, evidence):
+def account(pending, identifier, step, agent, sha, verdict, evidence, *, entries=None):
     """Append bookkeeping for a completed result; preserve the bound run's historical rows and closure."""
     if (not all((step, agent, sha, verdict, evidence.strip())) or verdict == 'owed'
             or any('\t' in f or '\n' in f or '\r' in f for f in (step, agent, sha, verdict))):
         raise ValueError('completed result needs single-line step, agent, sha, verdict and evidence')
     pending = Path(pending).absolute()  # Keep the hook's path spelling, including a symlinked XDG_STATE_HOME.
+    if entries is None:
+        entries = pending.read_text().splitlines()
     matches = []
-    for line in pending.read_text().splitlines():
+    for line in entries:
         fields = line.split('\t')
         if len(fields) == 4 and json.loads(fields[3]).get('id') == identifier:
             matches.append(fields)
@@ -310,10 +313,22 @@ def load_receipts(path):
 
 def account_auto(pending):
     pending = Path(pending).absolute()
+    # shortcut: the caller controls this variable; upgrade to isolated per-session state access.
+    session = os.environ.get('CLAUDE_CODE_SESSION_ID')
+    if not session or re.sub(r'[^\w.-]', '_', session) != pending.stem:
+        sys.exit('account-auto requires CLAUDE_CODE_SESSION_ID to match the owed file session.')
+    try:
+        fd = os.open(pending, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            sys.exit('account-auto refuses a symlinked owed file.')
+        raise
+    with os.fdopen(fd) as source:
+        entries = source.read().splitlines()
     receipts = load_receipts(STATE / 'accounted.json')
     budgets = {}
     accounted = remaining = 0
-    for fields in (line.split('\t') for line in pending.read_text().splitlines() if line):
+    for fields in (line.split('\t') for line in entries if line):
         identifier = 'unknown'
         try:
             if len(fields) != 4:
@@ -388,7 +403,8 @@ def account_auto(pending):
                         or word.endswith(("n't", 'n’t')) for word in words[1:])):
                     raise ValueError('expected one verdict')
                 verdict = 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
-                account(pending, identifier, 'review', agent, sha, verdict, f'{source} at {when}: {verdict}')
+                account(pending, identifier, 'review', agent, sha, verdict, f'{source} at {when}: {verdict}',
+                        entries=entries)
                 named = f'{agent}@{result["agent_id"]}' if result.get('agent_id') else agent
         except (json.JSONDecodeError, UnicodeError, OverflowError, RecursionError):
             reason = 'transcript or accounting parse error'
