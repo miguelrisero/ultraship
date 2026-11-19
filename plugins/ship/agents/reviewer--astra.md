@@ -46,9 +46,10 @@ Confirm from the brief's commit list that only the lane's own unmerged commits c
 Read the row lines at the merge base and the frozen head. Confirm that they are equal, or that only a re-anchor changed the paired fields.
 Read each row in the base checkout and the frozen-head checkout that the admission record lists, at the base and head line ranges.
 For each added row, grep the base copy of the row file for its ID and confirm zero matches.
-When the brief records that the row file is absent at the base, use that proof in place of the grep.
+When the brief records an empty `git ls-tree` result for the row file at the base, use that proof in place of the grep.
 Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
 For a CoC-approved row change, match each applied value to the decision file that the brief names by path and SHA256.
+Use that file only when the brief records the driver's SHA256 and binding check at the frozen head.
 Confirm that no other field changed and that the row is not weaker.
 Return a blocking finding for an unapproved changed claim, mutant or test, or a weaker row. The CoC decides those rows.
 A changed claim also needs a current task-specific owner event, which the CoC obtains.

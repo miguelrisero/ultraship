@@ -254,7 +254,8 @@ def staged_bytes(path, data, mode):
         staged.unlink(missing_ok=True)
 
 
-def write_record(path, identity, entry, row_file, original):
+@contextmanager
+def record_lock(path):
     try:
         path.parent.mkdir(mode=0o700)
     except FileExistsError:
@@ -269,7 +270,7 @@ def write_record(path, identity, entry, row_file, original):
         metadata = os.fstat(handle.fileno())
         require(stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1, 'invalid authorization record lock')
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        merge_record(path, identity, entry, row_file, original)
+        yield
 
 
 def merge_record(path, identity, entry, row_file, original):
@@ -380,21 +381,22 @@ def run(args):
     require(without_pair(text, head_fields) == without_pair(edited_text, edited_fields),
             'bytes outside paired statements differ')
     result = edited_text.encode('utf-8')
-    require(row_file.read_bytes() == original, 'row file changed during derivation')
     entry = {'row_file': relative, 'row_id': args.row_id, 'subject': args.subject,
              'expected_count': head_values.get('expect', 1), 'head_old_count': head.count(old),
              'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements),
              'base_lines': base_extent, 'lines': edited_extent, **restoration_fields}
     identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
-    if replacements:
-        mode = stat.S_IMODE(row_file.stat().st_mode)
-        with staged_bytes(row_file, result, mode) as stage:
-            require(row_file.read_bytes() == original, 'row file changed during staged write')
-            os.replace(stage, row_file)
-        record_output = 'none'
-    else:
-        write_record(record, identity, entry, row_file, original)
-        record_output = str(record)
+    with record_lock(record):
+        require(row_file.read_bytes() == original, 'row file changed during derivation')
+        if replacements:
+            mode = stat.S_IMODE(row_file.stat().st_mode)
+            with staged_bytes(row_file, result, mode) as stage:
+                require(row_file.read_bytes() == original, 'row file changed during staged write')
+                os.replace(stage, row_file)
+            record_output = 'none'
+        else:
+            merge_record(record, identity, entry, row_file, original)
+            record_output = str(record)
     print('PASS')
     for key, value in {'schema': 1, **identity, **entry, 'base_span_lines': len(lines(base_values['old'])),
                        'head_span_lines': len(lines(old)), 'tomllib': 'PASS', 'record': record_output}.items():
