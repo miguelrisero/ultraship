@@ -2102,7 +2102,8 @@ def shell_substitution_bodies(text, arithmetic_quotes=False, *, with_offsets=Fal
             comment = text[cursor:len(text) if end < 0 else end]
             if context == '`':
                 comment = comment.partition('`')[0]
-            if any(marker in comment for marker in ('$(', '`', '${')):
+            if ((with_offsets and context in {')', '`'})
+                    or any(marker in comment for marker in ('$(', '`', '${'))):
                 raise ValueError('shell comment substitution')
             cursor = len(text) if end < 0 else end + 1
             word_start = True
@@ -4487,21 +4488,40 @@ def pr_create_uses_shell_stdin(command):
         return False
 
     shell = shell_line_continuations(shell_without_heredoc_bodies(command, check_operators=True))
-    token_lists = [shell_raw_words(shell)]
-    substitutions = sorted(shell_substitution_bodies(shell, with_offsets=True))
-    token_lists.extend(shell_raw_words(shell_without_heredoc_bodies(shell[start:end], check_operators=True))
-                       for _, start, end in substitutions)
-    if substitutions:
-        # A substitution is part of a shell word, so its separators cannot end the outer command.
-        outer, end = [], 0
-        for opening, _, closing in substitutions:
-            if opening >= end:
-                outer.extend((shell[end:opening], '_'))
-                end = closing + 1
-        token_lists.append(shell_raw_words(''.join(outer) + shell[end:]))
-    # A heredoc or here-string in an earlier command can write the PR body file.
-    here_input = any(left[0] == right[0] == '<' and left[3] == right[2]
-                     for tokens in token_lists for left, right in zip(tokens, tokens[1:]))
+    # A child's separators cannot end a command in its parent.
+    regions = [(0, len(shell), [])]
+    parents = regions.copy()
+    for opening, start, closing in sorted(shell_substitution_bodies(shell, with_offsets=True)):
+        while len(parents) > 1 and opening >= parents[-1][1]:
+            parents.pop()
+        lower, upper, children = parents[-1]
+        if not lower <= opening < start <= closing < upper:
+            raise ValueError('shell substitution boundary')
+        children.append((opening, closing + 1))
+        child = (start, closing, [])
+        regions.append(child)
+        parents.append(child)
+
+    token_lists, here_input = [], False
+    for region_index, (start, end, children) in enumerate(regions):
+        parts = []
+        for opening, after in children:
+            parts.extend((shell[start:opening], '_'))
+            start = after
+        region = ''.join(parts) + shell[start:end]
+        if (region_index and '<<' in region
+                and shell_without_heredoc_bodies(region, check_operators=True) != region):
+            # The first heredoc pass must strip data before substitution offsets are computed.
+            raise ValueError('shell substitution boundary')
+        tokens = shell_raw_words(region)
+        token_lists.append(tokens)
+        for left, right in zip(tokens, tokens[1:]):
+            if left[3] != right[2]:
+                continue
+            if left[0] in {'<', '>'} and right[0] == '(':
+                raise ValueError('shell substitution boundary')
+            # A heredoc or here-string in an earlier command can write the PR body file.
+            here_input = here_input or left[0] == right[0] == '<'
 
     def next_pr_word(arguments):
         for word in arguments:
@@ -4513,6 +4533,9 @@ def pr_create_uses_shell_stdin(command):
 
     separators = {';', '&', '|', '(', ')', '`', '\n'}
     body_option = re.compile(r'--body-file(?:=|$)|-[A-Za-z]*F=?')
+    value_option = re.compile(r'(--(?:assignee|base|body|body-file|head|label|milestone|project|repo|reviewer|template|title))'
+                              r'(?==|$)|-[defhw]*([aBbFHlmprRtT])')
+    switch = re.compile(r'--(?:draft|dry-run|editor|fill|fill-first|fill-verbose|help|no-maintainer-edit|web)|-[defhw]+')
     for tokens in token_lists:
         words = []
         for raw, value, _, _ in [*shell_without_redirections(tokens), ('\n', '\n', 0, 0)]:
@@ -4526,7 +4549,20 @@ def pr_create_uses_shell_stdin(command):
                 if next_pr_word(arguments) != 'pr' or next_pr_word(arguments) not in {'create', 'new'}:
                     continue
                 options = list(arguments)
+                pending, known_position = '', True
                 for option, following in zip(options, options[1:] + ['']):
+                    flag = pending
+                    pending = ''
+                    if not flag and known_position:
+                        if match := value_option.match(option):
+                            flag = match[1] or match[2]
+                            if match.end() == len(option):
+                                pending = flag
+                        else:
+                            # Keep the conservative body scan after an unknown option.
+                            known_position = bool(switch.fullmatch(option.partition('=')[0]))
+                    if flag in {'--title', 't'}:
+                        continue
                     if match := body_option.match(option):
                         if here_input or (option[match.end():] or following) == '-':
                             return True

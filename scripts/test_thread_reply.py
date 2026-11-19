@@ -1661,6 +1661,30 @@ class HookTests(unittest.TestCase):
         with patch.object(ultraship, 'shell_raw_words', return_value=tokens):
             self.assertTrue(ultraship.pr_create_uses_shell_stdin('gh pr create --body-file'))
 
+    def test_pr_create_stdin_classifies_each_nested_level(self):
+        inner = "printf '%s' gh pr create --head $(printf '%s' fixture) --body-file {}"
+        sources = (
+            f'''printf '%s' "$({inner})"''',
+            f'''printf '%s' "$(printf '%s' "$({inner})")"''',
+        )
+        for source in sources:
+            for body, uses_stdin in (('-', True), ('body.md', False)):
+                with self.subTest(source=source, body=body):
+                    self.assertEqual(ultraship.pr_create_uses_shell_stdin(source.format(body)), uses_stdin)
+
+    def test_pr_create_stdin_refuses_uncertain_process_substitution(self):
+        source = "printf '%s' gh pr create --body-file body.md <(printf '%s' fixture)"
+        with self.assertRaisesRegex(ValueError, 'shell substitution boundary'):
+            ultraship.pr_create_uses_shell_stdin(source)
+
+    def test_pr_create_stdin_consumes_title_values(self):
+        for title in ('--title --body-file=-', '--title=--body-file=-', '-t -F-', '-tF-', '-dtF-'):
+            with self.subTest(title=title):
+                source = "printf '%s' gh pr create --head fixture " + title
+                self.assertFalse(ultraship.pr_create_uses_shell_stdin(source + ' --body-file body.md'))
+                self.assertTrue(ultraship.pr_create_uses_shell_stdin(source + ' --body-file -'))
+        self.assertTrue(ultraship.pr_create_uses_shell_stdin("printf '%s' gh pr create --body --title --body-file -"))
+
     def test_pr_create_admits_quoted_heredoc_text_in_title(self):
         command = "gh pr create --title 'docs: describe <<BODY' --body-file body.md"
         for caller in ('', 'ship:driver'):
