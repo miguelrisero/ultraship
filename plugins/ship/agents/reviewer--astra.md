@@ -40,6 +40,10 @@ Use the record fields that the brief copies from the tool output. Read no file u
 Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.
 For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.
 Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.
+For each restored row, confirm from the copied record fields `restoration_base_equal=true`, `restoration_outside_equal=true` and `changed_statements=0`.
+Confirm that `restoration` and `restoration_parent` match the brief, and that `starting_lines` is `null` for a row that the starting head deletes.
+Confirm from the brief's commit list that only the lane's own unmerged commits changed the row file after the merge base.
+Read the row lines at the merge base and the frozen head. Confirm that they are equal, or that only a re-anchor changed the paired fields.
 For each added row, confirm that its row ID is absent at the base.
 Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
 Return a blocking finding for a changed claim, a changed mutant, a changed test or a weaker row. The CoC decides those rows.

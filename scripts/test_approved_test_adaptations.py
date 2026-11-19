@@ -30,7 +30,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             for requirement in (
                 'No CoC decision file is required.',
                 'Authority: the owner\'s global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.',
-                "Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, and each new row that step 4 admits.",
+                "Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.",
                 'Admit the writer with the [row re-anchor tool admission record]',
                 'The record names the lane, base, head, row IDs, exact line ranges, expected counts and the unchanged mutant check.',
                 'The tool prints the record path and every record field as `key=value` lines, with no row text.',
@@ -72,8 +72,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.',
                 'The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.',
                 'Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.',
-                'The driver marks the draft ready only after the review in step 7 passes at the exact head.',
-                'one independent reviewer confirms that every changed, retired or added row is not weaker.',
+                'The driver marks the draft ready only after the review in step 8 passes at the exact head.',
+                'one independent reviewer confirms that every changed, retired, restored or added row is not weaker.',
                 'The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record]',
             ):
                 with self.subTest(path=name, requirement=requirement):
@@ -114,6 +114,60 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             ):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, route)
+
+    def test_lane_owned_restore_contract(self):
+        restore = (
+            "5. Restore: the writer returns rows that only the lane's own unmerged commits changed to their bytes at the merge base.\n"
+            '   A restored row needs no failing CI report, so a row that the starting head deletes stays in scope.\n'
+            '   Its evidence is the merge-base diff and the tool fields `starting_lines`, `base_lines` and `restoration_lines`.\n'
+            '   When a lane commit changed only those rows, the writer runs a plain `git revert` of that commit.\n'
+            '   When it also changed other lines, the writer restores each complete row with native Edit and keeps the other edits.\n'
+            '   The writer puts a deleted row back at its merge-base position, between the neighbor lines that held it there.\n'
+            '   The writer commits the restoration alone. Then it runs the re-anchor tool on each restored row.\n'
+            '   That run passes the merge base as `--base` and the restoration commit as `--restoration`.\n'
+            '   The tool binds the restoration commit and its own parent, the starting head. A later commit never moves that parent.\n'
+            '   The tool refuses unless each restored row equals the merge base byte for byte and the rest of the commit equals the starting head.\n'
+            '   It also refuses a row ID that is not unique, and it prints both results and `insert_after` as `key=value` lines.\n'
+            '   Any byte difference leaves the restore route. That row follows the re-anchor route or goes to the CoC.\n'
+            '   The driver copies the lane commits that changed each row file after the merge base into the reviewer brief.\n'
+            '6. Authorization record:'
+        )
+        for name in ROUTE_CARRIERS:
+            with self.subTest(path=name):
+                route = section((SHIP / name).read_text(), '### Lane-owned row route')
+                self.assertIn('\n' + restore, route)
+                self.assertIn(
+                    '   The record names the lane, base, head, row IDs, exact line ranges, expected counts and the unchanged mutant check.\n'
+                    '   A restore entry also names the restoration commit, its parent, the three row ranges and `insert_after`.\n',
+                    route,
+                )
+                self.assertIn(
+                    '   The record expires on any head change. Rerun the tool at the frozen head before review; that run changes zero statements.\n'
+                    '   On the restore route, that rerun keeps `--restoration` and prints `changed_statements=0`.\n',
+                    route,
+                )
+        review = (
+            'Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.\n'
+            'For each restored row, confirm from the copied record fields `restoration_base_equal=true`, `restoration_outside_equal=true` and `changed_statements=0`.\n'
+            'Confirm that `restoration` and `restoration_parent` match the brief, and that `starting_lines` is `null` for a row that the starting head deletes.\n'
+            "Confirm from the brief's commit list that only the lane's own unmerged commits changed the row file after the merge base.\n"
+            'Read the row lines at the merge base and the frozen head. Confirm that they are equal, or that only a re-anchor changed the paired fields.\n'
+        )
+        for name in REVIEWERS:
+            with self.subTest(path=name):
+                text = (SHIP / 'agents' / name).read_text()
+                self.assertIn(review, section(text, '## Lane-owned row review'))
+        decisions = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        admission = section(decisions, '## Row re-anchor tool admission record')
+        command = next(line for line in admission.splitlines() if line.startswith('Use exactly '))
+        self.assertIn(
+            command + '\nOn the restore route, append ` --restoration <commit>` with the full restoration commit SHA.\n',
+            admission,
+        )
+        self.assertIn(
+            '\n```\nOn the restore route, write `none` for the CI run, count and expected values when the starting head deletes the row.\n',
+            section(decisions, '## Row re-anchor tool brief'),
+        )
 
     def test_writers_require_verified_authority_and_preserve_controls(self):
         for name in ('writer--sol.md', 'writer--sonnet.md'):

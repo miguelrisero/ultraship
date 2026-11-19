@@ -65,7 +65,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
 
 A lane re-anchors, retires or adds the protected mutation rows that its own diff breaks or needs. No CoC decision file is required.
 Authority: the owner's global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.
-Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, and each new row that step 4 admits.
+Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.
 
 1. Admit the writer with the [row re-anchor tool admission record](../skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
 2. Re-anchor: the writer runs the sanctioned re-anchor tool once per row, then commits the row file alone.
@@ -78,17 +78,32 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.
    The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.
    Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
-   The driver marks the draft ready only after the review in step 7 passes at the exact head.
-5. Authorization record: each successful tool run writes a generated record in the Git directory.
+   The driver marks the draft ready only after the review in step 8 passes at the exact head.
+5. Restore: the writer returns rows that only the lane's own unmerged commits changed to their bytes at the merge base.
+   A restored row needs no failing CI report, so a row that the starting head deletes stays in scope.
+   Its evidence is the merge-base diff and the tool fields `starting_lines`, `base_lines` and `restoration_lines`.
+   When a lane commit changed only those rows, the writer runs a plain `git revert` of that commit.
+   When it also changed other lines, the writer restores each complete row with native Edit and keeps the other edits.
+   The writer puts a deleted row back at its merge-base position, between the neighbor lines that held it there.
+   The writer commits the restoration alone. Then it runs the re-anchor tool on each restored row.
+   That run passes the merge base as `--base` and the restoration commit as `--restoration`.
+   The tool binds the restoration commit and its own parent, the starting head. A later commit never moves that parent.
+   The tool refuses unless each restored row equals the merge base byte for byte and the rest of the commit equals the starting head.
+   It also refuses a row ID that is not unique, and it prints both results and `insert_after` as `key=value` lines.
+   Any byte difference leaves the restore route. That row follows the re-anchor route or goes to the CoC.
+   The driver copies the lane commits that changed each row file after the merge base into the reviewer brief.
+6. Authorization record: each successful tool run writes a generated record in the Git directory.
    The record names the lane, base, head, row IDs, exact line ranges, expected counts and the unchanged mutant check.
+   A restore entry also names the restoration commit, its parent, the three row ranges and `insert_after`.
    The tool prints the record path and every record field as `key=value` lines, with no row text.
    The record expires on any head change. Rerun the tool at the frozen head before review; that run changes zero statements.
+   On the restore route, that rerun keeps `--restoration` and prints `changed_statements=0`.
    The driver copies the printed fields of that run into the reviewer brief. The reviewer reads no file under `.git`.
-6. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
-7. Review: one independent reviewer confirms that every changed, retired or added row is not weaker.
+7. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
+8. Review: one independent reviewer confirms that every changed, retired, restored or added row is not weaker.
    Not weaker means the same test, the same claim and the same mutant intent, or a replacement that guards as tightly.
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](../skills/ship/references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
-8. The mutation proof runs after merge, under its execution admission.
+9. The mutation proof runs after merge, under its execution admission.
 
 Send these rows to the CoC: a new or changed mutant on an existing row, a changed designated test, a retirement without a replacement, and a row that the PR's own diff does not break.
 Send a changed claim to the CoC too. The CoC approves it only with a current task-specific owner event.
