@@ -307,6 +307,39 @@ else:
         self.assert_refuse(result, 'git command failed (exit 1)')
         self.assertEqual(self.gh_calls.read_text(), '')
 
+    def test_directory_rename_split_refuses_even_with_drift_evidence(self):
+        self.git('checkout', '-b', 'split-main', self.base)
+        self.git('config', 'merge.directoryRenames', 'conflict')
+        (self.repo / 'old').mkdir()
+        self.commit({'.gitattributes': 'generated.txt binary -merge\n', 'generated.txt': 'base\n',
+                     'old/a.txt': 'first file\n', 'old/b.txt': 'second file\n'})
+        base = self.git('rev-parse', 'HEAD')
+        self.git('checkout', '-b', 'split-feature')
+        self.commit({'generated.txt': 'feature\n', 'old/c.txt': 'third file\n'})
+        author = self.git('rev-parse', 'HEAD')
+        self.git('checkout', 'split-main')
+        for name, directory in (('a.txt', 'new1'), ('b.txt', 'new2')):
+            (self.repo / directory).mkdir()
+            self.git('mv', f'old/{name}', f'{directory}/{name}')
+        self.commit({'generated.txt': 'main\n'})
+        parent = self.git('rev-parse', 'HEAD')
+
+        merge = subprocess.run(['git', 'merge-tree', '--write-tree', '--name-only', '-z', parent, author],
+                               cwd=self.repo, env=self.env, capture_output=True)
+        self.assertEqual(merge.returncode, 1, merge.stdout + merge.stderr)
+        tree, *fields = merge.stdout.split(b'\0')
+        boundary = fields.index(b'')
+        self.assertEqual(fields[:boundary], [b'generated.txt'])
+        self.assertIn(b'CONFLICT (directory rename split)', fields[boundary + 1:])
+        self.git('read-tree', '--reset', '-u', tree.decode('ascii'))
+        self.commit({'generated.txt': 'regenerated output\n'})
+        squash = self.git('rev-parse', 'HEAD')
+        script = self.script_with_config({'example/repo': self.rule('generated.txt')})
+        api = self.drift_replies(squash, ({}, {}))
+        result = self.check(base=base, author=author, squash=squash, script=script, api=api)
+        self.assert_refuse(result, 'git command failed (exit 1)')
+        self.assertEqual(self.gh_calls.read_text(), '')
+
     def test_regeneration_with_an_added_empty_subtree_refuses(self):
         base, author, parent, squash = self.regenerated_squash()
         blank = self.git('mktree', input='')

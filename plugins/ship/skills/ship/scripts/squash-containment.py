@@ -47,18 +47,45 @@ def configured_rule(pr):
     return repo, config.get(repo)
 
 
+def conflict_paths(output):
+    tree, *fields, terminator = output.split(b'\0')
+    if terminator or not re.fullmatch(rb'[0-9a-f]{40}|[0-9a-f]{64}', tree):
+        raise ValueError('invalid merge-tree output')
+    boundary = fields.index(b'')
+    if boundary == len(fields) - 1:
+        raise ValueError('missing merge-tree conflict records')
+    paths = set(fields[:boundary])
+    records = iter(fields[boundary + 1:])
+    for count in records:
+        if not count.isdigit():
+            raise ValueError('invalid merge-tree path count')
+        names = [next(records) for _ in range(int(count))]
+        kind, message = next(records), next(records)
+        if not all(names) or not kind or not message:
+            raise ValueError('invalid merge-tree record')
+        # Some conflicts, such as split directory renames, leave no unmerged stages.
+        if kind.startswith(b'CONFLICT'):
+            if not names:
+                raise ValueError('merge-tree conflict has no paths')
+            paths.update(names)
+    if not paths:
+        raise ValueError('merge-tree reported no conflict paths')
+    return tree, {fsdecode(path) for path in paths}
+
+
 def merge_tree(parent, author):
     root = fsdecode(git('rev-parse', '--show-toplevel').removesuffix(b'\n'))
     try:
-        output = git('-C', root, 'merge-tree', '--write-tree', '--no-messages', '--name-only', '-z', parent, author)
+        output = git('-C', root, 'merge-tree', '--write-tree', '--name-only', '-z', parent, author)
     except subprocess.CalledProcessError as exc:
         if exc.returncode != 1:
             raise
-        tree, *names = exc.stdout.rstrip(b'\0').split(b'\0')
-        if not tree or not names:
-            raise
-        return tree, {fsdecode(name) for name in names}, exc
-    return output.rstrip(b'\0'), set(), None
+        try:
+            tree, paths = conflict_paths(exc.stdout)
+        except (ValueError, StopIteration):
+            raise exc from None
+        return tree, paths, exc
+    return output.split(b'\0', 1)[0], set(), None
 
 
 def tree_entry(tree, path):
