@@ -143,24 +143,6 @@ Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into 
      Never use an abbreviated or default push. Never target a default branch.
 4. Open one PR at the first push, or update the open PR. Open it before any proof work: mutation batteries and live checks run after the PR exists. Put scope, behavior, verification steps, and risks in the body.
 
-Use the literal stdin form only in an authorized main session or driver session.
-Run the command alone from the lane worktree.
-Use the verified `github.com/owner/repo` and branch.
-Use a single-quoted title and the single-quoted `BODY` opener.
-Put one exact `BODY` delimiter on the final line.
-
-```bash
-gh pr create --repo github.com/bettergroupinc/example --head docs/lane --title 'docs: describe the lane' --body-file - <<'BODY'
-## Scope
-Describe the scope here.
-BODY
-```
-
-The Markdown body goes directly to stdin.
-Keep publication holds, receipt custody, and review-thread rules in force.
-The hook refuses aliases, extra flags, other redirects, substitutions, and compound commands on this route.
-The hook refuses shell-written heredoc body files on the PR creation route.
-
 ## 10. Babysit
 
 Run `ship:babysit` on the PR until required CI is green and zero threads are unresolved. Append one row per round, and a final `babysit` row with verdict `pass`.

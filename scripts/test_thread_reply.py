@@ -1474,6 +1474,13 @@ class HookTests(unittest.TestCase):
     def test_git_literal_pager_stays_admitted(self):
         self.assertEqual(self.decision('git -c core.pager=cat log -1', ''), {})
 
+    def test_git_pager_config_env_stays_refused(self):
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                result = self.decision('git --config-env=core.pager=PAGER log -1', caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn('git config from the command line', result['permissionDecisionReason'])
+
     def test_writer_admits_literal_commit_abbreviation_override(self):
         command = ('git -C /abs/lane -c core.abbrev=40 commit --only '
                    '-m "fix(mcp): pull editable skill versions" -- src/example.py')
@@ -1632,143 +1639,11 @@ class HookTests(unittest.TestCase):
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn(' Rule: ' + rule + '.', result['permissionDecisionReason'])
 
-    pr_create = ("gh pr create --repo github.com/miguelrisero/example --head docs/lane "
-                 "--title 'docs: link the review thread' --body-file -")
-    pr_body = " <<'BODY'\nMarkdown\nBODY"
-
-    def test_pr_create_reads_quoted_markdown_body(self):
-        command = (self.pr_create + " <<'BODY'\n"
-                   f'See the review thread at `{COMMENT}`.\n'
-                   'The examples mention `--config-env`, `--row-file`, `--row-id`, and `gh pr new`.\n'
-                   'BODY\n')
-        for caller in ('', 'ship:driver'):
-            with self.subTest(caller=caller):
-                self.assertEqual(self.decision(command, caller), {})
-                live_config = 'git --config-env=core.pager=PAGER log -1'
-                result = self.decision(live_config, caller)
-                self.assertEqual(result.get('permissionDecision'), 'deny')
-                self.assertIn('git config from the command line', result['permissionDecisionReason'])
-        for caller, rule in (('ship:writer--sol', 'Writers never push'),
-                             ('ship:reviewer--sol', 'Only the main session and the driver')):
-            with self.subTest(caller=caller):
-                result = self.decision(command, caller)
-                self.assertEqual(result.get('permissionDecision'), 'deny')
-                self.assertIn(rule, result['permissionDecisionReason'])
-
-    def test_pr_create_stdin_preserves_receipt_custody(self):
-        command = self.pr_create + self.pr_body.replace('Markdown', 'ultraship/text-lint')
-        for caller in ('', 'ship:driver'):
-            with self.subTest(caller=caller):
-                result = self.decision(command, caller)
-                self.assertEqual(result.get('permissionDecision'), 'deny')
-                self.assertIn('refusal receipts (custody rule)', result['permissionDecisionReason'])
-
-    def test_pr_create_stdin_refuses_other_shapes(self):
-        command = self.pr_create + self.pr_body
-        forms = (
-            command.replace('miguelrisero', 'other-owner', 1),
-            command.replace('/example ', '/.. ', 1),
-            command.replace('docs/lane', 'docs/../lane', 1),
-            command.replace('docs/lane', '$(printf lane)', 1),
-            command.replace("'docs: link the review thread'", '"docs: body"', 1),
-            command.replace("<<'BODY'", '<<BODY', 1),
-            command.replace("<<'BODY'", "<<-'BODY'", 1),
-            command.replace('\nBODY', '\n BODY', 1),
-            command.replace('\nMarkdown\n', '\nBODY\nMarkdown\n', 1),
-            command.removesuffix('BODY'),
-            command + '\ngh pr view 7',
-            'true && ' + command,
-            'command ' + command,
-            command.replace(" <<'BODY'", " --draft <<'BODY'", 1),
-            command.replace(" <<'BODY'", " > output.txt <<'BODY'", 1),
-            self.pr_create + ' < body.md',
-        )
-        for caller in ('', 'ship:driver'):
-            for form in forms:
-                with self.subTest(caller=caller, command=form):
-                    self.assertEqual(self.decision(form, caller).get('permissionDecision'), 'deny')
-
-    def test_pr_new_alias_keeps_heredoc_refusal(self):
-        alias = self.pr_create.replace('gh pr create', 'gh pr new', 1)
-        inert = f"cat <<'EXAMPLE'\n{alias + self.pr_body}\nEXAMPLE"
-        for caller in ('', 'ship:driver'):
-            with self.subTest(caller=caller):
-                result = self.decision(alias + self.pr_body, caller)
-                self.assertEqual(result.get('permissionDecision'), 'deny')
-                self.assertIn('literal PR body stdin form', result['permissionDecisionReason'])
-                self.assertEqual(self.decision(inert, caller), {})
-
-    def test_pr_create_heredoc_scan_keeps_lines_after_a_comment(self):
-        source = "# example: <<'END'\nprintf '%s' data\n"
-        self.assertEqual(ultraship.shell_without_heredoc_bodies(source, check_operators=True), source)
-
-    def test_pr_create_stdin_refuses_attached_repo_option_tokens(self):
-        words = ('gh', '-Rfixture', 'pr', 'create', '--body-file', '-')
-        tokens = [(word, word, i, i + 1) for i, word in enumerate(words)]
-        with patch.object(ultraship, 'shell_raw_words', return_value=tokens):
-            self.assertTrue(ultraship.pr_create_uses_shell_stdin('gh pr create --body-file'))
-
-    def test_pr_create_stdin_classifies_each_nested_level(self):
-        inner = "printf '%s' gh pr create --head $(printf '%s' fixture) --body-file {}"
-        sources = (
-            f'''printf '%s' "$({inner})"''',
-            f'''printf '%s' "$(printf '%s' "$({inner})")"''',
-        )
-        for source in sources:
-            for body, uses_stdin in (('-', True), ('body.md', False)):
-                with self.subTest(source=source, body=body):
-                    self.assertEqual(ultraship.pr_create_uses_shell_stdin(source.format(body)), uses_stdin)
-
-    def test_pr_create_stdin_refuses_uncertain_process_substitution(self):
-        source = "printf '%s' gh pr create --body-file body.md <(printf '%s' fixture)"
-        with self.assertRaisesRegex(ValueError, 'shell substitution boundary'):
-            ultraship.pr_create_uses_shell_stdin(source)
-
-    def test_pr_create_stdin_consumes_title_values(self):
-        for title in ('--title --body-file=-', '--title=--body-file=-', '-t -F-', '-tF-', '-dtF-'):
-            with self.subTest(title=title):
-                source = "printf '%s' gh pr create --head fixture " + title
-                self.assertFalse(ultraship.pr_create_uses_shell_stdin(source + ' --body-file body.md'))
-                self.assertTrue(ultraship.pr_create_uses_shell_stdin(source + ' --body-file -'))
-        self.assertTrue(ultraship.pr_create_uses_shell_stdin("printf '%s' gh pr create --body --title --body-file -"))
-
     def test_pr_create_admits_quoted_heredoc_text_in_title(self):
         command = "gh pr create --title 'docs: describe <<BODY' --body-file body.md"
         for caller in ('', 'ship:driver'):
             with self.subTest(caller=caller):
                 self.assertEqual(self.decision(command, caller), {})
-
-    def test_pr_create_and_new_refuse_stdin_with_an_interleaved_redirect(self):
-        for verb in ('create', 'new'):
-            command = self.pr_create.replace('gh pr create', f'gh 2>/dev/null pr {verb}', 1) + self.pr_body
-            for caller in ('', 'ship:driver'):
-                with self.subTest(caller=caller, verb=verb):
-                    result = self.decision(command, caller)
-                    self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn('literal PR body stdin form', result['permissionDecisionReason'])
-
-    def test_pr_create_refuses_shell_written_body_files(self):
-        with tempfile.TemporaryDirectory() as root:
-            workspace = Path(root).resolve()
-            scratch = workspace / '.scratch'
-            scratch.mkdir(mode=0o700)
-            (scratch / 'existing.md').touch()
-            (scratch / 'link.md').symlink_to(workspace / 'absent.md')
-            (scratch / 'link-dir').symlink_to(workspace, target_is_directory=True)
-            checkout = workspace / 'checkout'
-            checkout.mkdir()
-            (checkout / '.scratch').symlink_to(scratch, target_is_directory=True)
-            for cwd, path in ((workspace, '.scratch/fresh.md'), (workspace, '.scratch/existing.md'),
-                              (workspace, '.scratch/link.md'), (workspace, '.scratch/link-dir/body.md'),
-                              (workspace, 'outside.md'), (workspace, '.scratch/missing/body.md'),
-                              (checkout, '.scratch/body.md')):
-                for verb in ('create', 'new'):
-                    command = (f"cat > {path} <<'BODY'\nMarkdown\nBODY\n"
-                               f'gh pr {verb} --title "docs: body" --body-file {path}')
-                    with self.subTest(cwd=cwd, path=path, verb=verb):
-                        result = self.decision(command, 'ship:driver', str(cwd))
-                        self.assertEqual(result.get('permissionDecision'), 'deny')
-                        self.assertIn('literal PR body stdin form', result['permissionDecisionReason'])
 
     def test_guard_exception_denies_every_caller(self):
         with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):

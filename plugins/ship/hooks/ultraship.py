@@ -889,22 +889,6 @@ def literal_ps_awk_filter(command):
                   r"'([^'\r\n]*)'(?=[ \t]*(?:$|;|&&|\|\||\)))", data, command)
 
 
-def literal_pr_create_shell(command):
-    """Return the executable header only for one complete literal stdin form."""
-    line, _, body = command.partition('\n')
-    header = re.fullmatch(r"(gh pr create --repo github\.com/(?:bettergroupinc|miguelrisero)/([A-Za-z0-9_.-]+)"
-                          r" --head ([A-Za-z0-9_][A-Za-z0-9_./-]*) --title '[^'\x00-\x1f\x7f]+' --body-file -) <<'BODY'",
-                          line)
-    if not header or header[2] in {'.', '..'} or '\x00' in body:
-        return None
-    branch = header[3]
-    if '..' in branch or branch.endswith('.') or any(
-            not part or part.startswith('.') or part.endswith('.lock') for part in branch.split('/')):
-        return None
-    lines = body.removesuffix('\n').split('\n')
-    return header[1] if lines[-1] == 'BODY' and 'BODY' not in lines[:-1] else None
-
-
 def cat_heredoc_data(command):
     # ponytail: PATH or link aliases can reach the written file; sandbox execution to enforce filesystem identity.
     delimiter = r'''('[A-Za-z_0-9]+'|"[A-Za-z_0-9]+")'''
@@ -922,8 +906,6 @@ def cat_heredoc_data(command):
         candidate = lines[end].lstrip('\t') if strip_tabs else lines[end]
         if candidate.removesuffix('\n') == end_marker:
             remainder = ''.join(lines[end + 1:])
-            shell = re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
-            written = re.search(r'>>?[ \t]*([\w./-]+)', lines[0])[1]
             ruff = (r'(?:ruff|/[\w./-]+/\.venv/bin/ruff)[ \t]+'
                     r'(?:check|format)(?:[ \t]+[A-Za-z0-9./_=\-]+)*')
             segments = [part.strip() for part in re.split(r'&&|;|\n', remainder) if part.strip()]
@@ -936,7 +918,7 @@ def cat_heredoc_data(command):
                 if executable.is_absolute() and (
                         Path(os.path.realpath(executable)).parent != Path(os.path.realpath(executable.parent))):
                     return command
-            written = Path(written)
+            written = Path(re.search(r'>>?[ \t]*([\w./-]+)', lines[0])[1])
             folder = re.match(rf'^[ \t]*cd +({path}) +&& +', lines[0])
             if folder:
                 written = Path(folder[1]) / written
@@ -950,7 +932,7 @@ def cat_heredoc_data(command):
                             or any(part.startswith('python') or Path(part).stem in {'sitecustomize', 'usercustomize'}
                                    for part in destination.parts)):
                         return command
-            return shell
+            return re.sub(rf'<<-?[ \t]*{delimiter}', '', lines[0], count=1) + remainder
     return command
 
 
@@ -1142,7 +1124,7 @@ def shell_raw_words(text):
     return words
 
 
-def shell_without_heredoc_bodies(command, *, check_operators=False):
+def shell_without_heredoc_bodies(command):
     """Keep headers and following shell commands, without interpreting data as shell words."""
     lines, kept, pending = command.splitlines(keepends=True), [], []
     if (lines and re.fullmatch(r'[ \t]*(?:cd +[\w./-]+ +&& +)?git +commit(?: +(?:-[a-zA-Z]|--[\w-]+))* +'
@@ -1159,14 +1141,8 @@ def shell_without_heredoc_bodies(command, *, check_operators=False):
                     quoted_lines[index + 1:] = literal_quotes_removed(''.join(lines[index + 1:])).splitlines(keepends=True)
             continue
         kept.append(line)
-        header = quoted_lines[index]
-        operators = None
-        if check_operators and '<<' in header:
-            # A comment must not turn following shell commands into heredoc data.
-            operators = {start for raw, _, start, _ in shell_raw_words(line) if raw == '<'}
         for match in re.finditer(r"(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", line):
-            if (header[match.start():match.start() + 2] == '<<'
-                    and (operators is None or match.start() in operators)):
+            if quoted_lines[index][match.start():match.start() + 2] == '<<':
                 pending.append((shlex.split(match[2])[0], bool(match[1]), match[2][0] in '\'"\\'))
     return ''.join(kept)
 
@@ -2078,8 +2054,8 @@ def parameter_quote_mode(text, start):
     return 'other'
 
 
-def shell_substitution_bodies(text, arithmetic_quotes=False, *, with_offsets=False):
-    """Yield bodies or (opening, body start, closing) offsets with separate quote state."""
+def shell_substitution_bodies(text, arithmetic_quotes=False):
+    """Keep substitution quote state separate from the surrounding shell word."""
     frames, quote, cursor, word_start = [], '', 0, True
     while cursor < len(text):
         char = text[cursor]
@@ -2102,8 +2078,7 @@ def shell_substitution_bodies(text, arithmetic_quotes=False, *, with_offsets=Fal
             comment = text[cursor:len(text) if end < 0 else end]
             if context == '`':
                 comment = comment.partition('`')[0]
-            if ((with_offsets and context in {')', '`'})
-                    or any(marker in comment for marker in ('$(', '`', '${'))):
+            if any(marker in comment for marker in ('$(', '`', '${')):
                 raise ValueError('shell comment substitution')
             cursor = len(text) if end < 0 else end + 1
             word_start = True
@@ -2117,7 +2092,7 @@ def shell_substitution_bodies(text, arithmetic_quotes=False, *, with_offsets=Fal
                 quote = ''
         elif char == '`' and context == '`':
             _, start, quote, _ = frames.pop()
-            yield (start - 1, start, cursor) if with_offsets else text[start:cursor]
+            yield text[start:cursor]
         elif text.startswith(('$((', '${', '$['), cursor):
             opening = 3 if text.startswith('$((', cursor) else 2
             closing = '))' if opening == 3 else '}' if text.startswith('${', cursor) else ']'
@@ -2154,7 +2129,7 @@ def shell_substitution_bodies(text, arithmetic_quotes=False, *, with_offsets=Fal
                 if depth == 1:
                     frames.pop()
                     if closing == ')':
-                        yield (start - 2, start, cursor) if with_offsets else text[start:cursor]
+                        yield text[start:cursor]
                     quote = outer_quote
                     cursor += len(closing)
                     word_start = closing == ')'
@@ -2162,8 +2137,6 @@ def shell_substitution_bodies(text, arithmetic_quotes=False, *, with_offsets=Fal
                 frames[-1] = (closing, start, outer_quote, depth - 1)
         word_start = not quote and char in ' \t\n;&|()'
         cursor += 1
-    if with_offsets and (frames or quote):
-        raise ValueError('shell substitution boundary')
     for closing, start, _, _ in frames:
         if closing in {')', '`'}:
             yield text[start:]
@@ -4480,96 +4453,6 @@ def review_thread_denial(command, data_mode=False):
     return None
 
 
-def pr_create_uses_shell_stdin(command):
-    """Detect PR body input outside the exact literal admission."""
-    raw = re.sub(r'''['"\\]''', '', command.replace('\\\n', ''))
-    if (not re.search(r'\bgh\b', raw) or not re.search(r'\b(?:create|new)\b', raw)
-            or not re.search(r'--body-file|-[A-Za-z]*F', raw)):
-        return False
-
-    shell = shell_line_continuations(shell_without_heredoc_bodies(command, check_operators=True))
-    # A child's separators cannot end a command in its parent.
-    regions = [(0, len(shell), [])]
-    parents = regions.copy()
-    for opening, start, closing in sorted(shell_substitution_bodies(shell, with_offsets=True)):
-        while len(parents) > 1 and opening >= parents[-1][1]:
-            parents.pop()
-        lower, upper, children = parents[-1]
-        if not lower <= opening < start <= closing < upper:
-            raise ValueError('shell substitution boundary')
-        children.append((opening, closing + 1))
-        child = (start, closing, [])
-        regions.append(child)
-        parents.append(child)
-
-    token_lists, here_input = [], False
-    for region_index, (start, end, children) in enumerate(regions):
-        parts = []
-        for opening, after in children:
-            parts.extend((shell[start:opening], '_'))
-            start = after
-        region = ''.join(parts) + shell[start:end]
-        if (region_index and '<<' in region
-                and shell_without_heredoc_bodies(region, check_operators=True) != region):
-            # The first heredoc pass must strip data before substitution offsets are computed.
-            raise ValueError('shell substitution boundary')
-        tokens = shell_raw_words(region)
-        token_lists.append(tokens)
-        for left, right in zip(tokens, tokens[1:]):
-            if left[3] != right[2]:
-                continue
-            if left[0] in {'<', '>'} and right[0] == '(':
-                raise ValueError('shell substitution boundary')
-            # A heredoc or here-string in an earlier command can write the PR body file.
-            here_input = here_input or left[0] == right[0] == '<'
-
-    def next_pr_word(arguments):
-        for word in arguments:
-            if word in {'-R', '--repo'}:
-                next(arguments, '')
-            elif not word.startswith(('-R', '--repo=')):
-                return word
-        return ''
-
-    separators = {';', '&', '|', '(', ')', '`', '\n'}
-    body_option = re.compile(r'--body-file(?:=|$)|-[A-Za-z]*F=?')
-    value_option = re.compile(r'(--(?:assignee|base|body|body-file|head|label|milestone|project|repo|reviewer|template|title))'
-                              r'(?==|$)|-[defhw]*([aBbFHlmprRtT])')
-    switch = re.compile(r'--(?:draft|dry-run|editor|fill|fill-first|fill-verbose|help|no-maintainer-edit|web)|-[defhw]+')
-    for tokens in token_lists:
-        words = []
-        for raw, value, _, _ in [*shell_without_redirections(tokens), ('\n', '\n', 0, 0)]:
-            if raw not in separators:
-                words.append(value)
-                continue
-            for index, word in enumerate(words):
-                if os.path.basename(word) != 'gh':
-                    continue
-                arguments = iter(words[index + 1:])
-                if next_pr_word(arguments) != 'pr' or next_pr_word(arguments) not in {'create', 'new'}:
-                    continue
-                options = list(arguments)
-                pending, known_position = '', True
-                for option, following in zip(options, options[1:] + ['']):
-                    flag = pending
-                    pending = ''
-                    if not flag and known_position:
-                        if match := value_option.match(option):
-                            flag = match[1] or match[2]
-                            if match.end() == len(option):
-                                pending = flag
-                        else:
-                            # Keep the conservative body scan after an unknown option.
-                            known_position = bool(switch.fullmatch(option.partition('=')[0]))
-                    if flag in {'--title', 't'}:
-                        continue
-                    if match := body_option.match(option):
-                        if here_input or (option[match.end():] or following) == '-':
-                            return True
-            words.clear()
-    return False
-
-
 # In this literal Git read, the only dollar signs belong to the single-quoted pattern.
 LITERAL_GIT_GREP_ANCHOR = re.compile(
     r"[ \t]*git(?:[ \t]+-C[ \t]+(?!-)[\w./-]+)*[ \t]+grep"
@@ -4862,15 +4745,10 @@ def pre(data):
                          'Report the blocked scope to the driver.')
     if tool == 'Bash':
         command = str(tin.get('command', ''))
-        pr_body_command = literal_pr_create_shell(command)
-        command = pr_body_command or command
         # shortcut: substitutions or variables can build option names; upgrade to driver-only record folders and a tool-side record check.
         trigger = command.translate(str.maketrans('', '', "'\"\\")).casefold()
         if '--row-file' in trigger or '--row-id' in trigger or 'row_reanchor' in trigger and '--row-' in trigger:
             row_reanchor_gate(data, command)
-        if (pr_body_command and agent_type and not role(data, 'writer')
-                and not re.match(r'^(ship:)?driver(--|$)', agent_type)):
-            deny('Only the main session and the driver may use the literal PR body stdin form in the Ship pipeline.')
     if role(data, 'writer'):
         if tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input',
                     'mcp__bettercoding__set_input_status'):
@@ -4883,7 +4761,7 @@ def pre(data):
                                  'or report the rule and blocked scope to your driver and ask for permission; '
                                  'the driver may grant it or run the step itself.')
             try:
-                command = pr_body_command or tin.get('command', '')
+                command = tin.get('command', '')
                 if any(char.isspace() and char not in ' \t\n' for char in command):
                     deny(classifier_reason + ' Rule: line separator rule.')
                 reason = process_heredoc_denial(command)
@@ -4958,10 +4836,8 @@ def pre(data):
                 deny('Writers do not edit GitHub CLI configuration.')
     if tool == 'Bash':
         try:
-            command = pr_comment_body_removed(pr_body_command or tin.get('command', ''))
+            command = pr_comment_body_removed(tin.get('command', ''))
             reason = review_thread_denial(command)
-            if reason is None and pr_body_command is None and pr_create_uses_shell_stdin(command):
-                reason = 'Shell heredocs and stdin for PR creation require the literal PR body stdin form'
             if reason is None:
                 separated = re.sub(r'''['"\\]''', ' ', command).casefold()
                 normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()
