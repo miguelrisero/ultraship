@@ -11,9 +11,7 @@ import json
 import os
 import posixpath
 import re
-import select
 import shlex
-import signal
 import stat
 import subprocess
 import sys
@@ -5425,16 +5423,25 @@ class ReceiptIntegrityError(ValueError):
     pass
 
 
-class NonGitTimeout(ValueError):
-    pass
+def account(ledger, notifications, receipts, session):
+    histories, occurrences = {}, {}
+    used = {json.dumps(value) for value in receipts.values()}
+    failures = []
+    for owed in notifications:
+        result = {}
+        try:
+            result = owed_result(owed, session, occurrences)
+            account_one(ledger, owed, result, receipts, session, histories, used)
+        except ReceiptIntegrityError:
+            raise
+        except Exception as exc:
+            failures.append((owed, result, exc))
+    return failures
 
 
 NON_GIT_LEDGER_FILES = 64
 NON_GIT_DIR_ENTRIES = 128
 NON_GIT_LEDGER_BYTES = 1024 * 1024
-NON_GIT_LOOKUP_SECONDS = 5
-NON_GIT_TERM_GRACE = 5
-NON_GIT_REPLY_BYTES = 16 * 1024
 
 
 def non_git_ledger_files(workspace):
@@ -5442,10 +5449,10 @@ def non_git_ledger_files(workspace):
         with os.scandir(directory) as scan:
             for index, entry in enumerate(scan):
                 if index >= NON_GIT_DIR_ENTRIES:
-                    raise ValueError('Workspace ledger directory has too many entries')
+                    raise ValueError(f'Too many entries in workspace directory: {directory}')
                 yield Path(entry.path)
 
-    def is_directory(path, *, linked_git=False):
+    def directory(path, *, linked_git=False):
         try:
             mode = path.lstat().st_mode
         except FileNotFoundError:
@@ -5456,274 +5463,96 @@ def non_git_ledger_files(workspace):
             raise ValueError(f'Workspace ledger needs a real directory: {path}')
         return True
 
-    def directories():
-        override = os.environ.get('SHIP_LEDGER_DIR')
-        if override is not None:
-            directory = Path(override)
-            if not directory.is_absolute() or directory.resolve(strict=True) != directory:
-                raise ValueError('SHIP_LEDGER_DIR must be an absolute canonical directory')
-            yield directory
-            return
+    def homes():
         scratch = workspace / '.scratch'
-        ledger_root = scratch / 'ship-ledgers'
-        if is_directory(scratch) and is_directory(ledger_root):
-            for directory in entries(ledger_root):
-                if re.fullmatch('[0-9a-f]{64}', directory.name):
-                    if not stat.S_ISDIR(directory.lstat().st_mode):
-                        raise ValueError(f'Workspace ledger needs a real directory: {directory}')
-                    yield directory
+        root = scratch / 'ship-ledgers'
+        if directory(scratch) and directory(root):
+            for child in entries(root):
+                if re.fullmatch('[0-9a-f]{64}', child.name):
+                    if not stat.S_ISDIR(child.lstat().st_mode):
+                        raise ValueError(f'Workspace ledger needs a real directory: {child}')
+                    yield child
         for child in entries(workspace):
             mode = child.lstat().st_mode
             if stat.S_ISLNK(mode):
                 raise ValueError(f'Workspace ledger needs a real directory: {child}')
-            if not stat.S_ISDIR(mode):
-                continue
-            git = child / '.git'
-            ship = git / 'ship'
-            directory = ship / 'ledger'
-            if is_directory(git, linked_git=True) and is_directory(ship) and is_directory(directory):
-                yield directory
+            if stat.S_ISDIR(mode):
+                git = child / '.git'
+                ship = git / 'ship'
+                home = ship / 'ledger'
+                if directory(git, linked_git=True) and directory(ship) and directory(home):
+                    yield home
 
-    files = []
-    for directory in directories():
-        for path in entries(directory):
+    count = 0
+    for home in homes():
+        for path in entries(home):
             if path.name.endswith('.tsv'):
-                if len(files) >= NON_GIT_LEDGER_FILES:
-                    raise ValueError('Workspace has too many ledger files')
+                count += 1
+                if count > NON_GIT_LEDGER_FILES:
+                    raise ValueError('Too many workspace ledger files')
                 if not stat.S_ISREG(path.lstat().st_mode):
                     raise ValueError(f'Workspace ledger needs a regular file: {path}')
-                files.append(path)
-    return files
+                yield path
 
 
-def non_git_rows(path, ledger):
-    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
-        info = os.fstat(stream.fileno())
+def non_git_rows(path, ledger, result_id):
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
+        info = os.fstat(source.fileno())
         if not stat.S_ISREG(info.st_mode):
             raise ValueError(f'Workspace ledger needs a regular file: {path}')
         if info.st_size > NON_GIT_LEDGER_BYTES:
             raise ValueError(f'Workspace ledger exceeds its byte limit: {path}')
-        data = stream.read(NON_GIT_LEDGER_BYTES + 1)
+        data = source.read(NON_GIT_LEDGER_BYTES + 1)
     if len(data) > NON_GIT_LEDGER_BYTES:
         raise ValueError(f'Workspace ledger exceeds its byte limit: {path}')
     history = [line.split('\t') for line in data.decode('utf-8').splitlines() if line]
+    explicit = False
     for row in history:
-        if (len(row) != 6 or not row[0].isascii() or not row[0].isdigit()
-                or not row[1] or not row[4] or (row[1] == 'run-start' and row[2] not in ledger.REQUIRED)):
+        if (len(row) != 6 or not row[0].isascii() or not row[0].isdigit() or not row[1] or not row[4]
+                or (row[1] == 'run-start' and row[2] not in ledger.REQUIRED)):
             raise ValueError(f'Malformed workspace ledger: {path}')
         int(row[0])
-    return history
+        if row[1] in ('account-result', 'correct-binding'):
+            marker = json.loads(row[5])
+            if (not isinstance(marker, dict) or not isinstance(marker.get('result'), str)
+                    or (row[1] == 'account-result' and 'run' not in marker)):
+                raise ValueError(f'Malformed workspace ledger marker: {path}')
+            explicit |= marker['result'] == result_id
+    return history, explicit
 
 
-def non_git_run_contains(history, start, index, epoch):
-    if not 0 <= start < index < len(history) or history[start][1] != 'run-start':
-        return False
-    following = next((i for i in range(start + 1, len(history)) if history[i][1] == 'run-start'), len(history))
-    end = next((i for i in range(start + 1, following) if history[i][1] == 'run-end'), following)
-    return (index < end and int(history[start][0]) <= epoch
-            and (following == len(history) or epoch < int(history[following][0]))
-            and (end == following or epoch <= int(history[end][0])))
-
-
-def non_git_receipt_shape(value):
-    return (isinstance(value, list) and len(value) == 3 and isinstance(value[0], str)
-            and all(isinstance(token, list) and len(token) == 2
-                    and type(token[0]) is int and isinstance(token[1], str) for token in value[1:]))
-
-
-def non_git_replay(ledger, workspace, saved, epoch, agent, agent_id):
-    if not non_git_receipt_shape(saved):
-        raise ReceiptIntegrityError('Accounting receipt has an invalid shape')
-    home, run, token = saved
-    try:
-        epoch = int(epoch)
-        path = next((path for path in non_git_ledger_files(workspace) if str(path) == home), None)
-        if path is None:
-            raise ValueError('ledger is outside the workspace inventory')
-        history = non_git_rows(path, ledger)
-        start, index = run[0], token[0]
-        if (not non_git_run_contains(history, start, index, epoch)
-                or history[index][1] in ledger.MARKS
-                or run != run_identity(start, history[start]) or token != run_identity(index, history[index])):
-            raise ValueError('run or row evidence differs')
-        row = history[index]
-        if ledger.agent_key(row[2]) != (agent, agent_id) or row[4] == 'owed' or int(row[0]) < epoch - 5:
-            raise ValueError('saved row is not eligible for this result')
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise ReceiptIntegrityError(f'Invalid accounting receipt: {exc}') from exc
-
-
-def non_git_account(ledger, cwd, epoch, agent, agent_id, saved, replay, used):
-    workspace = Path(cwd).resolve(strict=True)
+def non_git_ledger_home(ledger, cwd, epoch, owner, result_id, git_error):
+    workspace = Path(cwd)
+    if not workspace.is_absolute() or str(workspace) != cwd or workspace.resolve(strict=True) != workspace:
+        raise ValueError('Workspace ledger lookup needs an absolute canonical cwd')
     try:
         (workspace / '.git').lstat()
     except FileNotFoundError:
         pass
     else:
-        return ['git', None]
-    if replay:
-        non_git_replay(ledger, workspace, saved, epoch, agent, agent_id)
-        return ['receipt', None]
-    epoch = int(epoch)
+        raise git_error
+
+    # shortcut: lookup requires quiescent writers and has no I/O deadline; add a deadline for stalled filesystems.
     count = 0
-    match = None
     for path in non_git_ledger_files(workspace):
-        history = non_git_rows(path, ledger)
-        start = -1
-        for index, row in enumerate(history):
-            if row[1] == 'run-start':
-                start = index
-            elif row[1] not in ledger.MARKS and ledger.agent_key(row[2]) == (agent, agent_id):
+        rows, has_marker = non_git_rows(path, ledger, result_id)
+        for i, row in enumerate(rows):
+            if row[1] not in ledger.MARKS and ledger.agent_key(row[2]) == owner:
                 count += 1
-                match = path, history, start, index
+                home, history, index, explicit = path, rows, i, has_marker
     if count != 1:
-        raise ValueError(f'Found {count} ledger rows for agent {agent}@{agent_id}; expected exactly one')
-    path, history, start, index = match
-    row = history[index]
-    if not non_git_run_contains(history, start, index, epoch):
+        raise ValueError(f'Found {count} workspace ledger rows for {owner[0]}@{owner[1]}; expected exactly one')
+    if explicit:
+        raise ValueError('Workspace ledger has an explicit marker for this pending result')
+    start = next((i for i in range(index - 1, -1, -1) if history[i][1] == 'run-start'), -1)
+    following = next((i for i in range(index + 1, len(history)) if history[i][1] == 'run-start'), len(history))
+    end = next((i for i in range(start + 1, following) if history[i][1] == 'run-end'), following)
+    when = int(epoch)
+    if (start < 0 or index >= end or when < int(history[start][0])
+            or (following < len(history) and when >= int(history[following][0]))
+            or (end < following and when > int(history[end][0]))):
         raise ValueError('Notification or matched row falls outside the bound ship run')
-    receipt = [str(path), run_identity(start, history[start]), run_identity(index, row)]
-    if row[4] == 'owed' or int(row[0]) < epoch - 5 or json.dumps(receipt) in used:
-        raise ValueError(f'Review results have no unused ledger row for agent {agent}@{agent_id}')
-    return ['receipt', receipt]
-
-
-def non_git_child(write_fd, args):
-    try:
-        # The parent owns the owed and receipt locks. Drop all inherited descriptors before lookup.
-        os.closerange(0, write_fd)
-        os.closerange(write_fd + 1, 2**31 - 1)
-        try:
-            reply = non_git_account(*args)
-        except Exception as exc:
-            kind = 'integrity' if isinstance(exc, ReceiptIntegrityError) else 'error'
-            reply = [kind, str(exc)[:1024]]
-        data = json.dumps(reply).encode()
-        if len(data) > NON_GIT_REPLY_BYTES:
-            data = b'["error", "Workspace ledger reply exceeds its byte limit"]'
-        os._exit(0 if os.write(write_fd, data) == len(data) else 1)
-    finally:
-        os._exit(1)
-
-
-def reap_non_git_child(pid):
-    def signal_live(signum):
-        try:
-            if os.waitpid(pid, os.WNOHANG)[0] == 0:
-                os.kill(pid, signum)
-                return True
-        except (ChildProcessError, ProcessLookupError):
-            pass
-        return False
-
-    if signal_live(signal.SIGTERM):
-        grace = time.monotonic() + NON_GIT_TERM_GRACE
-        while (remaining := grace - time.monotonic()) > 0:
-            if os.waitpid(pid, os.WNOHANG)[0]:
-                return
-            time.sleep(min(remaining, 0.005))
-        if signal_live(signal.SIGKILL):
-            os.waitpid(pid, os.WNOHANG)
-
-
-def bounded_non_git_account(git_error, ledger, cwd, epoch, agent, agent_id, saved, replay, used, *, pass_deadline):
-    deadline = min(pass_deadline, time.monotonic() + NON_GIT_LOOKUP_SECONDS)
-    read_fd, write_fd = os.pipe()
-    pid = 0
-    try:
-        if time.monotonic() >= deadline:
-            raise NonGitTimeout('Workspace ledger lookup timed out')
-        pid = os.fork()
-        if pid == 0:
-            non_git_child(write_fd, (ledger, cwd, epoch, agent, agent_id, saved, replay, used))
-    finally:
-        os.close(write_fd)
-        if not pid:
-            os.close(read_fd)
-    reaped = False
-    try:
-        poll = select.poll()
-        poll.register(read_fd, select.POLLIN)
-        data = bytearray()
-        while (remaining := deadline - time.monotonic()) > 0:
-            if not poll.poll(max(1, int(remaining * 1000))):
-                continue
-            chunk = os.read(read_fd, NON_GIT_REPLY_BYTES + 1 - len(data))
-            if not chunk:
-                break
-            data.extend(chunk)
-            if len(data) > NON_GIT_REPLY_BYTES:
-                raise ValueError('Workspace ledger child reply exceeds its byte limit')
-        while (remaining := deadline - time.monotonic()) > 0:
-            reaped, status = os.waitpid(pid, os.WNOHANG)
-            if reaped:
-                if status != 0:
-                    raise ValueError('Workspace ledger child failed')
-                break
-            time.sleep(min(remaining, 0.005))
-        if not reaped or time.monotonic() >= deadline:
-            raise NonGitTimeout('Workspace ledger lookup timed out')
-    finally:
-        os.close(read_fd)
-        if not reaped:
-            reap_non_git_child(pid)
-    try:
-        reply = json.loads(data)
-    except (ValueError, RecursionError) as exc:
-        raise ValueError('Invalid workspace ledger child reply') from exc
-    if isinstance(reply, list) and len(reply) == 2:
-        kind, value = reply
-        if kind == 'receipt' and (value is None if replay else non_git_receipt_shape(value)):
-            return value
-        if kind == 'git' and value is None:
-            raise git_error
-        if isinstance(value, str):
-            if kind == 'integrity' and replay:
-                raise ReceiptIntegrityError(value)
-            if kind == 'error':
-                raise ValueError(value)
-    raise ValueError('Invalid workspace ledger child reply')
-
-
-def account(ledger, notifications, receipts, session):
-    histories, occurrences = {}, {}
-    used = {json.dumps(value) for value in receipts.values()}
-    failures, deferred = {}, []
-    for position, owed in enumerate(notifications):
-        result = {}
-        try:
-            result = owed_result(owed, session, occurrences)
-            fallback = account_one(ledger, owed, result, receipts, session, histories, used)
-            if fallback is not None:
-                deferred.append((position, owed, result, *fallback))
-        except ReceiptIntegrityError:
-            raise
-        except Exception as exc:
-            failures[position] = (owed, result, exc)
-
-    deadline = None
-    timed_out = False
-    for position, owed, result, git_error, result_id in deferred:
-        epoch, agent, cwd = owed[:3]
-        replay = result_id in receipts
-        if deadline is None:
-            deadline = time.monotonic() + NON_GIT_LOOKUP_SECONDS
-        try:
-            if timed_out or time.monotonic() >= deadline:
-                raise NonGitTimeout('Workspace ledger lookup timed out during this Stop')
-            receipt = bounded_non_git_account(git_error, ledger, cwd, epoch, agent, result['agent_id'],
-                                              receipts.get(result_id), replay, used, pass_deadline=deadline)
-            if receipt is not None:
-                receipts[result_id] = receipt
-                used.add(json.dumps(receipt))
-        except ReceiptIntegrityError:
-            raise
-        except Exception as exc:
-            if replay:
-                raise ReceiptIntegrityError(f'Unverified workspace ledger replay: {exc}') from exc
-            timed_out = timed_out or isinstance(exc, NonGitTimeout)
-            failures[position] = (owed, result, exc)
-    return [failures[position] for position in sorted(failures)]
+    return home, history, run_identity(start, history[start])
 
 
 def account_one(ledger, owed, result, receipts, session, histories, used):
@@ -5731,17 +5560,22 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
     result_id = json.dumps([session, cwd, result['id']])
     if 'ledger' in result and result['run'] is None:
         return
-    # Recorded results keep their ledger across branch changes. Only legacy results resolve the current branch.
+    # Recorded results keep their ledger across branch changes.
     try:
         home = Path(result['ledger']) if 'ledger' in result else ledger.ledger_path(cwd).resolve()
     except subprocess.CalledProcessError as exc:
-        agent_id = result.get('agent_id')
-        if ('ledger' in result or 'run' in result or result.get('v') != 2
-                or not isinstance(agent_id, str) or not agent_id.strip()
-                or exc.returncode != 128 or exc.cmd != ['git', '-C', str(cwd), 'rev-parse', '--abbrev-ref', 'HEAD']
-                or not isinstance(exc.stderr, str) or not exc.stderr.startswith('fatal: not a git repository')):
+        ident = result.get('agent_id')
+        if (result.get('v') != 2 or not isinstance(ident, str) or not ident.strip()
+                or 'ledger' in result or 'run' in result or 'SHIP_LEDGER_DIR' in os.environ
+                or exc.cmd != ['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD']
+                or exc.returncode != 128 or not exc.stderr.startswith('fatal: not a git repository')):
             raise
-        return exc, result_id
+        try:
+            home, history, run = non_git_ledger_home(ledger, cwd, epoch, (agent, ident), result_id, exc)
+        except (OSError, RuntimeError, RecursionError) as error:
+            raise ValueError(f'Workspace ledger lookup failed: {error}') from error
+        histories = {home: history}
+        result = {**result, 'ledger': str(home), 'run': run}
     if not home.is_absolute() or home.resolve() != home:
         raise ValueError('Recorded ledger must be an absolute path without symlinks')
     if home not in histories:
