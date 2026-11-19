@@ -1,4 +1,5 @@
 """Synthetic linked-worktree ledger and hook regressions."""
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
 import hashlib
 import io
@@ -6,10 +7,12 @@ import importlib.util
 import json
 import os
 import shutil
+import signal
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -196,168 +199,238 @@ class LedgerDirTests(unittest.TestCase):
             self.assertEqual(self.cli('append', step, 'driver', 'sha', 'pass').returncode, 0)
         self.assertEqual(self.cli('run-end').returncode, 0)
 
-    def record_non_git_result(self):
+    def fallback_fixture(self):
         self.env['GIT_CEILING_DIRECTORIES'] = str(self.base)
         agent = 'ship:reviewer--sol'
         self.hook('subagent-stop', cwd=str(self.workspace), agent_type=agent, agent_id='reviewer')
         owed = self.base / 'state/ultraship/owed/s1.tsv'
-        evidence = owed.read_bytes()
-        self.assertNotIn('ledger', json.loads(evidence.split(b'\t')[3]))
-        return owed, evidence, f'{agent}@reviewer'
+        pending = b'10\t' + owed.read_bytes().split(b'\t', 1)[1]
+        result = json.loads(pending.split(b'\t')[3])
+        self.assertNotIn('ledger', result)
+        owed.write_bytes(pending)
+        return owed, pending, json.dumps([str(owed), str(self.workspace), result['id']])
 
-    def test_stop_accounts_one_non_git_match(self):
-        owed, evidence, agent = self.record_non_git_result()
-        evidence = b'10\t' + evidence.split(b'\t', 1)[1]
-        owed.write_bytes(evidence)
-        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
+    def fallback_hook(self, owed):
+        spec = importlib.util.spec_from_file_location('stop_hook', HOOK)
+        module = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            spec.loader.exec_module(module)
+        self.assertEqual(module.owed_file({'session_id': 's1'}), owed)
+        return module
+
+    def test_stop_non_git_exact_match(self):
+        owed, pending, key = self.fallback_fixture()
         home = self.resolve()
-        history = ledger.rows(home)
-        history[-1][0] = '11'
-        home.write_text(''.join('\t'.join(row) + '\n' for row in history))
-        self.assertEqual(self.hook('stop', cwd=str(self.workspace)), '')
-        self.assertEqual(owed.read_bytes(), b'')
+        child = self.workspace / 'repo/.git/ship/ledger/child.tsv'
+        child.parent.mkdir(parents=True)
+        start = b'1\trun-start\tlight\tsha\topen\trun-1\n'
+        row = b'10\tdeep-review\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
         receipts = owed.parent.parent / 'accounted.json'
-        identifier = json.loads(evidence.split(b'\t')[3])['id']
-        key = json.dumps([str(owed), str(self.workspace), identifier])
-        run = ledger.run_identity(0, history[0])
-        row = ledger.run_identity(len(history) - 1, history[-1])
-        self.assertEqual(json.loads(receipts.read_bytes()), {key: [str(home), run, row]})
-        saved = receipts.read_bytes()
-        owed.write_bytes(evidence)
-        with home.open('a') as fh:
-            fh.write('12\trun-end\tlight\tsha\tclosed\trun-1\n'
-                     '13\trun-start\tlight\tsha\topen\trun-2\n'
-                     f'14\tdeep-review\t{agent}\tsha\tpass\t\n')
-        self.assertEqual(self.hook('stop', cwd=str(self.workspace)), '')
-        self.assertEqual(owed.read_bytes(), b'')
-        self.assertEqual(receipts.read_bytes(), saved)
-
-    @unittest.skipIf(os.geteuid() == 0, 'root can list unreadable directories')
-    def test_stop_blocks_when_a_nested_ledger_directory_cannot_be_listed(self):
-        owed, evidence, agent = self.record_non_git_result()
-        pending = b'10\t' + evidence.split(b'\t', 1)[1]
-        owed.write_bytes(pending)
-        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
-        home = self.resolve()
-        history = ledger.rows(home)
-        history[-1][0] = '11'
-        home.write_text(''.join('\t'.join(row) + '\n' for row in history))
-        hidden = self.workspace / 'nested/checkout/.git/ship/ledger'
-        hidden.mkdir(parents=True)
-        hidden.chmod(0)
-        try:
-            blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
-            self.assertEqual(blocked['decision'], 'block')
-            self.assertIn('Permission denied', blocked['reason'])
-            self.assertIn(str(hidden), blocked['reason'])
-            self.assertEqual(owed.read_bytes(), pending)
-        finally:
-            hidden.chmod(0o700)
-
-    def test_stop_blocks_when_the_git_probe_exceeds_the_inventory_deadline(self):
-        owed, pending, _ = self.record_non_git_result()
-        bin_dir = self.base / 'bin'
-        bin_dir.mkdir()
-        fake_git = bin_dir / 'git'
-        fake_git.write_text('#!/bin/sh\nexec sleep 7\n')
-        fake_git.chmod(0o700)
-        env = {**self.env, 'PATH': f'{bin_dir}{os.pathsep}{self.env["PATH"]}'}
-        blocked = json.loads(self.hook('stop', cwd=str(self.workspace), env=env))
-        self.assertEqual(blocked['decision'], 'block')
-        self.assertIn('Workspace ledger inventory exceeds 5 seconds', blocked['reason'])
-        self.assertEqual(owed.read_bytes(), pending)
-
-    def test_stop_blocks_non_git_match_after_the_next_run_starts(self):
-        owed, evidence, agent = self.record_non_git_result()
-        pending = b'21\t' + evidence.split(b'\t', 1)[1]
-        owed.write_bytes(pending)
-        self.resolve().write_text(f'10\trun-start\tlight\tsha\topen\trun-1\n'
-                                  f'19\tdeep-review\t{agent}\tsha\tpass\t\n'
-                                  '20\trun-start\tlight\tsha\topen\trun-2\n')
-        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
-        self.assertEqual(blocked['decision'], 'block')
-        self.assertIn('Notification epoch falls outside the bound ship run', blocked['reason'])
-        self.assertEqual(owed.read_bytes(), pending)
-
-    def test_stop_blocks_non_git_match_after_the_run_end(self):
-        owed, evidence, agent = self.record_non_git_result()
-        pending = b'20\t' + evidence.split(b'\t', 1)[1]
-        owed.write_bytes(pending)
-        self.resolve().write_text(f'10\trun-start\tlight\tsha\topen\trun-1\n'
-                                  f'18\tdeep-review\t{agent}\tsha\tpass\t\n'
-                                  '19\trun-end\tlight\tsha\tclosed\trun-1\n')
-        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
-        self.assertEqual(blocked['decision'], 'block')
-        self.assertIn('Notification epoch falls outside the bound ship run', blocked['reason'])
-        self.assertEqual(owed.read_bytes(), pending)
-
-    def test_stop_rejects_malformed_or_outside_non_git_receipts(self):
-        owed, pending, _ = self.record_non_git_result()
-        identifier = json.loads(pending.split(b'\t')[3])['id']
-        key = json.dumps([str(owed), str(self.workspace), identifier])
-        receipts = owed.parent.parent / 'accounted.json'
-        for saved in ([[], [0, 'run'], [0]], [str(self.resolve()), [True, 'run'], [0]],
-                      [str(self.base / 'other.tsv'), [0, 'run'], [0]]):
-            with self.subTest(saved=saved):
-                receipts.write_text(json.dumps({key: saved}))
+        for count in (0, 2, 1):
+            with self.subTest(count=count):
+                owed.write_bytes(pending)
                 owed.with_suffix('.stop-state').unlink(missing_ok=True)
-                blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
-                self.assertEqual(blocked['decision'], 'block')
-                self.assertIn('Accounting receipt', blocked['reason'])
-                self.assertEqual(owed.read_bytes(), pending)
+                home.write_bytes(start + (row if count else row.replace(b'@reviewer', b'@other')))
+                child.write_bytes(start + (row.replace(b'\tpass\t', b'\towed\t') if count == 2 else b''))
+                output = self.hook('stop')
+                if count != 1:
+                    self.assertIn(f'Found {count} ledger rows', json.loads(output)['reason'])
+                    self.assertEqual(owed.read_bytes(), pending)
+                    self.assertFalse(receipts.exists())
+                    continue
+                self.assertEqual(output, '')
+                self.assertEqual(owed.read_bytes(), b'')
+                self.assertEqual(json.loads(receipts.read_bytes()), {key: [str(home),
+                    *[[i, hashlib.sha256(json.dumps(line.decode().rstrip('\n').split('\t')).encode()).hexdigest()]
+                      for i, line in enumerate((start, row))]]})
 
-    def test_stop_blocks_non_git_match_from_a_later_run(self):
-        owed, evidence, agent = self.record_non_git_result()
-        pending = b'10\t' + evidence.split(b'\t', 1)[1]
+    def test_stop_non_git_preserves_main(self):
+        owed, pending, _ = self.fallback_fixture()
+        home = self.resolve()
+        receipts = owed.parent.parent / 'accounted.json'
+        row = b'10\tdeep-review\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        home.write_bytes(self.history + row)
+        fields = pending.decode().rstrip('\n').split('\t')
+        result = json.loads(fields[3])
+        run = ledger.run_identity(0, ledger.rows(home)[0])
+        for mode in ('git', 'broken', 'recorded', 'legacy'):
+            with self.subTest(mode=mode):
+                cwd = str(self.checkout) if mode in ('git', 'legacy') else str(self.workspace)
+                home.write_bytes(self.history + (row.replace(b'@reviewer', b'') if mode == 'legacy' else row))
+                data = {**result, 'ledger': str(home), 'run': run} if mode == 'recorded' else result
+                line = '\t'.join(['10', fields[1], cwd] + ([] if mode == 'legacy' else [json.dumps(data)])) + '\n'
+                owed.write_text(line)
+                receipts.unlink(missing_ok=True)
+                if mode == 'broken':
+                    (self.workspace / '.git').mkdir()
+                output = self.hook('stop')
+                if mode == 'broken':
+                    block = json.loads(output)
+                    self.assertEqual(block['decision'], 'block')
+                    self.assertIn("'--abbrev-ref', 'HEAD']' returned non-zero exit status 128", block['reason'])
+                    self.assertEqual(owed.read_bytes(), line.encode())
+                    self.assertFalse(receipts.exists())
+                    continue
+                self.assertEqual(output, '')
+                self.assertEqual(owed.read_bytes(), b'')
+                identifier = result['id']
+                if mode == 'legacy':
+                    identifier = 'legacy:' + hashlib.sha256(json.dumps([str(owed), line.rstrip('\n'), 0]).encode()).hexdigest()
+                key = json.dumps([str(owed), cwd, identifier])
+                expected = {key: [str(home), run, ledger.run_identity(3, ledger.rows(home)[3])]}
+                self.assertEqual(receipts.read_bytes(), json.dumps(expected).encode())
+
+    def test_stop_non_git_window(self):
+        owed, pending, _ = self.fallback_fixture()
+        home = self.resolve()
+        receipts = owed.parent.parent / 'accounted.json'
+        start = b'10\trun-start\tlight\tsha\topen\trun-1\n'
+        row = b'18\tdeep-review\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        closed = b'20\trun-end\t\tsha\tclosed\trun-1\n'
+        next_run = b'20\trun-start\tlight\tsha\topen\trun-2\n'
+        for when, tail, passes in ((10, closed, True), (20, closed, True), (9, closed, False),
+                                   (21, closed, False), (20, next_run, False), (20, closed + next_run, False)):
+            with self.subTest(when=when, tail=tail):
+                evidence = str(when).encode() + b'\t' + pending.split(b'\t', 1)[1]
+                owed.write_bytes(evidence)
+                receipts.unlink(missing_ok=True)
+                owed.with_suffix('.stop-state').unlink(missing_ok=True)
+                home.write_bytes(start + row + tail)
+                output = self.hook('stop')
+                if passes:
+                    self.assertEqual(output, '')
+                    self.assertEqual(owed.read_bytes(), b'')
+                else:
+                    self.assertEqual(json.loads(output)['decision'], 'block')
+                    self.assertEqual(owed.read_bytes(), evidence)
+                    self.assertFalse(receipts.exists())
+
+    def test_stop_non_git_io(self):
+        owed, pending, _ = self.fallback_fixture()
+        hook = self.fallback_hook(owed)
+        home = self.workspace / 'repo/.git/ship/ledger/live.tsv'
+        home.parent.mkdir(parents=True)
+        history = self.history + b'10\tdeep-review\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        home.write_bytes(history)
+        bad = home.with_name('other.tsv')
+        real_list, real_open, real_fork = os.scandir, os.open, os.fork
+
+        def stop():
+            output = io.StringIO()
+            with mock.patch.dict(os.environ, self.env, clear=True), redirect_stdout(output):
+                hook.stop({'session_id': 's1'})
+            return output.getvalue()
+
+        def blocked():
+            owed.with_suffix('.stop-state').unlink(missing_ok=True)
+            self.assertEqual(json.loads(stop())['decision'], 'block')
+            self.assertEqual(owed.read_bytes(), pending)
+
+        output = stop()
+        self.assertEqual(output, '', output)
+        self.assertEqual(owed.read_bytes(), b'')
+        receipts = owed.parent.parent / 'accounted.json'
+        receipts.unlink()
         owed.write_bytes(pending)
-        self.resolve().write_bytes(b'20\trun-start\tlight\tsha\topen\trun-2 /board\n')
-        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
-        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
-        self.assertEqual(blocked['decision'], 'block')
-        self.assertIn('Notification epoch falls outside the bound ship run', blocked['reason'])
-        self.assertEqual(owed.read_bytes(), pending)
+        bad.touch()
 
-    def test_stop_keeps_normal_error_for_a_broken_checkout(self):
-        owed, evidence, agent = self.record_non_git_result()
-        (self.workspace / '.git').mkdir()
-        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
-        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
-        self.assertEqual(blocked['decision'], 'block')
-        self.assertIn("'--abbrev-ref', 'HEAD']' returned non-zero exit status 128", blocked['reason'])
-        self.assertEqual(owed.read_bytes(), evidence)
+        def deny_listing(path):
+            if path == home.parent:
+                raise PermissionError('denied enumeration')
+            return real_list(path)
 
-    def test_stop_keeps_normal_error_for_a_ledger_override(self):
-        owed, evidence, agent = self.record_non_git_result()
-        env = {**self.env, 'SHIP_LEDGER_DIR': str(self.base / 'override')}
-        self.assertEqual(self.cli('run-start', 'light', 'override', env=env).returncode, 0)
-        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass', env=env).returncode, 0)
-        blocked = json.loads(self.hook('stop', cwd=str(self.workspace), env=env))
-        self.assertEqual(blocked['decision'], 'block')
-        self.assertIn("'--abbrev-ref', 'HEAD']' returned non-zero exit status 128", blocked['reason'])
-        self.assertEqual(owed.read_bytes(), evidence)
+        def vanish(path, *args, **kwargs):
+            if path == bad:
+                raise FileNotFoundError('vanished ledger')
+            return real_open(path, *args, **kwargs)
 
-    def test_stop_blocks_zero_non_git_matches(self):
-        owed, evidence, agent = self.record_non_git_result()
-        for other in ('ship:reviewer--sol@other', 'ship:reviewer--opus@reviewer'):
-            self.assertEqual(self.cli('append', 'deep-review', other, 'sha', 'pass').returncode, 0)
-        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
-        self.assertEqual(blocked['decision'], 'block')
-        self.assertIn(f'Found 0 ledger rows for agent {agent}; expected exactly one', blocked['reason'])
-        self.assertEqual(owed.read_bytes(), evidence)
+        with mock.patch.object(os, 'scandir', side_effect=deny_listing):
+            blocked()
+        with mock.patch.object(os, 'open', side_effect=vanish):
+            blocked()
+        bad.unlink()
+        for make in (lambda: bad.symlink_to(home), lambda: os.mkfifo(bad),
+                     lambda: bad.write_text('bad\trow\n'), lambda: bad.write_bytes(b' ' * (1024 * 1024 + 1))):
+            make()
+            blocked()
+            bad.unlink()
+        for suffix, count in (('.tsv', 64), ('.txt', 128)):
+            with tempfile.TemporaryDirectory(dir=self.base) as directory:
+                override = Path(directory)
+                for i in range(count):
+                    (override / f'{i}{suffix}').touch()
+                (override / 'live.tsv').write_bytes(history)
+                with mock.patch.dict(self.env, SHIP_LEDGER_DIR=str(override)):
+                    blocked()
 
-    def test_stop_blocks_two_non_git_matches_across_ledgers(self):
-        owed, evidence, agent = self.record_non_git_result()
-        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
-        sibling = self.workspace / 'sibling'
-        self.git(self.workspace, 'init', '-q', '-b', 'second', str(sibling))
-        self.git(sibling, '-c', 'user.name=t', '-c', 'user.email=t@t',
-                 'commit', '-q', '--allow-empty', '-m', 'init')
-        self.assertEqual(self.cli('run-start', 'light', 'run-2', cwd=sibling).returncode, 0)
-        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass', cwd=sibling).returncode, 0)
-        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
-        self.assertEqual(blocked['decision'], 'block')
-        self.assertIn(f'Found 2 ledger rows for agent {agent}; expected exactly one', blocked['reason'])
-        self.assertEqual(owed.read_bytes(), evidence)
+        children = []
+
+        def track_fork():
+            pid = real_fork()
+            if pid:
+                children.append(pid)
+            return pid
+
+        def stall(path):
+            time.sleep(30)
+            return real_list(path)
+
+        try:
+            owed.write_bytes(pending * 2)
+            owed.with_suffix('.stop-state').unlink(missing_ok=True)
+            started = time.monotonic()
+            with mock.patch.object(os, 'fork', side_effect=track_fork), mock.patch.object(os, 'scandir', side_effect=stall):
+                output = stop()
+            self.assertEqual(json.loads(output)['decision'], 'block')
+            self.assertIn('timed out', output)
+            self.assertLess(time.monotonic() - started, 12)
+            self.assertEqual(len(children), 1)
+            self.assertEqual(owed.read_bytes(), pending * 2)
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(children[0], os.WNOHANG)
+        finally:
+            for pid in children:
+                try:
+                    if os.waitpid(pid, os.WNOHANG)[0] == 0:
+                        os.kill(pid, signal.SIGTERM)
+                        os.waitpid(pid, 0)
+                except ChildProcessError:
+                    pass
+
+    def test_stop_non_git_replay(self):
+        owed, pending, key = self.fallback_fixture()
+        hook = self.fallback_hook(owed)
+        home = self.resolve()
+        row = b'10\tdeep-review\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        home.write_bytes(self.history + row)
+        self.assertEqual(self.hook('stop'), '')
+        receipts = owed.parent.parent / 'accounted.json'
+        before = receipts.read_bytes()
+        valid = json.loads(before)[key]
+        with home.open('ab') as stream:
+            stream.write(row)
+        owed.write_bytes(pending)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+        self.assertEqual(receipts.read_bytes(), before)
+        with home.open('ab') as stream:
+            stream.write(row.replace(b'@reviewer', b'@other'))
+        other = json.loads(pending.split(b'\t')[3])
+        other.update(id='other-result', agent_id='other')
+        batch = b'\t'.join(pending.split(b'\t')[:3] + [json.dumps(other).encode()]) + b'\n' + pending
+        for saved in (None, [[], *valid[1:]], [valid[0], [True, valid[1][1]], valid[2]],
+                      [str(self.base / 'elsewhere.tsv'), *valid[1:]], [*valid[:2], [3, 'bad token']]):
+            with self.subTest(saved=saved), mock.patch.dict(os.environ, self.env, clear=True):
+                evidence = json.dumps({key: saved}).encode()
+                receipts.write_bytes(evidence)
+                owed.write_bytes(batch)
+                owed.with_suffix('.stop-state').unlink(missing_ok=True)
+                with self.assertRaises(hook.ReceiptIntegrityError):
+                    hook.account(ledger, [line.split('\t') for line in batch.decode().splitlines()],
+                                 {key: saved}, str(owed))
+                self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+                self.assertEqual(receipts.read_bytes(), evidence)
+                self.assertEqual(owed.read_bytes(), batch)
 
     def test_stop_accounts_closed_run_and_refuses_next_run_evidence(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
