@@ -628,7 +628,7 @@ Keep operative writer rules in its loaded definition and preserve the independen
 When a main merge changes migration files or the brief names migration scope, prepare [graph, migration revision-head, Git merge-head, and target-parent evidence](../skills/ship/references/owner-decisions.md#structural-migration-parent-example).
 For register scope, prepare [owning-predicate, exact-entry/reason, and unchanged-assertion evidence](../skills/ship/references/owner-decisions.md#exact-register-classification-example).
 Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals), including its retry rule, its coordination text remedy and its safety blocks.
-After a `text_lint.py` formatting refusal of an `Agent` or `SendMessage` call, resend with the findings fixed.
+Apply a `text_lint.py` formatting warning to the next message.
 When a writer or reviewer asks for permission to run a refused command, grant it or run the command yourself when you consider it appropriate.
 Record the grant or the run in the lane state file; ask your chief when the command is outside your authority.
 
