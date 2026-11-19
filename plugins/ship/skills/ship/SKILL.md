@@ -103,7 +103,11 @@ Use the Stop diagnostic's `account-auto` command to account for results with a c
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto "<pending.tsv>"
 ```
 
-Run the command alone on one line. The command leaves unclear results pending. Run Stop to publish the receipts.
+Run the command alone on one line. Start exactly one line in the review result with `Verdict:` or `OVERALL:`. The label permits leading whitespace and Markdown markers, as in `**OVERALL:** PASS`. The command matches labels and whole verdict words without regard to case.
+
+The command reads only the words after the label on that line. It recognizes `pass` as positive. It recognizes `fail`, `failed`, `fails`, `failing`, `failure`, and `findings` as negative. It records `pass` for a positive verdict. For a negative verdict, it records `findings` if that word appears, or `fail` otherwise.
+
+The result stays pending if the label is missing or repeats. It also stays pending if the value has no verdict word or mixes positive and negative words. Run Stop to publish the receipts.
 
 When an accounted result is bound to another result's row, move its credit with:
 

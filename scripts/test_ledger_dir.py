@@ -544,6 +544,29 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(self.cli('account-auto', str(owed)).stdout, expected)
         self.assertEqual(home.read_bytes(), saved)
 
+    def test_account_auto_normalizes_labeled_verdicts(self):
+        sha = 'ab' * 20
+        for label, verdict in (
+            ('Verdict: PASS', 'pass'),
+            ('OVERALL: FAIL', 'fail'),
+            ('verdict: findings', 'findings'),
+            ('verdict: pass', 'pass'),
+            ('Verdict: checks PASS', 'pass'),
+            ('Verdict: failed', 'fail'),
+            ('Verdict: fails', 'fail'),
+            ('Verdict: Failing', 'fail'),
+            ('Verdict: FAILURE', 'fail'),
+            ('  > - **Verdict:** FAIL and Findings', 'findings'),
+        ):
+            with self.subTest(label=label):
+                owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'{label} {sha}')])
+                auto = self.cli('account-auto', str(owed))
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                self.assertEqual(auto.stdout, f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} {verdict}\n"
+                                              '1 accounted, 0 pending\n')
+                self.assertEqual(ledger.rows(self.resolve())[-1][4], verdict)
+                owed.write_text('')
+
     def test_account_auto_leaves_unclear_results_pending(self):
         sha = 'ab' * 20
         prompt = (-5, 'user', [{'type': 'text', 'text': 'Review this commit.'}])
@@ -565,7 +588,15 @@ class LedgerDirTests(unittest.TestCase):
             ('several verdicts', [prompt, (-1, 'assistant', f'PASS followed by findings {sha}')], 'expected one verdict'),
             ('conflicting labels', [prompt, (-1, 'assistant', f'OVERALL: PASS\nVerdict: FAIL {sha}')], 'expected one verdict'),
             ('repeated label', [prompt, (-1, 'assistant', f'OVERALL: PASS\nVerdict: PASS {sha}')], 'expected one verdict'),
-            ('unclear label', [prompt, (-1, 'assistant', f'Verdict: conditional PASS {sha}')], 'expected one verdict'),
+            ('unclear label', [prompt, (-1, 'assistant', f'Verdict: bypass PASSING {sha}')], 'expected one verdict'),
+            ('verdict on next line', [prompt, (-1, 'assistant', f'Verdict:\nPASS {sha}')], 'expected one verdict'),
+            ('pass and fail', [prompt, (-1, 'assistant', f'Verdict: PASS and fail {sha}')], 'expected one verdict'),
+            ('pass and failed', [prompt, (-1, 'assistant', f'Verdict: pass, 2 FAILED {sha}')], 'expected one verdict'),
+            ('pass and fails', [prompt, (-1, 'assistant', f'Verdict: pass, one fails {sha}')], 'expected one verdict'),
+            ('pass and findings', [prompt, (-1, 'assistant', f'Verdict: pass with FINDINGS {sha}')], 'expected one verdict'),
+            ('pass without label', [prompt, (-1, 'assistant', f'tests pass {sha}')], 'expected one verdict'),
+            ('failure without label', [prompt, (-1, 'assistant', f'tests pass, 2 failed {sha}')], 'expected one verdict'),
+            ('inline label', [prompt, (-1, 'assistant', f'my verdict: pass {sha}')], 'expected one verdict'),
             ('parse error', [prompt], 'transcript parse error'),
         ):
             with self.subTest(case=case):
@@ -583,12 +614,12 @@ class LedgerDirTests(unittest.TestCase):
 
     def test_account_auto_preserves_account_run_refusal_and_continues(self):
         sha = 'ab' * 20
-        owed, _, invalid, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'FAIL {sha}')])
+        owed, _, invalid, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: FAIL {sha}')])
         fields = owed.read_text().rstrip('\n').split('\t')
         invalid['run'] = [0, 'wrong']
         fields[-1] = json.dumps(invalid)
         owed.write_text('\t'.join(fields) + '\n')
-        _, _, valid, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'FAIL {sha}')])
+        _, _, valid, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: FAIL {sha}')])
         auto = self.cli('account-auto', str(owed))
         self.assertEqual(auto.returncode, 0, auto.stderr)
         self.assertEqual(auto.stdout.splitlines(), [f"pending {invalid['id']} recorded run is missing or differs",
@@ -597,7 +628,7 @@ class LedgerDirTests(unittest.TestCase):
     def test_account_auto_reads_the_tail_in_bounded_chunks(self):
         sha = 'ab' * 20
         owed, transcript, result, _ = self.auto_owed([
-            (-2, 'user', 'Review.'), (-1, 'assistant', f'findings {sha}' + ' ' * (128 * 1024))])
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: findings {sha}' + ' ' * (128 * 1024))])
         prefix = transcript.read_bytes()
         cap = 64 * 1024 * 1024
         with transcript.open('wb') as fh:

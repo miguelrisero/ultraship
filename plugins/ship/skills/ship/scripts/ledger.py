@@ -349,18 +349,15 @@ def account_auto(pending):
                 if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
                     raise ValueError('expected one commit')
                 sha = first[0].lower()
-                labels = re.finditer(r'\b(?:OVERALL|Verdict)\*{0,2}:[ \t*`]*', text, re.I)
+                label_pattern = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
+                labels = (match[1] for line in text.splitlines() if (match := label_pattern.match(line)))
                 label = next(labels, None)
-                if label:
-                    match = re.compile(r'(PASS|FAIL)\b', re.I).match(text, label.end())
-                    if next(labels, None) or not match:
-                        raise ValueError('expected one verdict')
-                    verdict = match[0].lower()
-                else:
-                    tokens = {match[0] for match in re.finditer(r'\b(?:pass|PASS|findings|FAIL)\b', text)}
-                    if len(tokens) != 1:
-                        raise ValueError('expected one verdict')
-                    verdict = tokens.pop().lower()
+                if label is None or next(labels, None) is not None:
+                    raise ValueError('expected one verdict')
+                tokens = set(re.findall(r'\b(?:pass|fail|failed|fails|failing|failure|findings)\b', label.lower()))
+                if not tokens or ('pass' in tokens and len(tokens) > 1):
+                    raise ValueError('expected one verdict')
+                verdict = 'pass' if 'pass' in tokens else 'findings' if 'findings' in tokens else 'fail'
                 account(pending, identifier, 'review', agent, sha, verdict, f'{source} at {when}: {verdict}')
                 named = f'{agent}@{result["agent_id"]}' if result.get('agent_id') else agent
         except (json.JSONDecodeError, UnicodeError, OverflowError, RecursionError):
