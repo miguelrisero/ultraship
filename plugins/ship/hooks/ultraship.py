@@ -2,6 +2,7 @@
 """Ultraship hooks. Usage: ultraship.py pre|subagent-stop|stop|compact < hook-input.json"""
 import ast
 import calendar
+import errno
 import fcntl
 import fnmatch
 import hashlib
@@ -4736,6 +4737,8 @@ def thread_command_config(command):
 
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                    'Report the blocked scope to the driver.')
+ACCOUNT_CUSTODY = ('Use the exact Stop command for your session (account custody rule). '
+                   'Report the blocked scope to the driver.')
 RECEIPT_CUSTODY_FAILED = ('The ship hook could not check refusal-receipt custody, so it denies this call. '
                           'Report the blocked scope to the driver.')
 PRE_FAILED = ('The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
@@ -4824,16 +4827,67 @@ def receipt_custody(data, read_search=False):
         return
     if tool in ('Edit', 'Write', 'NotebookEdit') and receipt_path(tin.get('file_path') or tin.get('notebook_path')):
         deny(RECEIPT_CUSTODY)
-    # shortcut: runtime path construction and rebuilt shell expansion escape Bash checks; upgrade to isolated state access.
+    # shortcut: split account spellings and renamed copies of older ledgers can escape this check.
+    # ledger.py checks the session for account-auto; upgrade to isolated per-session state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
         command = normalized(raw)
-        account_command = normalized(raw.replace('\\\n', ''))
+        joined = raw.replace('\\\n', '')
+        account_command = normalized(joined)
         raw_words = [word.translate(str.maketrans('', '', "\"'\\"))
                      for word in re.split(r'[\s;&|<>()]+', raw) if word]
         words = [re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
                         lambda match: os.environ.get(match[1] or match[2], ''), word)
                  for word in raw_words]
+
+        def names_ledger():
+            def cached_ledger(path, root):
+                return (path.is_relative_to(root)
+                        and path.relative_to(root).parts[1:] == ('skills', 'ship', 'scripts', 'ledger.py'))
+
+            try:
+                script = ledger_script().resolve()
+                config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+                cache_path = (config / 'plugins/cache/ultraship/ship').absolute()
+                cache = cache_path.resolve()
+                cwd = Path(data.get('cwd') or os.getcwd())
+                pending, seen = [joined], set()
+                while pending:
+                    text = shell_without_heredoc_bodies(pending.pop())
+                    if text in seen:
+                        continue
+                    seen.add(text)
+                    tokens = shell_raw_words(text)
+                    if nested_work_exceeded(tokens, seen):
+                        return 'ledger' in account_command
+                    saw_ledger = False
+                    for raw_word, word, _, _ in shell_without_redirections(tokens):
+                        if raw_word in {';', '&', '|', '\n'}:
+                            saw_ledger = False
+                            continue
+                        if saw_ledger and (raw_word in {'(', '`'} or word.casefold().startswith('account')
+                                           or unresolved_shell_word(raw_word)):
+                            return True
+                        if raw_word in {'(', ')', '`'}:
+                            continue
+                        word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
+                        path = cwd / Path(word).expanduser()
+                        saw_ledger = saw_ledger or cached_ledger(path.absolute(), cache_path)
+                        saw_ledger = saw_ledger or cached_ledger(path.parent.resolve() / path.name, cache)
+                        try:
+                            path = path.resolve(strict=True)
+                        except OSError as exc:
+                            if (not isinstance(exc, (FileNotFoundError, NotADirectoryError, PermissionError))
+                                    and exc.errno != errno.ENAMETOOLONG):
+                                raise
+                            path = path.resolve()
+                        saw_ledger = saw_ledger or path == script or cached_ledger(path, cache)
+                    pending.extend(token[1] for token in nested_shell_strings(tokens, text))
+            except ValueError:
+                return 'ledger' in account_command
+            except (OSError, RuntimeError):
+                return True
+            return False
 
         def glob_prefix(word):
             for pattern in resolved(word):
@@ -4867,6 +4921,9 @@ def receipt_custody(data, read_search=False):
                          ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
                 or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
             deny(RECEIPT_CUSTODY)
+        if ('account' in account_command and not own_account_call(data, raw)
+                and ('claude_code_session_id' in account_command or names_ledger())):
+            deny(ACCOUNT_CUSTODY)
 
 
 def canonical_row_path(value):
