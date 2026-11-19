@@ -4896,6 +4896,7 @@ def row_record(data, folder, workspace_fallback=False):
         return None, 'No admission record can match because the hook payload has no agent_id.'
     record = STATE / folder / (re.sub(r'[^\w.-]', '_', agent_id) + '.json')
     workspace_record = False
+    missing = None
     if workspace_fallback and not os.path.lexists(record):
         cwd = Path(os.path.realpath(data.get('cwd') or os.getcwd()))
         for workspace in (cwd, *cwd.parents):
@@ -4903,7 +4904,12 @@ def row_record(data, folder, workspace_fallback=False):
                 candidate = workspace / '.scratch/ultraship' / folder / record.name
                 if os.path.lexists(candidate):
                     record, workspace_record = candidate, True
+                else:
+                    missing = f'The admission record must exist at {record} or {candidate}.'
                 break
+        else:
+            missing = (f'The admission record must exist at {record}. A workspace record needs '
+                       "a `.scratch` folder at or above the reviewer's working directory.")
     unmet = f'Admission record {record} must exist and meet this condition: '
     if workspace_record:
         try:
@@ -4916,7 +4922,7 @@ def row_record(data, folder, workspace_fallback=False):
         # O_NONBLOCK keeps a named pipe from hanging the hook.
         descriptor = os.open(record, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
-        return None, unmet + 'the record is missing or is a link.'
+        return None, missing or (unmet + 'the record is missing or is a link.')
     with os.fdopen(descriptor, 'rb') as handle:
         status = os.fstat(descriptor)
         if (not stat.S_ISREG(status.st_mode) or status.st_uid != os.getuid()
