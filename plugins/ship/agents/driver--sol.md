@@ -92,7 +92,8 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](../skills/ship/references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
    The driver supplies read-only checkouts at the base and the frozen head. The admission record lists the row file in each checkout.
    The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.
-   For a row file absent at the base, the driver records that `git ls-tree --name-only <base> -- <path>` exits 0 and prints nothing.
+   For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
+   From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.
    The driver then admits only the head copy.
    Any later push to the PR needs a new review at the pushed head. Return a ready PR to draft before that push.
    Mark it ready again only after the new review passes.

@@ -71,7 +71,7 @@ For each retired row, confirm that the PR deletes the guarded code and that its 
 Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.
 Read each row in the base checkout and the frozen-head checkout that the admission record lists, at the base and head line ranges.
 For each added row, grep the base copy of the row file for its ID and confirm zero matches.
-When the brief records an empty `git ls-tree` result for the row file at the base, use that proof in place of the grep.
+When the brief records the verified base commit and an empty root-level `git ls-tree` result for the row file, use that proof in place of the grep.
 Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
 For a CoC-approved row change, match each applied value to the decision file that the brief names by path and SHA256.
 Use that file only when the brief records the driver's SHA256 and binding check at the frozen head.
