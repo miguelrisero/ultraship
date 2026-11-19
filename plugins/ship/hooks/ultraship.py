@@ -4854,13 +4854,16 @@ def pre(data):
                 elif (re.search(r'(?<!<)<<(?!<)', command) and '\\\n' in command
                       and (re.search(r'\bgh\b', separated) or re.search(r'\bgh\b', normalized))):
                     reason = 'heredoc with line continuation'
-                elif (thread_command_config(command) or '--config-env' in command
-                      or ("$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
-                                              or re.search(r'\b(?:gh|api)\b', normalized))
-                          and not LITERAL_GIT_GREP_ANCHOR.fullmatch(command)
-                          and "$'" in writer_quoted_grep_data(command)
-                          and not LITERAL_GIT_COUNT_COMMAND.fullmatch(command))):
-                    reason = 'git config from the command line'
+                elif thread_command_config(command):
+                    reason = 'git configuration token'
+                elif '--config-env' in command:
+                    reason = 'git configuration environment option'
+                elif ("$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
+                                          or re.search(r'\b(?:gh|api)\b', normalized))
+                      and not LITERAL_GIT_GREP_ANCHOR.fullmatch(command)
+                      and "$'" in writer_quoted_grep_data(command)
+                      and not LITERAL_GIT_COUNT_COMMAND.fullmatch(command)):
+                    reason = 'ambiguous shell quote pattern'
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__
         if reason:

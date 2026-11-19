@@ -1206,8 +1206,8 @@ class HookTests(unittest.TestCase):
     def test_pr_comment_preserves_config_and_thread_denials(self):
         command = f"gh pr comment {PR} --body 'Summary'"
         cases = (
-            ('GIT_CONFIG_COUNT=2 ' + command, 'git config from the command line'),
-            (command + '\ngit --config-env=core.pager=PAGER status', 'git config from the command line'),
+            ('GIT_CONFIG_COUNT=2 ' + command, 'git configuration token'),
+            (command + '\ngit --config-env=core.pager=PAGER status', 'git configuration environment option'),
             (command + ' && gh api repos/o/r/pulls/7/comments/123/replies -f body=sample',
              'raw review-thread mutation'),
         )
@@ -1323,16 +1323,16 @@ class HookTests(unittest.TestCase):
     def test_git_grep_end_anchor_keeps_config_and_ansi_quote_refusals(self):
         search = "git -C /work/example grep -n -E '^.{121,}$' abc123 -- src/api/example.py"
         commands = (
-            'GIT_CONFIG_COUNT=2 ' + search,
-            search.replace(' grep ', ' --config-env=core.pager=PAGER grep '),
-            search + "; printf '%s' $'api'",
+            ('GIT_CONFIG_COUNT=2 ' + search, 'git configuration token'),
+            (search.replace(' grep ', ' --config-env=core.pager=PAGER grep '), 'git configuration environment option'),
+            (search + "; printf '%s' $'api'", 'ambiguous shell quote pattern'),
         )
-        for command in commands:
+        for command, rule in commands:
             for caller in ('', 'ship:driver'):
                 with self.subTest(command=command, caller=caller):
                     result = self.decision(command, caller)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
+                    self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
 
     def test_actual_ansi_quotes_keep_the_caller_refusal(self):
         commands = (
@@ -1347,14 +1347,14 @@ class HookTests(unittest.TestCase):
                 with self.subTest(command=command, caller=caller):
                     result = self.decision(command, caller)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
+                    self.assertIn(' Rule: ambiguous shell quote pattern.', result['permissionDecisionReason'])
 
     def test_git_count_pipeline_treats_grep_anchor_as_data(self):
         command = r'''echo "files: $(git ls-tree -r --name-only abc123 -- src/api/ | grep -c '\.toml$')"'''
         refused = (
-            ('GIT_CONFIG_COUNT=2; ' + command, 'git config from the command line'),
-            (command + "; printf '%s' $'api'", 'git config from the command line'),
-            (command + '; echo "$(printf \'%s\' $\'api\')"', 'git config from the command line'),
+            ('GIT_CONFIG_COUNT=2; ' + command, 'git configuration token'),
+            (command + "; printf '%s' $'api'", 'ambiguous shell quote pattern'),
+            (command + '; echo "$(printf \'%s\' $\'api\')"', 'ambiguous shell quote pattern'),
             (command + '; echo "$(gh api repos/o/r/pulls/7/comments -f body=x)"', 'REST review-comment write'),
         )
         for caller in ('', 'ship:driver'):
@@ -1384,7 +1384,7 @@ class HookTests(unittest.TestCase):
                 with self.subTest(caller=caller, shell=shell):
                     result = self.decision(shell, caller)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
+                    self.assertIn(' Rule: ambiguous shell quote pattern.', result['permissionDecisionReason'])
 
     def test_graphql_read_route_refuses_other_documents_and_options(self):
         documents = ('mutation{createIssue{ id }}', 'subscription{events{id}}',
@@ -1468,11 +1468,18 @@ class HookTests(unittest.TestCase):
         )
         for command in commands:
             with self.subTest(command=command):
-                self.assertEqual(self.decision(command, '').get('permissionDecision'), 'deny')
+                result = self.decision(command, '')
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                if '--config-env' in command:
+                    self.assertIn(' Rule: git configuration environment option.', result['permissionDecisionReason'])
 
     def test_git_config_key_assignment_stays_refused(self):
-        self.assertEqual(self.decision('GIT_CONFIG_KEY_0=alias.x git log -1', '').get('permissionDecision'), 'deny')
-        self.assertEqual(self.decision('GIT_CONFIG_KEY_1=include.path git log -1', '').get('permissionDecision'), 'deny')
+        for command in ('GIT_CONFIG_KEY_0=alias.x git log -1',
+                        'GIT_CONFIG_KEY_1=include.path git log -1'):
+            with self.subTest(command=command):
+                result = self.decision(command, '')
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(' Rule: git configuration token.', result['permissionDecisionReason'])
 
     def test_git_config_value_assignment_stays_refused(self):
         self.assertEqual(self.decision("GIT_CONFIG_VALUE_0='!echo hi' git log -1", '').get('permissionDecision'), 'deny')
@@ -1532,7 +1539,7 @@ class HookTests(unittest.TestCase):
             with self.subTest(caller=caller):
                 result = self.decision('git --config-env=core.pager=PAGER log -1', caller)
                 self.assertEqual(result.get('permissionDecision'), 'deny')
-                self.assertIn('git config from the command line', result['permissionDecisionReason'])
+                self.assertIn(' Rule: git configuration environment option.', result['permissionDecisionReason'])
 
     def test_writer_admits_literal_commit_abbreviation_override(self):
         command = ('git -C /abs/lane -c core.abbrev=40 commit --only '
