@@ -288,6 +288,8 @@ def run(args):
              'base_lines': base_extent, 'lines': edited_extent}
     identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
     with record_lock(record):
+        require(git('branch', '--show-current').decode().rstrip('\n') == lane, 'lane branch changed during derivation')
+        require(git('rev-parse', 'HEAD').decode().strip() == head_sha, 'HEAD changed during derivation')
         require(row_file.read_bytes() == original, 'row file changed during derivation')
         if replacements:
             mode = stat.S_IMODE(row_file.stat().st_mode)

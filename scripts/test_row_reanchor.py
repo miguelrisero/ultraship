@@ -306,6 +306,24 @@ class ToolTests(unittest.TestCase):
         self.assertIn('record=none', output.splitlines())
         self.assertFalse(self.record_path().exists())
 
+    def test_subject_commit_while_waiting_for_lock_refuses_without_writing(self):
+        self.setup_pair()
+        original = self.row.read_bytes()
+        record = self.record_path()
+        record.parent.mkdir(mode=0o700)
+        prior = b'{"schema": 1, "lane": "expired", "rows": []}'
+        record.write_bytes(prior)
+
+        def commit_subject_change():
+            self.subject.write_text(self.subject.read_text().replace('grown_b()', 'new_at_head()'))
+            self.assertNotEqual(self.commit(), self.head_sha)
+            self.assertEqual(self.row.read_bytes(), original)
+
+        with self.assertRaisesRegex(reanchor.Refused, '^HEAD changed during derivation$'):
+            self.run_with_lock_held(commit_subject_change)
+        self.assertEqual(self.row.read_bytes(), original)
+        self.assertEqual(record.read_bytes(), prior)
+
     def test_detached_head_refuses_before_writing(self):
         self.setup_pair()
         self.git('checkout', '--detach', '-q', self.head_sha)
