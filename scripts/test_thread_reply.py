@@ -1806,6 +1806,14 @@ class HookTests(unittest.TestCase):
                     self.assertIn(' Rule: unparsed shell syntax rule: No closing quotation.',
                                   result['permissionDecisionReason'])
 
+    def replace_preflight_ls_remote(self, command, replacement):
+        prefix = ('GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git '
+                  '-c http.https://git.example.invalid/o/r.git.followRedirects=false '
+                  '-c credential.helper= ls-remote')
+        shell = command.replace(prefix, replacement)
+        self.assertNotEqual(shell, command)
+        return shell
+
     def test_preflight_requires_disabled_git_http_redirects(self):
         command = self.preflight_command()
         key = 'http.https://git.example.invalid/o/r.git.followRedirects'
@@ -1824,6 +1832,10 @@ class HookTests(unittest.TestCase):
                     with self.subTest(flag=flag, redirect=redirect, caller=caller):
                         result = self.preflight_decision(shell, caller)
                         self.assertEqual(result.get('permissionDecision'), 'deny')
+        shell = self.replace_preflight_ls_remote(command, 'git -c http.followRedirects=false -c credential.helper= ls-remote')
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
 
     def test_preflight_disables_git_prompts(self):
         command = self.preflight_command()
@@ -1844,6 +1856,10 @@ class HookTests(unittest.TestCase):
                     with self.subTest(flag=flag, prompts=variant, caller=caller):
                         result = self.preflight_decision(shell, caller)
                         self.assertEqual(result.get('permissionDecision'), 'deny')
+        shell = self.replace_preflight_ls_remote(command, 'git -c http.followRedirects=false -c credential.helper= ls-remote')
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
 
     def test_preflight_requires_empty_git_credential_helper(self):
         command = self.preflight_command()
@@ -1855,8 +1871,7 @@ class HookTests(unittest.TestCase):
                     with self.subTest(flag=flag, helper=helper, caller=caller):
                         result = self.preflight_decision(shell, caller)
                         self.assertEqual(result.get('permissionDecision'), 'deny')
-        shell = command.replace(
-            ' -c http.https://git.example.invalid/o/r.git.followRedirects=false -c credential.helper=', '').replace(
+        shell = self.replace_preflight_ls_remote(command, 'git ls-remote').replace(
             'test "$upstream" != "refs/remotes/origin/trunk"', 'case "$upstream" in */trunk) exit 1;; esac')
         for caller in ('', 'ship:driver'):
             with self.subTest(caller=caller):
