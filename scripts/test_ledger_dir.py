@@ -548,6 +548,23 @@ class LedgerDirTests(unittest.TestCase):
     def test_account_auto_refuses_empty_session(self):
         self.assert_account_auto_refuses_session('')
 
+    def test_account_auto_refuses_a_symlinked_owed_file(self):
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])
+        target = owed.rename(owed.with_name('retained.tsv'))
+        owed.symlink_to(target)
+        home = self.resolve()
+        receipts = self.base / 'state/ultraship/accounted.json'
+        receipts.write_bytes(b'{}\n')
+        paths = (home, receipts, target)
+        before = [path.read_bytes() for path in paths]
+        with mock.patch.dict(os.environ, self.env, clear=True), \
+                mock.patch.object(Path, 'read_text', side_effect=AssertionError('unexpected read')):
+            with self.assertRaisesRegex(SystemExit, 'account-auto refuses a symlinked owed file'):
+                ledger.account_auto(owed)
+        self.assertTrue(owed.is_symlink())
+        self.assertEqual([path.read_bytes() for path in paths], before)
+
     def test_account_auto_uses_own_final_text_and_skips_existing_accounting(self):
         sha = 'ab' * 20
         owed, transcript, result, epoch = self.auto_owed([

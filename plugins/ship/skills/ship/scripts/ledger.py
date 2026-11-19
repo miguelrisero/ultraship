@@ -314,6 +314,8 @@ def account_auto(pending):
     session = os.environ.get('CLAUDE_CODE_SESSION_ID')
     if not session or re.sub(r'[^\w.-]', '_', session) != pending.stem:
         sys.exit('account-auto requires CLAUDE_CODE_SESSION_ID to match the owed file session.')
+    if pending.is_symlink():
+        sys.exit('account-auto refuses a symlinked owed file.')
     receipts = load_receipts(STATE / 'accounted.json')
     budgets = {}
     accounted = remaining = 0

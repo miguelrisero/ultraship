@@ -523,31 +523,55 @@ class ReceiptCustodyTests(unittest.TestCase):
                 self.assert_custody_denial({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
                                            'tool_input': {'command': command}})
 
-    def test_account_auto_denies_ledger_path_resolution_error(self):
-        (self.cwd / 'ledger.py').symlink_to('ledger.py')
-        self.assert_custody_denial({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
-                                   'tool_input': {'command': 'python3 ./ledger.py account-auto pending.tsv'}})
+    def assert_account_custody_denial(self, command, caller='ship:driver--sol'):
+        self.assert_custody_denial(
+            {'agent_type': caller, 'tool_name': 'Bash', 'tool_input': {'command': command}},
+            'Use the exact Stop command for your session (account custody rule). Report the blocked scope to the driver.')
+
+    def assert_account_command_allowed(self, command, caller='ship:driver--sol', **event):
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            try:
+                ultraship.guarded_pre({'cwd': str(self.cwd), **event, 'agent_type': caller,
+                                       'tool_name': 'Bash', 'tool_input': {'command': command}})
+            except SystemExit:
+                self.fail(output.getvalue())
+        self.assertEqual(output.getvalue(), '')
+
+    def test_account_custody_allows_commit_message_heredoc(self):
+        self.assert_account_command_allowed(
+            'git commit -m "$(cat <<\'EOF\'\nfix: check the account\n\nThe account\'s label (reviewed).\nEOF\n)"\n',
+            caller='ship:writer--sol')
+
+    def test_account_custody_allows_a_long_quoted_argument(self):
+        self.assert_account_command_allowed(f'echo "{"a" * 300}" account')
+
+    def test_account_custody_allows_commit_message_with_session_variable(self):
+        self.assert_account_command_allowed("git commit -m 'Explain account-auto and CLAUDE_CODE_SESSION_ID'",
+                                            caller='ship:writer--sol')
+
+    def test_account_custody_allows_own_stop_command_with_session_variable_in_path(self):
+        event = self.own_account_event()
+        state = ultraship.STATE / 'CLAUDE_CODE_SESSION_ID'
+        with patch.object(ultraship, 'STATE', state):
+            command = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+            self.assert_account_command_allowed(command, session_id=event['session_id'])
 
     def test_account_auto_denies_commands_that_name_the_session_variable(self):
-        event = self.own_account_event()
-        own = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
         for command in (
-            f'CLAUDE_CODE_SESSION_ID=session-context {own}',
-            'export CLAUDE_CODE_SESSION_ID=session-context; echo account-auto',
-            'env CLAUDE_CODE_SESSION_ID=session-context echo account-auto',
-            'env -u CLAUDE_CODE_SESSION_ID echo account-auto',
-            'unset CLAUDE_CODE_SESSION_ID; echo account-auto ./missing/ledger.py',
-            'echo account-auto claude_code_session_id',
+            'CLAUDE_CODE_SESSION_ID=s1 echo account-auto ./ledger',
+            'export CLAUDE_CODE_SESSION_ID=s1; echo account-auto ./ledger',
+            'env CLAUDE_CODE_SESSION_ID=s1 echo account-auto ./ledger',
+            'env -u CLAUDE_CODE_SESSION_ID echo account-auto ./ledger',
+            'unset CLAUDE_CODE_SESSION_ID; echo account-auto ./missing/ledger',
+            'echo account-auto claude_code_session_id ./ledger',
         ):
             with self.subTest(command=command):
-                self.assert_custody_denial({**event, 'agent_type': 'ship:driver--sol',
-                                           'tool_input': {'command': command}})
+                self.assert_account_custody_denial(command)
 
     def assert_ledger_expansion_denied(self, command):
         for caller in ('ship:driver--sol', 'ship:writer--sol'):
             with self.subTest(caller=caller):
-                self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
-                                           'tool_input': {'command': command}})
+                self.assert_account_custody_denial(command, caller)
 
     def test_ledger_custody_blocks_variable_expansion(self):
         self.assert_ledger_expansion_denied(f'word=account; echo {shlex.quote(str(LEDGER))} "$word-sample"')
@@ -558,13 +582,33 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_ledger_custody_blocks_command_substitution(self):
         self.assert_ledger_expansion_denied(f'echo {shlex.quote(str(LEDGER))} "$(printf account)"')
 
+    def test_account_custody_resolves_installed_ledger_paths(self):
+        os.environ.pop('CLAUDE_CONFIG_DIR', None)
+        cached = Path.home() / '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
+        cached.parent.mkdir(parents=True)
+        cached.touch()
+        command = f'word=account; echo {shlex.quote(str(cached))} "$word-sample"'
+        for fixture in (command, 'bash -c ' + shlex.quote(command)):
+            with self.subTest(fixture=fixture):
+                self.assert_account_custody_denial(fixture)
+        (self.cwd / 'helper').symlink_to(cached)
+        self.assert_account_custody_denial('echo ./helper account-auto')
+
+    def test_account_custody_denies_parse_error_with_ledger(self):
+        self.assert_account_custody_denial("echo ledger 'account")
+
+    def test_account_auto_denies_ledger_path_resolution_error(self):
+        (self.cwd / 'loop').symlink_to('loop')
+        self.assert_account_custody_denial('echo ./loop account')
+
     def test_ledger_append_allows_commit_substitution(self):
-        event = self.own_account_event()
-        command = f'python3 {shlex.quote(str(LEDGER))} append slices driver "$(git rev-parse HEAD)" pass'
-        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
-            ultraship.guarded_pre({'cwd': str(self.cwd), **event, 'agent_type': 'ship:driver--sol',
-                                   'tool_input': {'command': command}})
-        self.assertEqual(output.getvalue(), '')
+        command = (f'python3 {shlex.quote(str(LEDGER))} append slices driver "$(git rev-parse HEAD)"'
+                   " pass 'accounting reviewed'")
+        self.assert_account_command_allowed(command)
+
+    def test_ledger_run_start_allows_account_in_board_path(self):
+        command = f'python3 {shlex.quote(str(LEDGER))} run-start light lane ./account-board.md'
+        self.assert_account_command_allowed(command)
 
     def test_own_account_call_denies_other_commands_and_callers(self):
         event = self.own_account_event()
