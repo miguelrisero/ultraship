@@ -253,7 +253,7 @@ def run(args):
     original = row_file.read_bytes()
     require(original == blob(head_sha, relative), 'working row file differs from head')
     text = original.decode('utf-8')
-    base_values, base_fields, _ = row_statements(blob(base_sha, relative).decode('utf-8'), args.row_id)
+    base_values, base_fields, base_extent = row_statements(blob(base_sha, relative).decode('utf-8'), args.row_id)
     head_values, head_fields, _ = row_statements(text, args.row_id)
     require(base_values['file'] == head_values['file'] == args.subject, 'subject mismatch')
     require([field[2] for key, field in base_fields.items() if key not in ('old', 'new')]
@@ -298,7 +298,7 @@ def run(args):
     entry = {'row_file': relative, 'row_id': args.row_id, 'subject': args.subject,
              'expected_count': head_values.get('expect', 1), 'head_old_count': head.count(old),
              'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements),
-             'lines': edited_extent}
+             'base_lines': base_extent, 'lines': edited_extent}
     identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
     write_row_and_record(record, identity, entry, row_file, original, result)
     print('PASS')
