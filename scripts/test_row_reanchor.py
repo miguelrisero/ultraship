@@ -324,6 +324,43 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(self.row.read_bytes(), original)
         self.assertEqual(record.read_bytes(), prior)
 
+    def test_subject_commit_after_staging_refuses_both_replacements(self):
+        self.setup_pair()
+        record = self.record_path()
+        record.parent.mkdir(mode=0o700)
+        prior = b'{"schema": 1, "lane": "expired", "rows": []}'
+        record.write_bytes(prior)
+        staged_bytes = reanchor.staged_bytes
+        output = io.StringIO()
+        env = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+
+        for destination in (self.row, record):
+            with self.subTest(destination=destination):
+                if destination == record:
+                    self.invoke()
+                    self.head_sha = self.commit()
+                original = self.row.read_bytes()
+                args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
+                                 base=self.base, head=self.head_sha)
+
+                @contextlib.contextmanager
+                def stage_then_commit(path, data, mode):
+                    with staged_bytes(path, data, mode) as stage:
+                        self.assertEqual(path, destination)
+                        with self.subject.open('a') as subject:
+                            subject.write('subject changed during staging\n')
+                        self.assertNotEqual(self.commit(), self.head_sha)
+                        yield stage
+
+                with patch.dict(os.environ, env), contextlib.redirect_stdout(output), \
+                        patch.object(reanchor, 'staged_bytes', stage_then_commit):
+                    with self.assertRaisesRegex(reanchor.Refused, '^HEAD changed during staged write$'):
+                        reanchor.run(args)
+                self.assertEqual(self.row.read_bytes(), original)
+                self.assertEqual(record.read_bytes(), prior)
+                self.head_sha = self.git('rev-parse', 'HEAD')
+        self.assertEqual(output.getvalue(), '')
+
     def test_detached_head_refuses_before_writing(self):
         self.setup_pair()
         self.git('checkout', '--detach', '-q', self.head_sha)
