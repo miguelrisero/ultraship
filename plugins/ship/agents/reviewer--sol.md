@@ -69,7 +69,7 @@ Use the record fields that the brief copies from the tool output. Read no file u
 Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.
 For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.
 Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.
-Read each row in the base checkout and the frozen-head checkout that the admission record lists.
+Read each row in the base checkout and the frozen-head checkout that the admission record lists, at the base and head line ranges.
 For each added row, grep the base copy of the row file for its ID and confirm zero matches.
 Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
 For a CoC-approved row change, confirm that only the fields the CoC decision names changed, and that the row is not weaker.

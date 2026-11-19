@@ -80,7 +80,7 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
    The driver marks the draft ready only after the review in step 7 passes at the exact head.
 5. Authorization record: each successful tool run writes a generated record in the Git directory.
-   The record names the lane, base, head, row IDs, exact line ranges, expected counts and the unchanged mutant check.
+   The record names the lane, base, head, row IDs, base and head line ranges, expected counts and the unchanged mutant check.
    The tool prints the record path and every record field as `key=value` lines, with no row text.
    The record expires on any head change. Rerun the tool at the frozen head before review; that run changes zero statements.
    The driver copies the printed fields of that run into the reviewer brief. The reviewer reads no file under `.git`.
