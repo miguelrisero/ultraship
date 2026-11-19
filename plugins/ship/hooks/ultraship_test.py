@@ -488,6 +488,16 @@ class ReceiptCustodyTests(unittest.TestCase):
             sibling = command.replace('s1.tsv', 'sibling.tsv')
             self.assert_custody_denial({**driver, 'tool_input': {'command': sibling}})
 
+    def test_account_auto_line_continuations_require_raw_driver_call(self):
+        event = self.own_account_event()
+        event['session_id'] = 's1'
+        command = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+        for before, after in (('account-', 'auto'), ('ledger.', 'py')):
+            split = command.replace(before + after, before + '\\\n' + after, 1)
+            for caller in ('ship:writer--sol', 'ship:driver--sol'):
+                with self.subTest(token=before + after, caller=caller):
+                    self.assert_custody_denial({**event, 'agent_type': caller, 'tool_input': {'command': split}})
+
     def test_own_account_call_denies_other_commands_and_callers(self):
         event = self.own_account_event()
         command = event['tool_input']['command']

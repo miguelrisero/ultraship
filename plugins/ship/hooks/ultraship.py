@@ -4668,6 +4668,7 @@ def receipt_custody(data, read_search=False):
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
         command = normalized(raw)
+        account_command = normalized(raw.replace('\\\n', ''))
         raw_words = [word.translate(str.maketrans('', '', "\"'\\"))
                      for word in re.split(r'[\s;&|<>()]+', raw) if word]
         words = [re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
@@ -4686,7 +4687,8 @@ def receipt_custody(data, read_search=False):
             return False
 
         if (receipt_text(raw)
-                or ('ledger.py' in command and 'account-auto' in command and not own_account_call(data, raw))
+                or ('ledger.py' in account_command and 'account-auto' in account_command
+                    and not own_account_call(data, raw))
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
                 or (('.local/state' in command or 'xdg_state_home' in command)
@@ -5243,6 +5245,9 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
     end = next((i for i in range(start + 1, end) if history[i][1] == 'run-end'), end)
     if result_id in receipts:
         saved = receipts[result_id]
+        if (not isinstance(saved, list) or len(saved) != 3
+                or not isinstance(saved[2], list) or not saved[2] or type(saved[2][0]) is not int):
+            raise ReceiptIntegrityError('Accounting receipt has an invalid shape')
         if saved[0] != str(home) or saved[1] != run:
             raise ReceiptIntegrityError('Accounting receipt names a different ledger or run')
         index = saved[2][0]

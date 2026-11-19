@@ -338,6 +338,11 @@ def account_auto(pending):
                 if not 0 <= index < len(history) or run_identity(index, history[index]) != identity:
                     raise ValueError('Stop receipt row is missing or differs')
                 row = history[index]
+                start = starts[0]
+                end = next((i for i in range(start + 1, len(history))
+                            if history[i][1] in ('run-start', 'run-end')), len(history))
+                if not start < index < end and not accounting_row(row, key, run):
+                    raise ValueError('Stop receipt row belongs to another run')
             else:
                 row = next((r for r in history if accounting_row(r, key, run)), None)
             if row is not None:
@@ -353,7 +358,7 @@ def account_auto(pending):
                         or path.parent.parent.name != pending.stem):
                     raise ValueError('transcript path does not match the recorded agent and session')
                 try:
-                    canonical = path.resolve() == path
+                    canonical = source == str(path) == os.path.realpath(source)
                 except (OSError, RuntimeError):
                     canonical = False
                 if not canonical:
@@ -363,7 +368,7 @@ def account_auto(pending):
                 text = final_turn_text(path, epoch, budgets)
                 if not text:
                     raise ValueError('no final turn text')
-                commits = re.finditer(r'\b[0-9a-fA-F]{40}\b', text)
+                commits = re.finditer(r'(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])', text)
                 first = next(commits, None)
                 if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
                     raise ValueError('expected one commit')

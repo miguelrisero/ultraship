@@ -578,6 +578,26 @@ class LedgerDirTests(unittest.TestCase):
                     f"pending {result['id']} transcript path does not match the recorded agent and session",
                     '0 accounted, 1 pending'])
 
+    def test_account_auto_refuses_noncanonical_transcript_spelling(self):
+        sha = 'ab' * 20
+        for segment in ('/./', '//', '/s1/../'):
+            with self.subTest(segment=segment):
+                owed, transcript, result, _ = self.auto_owed([
+                    (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {sha}')])
+                source = f'{self.base}{segment}{transcript.relative_to(self.base)}'
+                fields = owed.read_text().rstrip('\n').split('\t')
+                fields[-1] = json.dumps({**result, 'agent_transcript_path': source})
+                owed.write_text('\t'.join(fields) + '\n')
+                home = self.resolve()
+                before = (owed.read_bytes(), home.read_bytes())
+                auto = self.cli('account-auto', str(owed))
+                self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                self.assertEqual(auto.stdout.splitlines(), [
+                    f"pending {result['id']} transcript path does not match the recorded agent and session",
+                    '0 accounted, 1 pending'])
+                owed.write_text('')
+
     def test_final_turn_text_refuses_a_transcript_symlink(self):
         _, transcript, _, epoch = self.auto_owed([
             (-2, 'user', 'Review.'), (-1, 'assistant', 'Verdict: PASS ' + 'ab' * 20)])
@@ -697,6 +717,22 @@ class LedgerDirTests(unittest.TestCase):
                 self.assertEqual((owed.read_bytes(), self.resolve().read_bytes()), before)
                 owed.write_text('')
 
+    def test_account_auto_counts_underscored_and_backticked_commits(self):
+        sha, other = 'ab' * 20, 'cd' * 20
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS _{sha}_ {other}')])
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout.splitlines(), [f"pending {result['id']} expected one commit",
+                                                   '0 accounted, 1 pending'])
+        owed.write_text('')
+        _, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS _{sha}_ `{sha.upper()}`')])
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout.splitlines(), [
+            f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} pass", '1 accounted, 0 pending'])
+
     def test_account_auto_preserves_account_run_refusal_and_continues(self):
         sha = 'ab' * 20
         owed, _, invalid, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: FAIL {sha}')])
@@ -772,6 +808,40 @@ class LedgerDirTests(unittest.TestCase):
                 self.assertEqual(auto.stdout.splitlines(), [
                     f"pending {result['id']} Stop receipt names a different ledger or run", '0 accounted, 1 pending'])
 
+    def test_account_auto_refuses_a_receipt_row_outside_its_run(self):
+        owed, _, result, _ = self.auto_owed(None)
+        self.finish_run()
+        self.assertEqual(self.cli('run-start', 'light', 'run-2').returncode, 0)
+        agent = 'ship:reviewer--sol'
+        self.assertEqual(self.cli('append', 'deep-review', agent + '@reviewer', 'sha', 'pass').returncode, 0)
+        home = self.resolve()
+        history = ledger.rows(home)
+        key = json.dumps([str(owed), str(self.checkout), result['id']])
+        receipts = owed.parent.parent / 'accounted.json'
+        identity = ledger.run_identity(len(history) - 1, history[-1])
+        receipts.write_text(json.dumps({key: [str(home), result['run'], identity]}))
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout.splitlines(), [
+            f"pending {result['id']} Stop receipt row belongs to another run", '0 accounted, 1 pending'])
+
+    def test_stop_publishes_no_receipt_when_a_saved_receipt_has_invalid_shape(self):
+        owed, _, first, _ = self.auto_owed(None)
+        record = self.cli('account', str(owed), first['id'], 'review', 'ship:reviewer--sol',
+                          'ab' * 20, 'pass', 'Completed review')
+        self.assertEqual(record.returncode, 0, record.stderr)
+        _, _, corrupt, _ = self.auto_owed(None)
+        pending = owed.read_bytes()
+        key = json.dumps([str(owed), str(self.checkout), corrupt['id']])
+        receipts = owed.parent.parent / 'accounted.json'
+        saved = json.dumps({key: [corrupt['ledger'], corrupt['run'], []]}).encode()
+        receipts.write_bytes(saved)
+        blocked = json.loads(self.hook('stop'))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn('Accounting receipt has an invalid shape', blocked['reason'])
+        self.assertEqual(receipts.read_bytes(), saved)
+        self.assertEqual(owed.read_bytes(), pending)
+
     def test_stop_publishes_no_receipt_when_a_receipted_row_changes(self):
         agent = 'ship:reviewer--sol'
         self.hook('subagent-stop', agent_type=agent, agent_id='reviewer')
@@ -797,6 +867,15 @@ class LedgerDirTests(unittest.TestCase):
         guidance = skill.split('Use the Stop diagnostic\'s `account-auto` command', 1)[1].split('`correct-binding`', 1)[0]
         for phrase in ('`<session>/subagents/agent-<agent-id>.jsonl`', 'The first word must be a verdict word.',
                        'exactly one `run-start` row', 'The receipt must name the same ledger and run.'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, guidance)
+
+    def test_account_auto_skill_describes_path_row_and_commit_boundaries(self):
+        skill = (LEDGER.parent.parent / 'SKILL.md').read_text()
+        guidance = skill.split('Use the Stop diagnostic\'s `account-auto` command', 1)[1].split('`correct-binding`', 1)[0]
+        for phrase in ('match its normalized and resolved forms', '`..` segments or repeated slashes',
+                       'The first `run-end` or next `run-start`', 'outside that range',
+                       'exactly one distinct 40-digit hexadecimal commit SHA', 'underscores or backticks'):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, guidance)
 
