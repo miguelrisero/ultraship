@@ -943,7 +943,8 @@ class TextLintTests(unittest.TestCase):
                 self.assertEqual(denial['permissionDecision'], 'deny')
                 self.assertIn(reason, denial['permissionDecisionReason'])
         non_format_id = text_lint.write_receipt(self.event(), ['Content refusal'], False, None)['id']
-        self.assertIn('Receipt does not permit a resend', self.hook_refusal(self.resend(non_format_id)))
+        self.assertIn('This receipt cannot authorize this call. Fix the cause and retry, or ask your superior.',
+                      self.hook_refusal(self.resend(non_format_id)))
         self.assertIsNone(self.hook_output(self.event('Facts: Checks pass.\nDecision: Continue.\nNext: Resume.')))
 
     def test_all_lint_off_preserves_safety_denials(self):

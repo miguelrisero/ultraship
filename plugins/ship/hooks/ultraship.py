@@ -1150,6 +1150,17 @@ def shell_without_heredoc_bodies(command):
 
 SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'mksh', 'yash', 'rbash', 'ash'}
 STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su', 'trap'}
+READ_ONLY_OPTIONS = {
+    'grep': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})',
+    'git': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})|--',
+    'rg': r'-(?:[nilrFEweCABgt]|[nilFw]{2,})|--glob(?:=.*)?',
+    'find': r'-(?:name|iname|type|path|maxdepth|mindepth|print|o)',
+    'ls': r'-(?:[lah1]|[lah1]{2,})',
+    'cat': r'(?!)',
+    'head': r'-(?:n|[0-9]+)',
+    'tail': r'-(?:n|[0-9]+)',
+    'wc': r'-[lcwm]',
+}
 
 
 def read_only_argument_word(command, tokens, words, index, *, literal_grep_anchor=False):
@@ -1216,17 +1227,6 @@ def read_only_argument_word(command, tokens, words, index, *, literal_grep_ancho
         cursor += 1
     if not pipelines[-1][-1] or not any(pipeline[0] == words for pipeline in pipelines):
         return False
-    options = {
-        'grep': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})',
-        'git': r'-(?:[nilrFEweCAB]|[nilrFEw]{2,})|--',
-        'rg': r'-(?:[nilrFEweCABgt]|[nilFw]{2,})|--glob(?:=.*)?',
-        'find': r'-(?:name|iname|type|path|maxdepth|mindepth|print|o)',
-        'ls': r'-(?:[lah1]|[lah1]{2,})',
-        'cat': r'(?!)',
-        'head': r'-(?:n|[0-9]+)',
-        'tail': r'-(?:n|[0-9]+)',
-        'wc': r'-[lcwm]',
-    }
     for pipeline in pipelines:
         if (len(pipeline[0]) > 3 and pipeline[0][0][0] == 'git' and pipeline[0][1][0] == '-C'
                 and pipeline[0][3][0] == 'grep'):
@@ -1239,7 +1239,7 @@ def read_only_argument_word(command, tokens, words, index, *, literal_grep_ancho
                 or any(part[0][0] not in {'head', 'tail', 'wc'} for part in pipeline[1:])):
             return False
         for part in pipeline:
-            if any(word[1].startswith('-') and not re.fullmatch(options[part[0][0]], word[1]) for word in part):
+            if any(word[1].startswith('-') and not re.fullmatch(READ_ONLY_OPTIONS[part[0][0]], word[1]) for word in part):
                 return False
     for raw, value, start, end in original:
         if raw in {'|', '&', ';'} or start in null_redirects:
@@ -1275,6 +1275,45 @@ def read_only_argument_word(command, tokens, words, index, *, literal_grep_ancho
         if prefix_end < len(raw) and not (
                 (raw[0].isascii() and raw[0].isalnum() or raw[0] in '_./') and '/' in prefix):
             return False
+    return True
+
+
+def literal_search_patterns(words):
+    """Recognize literal search arguments and complete -e operands."""
+    name, *args = (word[0] for word in words)
+    plain = r'[\w./][\w./-]*'
+    if name == 'git':
+        if args[:1] == ['-C']:
+            if len(args) < 2 or not re.fullmatch(plain, args[1]):
+                return False
+            args = args[2:]
+        if args[:1] != ['grep']:
+            return False
+        args = args[1:]
+    elif name == 'rg':
+        if args[:1] != ['--no-config']:
+            return False
+        args = args[1:]
+    elif name != 'grep':
+        return False
+
+    args = iter(args)
+    for raw in args:
+        if re.fullmatch(plain, raw) or raw == '--' and name == 'git':
+            return all(re.fullmatch(plain, word) for word in args)
+        if not re.fullmatch(READ_ONLY_OPTIONS[name], raw):
+            return False
+        if name == 'rg' and raw.startswith('--glob=') and not re.fullmatch(plain, raw.removeprefix('--glob=')):
+            return False
+        if raw == '-e':
+            if not re.fullmatch(rf"{plain}|'(?!-)[^'\r\n]*'", next(args, '')):
+                return False
+        elif raw in {'-A', '-B', '-C'}:
+            if not re.fullmatch(r'[0-9]+', next(args, '')):
+                return False
+        elif name == 'rg' and raw in {'-E', '-g', '-r', '-t', '--glob'}:
+            if not re.fullmatch(plain, next(args, '')):
+                return False
     return True
 
 
@@ -3010,8 +3049,9 @@ def inline_interpreter_denial(command, cwd=None):
         command_positions = shell_command_positions(tokens)
         # A case pattern can end with a parenthesis that does not close a pipe group.
         has_case = any(raw == 'case' and start in command_positions for raw, _, start, _ in tokens)
-        limit = (test_operand_limit(tokens, groups)
-                 if top_level and not TEST_SHAPE_REDEFINE.search(command) else 0)
+        test_shape = top_level and not TEST_SHAPE_REDEFINE.search(command)
+        limit = test_operand_limit(tokens, groups) if test_shape else 0
+        literal_search_context = test_shape and not any(token[0] in {'<', '>'} for token in tokens)
         segments, words, piped, pipe_groups = [], [], False, []
         runtime_paths = inherited_paths or nested_paths or shell_defines_function(tokens, command_positions) or any(
             token[1] in {'while', 'until', 'for', 'select'} and token[2] in command_positions for token in tokens)
@@ -3104,6 +3144,10 @@ def inline_interpreter_denial(command, cwd=None):
                     and unresolved_shell_word(first[0])):
                 return 'inline interpreter code rule (unresolved command word)'
             test_operands, test_commands, closing = set(), set(), None
+            literal_ready = (literal_search_context and bool(words) and prefix_end == 0
+                             and literal_search_patterns(words)
+                             and not any(limit <= token[2] < words[0][2] and token[0] not in {';', '&', '|', '\n'}
+                                         for token in tokens))
             if words and words[-1][3] <= limit:
                 reserved_prefix = True
                 for _, value, start, _ in words:
@@ -3131,12 +3175,12 @@ def inline_interpreter_denial(command, cwd=None):
                 joined_code = (not neutral and unresolved_shell_word(raw) and bool(re.search(
                     rf'{names}|--(?:eval|print)|(?:^|[^\w])(?:-[ceEpr]|eval|run|repl)(?:$|[^\w])', raw))
                                and not read_only_argument_word(command, tokens, words, index))
-                if start not in test_operands and (joined_code or unresolved and (
+                data = grep_data_token(words, index)
+                if start not in test_operands and (joined_code or unresolved and not (literal_ready and data) and (
                         any(code_option(argument) for argument in arguments)
                         or arguments[:1] and arguments[0] in {'eval', 'run', 'repl'})):
                     return 'inline interpreter code rule (unresolved command word)'
-                if (grep_data_token(words, index) or words[0][0] == 'ls'
-                        and read_only_argument_word(command, tokens, words, index)):
+                if data or (words[0][0] == 'ls' and read_only_argument_word(command, tokens, words, index)):
                     continue
                 name = interpreter_name(value)
                 if not name:

@@ -159,6 +159,13 @@ Keep operative writer rules in its loaded definition and preserve the independen
 When a main merge changes migration files or the brief names migration scope, prepare [graph, migration revision-head, Git merge-head, and target-parent evidence](../skills/ship/references/owner-decisions.md#structural-migration-parent-example).
 For register scope, prepare [owning-predicate, exact-entry/reason, and unchanged-assertion evidence](../skills/ship/references/owner-decisions.md#exact-register-classification-example).
 Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals), including its retry rule, its coordination text remedy and its safety blocks.
+A refusal never ends the work.
+After a refusal, find the cause and retry in a compliant form, or ask your superior how to proceed.
+A writer asks its driver, a driver asks its chief, and a chief asks the CoC.
+The ask never blocks your other work.
+Only the CoC decides whether an owner-only item becomes an owner Input; agents never ask the owner.
+The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items still need a compliant form or the authority they lacked.
+A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
 Apply a `text_lint.py` formatting warning to the next message.
 When a writer or reviewer asks for permission to run a refused command, grant it or run the command yourself when you consider it appropriate.
 Record the grant or the run in the lane state file; ask your chief when the command is outside your authority.
