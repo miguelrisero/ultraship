@@ -42,6 +42,12 @@ class EnvDirectoryTests(unittest.TestCase):
         for command, rule in (
             ('printf sample | python3', 'inline interpreter code rule (program from a pipe)'),
             ('printf sample | python3 -', 'inline interpreter code rule (program from a pipe)'),
+            ('printf x | python3 --version', 'inline interpreter code rule (program from a pipe)'),
+            ('printf x | xargs python3 --version', 'inline interpreter code rule (program from a pipe)'),
+            ('printf x | env python3 --version', 'inline interpreter code rule (program from a pipe)'),
+            ('printf x | cat; env python3 --version', 'inline interpreter code rule (program from a pipe)'),
+            ("printf x | sh -c 'python3 --version'", 'inline interpreter code rule (program from a pipe)'),
+            ('< input python3 --version', 'inline interpreter code rule (program from a pipe)'),
             ('python3 --version < input', 'inline interpreter code rule (program from a pipe)'),
             ('printf sample | cat; python3 --version < input',
              'inline interpreter code rule (program from a pipe)'),

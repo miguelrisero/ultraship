@@ -3032,7 +3032,9 @@ def inline_interpreter_denial(command, cwd=None):
                 segment_text = text[words[0][2]:words[-1][3]]
                 if redirected or any(word[0] == '<' for word in words) or re.search(r'[<>][ \t]*\(|=\(', text[end:]):
                     return 'inline interpreter code rule (program from a pipe)'
-                if arguments == ['--version']:
+                # An independent pipeline does not feed this segment.
+                if (index == 0 and start in command_positions and not reads_pipe and not runtime_paths
+                        and re.fullmatch(r'[\w./-]+[ \t]+--version', segment_text)):
                     continue
                 if not arguments and not piped:
                     if piped_input or any(token[0] in {'<', '|', '('} or token[0] == '{'
