@@ -70,7 +70,7 @@ Source delivery grants zero retry authority.
 Source delivery grants zero installation authority.
 Source delivery grants zero publication authority.
 Preserve every existing refusal, tool and hook denial, and affected-session hold.
-Never replay a denied command or an equivalent operation yourself; your manager reviews the escalation and may run the exact command.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.

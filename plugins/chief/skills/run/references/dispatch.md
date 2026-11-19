@@ -67,7 +67,7 @@ Task: <frozen goal, one paragraph>
 Repository: <owner/repo>   Worktree: <absolute path>   Branch: <name>   Base SHA: <sha>
 In scope: <files or areas>   Out of scope: <files or areas owned by other lanes>
 Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
-A hook refusal escalates to your manager: report the escalation id and stop this step.
+A hook refusal is final: report it and stop.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 The stop covers the refused call; the loaded formatting, coordination and method-only resend routes stay.

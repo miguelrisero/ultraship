@@ -179,7 +179,7 @@ class BriefTests(unittest.TestCase):
             'Readable files: `<worktree path>`, `<plugin root>/skills/ship/references/owner-decisions.md`, '
             '`<decision file path>`, `<tool route decision path>`, '
             '`<denial record path>`, `<attempt record path>`; every other path is out of scope\n'
-            'A hook refusal escalates to your manager: report the escalation id and stop this step.\n'
+            'A hook refusal is final: report it and stop.\n'
             'Never print a key value; never post outside bettergroupinc and miguelrisero.\n'
             'Never chain a glob listing into a write command.'
         )

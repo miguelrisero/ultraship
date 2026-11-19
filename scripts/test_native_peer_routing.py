@@ -112,7 +112,7 @@ class BriefSafetyTests(unittest.TestCase):
             section = (ROOT / name).read_text().split(heading + '\n', 1)[1].split('\n## ', 1)[0]
             for requirement in (
                 'Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>',
-                'A hook refusal escalates to your manager: report the escalation id and stop this step.',
+                'A hook refusal is final: report it and stop.',
                 'Never print a key value; never post outside bettergroupinc and miguelrisero.',
                 'Never chain a glob listing into a write command.',
             ):

@@ -19,7 +19,7 @@ Require this field and these sentences verbatim in every brief:
 
 ```text
 Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
-A hook refusal escalates to your manager: report the escalation id and stop this step.
+A hook refusal is final: report it and stop.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 ```
@@ -116,7 +116,7 @@ Source delivery grants zero retry authority.
 Source delivery grants zero installation authority.
 Source delivery grants zero publication authority.
 Preserve every existing refusal, tool and hook denial, and affected-session hold.
-Never replay a denied command or an equivalent operation yourself; your manager reviews the escalation and may run the exact command.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
@@ -212,7 +212,7 @@ Re-anchor row `<row ID>` of <PR URL> once with the sanctioned row re-anchor tool
 
 Owner helper request: the owner's global CLAUDE.md, heading "Helper agents (standing request)", requests helper agents. Covered role: writer. Topic: <assigned topic>. Every permission, denial and gate stays in force.
 Readable files: `<worktree path>`, `<plugin root>/skills/ship/references/owner-decisions.md`, `<decision file path>`, `<tool route decision path>`, `<denial record path>`, `<attempt record path>`; every other path is out of scope
-A hook refusal escalates to your manager: report the escalation id and stop this step.
+A hook refusal is final: report it and stop.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 
@@ -350,7 +350,7 @@ Apply this route only to future briefs after verified runtime adoption.
 Source delivery grants zero runtime-adoption authority.
 Source delivery grants zero retry authority.
 Native Edit grants zero alternate form for an existing or recorded denied operation.
-Never replay a denied command or an equivalent operation yourself; your manager reviews the escalation and may run the exact command.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Preserve every effective refusal, tool and hook denial, and affected-session hold.
 Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
@@ -371,7 +371,7 @@ A matching existing denial blocks the action, recipient and scope under every ro
 Preserve every effective tool, hook, owner and loaded-instruction refusal and every affected-session hold.
 Native Edit grants zero alternate form for a denied operation.
 Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt.
-Never replay a denied command or an equivalent operation yourself; your manager reviews the escalation and may run the exact command.
+Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
 Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
 A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
 It made zero protected reads and named no content, scope, protected-access, hook, permission or tool finding.
@@ -418,18 +418,6 @@ Supply its applicable standing, council/Chief, or owner-event route and evidence
 Include the unchanged mark-detection, marked-file equality, and routing assertions in that evidence.
 Identify whether the entry classifies a token mention or skips a required check or widens security, authorization, or resource policy.
 For a policy change, supply its applicable dedicated authority; a register label supplies zero authority by itself.
-
-## Refusal escalation
-
-A classifier refusal of a Bash call writes a signed escalation record and names the manager in the refusal text.
-The manager of a subagent is its parent main session. The manager of a main session is the CoC, which is the session whose working directory is inside `ULTRASHIP_COC_DIR`.
-The lane reports the escalation id and stops this step. It never runs the command in another form.
-The manager reads the record with `python3 <plugin root>/hooks/escalation.py show <id>` and reviews the exact command.
-To approve, the manager runs `python3 <plugin root>/hooks/escalation.py approve <id> --reason '<why>'`, then runs the exact command once as `cd '<cwd>' && <command>`, and tells the lane the result.
-To reject, the manager runs `python3 <plugin root>/hooks/escalation.py reject <id> --reason '<why>'` and tells the lane the reason.
-An approval binds the command hash, the cwd, the head SHA and the approving session. It is single use and expires after 60 minutes.
-No approval runs an absolute hold: secret reads, production writes, destructive git, owner-only settings, and writes to the escalation or receipt stores. Send these to the owner.
-`python3 <plugin root>/hooks/escalation.py list` prints the undecided records.
 
 ## Loaded instructions and refusals
 
