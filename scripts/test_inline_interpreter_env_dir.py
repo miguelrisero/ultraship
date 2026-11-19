@@ -330,9 +330,26 @@ class EnvDirectoryTests(unittest.TestCase):
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
             self.assertFalse(self.denied('timeout 5 python3 scripts/x.py', cwd=directory), self.reason)
 
+    def test_piped_launcher_with_opaque_job_is_denied(self):
+        self.assertTrue(self.denied("printf input | parallel 'printf %s'"))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_pipeline_wrapper_requires_a_proven_child_command(self):
+        self.assertTrue(self.denied('printf input | timeout 5 "$CONSUMER"'))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+        self.assertFalse(self.denied('printf input | timeout 5 cat'), self.reason)
+
+    def test_directory_names_as_script_arguments_stay_admitted(self):
+        for word in ('cd', 'pushd'):
+            with self.subTest(word=word):
+                self.assertFalse(self.denied(f'python3 scripts/x.py --label {word} frontend'), self.reason)
+
     def test_launcher_names_as_script_arguments_stay_admitted(self):
         with tempfile.TemporaryDirectory() as directory:
             for command in ('python3 scripts/x.py --label xargs',
+                            'timeout 5 python3 scripts/x.py --label xargs',
+                            'X+=1 python3 scripts/x.py --label xargs',
+                            'git grep xargs', 'rg find',
                             'python3 scripts/x.py parallel', 'node x.js -exec'):
                 with self.subTest(command=command):
                     self.assertFalse(self.denied(command, cwd=directory), self.reason)
@@ -367,11 +384,16 @@ class EnvDirectoryTests(unittest.TestCase):
                 f'env >/dev/null {find}',
                 f'sudo ionice -t xargs node {script}',
                 f'doas -u node /usr/bin/{find}',
-                f"stdbuf -o node xargs env -S 'node {script}'",
             ):
                 with self.subTest(command=command):
                     self.assertTrue(self.denied(command, cwd=directory))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_launcher_inherits_path_check_into_env_split_string(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / 'p.js'
+            self.assertTrue(self.denied(f"stdbuf -oL xargs env -S 'node {script}'", cwd=directory))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
     def test_relative_directory_is_unproven_without_hook_cdpath(self):
         with tempfile.TemporaryDirectory() as directory:

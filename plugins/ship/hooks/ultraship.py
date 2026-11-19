@@ -1507,7 +1507,7 @@ def shell_input_state(tokens, text, inherited=(False, False, False)):
         and not (index and tokens[index - 1][0] == '|' and tokens[index - 1][3] == token[2])
         and not (index + 1 < len(tokens) and tokens[index + 1][0] == '|' and tokens[index + 1][2] == token[3])
         for index, token in enumerate(tokens))
-    directory = inherited[1] or any(token[1] in {'cd', 'pushd'} for token in tokens)
+    directory = inherited[1] or bool(shell_directory_positions(tokens))
     return piped, directory, redirected
 
 
@@ -1667,12 +1667,11 @@ def chdir_wrapper_present(command, env_directories):
             tokens = shell_raw_words(text)
             if nested_work_exceeded(tokens, seen):
                 return True
+            directory_change = directory_change or bool(shell_directory_positions(tokens))
             for index, token in enumerate(tokens):
                 if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
                     first_segment = False
                 name = os.path.basename(token[1])
-                if token[1] in {'cd', 'pushd'}:
-                    directory_change = True
                 if name in {'chroot', 'nsenter', 'unshare', 'setpriv', 'runuser', 'su', 'systemd-run', 'doas'}:
                     if index + 1 < len(tokens):
                         return True
@@ -1761,8 +1760,9 @@ def safe_directory_state(command, cwd=None):
             tokens = shell_raw_words(text)
             if nested_work_exceeded(tokens, seen):
                 return False
+            positions = shell_directory_positions(tokens)
             for index, token in enumerate(tokens):
-                if token[1] not in {'cd', 'pushd'}:
+                if token[2] not in positions:
                     continue
                 cursor = index + 1
                 while cursor < len(tokens) and tokens[cursor][1] in {'-L', '-P', '-e', '-@'}:
@@ -1807,6 +1807,10 @@ def shell_without_redirections(tokens):
         yield token
 
 
+SHELL_ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\+?=')
+SHELL_COMMAND_PREFIXES = {'!', 'if', 'elif', 'while', 'until', 'then', 'do', 'else', '{'}
+
+
 def shell_command_positions(tokens):
     """Resolve shell prefixes without treating ordinary argument words as commands."""
     positions, command_start, time_option = set(), True, False
@@ -1816,16 +1820,20 @@ def shell_command_positions(tokens):
             continue
         if not command_start:
             continue
-        if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', value, re.S):
+        if SHELL_ASSIGNMENT.match(raw):
             continue
         if time_option and value in {'-p', '--'}:
             time_option = False
             continue
         positions.add(start)
-        command_start = value in {'command', 'builtin', 'exec', 'time', '!', 'if', 'elif',
-                                  'while', 'until', 'then', 'do', 'else', '{'}
+        command_start = raw in SHELL_COMMAND_PREFIXES or value in {'command', 'builtin', 'exec', 'time'}
         time_option = value in {'command', 'builtin', 'exec', 'time'}
     return positions
+
+
+def shell_directory_positions(tokens):
+    candidates = {start for _, value, start, _ in tokens if value in {'cd', 'pushd'}}
+    return candidates and candidates & shell_command_positions(tokens)
 
 
 def shell_defines_function(tokens, positions):
@@ -2784,14 +2792,75 @@ def shell_changes_paths(tokens):
     return name != 'true' or len(tokens) != 1
 
 
-def shell_launches_commands(tokens, command_positions):
-    words = list(shell_without_redirections(tokens))
-    first = next((word for word in words if not TEST_SHAPE_ASSIGNMENT.match(word[0])), None)
-    if first and first[2] in command_positions and interpreter_name(first[1]):
+PIPE_WRAPPER_FLAGS = {
+    'env': {'-i', '--ignore-environment', '-v', '--debug'},
+    'command': {'-p'}, 'exec': {'-c', '-l'}, 'nice': set(), 'nohup': set(),
+    'timeout': {'--foreground', '--preserve-status', '-v', '--verbose'},
+    'stdbuf': set(), 'sudo': {'-n', '--non-interactive', '-E', '--preserve-env', '-H', '-S', '-b'},
+    'doas': {'-n'}, 'builtin': set(), 'time': {'-p'},
+}
+
+
+def shell_segment_command(words, command_positions):
+    """Return the child command and whether a wrapper needs proof."""
+    cursor, wrapped = 0, False
+    while cursor < len(words):
+        raw, value, start, _ = words[cursor]
+        if not wrapped:
+            if SHELL_ASSIGNMENT.match(raw) or raw in SHELL_COMMAND_PREFIXES:
+                cursor += 1
+                continue
+            if start not in command_positions:
+                return None, False
+        name = os.path.basename(value)
+        if name not in PIPE_WRAPPER_FLAGS:
+            return words[cursor], wrapped
+        wrapped = True
+        if unresolved_shell_word(raw):
+            break
+        values = {'stdbuf': {'-i', '-o', '-e', '--input', '--output', '--error'},
+                  'doas': {'-u'}}.get(name, WRAPPERS.get(name, set()))
+        cursor += 1
+        while cursor < len(words) and words[cursor][1].startswith('-'):
+            raw, option, _, _ = words[cursor]
+            key, attached, _ = option.partition('=')
+            if unresolved_shell_word(raw) or name == 'env' and option.startswith(('-S', '--split-string')):
+                return None, wrapped
+            cursor += 1
+            if option == '--':
+                break
+            if option in PIPE_WRAPPER_FLAGS[name]:
+                continue
+            if key in values and (not attached or key.startswith('--')):
+                if not attached:
+                    if cursor == len(words) or unresolved_shell_word(words[cursor][0]):
+                        return None, wrapped
+                    cursor += 1
+            elif name == 'stdbuf' and re.fullmatch(r'-[ioe].+', option):
+                continue
+            else:
+                return None, wrapped
+        if name == 'timeout':
+            if (cursor == len(words) or unresolved_shell_word(words[cursor][0])
+                    or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)?[smhd]?', words[cursor][1])):
+                return None, wrapped
+            cursor += 1
+        if name in {'env', 'sudo'}:
+            while cursor < len(words) and '=' in words[cursor][1]:
+                raw, value, _, _ = words[cursor]
+                if not SHELL_ASSIGNMENT.match(value) or unresolved_shell_word(raw):
+                    return None, wrapped
+                cursor += 1
+    return None, wrapped
+
+
+def shell_launches_commands(words, command):
+    if command and not unresolved_shell_word(command[0]) and interpreter_name(command[1]):
         return False
-    return any(os.path.basename(word[1]) in {'xargs', 'parallel'}
-               or os.path.basename(word[1]) == 'find' and any(
-                   later[1] in {'-exec', '-execdir', '-ok', '-okdir'} for later in words[index + 1:])
+    return any((os.path.basename(word[1]) in {'xargs', 'parallel'}
+                or os.path.basename(word[1]) == 'find' and any(
+                    later[1] in {'-exec', '-execdir', '-ok', '-okdir'} for later in words[index + 1:]))
+               and not (command == words[0] and grep_data_token(words, index))
                for index, word in enumerate(words))
 
 
@@ -2962,10 +3031,14 @@ def inline_interpreter_denial(command, cwd=None):
                 words.append(token)
         segments.append((words, piped or any(pipe_groups)))
         changing_segments = [shell_changes_paths(words) for words, _ in segments]
-        segments = [(words, piped, runtime_paths or any(changing_segments[:index])
-                     or any(changing_segments[index + 1:])
-                     or shell_launches_commands(words, command_positions))
-                    for index, (words, piped) in enumerate(segments)]
+        classified = []
+        for index, (words, piped) in enumerate(segments):
+            command_words = list(shell_without_redirections(words))
+            consumer, wrapped = shell_segment_command(command_words, command_positions)
+            launches = shell_launches_commands(command_words, consumer)
+            paths_changed = (launches or runtime_paths or any(changing_segments[:index])
+                             or any(changing_segments[index + 1:]))
+            classified.append((words, piped, paths_changed, launches, consumer, wrapped))
         shell_programs = set()
         for index, token in enumerate(tokens):
             if os.path.basename(token[1]) not in SHELL_INTERPRETERS:
@@ -2984,7 +3057,7 @@ def inline_interpreter_denial(command, cwd=None):
                     cursor += 1
                     continue
                 break
-        for words, piped, paths_changed in segments:
+        for words, piped, paths_changed, launches, consumer, wrapped in classified:
             if subscript_reason is None:
                 try:
                     subscript_reason = (array_subscript_denial(words, arithmetic, tokens, groups)
@@ -2992,11 +3065,19 @@ def inline_interpreter_denial(command, cwd=None):
                 except Exception:
                     subscript_reason = 'array subscript evaluation rule (parse error)'
             reads_pipe = inherited[0] or piped or any(word[0] == '<' for word in words)
+            if reads_pipe and launches and path_reason is None:
+                path_reason = 'inline interpreter code rule (program from a pipe)'
+            if reads_pipe and wrapped and path_reason is None:
+                if (consumer is None or unresolved_shell_word(consumer[0])
+                        or not re.fullmatch(r'[\w./+-]+', consumer[1])):
+                    path_reason = 'inline interpreter code rule (unresolved command word)'
+                elif os.path.basename(consumer[1]) in SHELL_INTERPRETERS:
+                    path_reason = 'inline interpreter code rule (program from a pipe)'
             unproven_directory = chdir_wrapper or directory and not safe_directory
             segment_relative_denied = redirected or not safe_base or unproven_directory or reads_pipe
             directory_only = unproven_directory and safe_base and not reads_pipe
             prefix_end = next((index for index, word in enumerate(words)
-                               if not re.match(r'[A-Za-z_][A-Za-z0-9_]*=', word[1])), len(words))
+                               if not SHELL_ASSIGNMENT.match(word[0])), len(words))
             first = words[prefix_end] if prefix_end < len(words) else None
             neutral_prefix = prefix_end > 0 and not any(
                 interpreter_name(word[1]) or os.path.basename(word[1]) in STRING_WRAPPERS for word in words)
@@ -3091,7 +3172,7 @@ def inline_interpreter_denial(command, cwd=None):
                             and path_reason is None):
                         path_reason = 'inline interpreter code rule (program from a pipe)'
         for token in nested:
-            preceding_paths = next((changed for words, _, changed in segments
+            preceding_paths = next((changed for words, _, changed, *_ in classified
                                     if words and words[0][2] <= token[2] < words[-1][3]), inherited_paths)
             pending.append((token[1], state, True if token in shell_nested else preceding_paths))
         substitutions.extend((body, state, True) for body in bodies)
