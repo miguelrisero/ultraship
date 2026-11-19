@@ -435,7 +435,7 @@ class ReceiptCustodyTests(unittest.TestCase):
 
     def test_stop_account_diagnostic_admits_quoted_paths(self):
         event = self.own_account_event()
-        home = Path(os.environ['HOME']) / 'home with space'
+        home = Path(os.environ['HOME']) / 'home with text'
         state = home / '.local/state/ultraship'
         script = self.cwd / 'plugin with space/ledger.py'
         with patch.dict(os.environ, {'HOME': str(home)}), \
@@ -463,6 +463,44 @@ class ReceiptCustodyTests(unittest.TestCase):
                 self.assertIsNone(ultraship.guarded_pre(
                     {'cwd': str(self.cwd), **event, 'tool_input': {'command': command}}))
             self.assertEqual(output.getvalue(), '')
+
+            auto, = re.findall(r'`([^`]* account-auto [^`]*)`', diagnostic['reason'])
+            self.assertEqual(shlex.split(auto), ['python3', str(script), 'account-auto', str(pending)])
+            for caller in ('', 'ship:driver--sol'):
+                with self.subTest(caller=caller):
+                    output = io.StringIO()
+                    with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                        ultraship.guarded_pre({'cwd': str(self.cwd), **event, 'agent_type': caller,
+                                               'tool_input': {'command': auto}})
+                    self.assertEqual(output.getvalue(), '')
+            for invalid in (auto + ' extra', auto + ' && echo done', auto.replace('session-context', 'sibling')):
+                with self.subTest(command=invalid):
+                    self.assert_custody_denial({**event, 'tool_input': {'command': invalid}})
+            self.assert_custody_denial({**event, 'agent_type': 'ship:writer--sol', 'tool_input': {'command': auto}})
+
+    def test_plain_account_auto_requires_own_driver_call(self):
+        event = self.own_account_event()
+        event['session_id'] = 's1'
+        command = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+        driver = {**event, 'agent_type': 'ship:driver--sol', 'tool_input': {'command': command}}
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            self.assertIsNone(ultraship.guarded_pre({'cwd': str(self.cwd), **driver}))
+        self.assertEqual(output.getvalue(), '')
+        with self.subTest('writer'):
+            self.assert_custody_denial({**driver, 'agent_type': 'ship:writer--sol'})
+        with self.subTest('sibling'):
+            sibling = command.replace('s1.tsv', 'sibling.tsv')
+            self.assert_custody_denial({**driver, 'tool_input': {'command': sibling}})
+
+    def test_account_auto_line_continuations_require_raw_driver_call(self):
+        event = self.own_account_event()
+        event['session_id'] = 's1'
+        command = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+        for before, after in (('account-', 'auto'), ('ledger.', 'py')):
+            split = command.replace(before + after, before + '\\\n' + after, 1)
+            for caller in ('ship:writer--sol', 'ship:driver--sol'):
+                with self.subTest(token=before + after, caller=caller):
+                    self.assert_custody_denial({**event, 'agent_type': caller, 'tool_input': {'command': split}})
 
     def test_own_account_call_denies_other_commands_and_callers(self):
         event = self.own_account_event()
