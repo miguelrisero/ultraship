@@ -69,7 +69,10 @@ class WriterDeniedProcessTests(unittest.TestCase):
                 text = path.read_text(encoding='utf-8')
                 if name in (*WRITER_FILES, REFERENCE_FILE):
                     text = refusals_section(text)
-                self.assertIn(rule, ' '.join(text.splitlines()))
+                joined = ' '.join(text.splitlines())
+                self.assertIn(rule, joined)
+                if path in agents and not path.name.startswith(('writer--', 'driver')):
+                    self.assertIn('Ask your coordinator for permission at any time. ' + rule, joined)
 
     def test_decision_defect_rule_limits_refusal_resolution(self):
         defect = 'The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.'

@@ -126,13 +126,11 @@ class CoordinationRemedyContractTests(unittest.TestCase):
                         'stay final', 'Never resend'):
             with self.subTest(removed=removed):
                 self.assertNotIn(removed, self.refusals)
-        for name in ('driver.md', 'driver--sol.md', 'writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md',
-                     'reviewer--fable.md', 'reviewer--fable52.md', 'reviewer--luna.md', 'reviewer--sonnet.md',
-                     'triage--sol.md', 'verifier--astra.md', 'verifier--fable.md'):
-            text = (ROOT / 'plugins/ship/agents' / name).read_text()
+        for path in sorted((ROOT / 'plugins/ship/agents').glob('*.md')):
+            text = path.read_text()
             for removed in ('once-only', 'remains final', 'substitute an executor', 'Never replay a denied command',
                             'stay final', 'Never resend'):
-                with self.subTest(carrier=name, removed=removed):
+                with self.subTest(carrier=path.name, removed=removed):
                     self.assertNotIn(removed, text)
 
     def test_contract_keeps_the_refusal_rule_line_budget(self):
