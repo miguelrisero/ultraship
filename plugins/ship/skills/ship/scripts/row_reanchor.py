@@ -291,7 +291,9 @@ def run(args):
              'expected_count': head_values.get('expect', 1), 'head_old_count': head.count(old),
              'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements),
              'lines': edited_extent, 'base_lines': base_extent, 'base_equal': base_equal}
-    identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
+    parents = git('rev-list', '--parents', '-n', '1', head_sha).decode().split()
+    require(len(parents) > 1, 'head first parent required')
+    identity = {'lane': lane, 'base': base_sha, 'head': head_sha, 'parent': parents[1]}
     write_row_and_record(record, identity, entry, row_file, original, result)
     print('PASS')
     print('row_file=' + str(row_file))

@@ -124,6 +124,7 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(record.parent.stat().st_mode & 0o777, 0o700)
         self.assertEqual(json.loads(record.read_bytes()), {
             'schema': 1, 'lane': 'linked-lane', 'base': self.base, 'head': self.head_sha,
+            'parent': self.base,
             'rows': [{'row_file': 'rows.toml', 'row_id': 'target', 'subject': 'subject.txt',
                       'expected_count': 1, 'head_old_count': 1, 'hunk_count': 2,
                       'mutant_unchanged': True, 'changed_statements': 2,
@@ -159,13 +160,26 @@ class ToolTests(unittest.TestCase):
         target = old_record['rows'][0]
         old_record['rows'].append({**target, 'row_id': 'other'})
         record.write_text(json.dumps(old_record))
+        parent = self.head_sha
         self.head_sha = self.commit()
         before, output = self.invoke()
         self.assertEqual(self.row.read_bytes(), before)
         self.assertIn('changed_statements=0', output.splitlines())
         self.assertEqual(json.loads(record.read_bytes()), {
-            **old_record, 'head': self.head_sha, 'rows': [{**target, 'changed_statements': 0}],
+            **old_record, 'head': self.head_sha, 'parent': parent,
+            'rows': [{**target, 'changed_statements': 0}],
         })
+
+    def test_record_expires_when_only_the_recorded_parent_differs(self):
+        self.setup_pair('start\nend\n', 'start\ninserted\nend\n', 'start\nend\n')
+        self.invoke()
+        record = self.record_path()
+        current = json.loads(record.read_bytes())
+        record.write_text(json.dumps({**current, 'parent': self.head_sha, 'rows': [
+            {**current['rows'][0], 'row_id': 'other'},
+        ]}))
+        self.invoke()
+        self.assertEqual(json.loads(record.read_bytes()), current)
 
     def test_same_head_replaces_one_entry_and_keeps_other_rows(self):
         self.setup_pair('start\nend\n', 'start\ninserted\nend\n', 'start\nend\n', literal=True)
