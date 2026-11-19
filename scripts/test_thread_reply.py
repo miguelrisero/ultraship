@@ -1682,8 +1682,8 @@ class HookTests(unittest.TestCase):
             with self.subTest(caller=caller):
                 self.assertEqual(self.decision(command, caller), {})
 
-    def test_preflight_with_nested_repo_read_keeps_role_limits(self):
-        command = (
+    def preflight_command(self):
+        return (
             r"""set -euo pipefail; w=/work/example/repo; d=${w%/*}/intake; cd "$w"; """
             r"""test "$(git rev-parse --show-toplevel)" = "$w"; """
             r"""test "$(git branch --show-current)" = lane/example; """
@@ -1704,10 +1704,15 @@ class HookTests(unittest.TestCase):
             r"""curl -fsS --max-time 15 'https://queue.example.invalid/mq/queue?limit=100' | """
             r"""jq -e '(.truncated == false) and ([.entries[] | select(tostring | contains("example-id"))] | length == 0)'"""
         )
+
+    def test_preflight_with_nested_repo_read_keeps_role_limits(self):
+        command = self.preflight_command()
         for caller in ('', 'ship:driver'):
             with self.subTest(caller=caller):
                 self.assertEqual(self.decision(command, caller), {})
-        self.assertEqual(self.decision(command, 'ship:writer--sol').get('permissionDecision'), 'deny')
+        result = self.decision(command, 'ship:writer--sol')
+        self.assertEqual(result.get('permissionDecision'), 'deny')
+        self.assertIn(' Rule: git writer expansion or glob rule.', result['permissionDecisionReason'])
 
         cases = (
             (command + '; test "unfinished', 'unparsed shell syntax rule: No closing quotation'),
@@ -1723,6 +1728,30 @@ class HookTests(unittest.TestCase):
                     result = self.decision(shell, caller)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
+
+    def test_preflight_accepts_spaces_after_final_semicolon(self):
+        command = self.preflight_command() + ';   '
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+
+    def test_preflight_retry_requires_fixed_steps(self):
+        command = self.preflight_command()
+        cases = (
+            ('Python isolation', command.replace('python3 -I -c', 'python3 -c', 1)),
+            ('Python body', command.replace('sys.exit(not ok)', 'sys.exit(0)', 1)),
+            ('awk body', command.replace('END{exit n!=1}', 'END{exit 0}', 1)),
+            ('extra Git step', command + '; git log -1'),
+            ('missing pipeline stage', command + ' |   '),
+            ('missing next command', command + ' &&   '),
+        )
+        for case, shell in cases:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(case=case, caller=caller):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: unparsed shell syntax rule: No closing quotation.',
+                                  result['permissionDecisionReason'])
 
     def test_guard_exception_denies_every_caller(self):
         with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):

@@ -4177,38 +4177,47 @@ def hidden_gh_api_calls(text):
     return max(counts)
 
 
-def review_thread_repo_read_quotes(command):
-    # shortcut: recognize the single-line preflight grammar; use a shell parser for broader syntax.
-    if '"$(gh' not in command or '\x00' in command or any(c.isspace() and c not in ' \t' for c in command):
-        return command
-    name = r'[A-Za-z_][A-Za-z0-9_]*'
-    plain = r'[A-Za-z0-9_./:@=+,%\-]'
-    single = r"'[^']*'"
-    variable = rf'\$(?:{name}(?![A-Za-z0-9_])|\{{{name}(?:%/\*|:-{plain}+)?\}})'
-    git_read = (r'\$\(git[ \t]+(?:rev-parse[ \t]+(?:--show-toplevel|HEAD)'
-                r"|rev-parse[ \t]+--abbrev-ref[ \t]+'@\{u\}'[ \t]+2>/dev/null[ \t]+\|\|[ \t]+:"
-                r'|branch[ \t]+--show-current|status[ \t]+--porcelain=v1'
-                r'|remote[ \t]+get-url[ \t]+--push[ \t]+--all[ \t]+origin)\)')
-    double = rf'"(?:[^"$`\\!]|{variable}|{git_read})*"'
-    word = rf'(?:{plain}|{single}|{double}|{variable}|{git_read})+'
-    repo_test = (r'test[ \t]+"\$\(gh[ \t]+repo[ \t]+view[ \t]+(?!-)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
-                 r'[ \t]+--json[ \t]+nameWithOwner,defaultBranchRef[ \t]+--jq[ \t]+'
-                 r"""'(?P<jq>\.nameWithOwner\+" "\+\.defaultBranchRef\.name)'\)"[ \t]+=[ \t]+""" + single)
-    branch_case = rf'case[ \t]+"\${name}"[ \t]+in[ \t]+{plain}+\|\*/{plain}+\)[ \t]+exit[ \t]+[0-9]+;;[ \t]+esac'
-    simple = rf'(?:test|gh|git|cd|awk|python3|printf|curl|jq)(?:[ \t]+(?:{word}|>[ \t]+{word}))*'
-    step = re.compile(rf'[ \t]*(?:{repo_test}|{branch_case}|set[ \t]+-euo[ \t]+pipefail|{name}={word}|{simple})'
-                      r'[ \t]*(?P<separator>;|&&|\|\||\||$)')
-    parts, cursor = [], 0
-    while cursor < len(command):
-        match = step.match(command, cursor)
-        if not match or match.end() == len(command) and match['separator'] in ('&&', '||', '|'):
-            return command
-        start, end = match.span('jq')
-        # The outer shlex pass removes these escapes and passes the literal jq word to the nested scan.
-        parts.append(match[0] if start < 0 else
-                     command[cursor:start] + match['jq'].replace('"', r'\"') + command[end:match.end()])
-        cursor = match.end()
-    return ''.join(parts)
+# shortcut: recognize one ordered preflight shape; use a shell parser for broader syntax.
+REVIEW_THREAD_PREFLIGHT = re.compile(
+    r'[ \t]*set -euo pipefail; w=/[A-Za-z0-9_./-]+; d=\$\{w%/\*\}/intake; cd "\$w"; '
+    r'test "\$\(git rev-parse --show-toplevel\)" = "\$w"; '
+    r'test "\$\(git branch --show-current\)" = [A-Za-z0-9_][A-Za-z0-9_./-]*; '
+    r'test "\$\(git rev-parse HEAD\)" = [0-9a-f]{40}; '
+    r'test -z "\$\(git status --porcelain=v1\)"; '
+    r"git remote get-url --push --all origin \| python3 -I -c 'import sys; "
+    r'u=sys\.stdin\.read\(\)\.splitlines\(\); ok=u==\["https://[A-Za-z0-9.-]+/[A-Za-z0-9_./-]+\.git"\]; '
+    r'''print\("[A-Za-z .;-]+" if ok else "[A-Za-z .;-]+"\); sys\.exit\(not ok\)'; '''
+    r'url=\$\(git remote get-url --push --all origin\); '
+    r'git ls-remote --symref "\$url" HEAD > "\$d/(?P<file>[A-Za-z0-9_.-]+\.tsv)"; '
+    r'''awk '\$1=="ref:" && \$2=="refs/heads/(?P<branch>[A-Za-z0-9_./-]+)" && \$3=="HEAD" '''
+    r'''\{n\+\+\} END\{exit n!=1\}' "\$d/(?P=file)"; '''
+    r'test "\$\(gh repo view (?P<repo>[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+) '
+    r'''--json nameWithOwner,defaultBranchRef --jq '(?P<filter>\.nameWithOwner\+" "\+\.defaultBranchRef\.name)'\)" '''
+    r"= '(?P=repo) (?P=branch)'; "
+    r'''upstream=\$\(git rev-parse --abbrev-ref '@\{u\}' 2>/dev/null \|\| :\); '''
+    r'case "\$upstream" in (?P=branch)\|\*/(?P=branch)\) exit 1;; esac; '
+    r"printf 'Branch: %s\\nHead: %s\\nEndpoint: %s\\nUpstream: %s\\n' "
+    r'"\$\(git branch --show-current\)" "\$\(git rev-parse HEAD\)" "\$url" "\$\{upstream:-none\}"; '
+    r"curl -fsS --max-time 15 'https://[A-Za-z0-9.-]+/mq/queue\?limit=100' \| "
+    r'''jq -e '\(\.truncated == false\) and \(\[\.entries\[\] \| select\(tostring \| '''
+    r"""contains\("[A-Za-z0-9_-]+"\)\)\] \| length == 0\)'""")
+
+
+def review_thread_preflight_denial(command, normalized, data_mode, reason):
+    if len(command) > 4096 or '"$(gh repo view ' not in command:
+        return reason
+    match = REVIEW_THREAD_PREFLIGHT.match(command)
+    if not match:
+        return reason
+    tail = command[match.end():].strip(' \t')
+    if tail not in ('', ';'):
+        # A literal API suffix can refine the denial only.
+        api_tail = re.fullmatch(r';[ \t]*(gh api(?:[ \t]+[A-Za-z0-9_./:@=+,%\-]+)+)', tail)
+        return (review_thread_denial(api_tail[1], outer=False) or reason) if api_tail else reason
+    start, end = match.span('filter')
+    # The outer shlex pass removes these escapes before the nested scan reads the jq argument.
+    quoted = command[:start] + match['filter'].replace('"', r'\"') + command[end:]
+    return review_thread_scan(quoted, normalized, data_mode)
 
 
 # shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
@@ -4236,9 +4245,7 @@ def review_thread_denial(command, data_mode=False, *, outer=True):
         return 'raw review-thread mutation'
     reason = review_thread_scan(cat_heredoc_data(command), normalized, data_mode)
     if outer and reason == 'unparsed shell syntax rule: No closing quotation':
-        quoted = review_thread_repo_read_quotes(original)
-        if quoted != original:
-            return review_thread_scan(quoted, normalized, data_mode)
+        return review_thread_preflight_denial(original, normalized, data_mode, reason)
     return reason
 
 
