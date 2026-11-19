@@ -1162,6 +1162,8 @@ class HookTests(unittest.TestCase):
                 self.assertIn('Keep the task.', reason)
                 self.assertIn('Report the blocked step and named rule to ' + superior, reason)
                 self.assertIn('Continue independent work within your authority.', reason)
+                if not caller:
+                    self.assertIn('If the brief names no superior, report it here.', reason)
 
     def test_admit_forms_for_main_and_driver(self):
         for agent_type in ('', 'ship:driver'):
@@ -1703,6 +1705,9 @@ class HookTests(unittest.TestCase):
                     result = self.decision('echo hello', agent_type)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn('review-thread guard exception: ValueError', result['permissionDecisionReason'])
+                    if agent_type == 'ship:writer--sol':
+                        self.assertIn('Report the blocked step and named rule to your driver.',
+                                      result['permissionDecisionReason'])
 
 
 if __name__ == '__main__':

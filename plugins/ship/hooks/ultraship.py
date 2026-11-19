@@ -4876,7 +4876,8 @@ def pre(data):
             deny("Ship replies to and resolves review threads only through `skills/babysit/scripts/thread_reply.py`, "
                  "which first checks that the thread belongs to the PR's own repository and number. Rule: " + reason + '.'
                  ' Keep the task. Report the blocked step and named rule to ' + superior + '.'
-                 ' Continue independent work within your authority.')
+                 + (' If the brief names no superior, report it here.' if superior == 'the superior named in your brief' else '')
+                 + ' Continue independent work within your authority.')
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
         counter.parent.mkdir(parents=True, exist_ok=True)
