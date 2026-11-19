@@ -563,7 +563,7 @@ class ToolTests(unittest.TestCase):
                     self.head_sha = self.commit()
                 original = self.row.read_bytes()
                 args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
-                                 base=self.base, head=self.head_sha)
+                                 base=self.base, head=self.head_sha, restoration=None)
 
                 @contextlib.contextmanager
                 def stage_then_commit(path, data, mode):
