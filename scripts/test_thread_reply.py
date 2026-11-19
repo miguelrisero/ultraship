@@ -1160,6 +1160,22 @@ class HookTests(unittest.TestCase):
                     with self.subTest(step=step):
                         self.assertEqual(self.decision(step, caller), {})
 
+    def test_refused_review_call_keeps_task_and_names_superior(self):
+        command = 'git --config-env=core.pager=PAGER log -1'
+        for caller, superior in (('', 'the superior named in your brief'),
+                                 ('ship:driver', 'your chief'),
+                                 ('ship:driver--sol', 'your chief'),
+                                 ('ship:reviewer--sol', 'your coordinator')):
+            with self.subTest(caller=caller):
+                denial = self.decision(command, caller)
+                self.assertEqual(denial.get('permissionDecision'), 'deny')
+                reason = denial['permissionDecisionReason']
+                self.assertIn('Keep the task.', reason)
+                self.assertIn('Report the blocked step and named rule to ' + superior, reason)
+                self.assertIn('Continue independent work within your authority.', reason)
+                if not caller:
+                    self.assertIn('If the brief names no superior, report it here.', reason)
+
     def test_admit_forms_for_main_and_driver(self):
         for agent_type in ('', 'ship:driver'):
             for command in ADMIT:
@@ -1700,6 +1716,9 @@ class HookTests(unittest.TestCase):
                     result = self.decision('echo hello', agent_type)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn('review-thread guard exception: ValueError', result['permissionDecisionReason'])
+                    if agent_type == 'ship:writer--sol':
+                        self.assertIn('Report the blocked step and named rule to your driver.',
+                                      result['permissionDecisionReason'])
 
 
 if __name__ == '__main__':
