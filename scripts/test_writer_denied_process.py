@@ -57,6 +57,7 @@ class WriterDeniedProcessTests(unittest.TestCase):
             'A writer asks its driver, a driver asks its chief, and a chief asks the CoC. '
             'The ask never blocks your other work. '
             'Only the CoC decides whether an owner-only item becomes an owner Input. '
+            'With a CoC, decisions reach the owner through the CoC. In a standalone run, an owner-only item becomes a standalone Input. '
             'No agent, the CoC included, sends the owner a refusal, hook or tooling question. '
             'Product, billing, security policy and big architecture decisions still reach the owner through the CoC. '
             'The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items '
