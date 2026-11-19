@@ -4200,10 +4200,13 @@ REVIEW_THREAD_PREFLIGHT = re.compile(
     r'test -z "\$dirty"; '
     r'''upstream=\$\(git rev-parse --symbolic-full-name --verify '@\{u\}'\); '''
     r'test "\$upstream" = "refs/remotes/origin/\$branch"; '
+    r'''remote=\$\(git for-each-ref --format='%\(upstream:remotename\) %\(upstream:remoteref\)' "refs/heads/\$branch"\); '''
+    r'test "\$remote" = "origin refs/heads/\$branch"; '
     r'''git remote get-url --push --all origin \| awk '\$0=="(?P<url>https://(?P<host>[A-Za-z0-9.-]+)/'''
     r'''(?P<repo>[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+)\.git)" \{n\+\+\} END\{exit !\(n==1 && NR==1\)\}'; '''
     r'url=\$\(GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -c http\.(?P=url)\.followRedirects=false -c credential\.helper= '
     r"ls-remote --get-url '(?P=url)'\); test \"\$url\" = '(?P=url)'; "
+    r'env -i PATH="\$PATH" HOME="\$HOME" '
     r'GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ALLOW_PROTOCOL=https '
     r'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -C / -c http\.sslVerify=true '
     r'-c http\.(?P=url)\.followRedirects=false -c credential\.helper= '

@@ -1722,6 +1722,7 @@ class HookTests(unittest.TestCase):
         '-c http.https://git.example.invalid/o/r.git.followRedirects=false -c credential.helper= ls-remote'
     )
     PREFLIGHT_PROBE = (
+        'env -i PATH="$PATH" HOME="$HOME" '
         'GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ALLOW_PROTOCOL=https '
         'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -C / -c http.sslVerify=true '
         '-c http.https://git.example.invalid/o/r.git.followRedirects=false -c credential.helper= ls-remote'
@@ -1740,6 +1741,8 @@ class HookTests(unittest.TestCase):
             r'''dirty=$(git --no-optional-locks -c core.fsmonitor=false status --porcelain=v1 --untracked-files=all); '''
             r'''test -z "$dirty"; upstream=$(git rev-parse --symbolic-full-name --verify '@{u}'); '''
             r'''test "$upstream" = "refs/remotes/origin/$branch"; '''
+            r'''remote=$(git for-each-ref --format='%(upstream:remotename) %(upstream:remoteref)' "refs/heads/$branch"); '''
+            r'''test "$remote" = "origin refs/heads/$branch"; '''
             r'''git remote get-url --push --all origin | awk '$0=="https://git.example.invalid/o/r.git" '''
             r'''{n++} END{exit !(n==1 && NR==1)}'; '''
             f'''url=$({self.PREFLIGHT_GET_URL} --get-url 'https://git.example.invalid/o/r.git'); '''
@@ -1976,6 +1979,48 @@ class HookTests(unittest.TestCase):
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     if rule:
                         self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
+
+    def test_preflight_clears_inherited_probe_environment(self):
+        command = self.preflight_command()
+        prefix = 'env -i PATH="$PATH" HOME="$HOME" '
+        for replacement in ('', 'env PATH="$PATH" HOME="$HOME" ', prefix + 'GIT_DIR=/work/example/repo/.git '):
+            shell = command.replace(prefix, replacement, 1)
+            self.assertNotEqual(shell, command)
+            for caller in ('', 'ship:driver'):
+                with self.subTest(replacement=replacement, caller=caller):
+                    self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_checks_upstream_remote_ref(self):
+        command = self.preflight_command()
+        remote_steps = (
+            '''remote=$(git for-each-ref --format='%(upstream:remotename) %(upstream:remoteref)' "refs/heads/$branch"); '''
+            'test "$remote" = "origin refs/heads/$branch"; '
+        )
+        for old, new in (
+            (remote_steps, ''),
+            ('"origin refs/heads/$branch"', '"other refs/heads/$branch"'),
+            ('"origin refs/heads/$branch"', '"origin refs/heads/trunk"'),
+        ):
+            shell = command.replace(old, new, 1)
+            self.assertNotEqual(shell, command)
+            for caller in ('', 'ship:driver'):
+                with self.subTest(replacement=new, caller=caller):
+                    self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_ships_without_targets(self):
+        self.assertEqual(ultraship.REVIEW_THREAD_PREFLIGHT_TARGETS, frozenset())
+
+    def test_preflight_read_only_api_tail_keeps_quote_refusal(self):
+        command = self.preflight_command()
+        shell = command + '; gh api repos/o/r/pulls/71'
+        self.assertNotEqual(shell, command)
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(command, caller), {})
+                result = self.preflight_decision(shell, caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(' Rule: unparsed shell syntax rule: No closing quotation.',
+                              result['permissionDecisionReason'])
 
     def test_preflight_queue_check_validates_counts_and_exact_pr(self):
         clean = dict(truncated=False, total=1, returned=1, limit=100, entries=[{'pr_number': 711, 'label': '71'}])
