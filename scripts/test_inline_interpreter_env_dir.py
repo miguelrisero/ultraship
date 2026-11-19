@@ -373,6 +373,7 @@ class EnvDirectoryTests(unittest.TestCase):
                                f'-exec {interpreter} {script} \\;')
                     self.assertTrue(self.denied(command))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+                    self.assertFalse(self.denied(f'{interpreter} {script}'), self.reason)
                     command = f'find . -maxdepth 0 -exec {interpreter} {script} \\;'
                     self.assertTrue(self.denied(command))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
@@ -384,6 +385,8 @@ class EnvDirectoryTests(unittest.TestCase):
 
     def test_pipeline_wrapper_requires_a_proven_child_command(self):
         self.assertTrue(self.denied('printf input | timeout 5 "$CONSUMER"'))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+        self.assertTrue(self.denied('printf input | ./timeout 5 "$CONSUMER"'))
         self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
         self.assertFalse(self.denied('printf input | timeout 5 cat'), self.reason)
 

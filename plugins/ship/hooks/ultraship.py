@@ -2813,11 +2813,11 @@ def shell_segment_command(words, command_positions):
                 continue
             if start not in command_positions:
                 return None, False
-        name = value
+        name = os.path.basename(value)
         if name not in PIPE_WRAPPER_FLAGS:
             return words[cursor], wrapped
         wrapped = True
-        if unresolved_shell_word(raw):
+        if '/' in value or unresolved_shell_word(raw):
             break
         values = {'stdbuf': {'-i', '-o', '-e', '--input', '--output', '--error'},
                   'doas': {'-u'}}.get(name, WRAPPERS.get(name, set()))
