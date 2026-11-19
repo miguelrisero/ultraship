@@ -440,7 +440,7 @@ def run(args):
         base_entry = git('ls-tree', '--full-tree', '-z', base_sha, '--', ':(literal)' + relative)
         require(mode in (b'100644', b'100755') and base_entry.startswith(mode + b' blob ')
                 and base_entry.endswith(b'\t' + path + b'\0')
-                and (status != b'M' or old_mode == b':' + mode), reason)
+                and (status, old_mode) in ((b'A', b':000000'), (b'M', b':' + mode)), reason)
         start_text = '' if status == b'A' else blob(restoration_parent, relative).decode('utf-8')
         restoration_fields = {'restoration': restoration, 'restoration_parent': restoration_parent,
                               **restoration_check(base_text, start_text, blob(restoration, relative).decode('utf-8'),

@@ -436,6 +436,17 @@ class ToolTests(unittest.TestCase):
         self.invoke(2, 'restoration commit must change only the row file', restoration=restoration)
         self.assertFalse(self.record_path().exists())
 
+    def test_restoration_refuses_replacing_a_symlink_with_a_row_file(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.row.unlink()
+        # Use valid TOML in the link so only the path guard can refuse it.
+        os.symlink(prefix + suffix, self.row)
+        self.commit()
+        self.row.unlink()
+        restoration = self.commit_rows(prefix + table + suffix)
+        self.invoke(2, 'restoration commit must change only the row file', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
     def test_restoration_refuses_a_row_moved_in_its_starting_head(self):
         prefix, table, suffix = self.restoration_fixture()
         self.commit_rows(prefix + suffix + '\n' + table.replace('claim =', 'claim  ='))
