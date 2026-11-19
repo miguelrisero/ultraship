@@ -233,6 +233,9 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
 2. Re-anchor: the writer runs the sanctioned re-anchor tool once per row, then commits the row file alone.
    The tool derives the paired `old` and `new` fields from the subject's new source text and keeps the identical mutant.
    It refuses a change to any other field, and it prints no row text.
+   The writer's worktree has one user. No other command runs there while the tool runs.
+   Concurrent Git commands in the writer's worktree are outside the tool's threat model.
+   The CI anchor guard and the mutation proof after merge catch a row that such a race leaves wrong.
 3. Retire: when the PR deletes the guarded code, the writer deletes the row table and runs `retire-rows.py`.
    The script appends one `[[retired]]` table per row with the row ID, the reason and the `replacement` row ID.
    The replacement row guards the new code. The anchor guard fails a removed row without a `[[retired]]` entry.
