@@ -29,6 +29,51 @@ class EnvDirectoryTests(unittest.TestCase):
         self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
         return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
 
+    def test_python_version_after_independent_pipeline_is_admitted(self):
+        for command in (
+            'python3 --version',
+            'printf sample | cat; python3 --version',
+            'printf sample | cat && python3 --version',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_python_version_exemption_preserves_program_refusals(self):
+        for command, rule in (
+            ('printf sample | python3', 'inline interpreter code rule (program from a pipe)'),
+            ('printf sample | python3 -', 'inline interpreter code rule (program from a pipe)'),
+            ('printf x | python3 --version', 'inline interpreter code rule (program from a pipe)'),
+            ('printf x | xargs python3 --version', 'inline interpreter code rule (program from a pipe)'),
+            ('printf x | xargs node --version', 'inline interpreter code rule (program from a pipe)'),
+            ('printf x | env python3 --version', 'inline interpreter code rule (program from a pipe)'),
+            ('printf x | cat; env python3 --version', 'inline interpreter code rule (program from a pipe)'),
+            ("printf x | sh -c 'python3 --version'", 'inline interpreter code rule (program from a pipe)'),
+            ('< input python3 --version', 'inline interpreter code rule (program from a pipe)'),
+            ('python3 --version < input', 'inline interpreter code rule (program from a pipe)'),
+            ('printf sample | cat; python3 --version < input',
+             'inline interpreter code rule (program from a pipe)'),
+            ('printf sample | cat; python3 --version -',
+             'inline interpreter code rule (program from a pipe)'),
+            ("python3 --version -c 'print(1)'", 'process-capable python -c rule'),
+            ("printf sample | cat; python3 --version -c 'print(1)'",
+             'process-capable python -c rule'),
+            ('python3 --version; printf x | python3',
+             'inline interpreter code rule (program from a pipe)'),
+            ("python3 --version && python3 -c 'import sys; print(sys.argv)'",
+             'process-capable python -c rule'),
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertEqual(self.reason.splitlines()[0].split('Rule: ', 1)[1], rule + '.')
+
+    def test_python_version_after_path_change_is_denied(self):
+        self.assertTrue(self.denied('PATH=/usr/bin; printf sample | cat; python3 --version'))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_python_version_in_piped_case_is_denied(self):
+        self.assertTrue(self.denied('printf sample | (case x in x) python3 --version;; esac)'))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
     def test_env_directory_admits_verbatim_repository_script(self):
         command = 'env -C /home/miguel/.vk-worktrees/.bettercoding-workspaces/188e-pati-pr-backlog/lanes/pr-7890/backend/api API_ENVIRONMENT=testing uv run --frozen python scripts/integration_shards.py --refresh'
         isdir = ultraship.os.path.isdir

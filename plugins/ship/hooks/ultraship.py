@@ -2913,6 +2913,8 @@ def inline_interpreter_denial(command, cwd=None):
             if subscript_reason is None:
                 subscript_reason = 'array subscript evaluation rule (parse error)'
         command_positions = shell_command_positions(tokens)
+        # A case pattern can end with a parenthesis that does not close a pipe group.
+        has_case = any(raw == 'case' and start in command_positions for raw, _, start, _ in tokens)
         limit = (test_operand_limit(tokens, groups)
                  if top_level and not TEST_SHAPE_REDEFINE.search(command) else 0)
         segments, words, piped, pipe_groups = [], [], False, []
@@ -3033,6 +3035,10 @@ def inline_interpreter_denial(command, cwd=None):
                 segment_text = text[words[0][2]:words[-1][3]]
                 if redirected or any(word[0] == '<' for word in words) or re.search(r'[<>][ \t]*\(|=\(', text[end:]):
                     return 'inline interpreter code rule (program from a pipe)'
+                # An independent pipeline does not feed this segment.
+                if (index == 0 and start in command_positions and not reads_pipe and not paths_changed
+                        and not has_case and re.fullmatch(r'[\w./-]+[ \t]+--version', segment_text)):
+                    continue
                 if not arguments and not piped:
                     if piped_input or any(token[0] in {'<', '|', '('} or token[0] == '{'
                                           for token in input_tokens + tokens):
@@ -3045,8 +3051,6 @@ def inline_interpreter_denial(command, cwd=None):
                                    or argument.startswith('-') and not argument.startswith('--')
                                    and bool(set(argument[1:]) & set(short)) for argument in arguments[:1])):
                         return f'inline interpreter code rule ({name})'
-                    if arguments == ['--version']:
-                        continue
                     script = arguments[0] if arguments else ''
                     unsafe_script = any(unsafe_script_path(script, base) for base in bases)
                     if (not script or script.startswith('-') or stdin_program_path(script) or unsafe_script
