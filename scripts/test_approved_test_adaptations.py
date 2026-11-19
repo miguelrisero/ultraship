@@ -178,7 +178,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             'For each restored row, confirm from the copied record fields `restoration_base_equal=true`, `restoration_outside_equal=true` and `changed_statements=0`.\n'
             'Confirm that `restoration` and `restoration_parent` match the brief, and that `starting_lines` is `null` for a row that the starting head deletes.\n'
             "Refuse unless the record's base equals the verified merge base that the brief names.\n"
-            'Match every restored row ID in the record to the approved scope, and confirm that restored_rows equals their count.\n'
+            'Group the restored rows by restoration commit and row file. Match every restored row ID to the approved scope.\n'
+            'Confirm that restored_rows in each entry equals the number of approved row IDs in its group.\n'
             'Refuse a restored row outside that scope.\n'
             "Confirm from the brief's commit list that only the lane's own unmerged commits changed the row file after the merge base.\n"
             'Read the row lines at the merge base and the frozen head. Confirm that they are equal, or that only a re-anchor changed the paired fields.\n'
@@ -415,7 +416,8 @@ class ScopedDecisionRouteTests(unittest.TestCase):
             'The receipt states that it is the disposition and names the row ID, the breaking commit and the paired-field re-anchor.',
             'The receipt also records the evidence that no landed disposition exists for the row in every commit from the breaking commit through the bound main commit.',
             'It names that range by the full breaking commit SHA and the full bound main SHA.',
-            'Before publication, recheck that range through the current main SHA, and record that full SHA in the receipt. A disposition that landed after the bound main commit invalidates the receipt.',
+            'Before publication, recheck that range through the current main SHA. Record that SHA and the result in a separate note beside the frozen receipt digest. A disposition that landed after the bound main commit invalidates the receipt.\n'
+            'The receipt itself stays unchanged.',
             'Name the receipt by absolute path and SHA256. Verify the digest before any protected access.',
             'A CoC decision receipt needs no landed disposition and no prior disposition review.',
             'For a CoC decision receipt, the independent repair review below is the one not-weaker review.',
