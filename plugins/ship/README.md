@@ -78,7 +78,7 @@ An exception inside the `pre` hook denies every tool call for every caller. A pr
 
 Hook state lives in `${XDG_STATE_HOME:-~/.local/state}/ultraship`.
 
-Escalation records and decisions live in its `escalations` folder. The hook writes them, signed with the text_lint receipt key. Set `ULTRASHIP_COC_DIR` to the CoC workspace folder and `ULTRASHIP_COC_SESSION_ID` to the CoC session ID; without both, no session can approve a main-session escalation.
+Escalation records and decisions live in its `escalations` folder. The hook writes them, signed with the text_lint receipt key. Set `ULTRASHIP_COC_DIR` to the CoC workspace folder; without it, no session can approve a main-session escalation.
 
 A checkout with its Git directory inside the checkout uses `<common-git-dir>/ship/ledger/<branch>.tsv`. An existing parent `.scratch` identifies the workspace for a direct-child linked checkout. A common Git directory inside that workspace also uses the common-directory default. An external common Git directory selects `<workspace>/.scratch/ship-ledgers/<canonical-checkout-sha256>/<branch>.tsv`. The resolver canonicalizes roots and rejects symlink escapes. Ambiguous layouts require an absolute `SHIP_LEDGER_DIR`.
 

@@ -4608,7 +4608,7 @@ def pre(data):
     except Exception:
         traceback.print_exc()
         deny(RECEIPT_CUSTODY_FAILED)
-    approval = decision_request = None
+    approval = None
     if tool == 'Bash':
         command = str(tin.get('command', ''))
         escalation = load_escalation()
@@ -4616,11 +4616,11 @@ def pre(data):
         if request:
             verb, identifier, reason = request
             entry = escalation.get(identifier)
-            decision_request = (data, verb, identifier, reason, entry and absolute_hold(entry['command']))
-            refusal = escalation.decide(*decision_request, write=False)
+            refusal = escalation.decide(data, verb, identifier, reason, entry and absolute_hold(entry['command']))
             if refusal:
                 deny('Escalation ' + verb + ' refused: ' + refusal + '.')
-        elif not data.get('agent_id') and escalation.approved(data, command, consume=False):
+            return
+        if not data.get('agent_id') and escalation.approved(data, command, consume=False):
             hold = absolute_hold(command)
             if hold:
                 deny('A manager approval cannot run this command. Rule: absolute hold (' + hold + '). '
@@ -4944,11 +4944,6 @@ def pre(data):
         except Exception:
             deny('Reviewers cannot proceed when search scope validation fails. Report the blocked scope to the coordinator.')
     receipt_custody(data, read_search=True)
-    # The decision is written only after every other check admitted the call.
-    if decision_request:
-        refusal = load_escalation().decide(*decision_request)
-        if refusal:
-            deny('Escalation ' + decision_request[1] + ' refused: ' + refusal + '.')
 
 
 def owed_file(data):

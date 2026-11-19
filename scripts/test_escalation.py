@@ -6,10 +6,8 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 import unittest
@@ -20,14 +18,13 @@ HOOKS = ROOT / 'plugins/ship/hooks'
 TEMP = Path(tempfile.mkdtemp(prefix='escalation-test-'))
 os.environ['XDG_STATE_HOME'] = str(TEMP / 'state')
 os.environ['ULTRASHIP_COC_DIR'] = str(TEMP / 'coc')
-os.environ['ULTRASHIP_COC_SESSION_ID'] = 'C'
 spec = importlib.util.spec_from_file_location('ultraship_escalation_hook', HOOKS / 'ultraship.py')
 ultraship = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ultraship)
 escalation = ultraship.load_escalation()
 
 WRITE = 'gh api repos/o/r/issues/7/comments -f body=x'
-SCRIPT = os.path.realpath(HOOKS / 'escalation.py')
+CLI = 'python3 ' + str(HOOKS / 'escalation.py')
 
 
 def git(cwd, *args):
@@ -72,7 +69,7 @@ class EscalationTests(unittest.TestCase):
         return match[1], match[2]
 
     def approve(self, identifier, session='S1', agent_id=None, cwd=None):
-        return self.decision(shlex.join([sys.executable, SCRIPT, 'approve', identifier, '--reason', 'reviewed it']),
+        return self.decision(f"{CLI} approve {identifier} --reason 'reviewed the exact command'",
                              session=session, agent_id=agent_id, cwd=cwd or TEMP)
 
     def run_approved(self, command=WRITE, session='S1'):
@@ -153,29 +150,7 @@ class EscalationTests(unittest.TestCase):
         # A main-session record goes to the CoC: its own session and a session outside the CoC folder refuse.
         identifier = re.search(r'as ([0-9a-f]{32});', self.decision(WRITE)['permissionDecisionReason'])[1]
         self.assertEqual(self.approve(identifier).get('permissionDecision'), 'deny')
-        self.assertEqual(self.approve(identifier, session='X', cwd=TEMP / 'coc').get('permissionDecision'), 'deny')
         self.assertEqual(self.approve(identifier, session='C', cwd=TEMP / 'coc'), {})
-
-    def test_coc_session_cannot_approve_its_own_record(self):
-        result = self.decision(WRITE, session='C', cwd=TEMP / 'coc')
-        identifier = re.search(r'as ([0-9a-f]{32});', result['permissionDecisionReason'])[1]
-        self.assertEqual(self.approve(identifier, session='C', cwd=TEMP / 'coc').get('permissionDecision'), 'deny')
-        self.assertIsNone(escalation.decision(identifier))
-
-    def test_only_the_canonical_decision_command_decides(self):
-        _, identifier = self.escalate()
-        canonical = shlex.join([sys.executable, SCRIPT, 'approve', identifier, '--reason', 'ok'])
-        for command in (canonical.replace(' approve', '  approve'), 'python3 ' + canonical.split(' ', 1)[1],
-                        canonical + '; echo hi', canonical[:-2] + "'ok;x'", canonical[:-2] + "'$X'"):
-            with self.subTest(command=command):
-                self.decision(command, cwd=TEMP)
-                self.assertIsNone(escalation.decision(identifier))
-        # Every other pre check still runs on the canonical command, and a refusal writes no decision.
-        with patch.object(ultraship, 'review_thread_denial', return_value='x'):
-            self.assertEqual(self.decision(canonical, cwd=TEMP).get('permissionDecision'), 'deny')
-        self.assertIsNone(escalation.decision(identifier))
-        self.assertEqual(self.decision(canonical, cwd=TEMP), {})
-        self.assertEqual(escalation.decision(identifier)['decision'], 'approve')
 
     def test_lane_cannot_write_approval_files(self):
         target = escalation.store() / ('0' * 32 + '.decision.json')

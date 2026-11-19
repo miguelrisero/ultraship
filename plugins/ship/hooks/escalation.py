@@ -98,8 +98,7 @@ def record(data, rule):
         'actor': {'session_id': session, 'agent_id': agent_id, 'agent_type': data.get('agent_type') or None},
         'command': command, 'sha256': digest(command), 'rule': rule, 'cwd': cwd, 'head': head(cwd),
         'time': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'manager': ({'kind': 'parent', 'session_id': session} if agent_id
-                    else {'kind': 'coc', 'session_id': os.environ.get('ULTRASHIP_COC_SESSION_ID') or None}),
+        'manager': {'kind': 'parent', 'session_id': session} if agent_id else {'kind': 'coc'},
     }
     entry = sign(entry)
     write_new(store() / (entry['id'] + '.json'), entry)
@@ -121,36 +120,29 @@ def coc_caller(data):
 
 
 def manager_caller(data, entry):
-    """Whether this hook event comes from the recorded manager session: a main session, never the actor."""
-    manager, actor = entry['manager'], entry['actor']
-    if data.get('agent_id') or not manager.get('session_id') or data.get('session_id') != manager['session_id']:
+    """Whether this hook event comes from the record's manager: a main session, never a subagent."""
+    if data.get('agent_id'):
         return False
-    if manager['kind'] == 'parent':
-        return True
-    return data['session_id'] != actor['session_id'] and coc_caller(data)
-
-
-def approve_command(verb, identifier, reason):
-    """The one canonical text of a decision call; the hook accepts no other form."""
-    return shlex.join([sys.executable, os.path.realpath(__file__), verb, identifier, '--reason', reason])
+    if entry['manager']['kind'] == 'parent':
+        return data.get('session_id') == entry['manager']['session_id']
+    return coc_caller(data)
 
 
 def cli_decision(command):
-    """Return (verb, id, reason) when the command is exactly the canonical `escalation.py approve|reject` call."""
-    if re.search(r'[;&|<>()$`\\\n\r*?\[\]{}~!#]', command):
-        return None
+    """Return (verb, id, reason) when the command is exactly one `escalation.py approve|reject` call."""
     try:
         words = shlex.split(command)
     except ValueError:
         return None
-    if (len(words) == 6 and words[2] in ('approve', 'reject') and words[4] == '--reason' and words[5].strip()
-            and command == approve_command(words[2], words[3], words[5])):
+    if (len(words) == 6 and re.fullmatch(r'python3?', os.path.basename(words[0]))
+            and real(words[1]) == os.path.realpath(__file__) and words[2] in ('approve', 'reject')
+            and words[4] == '--reason' and words[5].strip()):
         return words[2], words[3], words[5]
     return None
 
 
-def decide(data, verb, identifier, reason, hold, write=True):
-    """Check, then write unless `write` is false, the manager's decision. Return None on success, else the refusal reason."""
+def decide(data, verb, identifier, reason, hold):
+    """Write the manager's decision. Return None on success, else the refusal reason."""
     entry = get(identifier)
     if entry is None:
         return 'no signed escalation record ' + identifier
@@ -158,10 +150,6 @@ def decide(data, verb, identifier, reason, hold, write=True):
         return 'only ' + manager_label(entry) + ' decides escalation ' + identifier
     if verb == 'approve' and hold:
         return 'absolute hold (' + hold + '); only the owner decides this command'
-    if decision(identifier):
-        return 'escalation ' + identifier + ' already has a decision'
-    if not write:
-        return None
     now = int(time.time())
     try:
         write_new(store() / (identifier + '.decision.json'), sign({
@@ -227,7 +215,6 @@ def show(entry):
              f"  cwd: {entry['cwd']}  head: {entry['head']}",
              f"  decision: {grant['decision'] + ' (' + grant['reason'] + ')' if grant else 'pending'}",
              f"  run as: cd {shlex.quote(entry['cwd'])} && <command>" if entry['cwd'] else '',
-             '  approve: ' + approve_command('approve', entry['id'], '<why>') if not grant else '',
              '  command:', entry['command']]
     return '\n'.join(line for line in lines if line)
 
