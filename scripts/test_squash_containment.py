@@ -25,7 +25,7 @@ CONTRACT_PATHS = (
 BODY = '''Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
 A single-parent squash commit meets that requirement only when it contains the recorded base and all conditions below hold.
 1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
-2. The squash tree equals the exact tree from a successful merge of the author head into the squash parent.
+2. The squash tree equals the exact tree from a successful merge of the author head into the squash parent, except for the listed paths below.
 The checker uses `git merge-tree --write-tree` with the squash parent first and the author head second.
 Require this check even when the squash parent already contains the author's changes.
 The `files` field counts the paths that differ between the squash parent and the squash commit.
@@ -111,8 +111,8 @@ else:
         gh.chmod(0o755)
         self.env['PATH'] = f'{binary}{os.pathsep}{self.env["PATH"]}'
 
-    def git(self, *args):
-        return subprocess.run(['git', *args], cwd=self.repo, env=self.env,
+    def git(self, *args, input=None):
+        return subprocess.run(['git', *args], cwd=self.repo, env=self.env, input=input,
                               capture_output=True, text=True, check=True).stdout.strip()
 
     def commit(self, files):
@@ -138,7 +138,7 @@ else:
         replies = {
             f'repos/example/repo/commits/{squash}/check-runs': {
                 'fields': ['-f', f'check_name={JOB}', '-F', 'app_id=15368',
-                           '-f', 'filter=latest', '-F', 'per_page=100'],
+                           '-f', 'filter=all', '-F', 'per_page=100'],
                 'body': {'total_count': len(ids), 'check_runs': [{'id': job_id} for job_id in ids]},
             },
         }
@@ -163,25 +163,29 @@ else:
         script.with_suffix('.json').write_text(json.dumps(config), encoding='utf-8')
         return script
 
-    def regenerated_squash(self, extra=None, executable=False, binary=False, keep_parent=False):
+    def regenerated_squash(self, extra=None, executable=False, binary=False, keep_parent=False,
+                           mixed_conflict=False, path='generated.txt'):
         self.git('checkout', '-b', 'generated-main', self.base)
         lines = ''.join(f'line {number}\n' for number in range(30))
-        files = {'generated.txt': lines}
+        (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
+        files = {path: lines}
         if binary:
-            files['.gitattributes'] = 'generated.txt binary -merge\n'
+            files['.gitattributes'] = f'{path} binary -merge\n'
         self.commit(files)
         if executable:
-            self.git('update-index', '--chmod=+x', 'generated.txt')
+            self.git('update-index', '--chmod=+x', path)
             self.git('commit', '-m', 'Executable fixture')
-            (self.repo / 'generated.txt').chmod(0o755)
+            (self.repo / path).chmod(0o755)
         base = self.git('rev-parse', 'HEAD')
         self.git('checkout', '-b', 'generated-feature')
-        self.commit({'generated.txt': lines.replace('line 5\n', 'feature line\n'),
-                     'alpha.txt': 'feature alpha\n'})
+        self.commit({path: lines.replace('line 5\n', 'feature line\n'), 'alpha.txt': 'feature alpha\n'})
         author = self.git('rev-parse', 'HEAD')
         self.git('checkout', 'generated-main')
         main_text = lines.replace('line 25\n', 'main line\n')
-        self.commit({'generated.txt': main_text})
+        files = {path: main_text}
+        if mixed_conflict:
+            files['alpha.txt'] = 'main alpha\n'
+        self.commit(files)
         parent = self.git('rev-parse', 'HEAD')
         if binary:
             merge = subprocess.run(
@@ -192,7 +196,7 @@ else:
             self.git('checkout', author, '--', 'alpha.txt')
         else:
             self.git('merge', '--squash', 'generated-feature')
-        self.commit({'generated.txt': main_text if keep_parent else 'regenerated output\n', **(extra or {})})
+        self.commit({path: main_text if keep_parent else 'regenerated output\n', **(extra or {})})
         return base, author, parent, self.git('rev-parse', 'HEAD')
 
     def test_regenerated_path_passes_and_uses_the_repository_root(self):
@@ -216,6 +220,7 @@ else:
             'missing check': (),
             'failed job': (({'conclusion': 'failure'}, {}),),
             'incomplete job': (({'status': 'in_progress'}, {}),),
+            'missing drift step': (({'steps': [{'name': 'Other step', 'conclusion': 'success'}]}, {}),),
             'skipped step': (({'steps': [{'name': STEP, 'conclusion': 'skipped'}]}, {}),),
             'duplicate step': (({'steps': [{'name': STEP, 'conclusion': 'success'}] * 2}, {}),),
             'wrong workflow': (({}, {'path': '.github/workflows/other.yml'}),),
@@ -232,6 +237,14 @@ else:
                 self.assert_refuse(result, 'drift check')
         self.assert_refuse(self.check(base=base, author=author, squash=squash, script=script),
                            'drift check')
+
+    def test_incomplete_drift_check_list_refuses(self):
+        base, author, _, squash = self.regenerated_squash()
+        script = self.script_with_config({'example/repo': self.rule('generated.txt')})
+        api = self.drift_replies(squash, ({}, {}))
+        api[f'repos/example/repo/commits/{squash}/check-runs']['body']['total_count'] = 2
+        result = self.check(base=base, author=author, squash=squash, script=script, api=api)
+        self.assert_refuse(result, 'drift check')
 
     def test_regenerated_path_with_a_hand_written_difference_refuses(self):
         base, author, _, squash = self.regenerated_squash({'alpha.txt': 'different alpha\n'})
@@ -258,6 +271,17 @@ else:
                          f'squash={squash} parent={parent} files=2 drift_job=101 '
                          'regenerated=generated.txt\n')
 
+    def test_listed_binary_conflict_passes_from_a_subdirectory(self):
+        path = 'nested/generated.txt'
+        base, author, parent, squash = self.regenerated_squash(binary=True, path=path)
+        script = self.script_with_config({'example/repo': self.rule(path)})
+        api = self.drift_replies(squash, ({}, {}))
+        result = self.check(base=base, author=author, squash=squash, script=script,
+                            cwd=self.repo / 'nested', api=api)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, f'PASS pr={PR} base={base} author_head={author} '
+                         f'squash={squash} parent={parent} files=2 drift_job=101 regenerated={path}\n')
+
     def test_listed_binary_conflict_needs_drift_evidence_even_when_trees_match(self):
         base, author, _, squash = self.regenerated_squash(binary=True, keep_parent=True)
         script = self.script_with_config({'example/repo': self.rule('generated.txt')})
@@ -274,6 +298,40 @@ else:
         script = self.script_with_config({'example/repo': self.rule('alpha.txt')})
         result = self.check(base=base, author=author, squash=squash, script=script)
         self.assert_refuse(result, 'git command failed (exit 1)')
+        self.assertEqual(self.gh_calls.read_text(), '')
+
+    def test_mixed_listed_and_unlisted_conflicts_refuse(self):
+        base, author, _, squash = self.regenerated_squash(binary=True, mixed_conflict=True)
+        script = self.script_with_config({'example/repo': self.rule('generated.txt')})
+        result = self.check(base=base, author=author, squash=squash, script=script)
+        self.assert_refuse(result, 'git command failed (exit 1)')
+        self.assertEqual(self.gh_calls.read_text(), '')
+
+    def test_regeneration_with_an_added_empty_subtree_refuses(self):
+        base, author, parent, squash = self.regenerated_squash()
+        blank = self.git('mktree', input='')
+        entries = self.git('ls-tree', squash)
+        tree = self.git('mktree', input=f'{entries}\n040000 tree {blank}\tempty\n')
+        squash = self.git('commit-tree', tree, '-p', parent, '-m', 'Squash with empty subtree')
+        script = self.script_with_config({'example/repo': self.rule('generated.txt')})
+        api = self.drift_replies(squash, ({}, {}))
+        result = self.check(base=base, author=author, squash=squash, script=script, api=api)
+        self.assert_refuse(result, 'squash tree differs')
+        self.assertEqual(self.gh_calls.read_text(), '')
+
+    def test_regeneration_with_two_merge_bases_refuses(self):
+        base, feature, main, regenerated = self.regenerated_squash()
+        main_tree = f'{main}^{{tree}}'
+        author = self.git('commit-tree', main_tree, '-p', feature, '-p', main,
+                          '-m', 'Feature merges main')
+        parent = self.git('commit-tree', main_tree, '-p', main, '-p', feature,
+                          '-m', 'Main merges feature')
+        self.assertEqual(set(self.git('merge-base', '--all', parent, author).split()), {feature, main})
+        squash = self.git('commit-tree', f'{regenerated}^{{tree}}', '-p', parent, '-m', 'Criss-cross squash')
+        script = self.script_with_config({'example/repo': self.rule('alpha.txt', 'generated.txt')})
+        api = self.drift_replies(squash, ({}, {}))
+        result = self.check(base=base, author=author, squash=squash, script=script, api=api)
+        self.assert_refuse(result, 'exactly one merge base')
         self.assertEqual(self.gh_calls.read_text(), '')
 
     def test_regenerated_path_requires_a_config_entry_for_the_pr_repository(self):

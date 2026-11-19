@@ -20,6 +20,7 @@ REPO = r'[A-Za-z0-9-]+/[A-Za-z0-9_.-]+'
 DIFF_TREE = ('diff-tree', '--raw', '-r', '-z', '--no-renames', '--no-relative',
              '--ignore-submodules=none')
 TREE_MISMATCH = 'squash tree differs from the clean merge of the author head'
+ACTIONS_APP_ID = 15368  # GitHub Actions app
 
 
 def valid_path(path):
@@ -47,8 +48,9 @@ def configured_rule(pr):
 
 
 def merge_tree(parent, author):
+    root = fsdecode(git('rev-parse', '--show-toplevel').removesuffix(b'\n'))
     try:
-        output = git('merge-tree', '--write-tree', '--no-messages', '--name-only', '-z', parent, author)
+        output = git('-C', root, 'merge-tree', '--write-tree', '--no-messages', '--name-only', '-z', parent, author)
     except subprocess.CalledProcessError as exc:
         if exc.returncode != 1:
             raise
@@ -56,7 +58,7 @@ def merge_tree(parent, author):
         if not tree or not names:
             raise
         return tree, {fsdecode(name) for name in names}, exc
-    return output.rstrip(b'\0\n'), set(), None
+    return output.rstrip(b'\0'), set(), None
 
 
 def tree_entry(tree, path):
@@ -70,18 +72,27 @@ def tree_entry(tree, path):
 def regenerated_paths(allowed, conflicts, parent, author, tree, squash_tree):
     if not allowed:
         raise ValueError(TREE_MISMATCH)
-    raw = git(*DIFF_TREE, tree, squash_tree)
+    raw = git(*DIFF_TREE, '-t', tree, squash_tree)
     if tree != squash_tree and not raw:
         raise ValueError(TREE_MISMATCH)
     fields = iter(raw.split(b'\0')[:-1])
     paths = set(conflicts)
+    directories = []
     for header, name in zip(fields, fields, strict=True):
-        status = header.split()[-1]
+        old_mode, new_mode, _, _, status = header[1:].split()
         path = fsdecode(name)
-        if path not in allowed or status != b'M':
+        if status == b'M' and old_mode == new_mode == b'040000':
+            directories.append(path)
+        elif status == b'M' and old_mode == new_mode == b'100644' and path in allowed:
+            paths.add(path)
+        else:
             raise ValueError(TREE_MISMATCH)
-        paths.add(path)
-    merge_base = git('merge-base', parent, author).strip()
+    if any(not any(path.startswith(directory + '/') for path in paths) for directory in directories):
+        raise ValueError(TREE_MISMATCH)
+    merge_bases = git('merge-base', '--all', parent, author).split()
+    if len(merge_bases) != 1:
+        raise ValueError('regenerated paths require exactly one merge base')
+    merge_base, = merge_bases
     ordered = sorted(paths)
     for path in ordered:
         for candidate in (tree, squash_tree):
@@ -107,8 +118,8 @@ def drift_job(repo, squash, rule):
     try:
         checks = github_object(
             f'repos/{repo}/commits/{squash}/check-runs',
-            '-f', f'check_name={rule["job"]}', '-F', 'app_id=15368',
-            '-f', 'filter=latest', '-F', 'per_page=100',
+            '-f', f'check_name={rule["job"]}', '-F', f'app_id={ACTIONS_APP_ID}',
+            '-f', 'filter=all', '-F', 'per_page=100',
         )
         check_runs = checks['check_runs']
         total = checks['total_count']

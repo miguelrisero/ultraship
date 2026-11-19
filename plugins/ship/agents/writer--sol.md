@@ -89,7 +89,7 @@ A checkpoint grants zero test execution authority; apply the execution admission
 Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
 A single-parent squash commit meets that requirement only when it contains the recorded base and all conditions below hold.
 1. GitHub links the squash commit to the PR: the PR state is `MERGED` and its `mergeCommit` equals that commit.
-2. The squash tree equals the exact tree from a successful merge of the author head into the squash parent.
+2. The squash tree equals the exact tree from a successful merge of the author head into the squash parent, except for the listed paths below.
 The checker uses `git merge-tree --write-tree` with the squash parent first and the author head second.
 Require this check even when the squash parent already contains the author's changes.
 The `files` field counts the paths that differ between the squash parent and the squash commit.
