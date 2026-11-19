@@ -28,8 +28,9 @@ class RetireRowsTests(unittest.TestCase):
         self.path.parent.mkdir(parents=True)
         self.old = b'title = "existing"'
         self.path.write_bytes(self.old)
-        self.rows = [{'id': 'R1', 'reason': 'removed "guard"\\\n\t\x7f'},
-                     {'id': 'R2', 'reason': 'removed other behavior'}]
+        self.rows = [{'id': 'R1', 'reason': 'removed "guard"\\\n\t\x7f',
+                      'replacement': 'café "guard"\\\n\t\x7f'},
+                     {'id': 'R2', 'reason': 'removed other behavior', 'replacement': 'R4'}]
         self.record = {'row_file': str(self.path), 'rows': self.rows}
         self.record_path = self.directory / 'record.json'
 
@@ -44,6 +45,7 @@ class RetireRowsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         content = self.path.read_bytes()
         self.assertTrue(content.startswith(self.old + b'\n[[retired]]\n'))
+        self.assertTrue(content.endswith(b'\nid = "R2"\nreason = "removed other behavior"\nreplacement = "R4"\n'))
         self.assertEqual(tomllib.loads(content.decode()),
                          {'title': 'existing', 'retired': self.rows})
         self.assertEqual(result.stdout,
@@ -75,15 +77,15 @@ class RetireRowsTests(unittest.TestCase):
             {'row_file': str(self.path.with_name('missing.toml')), 'rows': self.rows},
             {'row_file': str(link), 'rows': self.rows},
             {'row_file': str(self.path), 'rows': [self.rows[0], self.rows[0]]},
-            {'row_file': str(self.path), 'rows': [{'id': 'R1', 'reason': ''}]},
+            {'row_file': str(self.path), 'rows': [{**self.rows[0], 'reason': ''}]},
             {**self.record, 'extra': True},
             {'rows': self.rows},
             {'row_file': 1, 'rows': self.rows},
             {**self.record, 'rows': []},
             {**self.record, 'rows': {}},
-            {**self.record, 'rows': [{'id': '', 'reason': 'removed'}]},
-            {**self.record, 'rows': [{'id': 'R1', 'reason': 1}]},
-            {**self.record, 'rows': [{'id': 'R1', 'reason': 'removed', 'extra': True}]},
+            {**self.record, 'rows': [{**self.rows[0], 'id': ''}]},
+            {**self.record, 'rows': [{**self.rows[0], 'reason': 1}]},
+            {**self.record, 'rows': [{**self.rows[0], 'extra': True}]},
         ]
         for record in records:
             with self.subTest(record=record):
@@ -94,6 +96,16 @@ class RetireRowsTests(unittest.TestCase):
                 self.assertEqual(self.path.read_bytes(), self.old)
                 self.assertEqual(outside.read_bytes(), self.old)
         self.assertFalse(self.path.with_name('missing.toml').exists())
+
+    def test_missing_empty_or_identical_replacement_refuses_without_writing(self):
+        for row in ({'id': 'R1', 'reason': 'removed'}, {**self.rows[0], 'replacement': ''},
+                    {**self.rows[0], 'replacement': 'R1'}):
+            with self.subTest(row=row):
+                result = self.run_script({**self.record, 'rows': [self.rows[1], row]})
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn('replacement', result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(self.path.read_bytes(), self.old)
 
     def test_linked_or_protected_records_refuse_without_writing(self):
         protected = self.path.with_name('record.json')

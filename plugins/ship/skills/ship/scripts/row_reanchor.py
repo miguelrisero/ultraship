@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Derive a row's paired fields while preserving its whole-file mutant hunks."""
 import argparse
+from contextlib import contextmanager
 import difflib
+import fcntl
+import json
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -37,7 +40,7 @@ def basic(value):
 def row_statements(text, row_id):
     """Scan complete statements so string contents never become table headers."""
     source = lines(text)
-    rows, current, index, nested = [], None, 0, False
+    rows, split_rows, current, index, nested = [], set(), None, 0, False
     while index < len(source):
         start = index
         if not source[index].strip() or source[index].lstrip().startswith('#'):
@@ -55,17 +58,24 @@ def row_statements(text, row_id):
         if stripped.startswith('['):
             if re.fullmatch(r'\[\[\s*row\s*\]\]\s*(?:#[^\n]*)?\n?', stripped):
                 current, nested = [], False
-                rows.append(current)
-            elif re.match(r'\[\[?\s*row\.', stripped) and current is not None:
-                nested = True
-                current.append((start, index, statement, {}))
+                rows.append((start, current))
+            elif parsed.get('row') == [{}]:
+                current = None
+                rows.append((start, []))
+            elif isinstance(parsed.get('row'), dict) and parsed['row']:
+                if current is not None:
+                    nested = True
+                    current.append((start, index, statement, {}))
+                elif rows:
+                    split_rows.add(rows[-1][0])
             else:
                 current = None
         elif current is not None:
             current.append((start, index, statement, {} if nested else parsed))
-    matching = [row for row in rows if any(item[3].get('id') == row_id for item in row)]
+    matching = [(start, row) for start, row in rows if any(item[3].get('id') == row_id for item in row)]
     require(len(matching) == 1, 'row ID must match exactly once')
-    selected = matching[0]
+    first, selected = matching[0]
+    require(first not in split_rows, 'row table is not contiguous')
     values, fields = {}, {}
     for start, end, statement, parsed in selected:
         if not parsed:
@@ -80,7 +90,7 @@ def row_statements(text, row_id):
     require(isinstance(values['old'], str) and isinstance(values['new'], str)
             and values['old'] and values['old'] != values['new'], 'invalid base pair')
     require(type(values.get('expect', 1)) is int and values.get('expect', 1) == 1, 'expect must be 1')
-    return values, fields
+    return values, fields, (first + 1, selected[-1][1])
 
 
 def opcodes(a, b):
@@ -148,6 +158,62 @@ def derive(old, new, base, head):
     return head_old, head_new, len(edits)
 
 
+@contextmanager
+def staged_bytes(path, data, mode):
+    staged = path.with_name('.row-reanchor-' + uuid.uuid4().hex)
+    descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(descriptor, 'wb') as handle:
+            os.fchmod(handle.fileno(), mode)
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        require(staged.read_bytes() == data, 'staged write read-back differs')
+        yield staged
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+@contextmanager
+def record_lock(path):
+    try:
+        path.parent.mkdir(mode=0o700)
+    except FileExistsError:
+        require(path.parent.is_dir() and not path.parent.is_symlink(), 'invalid record directory')
+    else:
+        path.parent.chmod(0o700)
+
+    # Keep a separate inode so replacing the record never replaces the lock.
+    lock = path.with_suffix('.lock')
+    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    with os.fdopen(descriptor, 'r+b') as handle:
+        metadata = os.fstat(handle.fileno())
+        require(stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1, 'invalid authorization record lock')
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+
+
+def merge_record(path, identity, entry, check_before_replace):
+    rows = {}
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        require(stat.S_ISREG(metadata.st_mode), 'invalid authorization record file')
+        prior = json.loads(path.read_bytes())
+        require(isinstance(prior, dict), 'invalid authorization record')
+        if all(prior.get(key) == value for key, value in identity.items()):
+            require(prior.get('schema') == 1 and isinstance(prior.get('rows'), list),
+                    'invalid authorization record')
+            rows = {(row['row_file'], row['row_id']): row for row in prior['rows']}
+    rows[entry['row_file'], entry['row_id']] = entry
+    data = (json.dumps({'schema': 1, **identity, 'rows': list(rows.values())}) + '\n').encode('utf-8')
+    with staged_bytes(path, data, 0o600) as record_stage:
+        check_before_replace('staged write')
+        os.replace(record_stage, path)
+
+
 def run(args):
     row_file = Path(args.row_file)
     require(row_file.is_absolute() and stat.S_ISREG(row_file.lstat().st_mode)
@@ -162,9 +228,12 @@ def run(args):
     subject = PurePosixPath(args.subject)
     require(not subject.is_absolute() and args.subject == subject.as_posix()
             and '..' not in subject.parts and subject.parts, 'subject must be repository-relative')
+    lane = git('branch', '--show-current').decode().rstrip('\n')
+    require(lane, 'lane branch required')
     base_sha = git('rev-parse', '--verify', '--end-of-options', args.base + '^{commit}').decode().strip()
     head_sha = git('rev-parse', '--verify', '--end-of-options', args.head + '^{commit}').decode().strip()
     require(head_sha == git('rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
+    record = Path(git('rev-parse', '--path-format=absolute', '--git-path', 'ship/row-auth.json').decode().rstrip('\n'))
 
     def blob(sha, path):
         return git('cat-file', 'blob', sha + ':' + path)
@@ -172,8 +241,8 @@ def run(args):
     original = row_file.read_bytes()
     require(original == blob(head_sha, relative), 'working row file differs from head')
     text = original.decode('utf-8')
-    base_values, base_fields = row_statements(blob(base_sha, relative).decode('utf-8'), args.row_id)
-    head_values, head_fields = row_statements(text, args.row_id)
+    base_values, base_fields, base_extent = row_statements(blob(base_sha, relative).decode('utf-8'), args.row_id)
+    head_values, head_fields, _ = row_statements(text, args.row_id)
     require(base_values['file'] == head_values['file'] == args.subject, 'subject mismatch')
     require([field[2] for key, field in base_fields.items() if key not in ('old', 'new')]
             == [field[2] for key, field in head_fields.items() if key not in ('old', 'new')], 'frozen row statements differ')
@@ -189,6 +258,8 @@ def run(args):
         start, end, statement = head_fields[key]
         prefix = re.match(r'''[ \t]*(?:KEY|"KEY"|'KEY')[ \t]*=[ \t]*'''.replace('KEY', key), statement)
         require(prefix is not None, 'unsupported key prefix')
+        if head_values[key] == value:
+            continue
         ending = '\r\n' if statement.endswith('\r\n') else '\n' if statement.endswith('\n') else ''
         replacements.append((start, end, prefix[0] + basic(value) + ending))
     edited = source[:]
@@ -200,7 +271,7 @@ def run(args):
     require(len(targets) == 1 and targets[0]['old'] == old and targets[0]['new'] == new, 'edited pair mismatch')
     targets[0]['old'], targets[0]['new'] = head_values['old'], head_values['new']
     require(before == after, 'other TOML values differ')
-    _, edited_fields = row_statements(edited_text, args.row_id)
+    _, edited_fields, edited_extent = row_statements(edited_text, args.row_id)
 
     def without_pair(value, fields):
         kept = lines(value)
@@ -211,37 +282,32 @@ def run(args):
     require(without_pair(text, head_fields) == without_pair(edited_text, edited_fields),
             'bytes outside paired statements differ')
     result = edited_text.encode('utf-8')
-    require(row_file.read_bytes() == original, 'row file changed during derivation')
-    staged = row_file.with_name('.row-reanchor-' + uuid.uuid4().hex)
-    created = False
-    try:
-        descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(row_file.stat().st_mode))
-        created = True
-        with os.fdopen(descriptor, 'wb') as handle:
-            os.fchmod(handle.fileno(), stat.S_IMODE(row_file.stat().st_mode))
-            handle.write(result)
-            handle.flush()
-            os.fsync(handle.fileno())
-        require(staged.read_bytes() == result, 'staged write read-back differs')
-        require(row_file.read_bytes() == original, 'row file changed during staged write')
-        os.replace(staged, row_file)
-    except BaseException:
-        if created and staged.exists():
-            staged.unlink()
-        raise
+    entry = {'row_file': relative, 'row_id': args.row_id, 'subject': args.subject,
+             'expected_count': head_values.get('expect', 1), 'head_old_count': head.count(old),
+             'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements),
+             'base_lines': base_extent, 'lines': edited_extent}
+    identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
+
+    def check_worktree(phase):
+        require(git('branch', '--show-current').decode().rstrip('\n') == lane, 'lane branch changed during ' + phase)
+        require(git('rev-parse', 'HEAD').decode().strip() == head_sha, 'HEAD changed during ' + phase)
+        require(row_file.read_bytes() == original, 'row file changed during ' + phase)
+
+    with record_lock(record):
+        check_worktree('derivation')
+        if replacements:
+            mode = stat.S_IMODE(row_file.stat().st_mode)
+            with staged_bytes(row_file, result, mode) as stage:
+                check_worktree('staged write')
+                os.replace(stage, row_file)
+            record_output = 'none'
+        else:
+            merge_record(record, identity, entry, check_worktree)
+            record_output = str(record)
     print('PASS')
-    print('row_file=' + str(row_file))
-    print('row_id=' + args.row_id)
-    print('subject=' + args.subject)
-    print('base=' + base_sha)
-    print('head=' + head_sha)
-    print('base_span_lines=' + str(len(lines(base_values['old']))))
-    print('head_span_lines=' + str(len(lines(old))))
-    print('head_old_count=' + str(head.count(old)))
-    print('hunk_count=' + str(count))
-    print('tomllib=PASS')
-    print('changed_statements=' + str(sum(statement != head_fields[key][2]
-          for key, (_, _, statement) in zip(('old', 'new'), replacements))))
+    for key, value in {'schema': 1, **identity, **entry, 'base_span_lines': len(lines(base_values['old'])),
+                       'head_span_lines': len(lines(old)), 'tomllib': 'PASS', 'record': record_output}.items():
+        print(key + '=' + (value if isinstance(value, str) and value.isprintable() else json.dumps(value)))
 
 
 class Parser(argparse.ArgumentParser):

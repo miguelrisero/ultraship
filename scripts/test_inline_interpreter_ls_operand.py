@@ -61,7 +61,7 @@ class LsOperandTests(unittest.TestCase):
         ):
             with self.subTest(search=search):
                 self.assertTrue(self.denied(search + '; ls /w/bin/python3 | head -5'))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'),
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'),
                                  'inline interpreter code rule (program from a pipe)')
 
     def test_git_global_options_keep_ls_operand_refused(self):
@@ -74,7 +74,7 @@ class LsOperandTests(unittest.TestCase):
         ):
             with self.subTest(search=search):
                 self.assertTrue(self.denied(search + '; ls /w/bin/python3 | head -5'))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'),
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'),
                                  'inline interpreter code rule (program from a pipe)')
 
     def test_git_pager_options_keep_ls_operand_refused(self):
@@ -85,7 +85,7 @@ class LsOperandTests(unittest.TestCase):
         ):
             with self.subTest(search=search):
                 self.assertTrue(self.denied(search + '; ls /w/bin/python3 | head -5'))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'),
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'),
                                  'inline interpreter code rule (program from a pipe)')
 
     def test_repeated_and_attached_git_directories_keep_ls_operand_refused(self):
@@ -96,7 +96,7 @@ class LsOperandTests(unittest.TestCase):
         ):
             with self.subTest(search=search):
                 self.assertTrue(self.denied(search + '; ls /w/bin/python3 | head -5'))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'),
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'),
                                  'inline interpreter code rule (program from a pipe)')
 
     def test_unproven_git_directories_keep_ls_operand_refused(self):
@@ -105,7 +105,7 @@ class LsOperandTests(unittest.TestCase):
             with self.subTest(directory=directory):
                 command = f'git -C {directory} grep needle; ls /w/bin/python3 | head -5'
                 self.assertTrue(self.denied(command))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'),
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'),
                                  'inline interpreter code rule (program from a pipe)')
 
     def test_executable_sinks_keep_ls_operand_refused(self):
@@ -117,7 +117,7 @@ class LsOperandTests(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'),
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'),
                                  'inline interpreter code rule (program from a pipe)')
 
     def test_assignments_and_redefinitions_keep_ls_operand_refused(self):
@@ -130,7 +130,7 @@ class LsOperandTests(unittest.TestCase):
         ):
             with self.subTest(prefix=prefix):
                 self.assertTrue(self.denied(prefix + 'ls /w/bin/python3 | head -5'))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'),
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'),
                                  'inline interpreter code rule (program from a pipe)')
 
     def test_prefixed_ls_keeps_interpreter_operand_refused(self):
@@ -138,14 +138,14 @@ class LsOperandTests(unittest.TestCase):
         for executable in ('command ls', r'\ls', 'env ls', '/bin/ls', "'ls'", 'builtin ls'):
             with self.subTest(executable=executable):
                 self.assertTrue(self.denied(executable + ' /w/bin/python3 | head -5'))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'),
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'),
                                  'inline interpreter code rule (program from a pipe)')
 
     def test_nested_shell_keeps_ls_operand_refused(self):
         """Protect nested-call proof; trusting outer tokens fails; existing coverage omits a nested ls interpreter operand with a safe sink."""
         command = "bash -c 'ls /w/bin/python3 | head -5'"
         self.assertTrue(self.denied(command))
-        self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'),
+        self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'),
                          'inline interpreter code rule (program from a pipe)')
 
 
