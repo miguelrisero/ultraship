@@ -55,6 +55,46 @@ class WriterDeniedProcessTests(unittest.TestCase):
             'Push, merge and protected-write refusals stay final; a retry in another form never bypasses them.',
         ))
 
+    def test_decision_defect_rule_limits_refusal_resolution(self):
+        limits = (
+            'Defects include a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.',
+            'A corrected decision grants nothing beyond what the defective decision grants.',
+            'This rule lifts no hook, permission, tool, owner, push, merge, or protected-write refusal.',
+            'Follow the retry rule for hook, permission, and tool refusals.',
+            'This rule lifts no security, secret, or production gate.',
+        )
+        resolution = (
+            'Only a corrected CoC decision with a new SHA256 can resolve that refusal for that cause.',
+            'Require the corrected decision to quote the refusal verbatim and name the defect it corrects.',
+            'Verify the corrected decision in full before the next attempt.',
+            'Follow every other route requirement.',
+        )
+        self.check((REFERENCE_FILE,), (' '.join((
+            'Decision-defect rule: This rule applies only to an agent\'s own refusal '
+            'whose sole stated cause is a defect in a CoC decision.',
+            *limits,
+            'Quote the refusal and the defect to your superior.',
+            'Use the existing superior chain to reach the CoC: writer to driver, driver to chief, chief to CoC.',
+            *resolution,
+        )),))
+        self.check(WRITER_FILES, ('\n'.join((
+            'This [decision-defect rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) '
+            'applies only to your own refusal whose sole stated cause is a defect in a CoC decision.',
+            *limits,
+            'Quote the refusal and the defect to your driver.',
+            *resolution,
+        )),))
+
+    def test_chief_relays_decision_defect_refusals_and_corrected_decisions(self):
+        chief = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text(encoding='utf-8')
+        self.assertIn(
+            'Grant a lane request, or run the refused command yourself, when you consider it appropriate; '
+            'record the grant or the run in the lane state file.\n'
+            "Relay the lane's quoted refusal and defect to the CoC and the corrected decision to the lane "
+            "under ship's decision-defect rule.\n",
+            chief,
+        )
+
     def test_retired_refusal_accounting_does_not_return(self):
         for name in (*WRITER_FILES, REFERENCE_FILE):
             text = (ROOT / name).read_text(encoding='utf-8')
