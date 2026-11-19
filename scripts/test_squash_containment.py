@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SHIP = ROOT / 'plugins/ship'
 SCRIPT = SHIP / 'skills/ship/scripts/squash-containment.py'
 PR = 'https://github.com/example/repo/pull/1'
+WORKFLOW = '.github/workflows/ci.yml'
+JOB = 'Contract drift'
+STEP = 'Fail on drift'
 CONTRACT_PATHS = (
     SHIP / 'skills/ship/SKILL.md',
     *(SHIP / f'agents/{name}.md' for name in (
@@ -27,8 +30,9 @@ The checker uses `git merge-tree --write-tree` with the squash parent first and 
 Require this check even when the squash parent already contains the author's changes.
 The `files` field counts the paths that differ between the squash parent and the squash commit.
 A path that `squash-containment.json` lists for the PR's repository may differ from that merge only when every other path matches exactly.
-Such a path keeps its file mode, and the merge must change it from the squash parent.
-The `PASS` line names each such path as `regenerated=<path>`; with no listed path, the exact tree rule stays.
+Such a path stays a non-executable regular file, and the merge must change it from the squash parent.
+The squash commit also needs one passing push run of the configured drift check job and step from GitHub Actions.
+The `PASS` line names the drift job as `drift_job=<id>` and each such path as `regenerated=<path>`; with no listed path, the exact tree rule stays.
 The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
 Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
 Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.
@@ -39,9 +43,12 @@ Every other commit keeps the containment requirement unchanged.
 class ContractTests(unittest.TestCase):
     def test_shipped_config_lists_only_the_two_patricia_paths(self):
         config = json.loads(SCRIPT.with_suffix('.json').read_text(encoding='utf-8'))
-        self.assertEqual(config, {'bettergroupinc/patricia-monorepo': [
-            'backend/api/openapi.json', 'frontend/packages/api-types/src/generated/api.ts',
-        ]})
+        self.assertEqual(config, {'bettergroupinc/patricia-monorepo': {
+            'paths': ['backend/api/openapi.json', 'frontend/packages/api-types/src/generated/api.ts'],
+            'workflow': '.github/workflows/ci.yml',
+            'job': 'contract · openapi → api-types drift',
+            'step': 'Fail on contract drift',
+        }})
 
     def test_each_contract_carries_the_exact_body_once(self):
         for path in CONTRACT_PATHS:
@@ -83,7 +90,23 @@ class SquashContainmentTests(unittest.TestCase):
         binary = self.directory / 'bin'
         binary.mkdir()
         gh = binary / 'gh'
-        gh.write_text('#!/bin/sh\nprintf "%s\\n" "$GH_JSON"\n')
+        self.gh_calls = self.directory / 'gh-calls'
+        gh.write_text(f'#!{sys.executable}\n' + '''import json
+import os
+import sys
+
+args = sys.argv[1:]
+with open(os.environ['GH_CALLS'], 'a') as log:
+    print(json.dumps(args), file=log)
+if args[:2] == ['pr', 'view']:
+    print(os.environ['GH_PR'])
+else:
+    assert args[:3] == ['api', '-X', 'GET']
+    assert args[4:6] == ['--hostname', 'github.com']
+    reply = json.loads(os.environ['GH_API'])[args[3]]
+    assert args[6:] == reply.get('fields', [])
+    print(json.dumps(reply['body']))
+''')
         gh.chmod(0o755)
         self.env['PATH'] = f'{binary}{os.pathsep}{self.env["PATH"]}'
 
@@ -98,14 +121,40 @@ class SquashContainmentTests(unittest.TestCase):
         self.git('commit', '-m', 'Fixture commit')
 
     def check(self, squash=None, linked=None, state='MERGED', base=None, author=None,
-              script=SCRIPT, pr=PR, cwd=None):
-        squash = squash or self.squash
+              script=SCRIPT, pr=PR, cwd=None, api=None):
+        squash = self.squash if squash is None else squash
         info = {'state': state, 'mergeCommit': {'oid': linked or squash}}
+        self.gh_calls.write_text('')
         return subprocess.run(
             [sys.executable, str(script), pr, base or self.base, author or self.author, squash],
-            cwd=cwd or self.repo, env={**self.env, 'GH_JSON': json.dumps(info)},
+            cwd=cwd or self.repo, env={**self.env, 'GH_PR': json.dumps(info),
+                                      'GH_API': json.dumps(api or {}), 'GH_CALLS': str(self.gh_calls)},
             capture_output=True, text=True,
         )
+
+    def drift_replies(self, squash, *candidates):
+        ids = range(101, 101 + len(candidates))
+        replies = {
+            f'repos/example/repo/commits/{squash}/check-runs': {
+                'fields': ['-f', f'check_name={JOB}', '-F', 'app_id=15368',
+                           '-f', 'filter=latest', '-F', 'per_page=100'],
+                'body': {'total_count': len(ids), 'check_runs': [{'id': job_id} for job_id in ids]},
+            },
+        }
+        for job_id, (job, run) in zip(ids, candidates, strict=True):
+            run_id = job_id + 100
+            replies[f'repos/example/repo/actions/jobs/{job_id}'] = {'body': {
+                'id': job_id, 'run_id': run_id, 'head_sha': squash, 'run_attempt': 1,
+                'status': 'completed', 'conclusion': 'success',
+                'steps': [{'name': STEP, 'conclusion': 'success'}], **job,
+            }}
+            replies[f'repos/example/repo/actions/runs/{run_id}'] = {'body': {
+                'path': WORKFLOW, 'event': 'push', 'head_sha': squash, 'run_attempt': 1, **run,
+            }}
+        return replies
+
+    def rule(self, *paths):
+        return {'paths': list(paths), 'workflow': WORKFLOW, 'job': JOB, 'step': STEP}
 
     def script_with_config(self, config):
         script = self.directory / SCRIPT.name
@@ -113,10 +162,14 @@ class SquashContainmentTests(unittest.TestCase):
         script.with_suffix('.json').write_text(json.dumps(config), encoding='utf-8')
         return script
 
-    def regenerated_squash(self, extra=None):
+    def regenerated_squash(self, extra=None, executable=False):
         self.git('checkout', '-b', 'generated-main', self.base)
         lines = ''.join(f'line {number}\n' for number in range(30))
         self.commit({'generated.txt': lines})
+        if executable:
+            self.git('update-index', '--chmod=+x', 'generated.txt')
+            self.git('commit', '-m', 'Executable fixture')
+            (self.repo / 'generated.txt').chmod(0o755)
         base = self.git('rev-parse', 'HEAD')
         self.git('checkout', '-b', 'generated-feature')
         self.commit({'generated.txt': lines.replace('line 5\n', 'feature line\n'),
@@ -133,30 +186,59 @@ class SquashContainmentTests(unittest.TestCase):
         base, author, parent, squash = self.regenerated_squash()
         subdir = self.repo / 'subdir'
         subdir.mkdir()
-        script = self.script_with_config({'example/repo': ['generated.txt']})
+        script = self.script_with_config({'example/repo': self.rule('generated.txt')})
         pr = 'https://github.com/Example/Repo/pull/1'
-        result = self.check(base=base, author=author, squash=squash, script=script, pr=pr, cwd=subdir)
+        api = self.drift_replies(squash, ({}, {'event': 'pull_request'}), ({}, {}))
+        result = self.check(base=base, author=author, squash=squash, script=script, pr=pr,
+                            cwd=subdir, api=api)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout, f'PASS pr={pr} base={base} author_head={author} '
-                         f'squash={squash} parent={parent} files=2 regenerated=generated.txt\n')
+                         f'squash={squash} parent={parent} files=2 drift_job=102 '
+                         'regenerated=generated.txt\n')
+
+    def test_missing_or_unusable_drift_evidence_refuses(self):
+        base, author, _, squash = self.regenerated_squash()
+        script = self.script_with_config({'example/repo': self.rule('generated.txt')})
+        cases = {
+            'missing check': (),
+            'failed job': (({'conclusion': 'failure'}, {}),),
+            'incomplete job': (({'status': 'in_progress'}, {}),),
+            'skipped step': (({'steps': [{'name': STEP, 'conclusion': 'skipped'}]}, {}),),
+            'duplicate step': (({'steps': [{'name': STEP, 'conclusion': 'success'}] * 2}, {}),),
+            'wrong workflow': (({}, {'path': '.github/workflows/other.yml'}),),
+            'pull request event': (({}, {'event': 'pull_request'}),),
+            'wrong job SHA': (({'head_sha': author}, {}),),
+            'wrong run SHA': (({}, {'head_sha': author}),),
+            'old attempt': (({}, {'run_attempt': 2}),),
+            'two bound runs': (({}, {}), ({}, {})),
+        }
+        for label, candidates in cases.items():
+            with self.subTest(label=label):
+                api = self.drift_replies(squash, *candidates)
+                result = self.check(base=base, author=author, squash=squash, script=script, api=api)
+                self.assert_refuse(result, 'drift check')
+        self.assert_refuse(self.check(base=base, author=author, squash=squash, script=script),
+                           'drift check')
 
     def test_regenerated_path_with_a_hand_written_difference_refuses(self):
         base, author, _, squash = self.regenerated_squash({'alpha.txt': 'different alpha\n'})
-        script = self.script_with_config({'example/repo': ['generated.txt']})
+        script = self.script_with_config({'example/repo': self.rule('generated.txt')})
         self.assert_refuse(self.check(base=base, author=author, squash=squash, script=script),
                            'squash tree differs')
+        self.assertEqual(self.gh_calls.read_text(), '')
 
     def test_listed_path_unchanged_in_clean_merge_refuses(self):
         self.commit({'unrelated.txt': 'regenerated output\n'})
         squash = self.git('commit-tree', 'HEAD^{tree}', '-p', self.parent, '-m', 'Regenerated squash')
-        script = self.script_with_config({'example/repo': ['unrelated.txt']})
+        script = self.script_with_config({'example/repo': self.rule('unrelated.txt')})
         result = self.check(squash=squash, script=script)
         self.assert_refuse(result, 'regenerated')
         self.assertIn('unrelated.txt', result.stdout)
+        self.assertEqual(self.gh_calls.read_text(), '')
 
     def test_regenerated_path_requires_a_config_entry_for_the_pr_repository(self):
         base, author, _, squash = self.regenerated_squash()
-        for config in ({'other/repo': ['generated.txt']}, {'example/repo': []}):
+        for config in ({'other/repo': self.rule('generated.txt')}, {'example/repo': self.rule()}):
             with self.subTest(config=config):
                 result = self.check(base=base, author=author, squash=squash,
                                     script=self.script_with_config(config))
@@ -166,22 +248,42 @@ class SquashContainmentTests(unittest.TestCase):
 
     def test_regenerated_path_requires_a_full_github_pr_url(self):
         base, author, _, squash = self.regenerated_squash()
-        script = self.script_with_config({'example/repo': ['generated.txt']})
+        script = self.script_with_config({'example/repo': self.rule('generated.txt')})
         self.assert_refuse(self.check(base=base, author=author, squash=squash, script=script,
                                       pr=PR + '/files'), 'squash tree differs')
 
     def test_config_validation_applies_only_to_differing_trees(self):
         base, author, _, squash = self.regenerated_squash()
-        for paths in ('generated.txt', ['generated.txt', None], ['generated.txt', ''],
-                      ['generated.txt', 'with space.txt']):
-            with self.subTest(paths=paths):
-                script = self.script_with_config({'example/repo': paths})
+        rule = self.rule('generated.txt')
+        cases = [rule['paths'], {**rule, 'extra': True}]
+        cases += [{**rule, 'paths': paths} for paths in (
+            'generated.txt', ['generated.txt', None], ['generated.txt', ''],
+            ['generated.txt', 'with space.txt'],
+        )]
+        for key in rule:
+            cases += [{k: v for k, v in rule.items() if k != key}, {**rule, key: False}]
+        for invalid in cases:
+            with self.subTest(invalid=invalid):
+                script = self.script_with_config({'example/repo': invalid})
                 self.assert_refuse(self.check(base=base, author=author, squash=squash, script=script),
-                                   'invalid regenerated paths')
-                self.assertEqual(self.check(script=script).stdout, self.check().stdout)
+                                   'invalid regenerated path rule')
+                self.assertEqual(self.gh_calls.read_text(), '')
+                result = self.check(script=script)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                calls = self.gh_calls.read_text().splitlines()
+                self.assertEqual([json.loads(call)[:2] for call in calls], [['pr', 'view']])
+                self.assertEqual(result.stdout, self.check().stdout)
+
+    def test_regenerated_executable_path_refuses_even_when_mode_matches(self):
+        base, author, _, squash = self.regenerated_squash(executable=True)
+        script = self.script_with_config({'example/repo': self.rule('generated.txt')})
+        api = self.drift_replies(squash, ({}, {}))
+        self.assert_refuse(self.check(base=base, author=author, squash=squash, script=script, api=api),
+                           'squash tree differs')
+        self.assertEqual(self.gh_calls.read_text(), '')
 
     def test_listed_path_mode_change_or_deletion_refuses(self):
-        script = self.script_with_config({'example/repo': ['alpha.txt']})
+        script = self.script_with_config({'example/repo': self.rule('alpha.txt')})
         self.git('update-index', '--chmod=+x', 'alpha.txt')
         tree = self.git('write-tree')
         squash = self.git('commit-tree', tree, '-p', self.parent, '-m', 'Executable squash')
@@ -193,11 +295,12 @@ class SquashContainmentTests(unittest.TestCase):
 
     def test_multiple_regenerated_paths_pass_in_diff_tree_order(self):
         base, author, parent, squash = self.regenerated_squash({'alpha.txt': 'regenerated alpha\n'})
-        script = self.script_with_config({'example/repo': ['generated.txt', 'alpha.txt']})
-        result = self.check(base=base, author=author, squash=squash, script=script)
+        script = self.script_with_config({'example/repo': self.rule('generated.txt', 'alpha.txt')})
+        api = self.drift_replies(squash, ({}, {}))
+        result = self.check(base=base, author=author, squash=squash, script=script, api=api)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout, f'PASS pr={PR} base={base} author_head={author} '
-                         f'squash={squash} parent={parent} files=2 '
+                         f'squash={squash} parent={parent} files=2 drift_job=101 '
                          'regenerated=alpha.txt regenerated=generated.txt\n')
 
     def assert_refuse(self, result, reason):

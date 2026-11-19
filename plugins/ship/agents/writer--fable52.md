@@ -94,8 +94,9 @@ The checker uses `git merge-tree --write-tree` with the squash parent first and 
 Require this check even when the squash parent already contains the author's changes.
 The `files` field counts the paths that differ between the squash parent and the squash commit.
 A path that `squash-containment.json` lists for the PR's repository may differ from that merge only when every other path matches exactly.
-Such a path keeps its file mode, and the merge must change it from the squash parent.
-The `PASS` line names each such path as `regenerated=<path>`; with no listed path, the exact tree rule stays.
+Such a path stays a non-executable regular file, and the merge must change it from the squash parent.
+The squash commit also needs one passing push run of the configured drift check job and step from GitHub Actions.
+The `PASS` line names the drift job as `drift_job=<id>` and each such path as `regenerated=<path>`; with no listed path, the exact tree rule stays.
 The driver runs `python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/squash-containment.py" <PR URL> <base SHA> <author head SHA> <squash SHA>` in a checkout that holds all four commits.
 Accept only a recorded `PASS` line that names the same PR URL, recorded base, author head and squash commit.
 Refuse the squash commit when any condition fails or the evidence is missing, stale or ambiguous.
