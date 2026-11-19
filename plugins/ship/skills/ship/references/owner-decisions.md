@@ -174,9 +174,10 @@ The receipt states that it is the disposition and names the row ID, the breaking
 Name the receipt by absolute path and SHA256. Verify the digest before any protected access.
 For a landed disposition, require the disposition record to cite the landed row change and its CoC decision.
 For a landed disposition, require a receipt for the independent not-weaker review of that disposition.
-Require that reviewer to differ from the breaking PR author and the person who applied the disposition.
-Bind the review receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.
-Verify that the reviewed disposition is the one that landed for the named row.
+For a landed disposition, require that reviewer to differ from the breaking PR author and the person who applied the disposition.
+For a landed disposition, bind the review receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.
+For a landed disposition, verify that the reviewed disposition is the one that landed for the named row.
+A CoC decision receipt needs no landed disposition and no prior disposition review.
 For a CoC decision receipt, the independent repair review below is the one not-weaker review.
 Record the disposition and its evidence references in the frozen edit decision, with the receipt path and SHA256 for a CoC receipt.
 Bind them to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.
