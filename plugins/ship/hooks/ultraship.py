@@ -2839,6 +2839,8 @@ def shell_segment_command(words, command_positions):
                     cursor += 1
             elif name == 'stdbuf' and re.fullmatch(r'-[ioe].+', option):
                 continue
+            elif name == 'nice' and re.fullmatch(r'-(?:n[+-]?)?[0-9]+', option):
+                continue
             else:
                 return None, wrapped
         if name == 'timeout':
@@ -2855,14 +2857,22 @@ def shell_segment_command(words, command_positions):
     return None, wrapped
 
 
+def launcher_word(words, index):
+    name = os.path.basename(words[index][1])
+    return name in {'xargs', 'parallel'} or name == 'find' and any(
+        word[1] in {'-exec', '-execdir', '-ok', '-okdir'} for word in words[index + 1:])
+
+
 def shell_launches_commands(words, command):
+    return bool(command and not unresolved_shell_word(command[0]) and launcher_word(words, words.index(command)))
+
+
+def launcher_may_change_paths(words, command):
+    # Keep interpreter path checks conservative when an opaque wrapper may run a launcher.
     if command and not unresolved_shell_word(command[0]) and interpreter_name(command[1]):
         return False
-    return any((os.path.basename(word[1]) in {'xargs', 'parallel'}
-                or os.path.basename(word[1]) == 'find' and any(
-                    later[1] in {'-exec', '-execdir', '-ok', '-okdir'} for later in words[index + 1:]))
-               and not (command == words[0] and grep_data_token(words, index))
-               for index, word in enumerate(words))
+    return any(launcher_word(words, index) and not (command == words[0] and grep_data_token(words, index))
+               for index in range(len(words)))
 
 
 def inline_interpreter_denial(command, cwd=None):
@@ -3040,7 +3050,8 @@ def inline_interpreter_denial(command, cwd=None):
             consumer, wrapped = shell_segment_command(command_words, command_positions)
             launches = shell_launches_commands(command_words, consumer)
             paths_changed = (launches or runtime_paths or any(changing_segments[:index])
-                             or any(changing_segments[index + 1:]))
+                             or any(changing_segments[index + 1:])
+                             or launcher_may_change_paths(command_words, consumer))
             classified.append((words, piped, paths_changed, launches, consumer, wrapped))
         shell_programs = set()
         for index, token in enumerate(tokens):

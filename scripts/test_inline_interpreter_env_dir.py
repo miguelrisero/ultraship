@@ -384,6 +384,16 @@ class EnvDirectoryTests(unittest.TestCase):
         self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
         self.assertFalse(self.denied('printf input | timeout 5 cat'), self.reason)
 
+    def test_pipeline_launcher_names_as_data_stay_admitted(self):
+        for command in ('printf input | tee xargs', 'printf input | timeout 5 grep xargs'):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_pipeline_nice_attached_adjustments_stay_admitted(self):
+        for option in ('-n5', '-5'):
+            with self.subTest(option=option):
+                self.assertFalse(self.denied(f'printf input | nice {option} cat'), self.reason)
+
     def test_directory_names_as_script_arguments_stay_admitted(self):
         for word in ('cd', 'pushd'):
             with self.subTest(word=word):
