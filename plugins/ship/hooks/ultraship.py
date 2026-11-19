@@ -4855,7 +4855,7 @@ def pre(data):
                       and (re.search(r'\bgh\b', separated) or re.search(r'\bgh\b', normalized))):
                     reason = 'heredoc with line continuation'
                 elif thread_command_config(command):
-                    reason = 'git configuration assignment'
+                    reason = 'git configuration token'
                 elif '--config-env' in command:
                     reason = 'git configuration environment option'
                 elif ("$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
@@ -4863,7 +4863,7 @@ def pre(data):
                       and not LITERAL_GIT_GREP_ANCHOR.fullmatch(command)
                       and "$'" in writer_quoted_grep_data(command)
                       and not LITERAL_GIT_COUNT_COMMAND.fullmatch(command)):
-                    reason = 'ANSI-C shell quoting'
+                    reason = 'ambiguous shell quote pattern'
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__
         if reason:
