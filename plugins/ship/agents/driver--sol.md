@@ -74,15 +74,20 @@ Scope: each row that the PR's failing anchor CI names, when the recorded base/he
 3. Retire: when the PR deletes the guarded code, the writer deletes the row table and runs `retire-rows.py`.
    The script appends one `[[retired]]` table per row with the row ID, the reason and the `replacement` row ID.
    The replacement row guards the new code. The anchor guard fails a removed row without a `[[retired]]` entry.
-4. Add: the writer adds rows for the PR's own new code, each with a claim, a designated test, a subject and a mutant.
-5. Authorization record: each successful tool run writes a generated record in the Git directory and prints its path.
-   The record names the lane, base, head, row IDs, expected counts and the unchanged mutant check.
+4. Restore: a lane may restore rows that only its own unmerged commits changed, back to their merge-base bytes.
+   The writer runs a plain `git revert` of those lane commits and uses no Edit on protected files.
+   Then the writer runs the re-anchor tool on each restored row. Its record binds the exact line ranges.
+   The proof is a record entry with `base_equal` true: the row ranges have an empty diff against the merge base.
+   Any byte difference from the merge base leaves the restore route. That row follows the re-anchor route or goes to the CoC.
+5. Add: the writer adds rows for the PR's own new code, each with a claim, a designated test, a subject and a mutant.
+6. Authorization record: each successful tool run writes a generated record in the Git directory and prints its path.
+   The record names the lane, base, head, row IDs, exact line ranges, expected counts and the unchanged mutant check.
    The record expires on any head change. Rerun the tool at the frozen head before review; that run changes zero statements.
-6. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
-7. Review: one independent reviewer confirms that every changed, retired or added row is not weaker.
+7. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
+8. Review: one independent reviewer confirms that every changed, retired, restored or added row is not weaker.
    Not weaker means the same test, the same claim and the same mutant intent, or a replacement that guards as tightly.
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](../skills/ship/references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
-8. The mutation proof runs after merge, under its execution admission.
+9. The mutation proof runs after merge, under its execution admission.
 
 Send these rows to the CoC: a changed claim, a new or changed mutant on an existing row, a changed designated test, a retirement without a replacement, and a row that the PR's own diff does not break.
 The CoC audits a 10% sample of lane-owned row changes.

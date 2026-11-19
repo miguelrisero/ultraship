@@ -32,7 +32,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Authority: the owner\'s global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.',
                 "Scope: each row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it.",
                 'Admit the writer with the [row re-anchor tool admission record]',
-                'The record names the lane, base, head, row IDs, expected counts and the unchanged mutant check.',
+                'The record names the lane, base, head, row IDs, exact line ranges, expected counts and the unchanged mutant check.',
                 'The record expires on any head change. Rerun the tool at the frozen head before review; that run changes zero statements.',
                 'the anchor guard requires each anchor count to equal the row\'s expected count, not only a nonzero count.',
                 'The mutation proof runs after merge, under its execution admission.',
@@ -66,8 +66,21 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The replacement row guards the new code.',
                 'The anchor guard fails a removed row without a `[[retired]]` entry.',
                 "the writer adds rows for the PR's own new code, each with a claim, a designated test, a subject and a mutant.",
-                'one independent reviewer confirms that every changed, retired or added row is not weaker.',
+                'one independent reviewer confirms that every changed, retired, restored or added row is not weaker.',
                 'The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record]',
+            ):
+                with self.subTest(path=name, requirement=requirement):
+                    self.assertIn(requirement, route)
+
+    def test_lane_owned_restore_requires_own_unmerged_commits_and_exact_base_bytes(self):
+        for name in ROUTE_CARRIERS:
+            route = section((SHIP / name).read_text(), '### Lane-owned row route')
+            for requirement in (
+                'Restore: a lane may restore rows that only its own unmerged commits changed, back to their merge-base bytes.',
+                'The writer runs a plain `git revert` of those lane commits and uses no Edit on protected files.',
+                'Then the writer runs the re-anchor tool on each restored row. Its record binds the exact line ranges.',
+                'The proof is a record entry with `base_equal` true: the row ranges have an empty diff against the merge base.',
+                'Any byte difference from the merge base leaves the restore route. That row follows the re-anchor route or goes to the CoC.',
             ):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, route)
@@ -88,6 +101,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Confirm that the generated authorization record names the frozen head, the row ID, the expected count and an unchanged mutant.',
                 'For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.',
                 'Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.',
+                "For each restored row, confirm that only the lane's own unmerged commits changed it, and that its record entry shows `base_equal` true.",
+                'Check independently that each authorized restored range has an empty diff against the merge base.',
                 'For each added row, confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.',
                 'Return a blocking finding for a changed claim, a changed mutant, a changed test or a weaker row. The CoC decides those rows.',
                 'Report only paths, row IDs, fields and content-free findings. Quote no row text.',
