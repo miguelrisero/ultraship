@@ -122,9 +122,13 @@ def hold_wall(text):
             raise FormatError(['Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.'])
 
 
-def check(text, kind='result'):
+def check_unicode(text):
     if re.search(r'[\ud800-\udfff]', text):
         raise ValueError('Use valid Unicode in the message or Input.')
+
+
+def check(text, kind='result'):
+    check_unicode(text)
     visible = ''.join(VisibleText(text).parts)
     plain = peer_text(text) if kind == 'peer' else visible
     # A peer reads plain text; main's HTML view of the raw text keeps every word and sentence refusal main made.
@@ -172,6 +176,9 @@ def outgoing(event):
         nonlocal formatting_only
         tool, args = event.get('tool_name', ''), event.get('tool_input') or {}
         if tool == 'SendMessage':
+            for field in ('message', 'content', 'summary'):
+                if args.get(field) is not None:
+                    collect(check_unicode, args[field])
             text = sendmessage_body(args)
             if text:  # Native subscriptions and lifecycle controls can have no prose body.
                 collect(check, text, 'peer')

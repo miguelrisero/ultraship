@@ -846,6 +846,13 @@ class TextLintTests(unittest.TestCase):
                 self.assertEqual(result.get('permissionDecision'), 'deny')
                 self.assertIn('valid Unicode', result['permissionDecisionReason'])
 
+    def test_invalid_unicode_in_message_summary_remains_denied(self):
+        event = self.event('Facts: Checks pass.\nDecision: Continue.\nNext: Resume.', summary='\ud800')
+        result = self.hook_output(event)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get('permissionDecision'), 'deny')
+        self.assertIn('valid Unicode', result['permissionDecisionReason'])
+
     def test_conflicting_classification_attributes_keep_input_denied(self):
         for tool in ('create_input', 'update_input'):
             for tag in ('<meta name="output-kind" content="unknown" content="decision">',
