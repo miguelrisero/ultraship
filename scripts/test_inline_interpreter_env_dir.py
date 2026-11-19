@@ -344,6 +344,12 @@ class EnvDirectoryTests(unittest.TestCase):
             self.assertTrue(self.denied(command, cwd=directory))
             self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
+    def test_quoted_assignment_like_commands_do_not_hide_launchers(self):
+        for word in ("'X=1'", '"X=1"'):
+            with self.subTest(word=word):
+                self.assertTrue(self.denied(f'{word} python3 scripts/x.py --label xargs'))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
     def test_launchers_behind_unknown_wrappers_and_redirections_are_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             script = Path(directory) / 'p.js'

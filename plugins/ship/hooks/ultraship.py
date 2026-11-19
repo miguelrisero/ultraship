@@ -2786,8 +2786,7 @@ def shell_changes_paths(tokens):
 
 def shell_launches_commands(tokens, command_positions):
     words = list(shell_without_redirections(tokens))
-    first = next((word for word in words
-                  if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', word[1], re.S)), None)
+    first = next((word for word in words if not TEST_SHAPE_ASSIGNMENT.match(word[0])), None)
     if first and first[2] in command_positions and interpreter_name(first[1]):
         return False
     return any(os.path.basename(word[1]) in {'xargs', 'parallel'}
