@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Derive a row's paired fields while preserving its whole-file mutant hunks."""
 import argparse
+from collections import Counter
 from contextlib import contextmanager
 import difflib
 import fcntl
@@ -37,13 +38,16 @@ def basic(value):
     return encoded
 
 
-def row_statements(text, row_id):
+def scan_rows(text):
     """Scan complete statements so string contents never become table headers."""
     source = lines(text)
-    rows, split_rows, current, index, nested = [], set(), None, 0, False
+    rows, split_rows, standalone_blanks = [], set(), set()
+    current, index, nested = None, 0, False
     while index < len(source):
         start = index
         if not source[index].strip() or source[index].lstrip().startswith('#'):
+            if not source[index].strip(' \t\r\n'):
+                standalone_blanks.add(index)
             index += 1
             continue
         while True:
@@ -72,6 +76,11 @@ def row_statements(text, row_id):
                 current = None
         elif current is not None:
             current.append((start, index, statement, {} if nested else parsed))
+    return rows, split_rows, standalone_blanks
+
+
+def row_statements(text, row_id):
+    rows, split_rows, _ = scan_rows(text)
     matching = [(start, row) for start, row in rows if any(item[3].get('id') == row_id for item in row)]
     require(len(matching) == 1, 'row ID must match exactly once')
     first, selected = matching[0]
@@ -93,8 +102,144 @@ def row_statements(text, row_id):
     return values, fields, (first + 1, selected[-1][1])
 
 
+def scanned_extents(rows, split_rows):
+    extents = {}
+    for start, row in rows:
+        for _, _, _, parsed in row:
+            if 'id' in parsed:
+                row_id = parsed['id']
+                require(row_id not in extents, 'row ID must match exactly once')
+                require(start not in split_rows, 'row table is not contiguous')
+                extents[row_id] = (start, row[-1][1])
+    return extents
+
+
 def opcodes(a, b):
     return difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+
+
+def separator_lines(rows, blanks):
+    separators = blanks.copy()
+    for start, row in rows:
+        if row:
+            separators.difference_update(range(start, row[-1][1]))
+    return separators
+
+
+def mask_rows(source, extents, restored_ids, separators):
+    starts = {start: (key, end) for key, (start, end) in extents.items() if key in restored_ids}
+    masked, index = [], 0
+    while index < len(source):
+        if index in starts:
+            key, index = starts[index]
+            masked.append(((key,), False))
+        else:
+            masked.append((source[index], index in separators))
+            index += 1
+    return masked
+
+
+def is_row(item):
+    return isinstance(item[0], tuple)
+
+
+def restoration_items(base, head):
+    def alignment(items):
+        # Keep separators on the same side of a row when repeated blanks align.
+        keys, following_row = [], None
+        for item in reversed(items):
+            keys.append((item, following_row if item[1] else None))
+            if not item[1]:
+                following_row = item[0] if is_row(item) else None
+        return keys[::-1]
+
+    for tag, i1, i2, j1, j2 in opcodes(alignment(base), alignment(head)):
+        base_chunk, head_chunk = base[i1:i2], head[j1:j2]
+        kept = [(item, not is_row(item)) for item in head_chunk]
+        if tag != 'equal':
+            require(not any(map(is_row, head_chunk)), 'restored row moved')
+        if tag == 'equal' or not any(map(is_row, base_chunk)):
+            yield from kept
+            continue
+        fixed = [index for index, item in enumerate(base_chunk) if not is_row(item) and not item[1]]
+        added = [(item, False) for item in base_chunk]
+        if fixed:
+            first, last = fixed[0], fixed[-1]
+            require(not any(map(is_row, base_chunk[first:last + 1])), 'restored row position is ambiguous')
+            yield from added[:first] + kept + added[last + 1:]
+        else:
+            require(all(item[1] for item in head_chunk), 'restored row position is ambiguous')
+            yield from added + kept
+
+
+def restoration_position(expected_items, actual, row_id):
+    expected = list(expected_items)
+    if [item for item, _ in expected] != actual:
+        return None
+    head_count = 0
+    for item, from_head in expected:
+        if item[0] == (row_id,):
+            return head_count
+        head_count += from_head
+    return None
+
+
+def restoration_check(base_text, start_text, restored_text, row_id):
+    b, h, f = map(lines, (base_text, start_text, restored_text))
+    b_rows, b_split, b_blanks = scan_rows(base_text)
+    h_rows, h_split, h_blanks = scan_rows(start_text)
+    f_rows, f_split, f_blanks = scan_rows(restored_text)
+    eb = scanned_extents(b_rows, b_split)
+    eh, ef = scanned_extents(h_rows, h_split), scanned_extents(f_rows, f_split)
+    for text, extents in ((base_text, eb), (start_text, eh), (restored_text, ef)):
+        parsed_rows = tomllib.loads(text).get('row', [])
+        require(isinstance(parsed_rows, list) and all(isinstance(row, dict) for row in parsed_rows)
+                and Counter(row['id'] for row in parsed_rows if 'id' in row) == Counter(extents.keys()),
+                'row ID must match exactly once')
+
+    def row_lines(source, extents, key):
+        return source[slice(*extents[key])] if key in extents else None
+
+    require(row_id in eb, 'row missing at the merge base')
+    require(row_id in ef, 'row missing at the restoration commit')
+    restored = row_lines(f, ef, row_id)
+    require(restored == row_lines(b, eb, row_id), 'restored row differs from the merge base')
+    require(restored != row_lines(h, eh, row_id), 'restoration commit leaves the row unchanged')
+
+    restored_ids = [key for key in ef if key in eb
+                    and row_lines(f, ef, key) == row_lines(b, eb, key)
+                    and row_lines(f, ef, key) != row_lines(h, eh, key)]
+
+    def outside_rows(source, rows, extents, blanks):
+        omitted = blanks.copy()
+        # Only blank separators outside row tables may return with a row.
+        for start, row in rows:
+            if row:
+                omitted.difference_update(range(start, row[-1][1]))
+        for key in restored_ids:
+            if key in extents:
+                omitted.update(range(*extents[key]))
+        return [line for index, line in enumerate(source) if index not in omitted]
+
+    require(outside_rows(f, f_rows, ef, f_blanks) == outside_rows(h, h_rows, eh, h_blanks),
+            'restoration changed bytes outside restored rows')
+
+    base = mask_rows(b, eb, restored_ids, separator_lines(b_rows, b_blanks))
+    head = mask_rows(h, eh, restored_ids, separator_lines(h_rows, h_blanks))
+    final = mask_rows(f, ef, restored_ids, separator_lines(f_rows, f_blanks))
+    insert_after = restoration_position(restoration_items(base, head), final, row_id)
+    require(insert_after is not None, 'restoration changed bytes outside restored rows')
+
+    def line_range(extents):
+        if row_id in extents:
+            start, end = extents[row_id]
+            return [start + 1, end]
+        return None
+
+    return {'restoration_lines': line_range(ef), 'starting_lines': line_range(eh),
+            'insert_after': insert_after,
+            'restored_rows': len(restored_ids), 'restoration_base_equal': True,
+            'restoration_outside_equal': True}
 
 
 def hunks(before, after):
@@ -223,6 +368,9 @@ def run(args):
         return subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', str(row_file.parent), *words],
                               check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
 
+    def commit_sha(ref):
+        return git('rev-parse', '--verify', '--end-of-options', ref + '^{commit}').decode().strip()
+
     root = Path(git('rev-parse', '--show-toplevel').decode().strip()).resolve()
     relative = row_file.relative_to(root).as_posix()
     subject = PurePosixPath(args.subject)
@@ -230,8 +378,7 @@ def run(args):
             and '..' not in subject.parts and subject.parts, 'subject must be repository-relative')
     lane = git('branch', '--show-current').decode().rstrip('\n')
     require(lane, 'lane branch required')
-    base_sha = git('rev-parse', '--verify', '--end-of-options', args.base + '^{commit}').decode().strip()
-    head_sha = git('rev-parse', '--verify', '--end-of-options', args.head + '^{commit}').decode().strip()
+    base_sha, head_sha = commit_sha(args.base), commit_sha(args.head)
     require(head_sha == git('rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
     record = Path(git('rev-parse', '--path-format=absolute', '--git-path', 'ship/row-auth.json').decode().rstrip('\n'))
 
@@ -241,7 +388,36 @@ def run(args):
     original = row_file.read_bytes()
     require(original == blob(head_sha, relative), 'working row file differs from head')
     text = original.decode('utf-8')
-    base_values, base_fields, base_extent = row_statements(blob(base_sha, relative).decode('utf-8'), args.row_id)
+    base_text = blob(base_sha, relative).decode('utf-8')
+    restoration_fields = {}
+    if args.restoration is not None:
+        restoration = commit_sha(args.restoration)
+        try:
+            git('merge-base', '--is-ancestor', restoration, head_sha)
+        except subprocess.CalledProcessError:
+            raise Refused('restoration must be HEAD or an ancestor of HEAD') from None
+        parents = git('rev-list', '--parents', '-n', '1', restoration).decode().split()
+        require(len(parents) == 2, 'restoration must have exactly one parent')
+        restoration_parent = parents[1]
+        try:
+            git('merge-base', '--is-ancestor', base_sha, restoration_parent)
+        except subprocess.CalledProcessError:
+            raise Refused('merge base must be an ancestor of the restoration parent') from None
+        reason = 'restoration commit must change only the row file'
+        changes = git('diff-tree', '-r', '--raw', '--no-commit-id', '--no-renames', '-z',
+                      restoration_parent, restoration).split(b'\0')
+        path = relative.encode('utf-8')
+        require(len(changes) == 3 and changes[1] == path and changes[2] == b'', reason)
+        old_mode, mode, _, _, status = changes[0].split()
+        base_entry = git('ls-tree', '--full-tree', '-z', base_sha, '--', ':(literal)' + relative)
+        require(mode in (b'100644', b'100755') and base_entry.startswith(mode + b' blob ')
+                and base_entry.endswith(b'\t' + path + b'\0')
+                and (status, old_mode) in ((b'A', b':000000'), (b'M', b':' + mode)), reason)
+        start_text = '' if status == b'A' else blob(restoration_parent, relative).decode('utf-8')
+        restoration_fields = {'restoration': restoration, 'restoration_parent': restoration_parent,
+                              **restoration_check(base_text, start_text, blob(restoration, relative).decode('utf-8'),
+                                                  args.row_id)}
+    base_values, base_fields, base_extent = row_statements(base_text, args.row_id)
     head_values, head_fields, _ = row_statements(text, args.row_id)
     require(base_values['file'] == head_values['file'] == args.subject, 'subject mismatch')
     require([field[2] for key, field in base_fields.items() if key not in ('old', 'new')]
@@ -285,7 +461,7 @@ def run(args):
     entry = {'row_file': relative, 'row_id': args.row_id, 'subject': args.subject,
              'expected_count': head_values.get('expect', 1), 'head_old_count': head.count(old),
              'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements),
-             'base_lines': base_extent, 'lines': edited_extent}
+             'base_lines': base_extent, 'lines': edited_extent, **restoration_fields}
     identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
 
     def check_worktree(phase):
@@ -320,6 +496,7 @@ def main():
         parser = Parser(allow_abbrev=False, add_help=False)
         for name in ('row-file', 'row-id', 'subject', 'base', 'head'):
             parser.add_argument('--' + name, required=True)
+        parser.add_argument('--restoration')
         run(parser.parse_args())
         return 0
     except Refused as error:

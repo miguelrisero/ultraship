@@ -40,6 +40,14 @@ Use the record fields that the brief copies from the tool output. Read no file u
 Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.
 For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.
 Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.
+For each restored row, confirm from the copied record fields `restoration_base_equal=true`, `restoration_outside_equal=true` and `changed_statements=0`.
+Confirm that `restoration` and `restoration_parent` match the brief, and that `starting_lines` is `null` for a row that the starting head deletes.
+Refuse unless the record's base equals the verified merge base that the brief names.
+Group the restored rows by restoration commit and row file. Match every restored row ID to the approved scope.
+Confirm that restored_rows in each entry equals the number of approved row IDs in its group.
+Refuse a restored row outside that scope.
+Confirm from the brief's commit list that only the lane's own unmerged commits changed the row file after the merge base.
+Read the row lines at the merge base and the frozen head. Confirm that they are equal, or that only a re-anchor changed the paired fields.
 Read each row in the base checkout and the frozen-head checkout that the admission record lists, at the base and head line ranges.
 For each added row, grep the base copy of the row file for its ID and confirm zero matches.
 When the brief records the verified base commit and a root-level `git ls-tree` result with exit status 0 and empty output, use that proof in place of the grep.

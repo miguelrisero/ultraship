@@ -245,7 +245,7 @@ Every other commit keeps the containment requirement unchanged.
 
 A lane re-anchors, retires or adds the protected mutation rows that its own diff breaks or needs. No CoC decision file is required.
 Authority: the owner's global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.
-Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, and each new row that step 4 admits.
+Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.
 
 1. Admit the writer with the [row re-anchor tool admission record](references/owner-decisions.md#row-re-anchor-tool-admission-record).
 2. Re-anchor: the writer runs the sanctioned re-anchor tool once per row, then commits the row file alone.
@@ -261,16 +261,35 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.
    The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.
    Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
-   The driver marks the draft ready only after the review in step 7 passes at the exact head.
-5. Authorization record: each tool run that changes zero statements writes a generated record in the Git directory.
+   The driver marks the draft ready only after the review in step 8 passes at the exact head.
+5. Restore: the writer returns rows that only the lane's own unmerged commits changed to their bytes at the merge base.
+   A restored row needs no failing CI report, so a row that the starting head deletes stays in scope.
+   Its evidence is the merge-base diff and the tool fields `starting_lines`, `base_lines` and `restoration_lines`.
+   When a lane commit changed only those rows, the writer runs a plain `git revert` of that commit.
+   When it also changed other lines, the writer uses native Edit only for rows that exist at the starting head, and keeps the other edits.
+   A row that such a mixed lane commit deleted leaves the restore route.
+   That row follows the re-anchor route or goes to the CoC.
+   The writer commits the restoration alone. Then it runs the re-anchor tool on each restored row.
+   That run passes the merge base as `--base` and the restoration commit as `--restoration`.
+   The tool binds the restoration commit and its own parent, the starting head. A later commit never moves that parent.
+   The tool refuses unless each restored row equals the merge base byte for byte and the rest of the commit equals the starting head.
+   Only blank separator lines between tables, outside every row, may return with a restored row. Every other byte stays exact.
+   It also refuses a row ID that is not unique, and it prints both results and `insert_after` as `key=value` lines.
+   Any byte difference leaves the restore route. That row follows the re-anchor route or goes to the CoC.
+   The driver copies the lane commits that changed each row file after the merge base into the reviewer brief.
+   The driver names the verified merge base in the reviewer brief. The reviewer refuses unless the record's base equals it.
+   The reviewer matches every restored row ID in the record to the approved scope before publication.
+6. Authorization record: each tool run that changes zero statements writes a generated record in the Git directory.
    The record names the lane, base, head, row IDs, base and head line ranges, expected counts and the unchanged mutant check.
+   A restore entry also names the restoration commit, its parent, the three row ranges and `insert_after`.
    The tool prints the record path and every record field as `key=value` lines, with no row text.
    The record expires on any head change. Rerun the tool at the frozen head for each re-anchored row; that run changes zero statements.
-   A CoC-approved row change gets no tool run. Its decision file and the review in step 7 cover it.
+   On the restore route, that rerun keeps `--restoration` and prints `changed_statements=0`.
+   A CoC-approved row change gets no tool run. Its decision file and the review in step 8 cover it.
    A run that changes statements writes no record entry and unfreezes the head. The writer commits the edit and reruns the tool.
    The driver copies the printed fields of the frozen-head run into the reviewer brief. The reviewer reads no file under `.git`.
-6. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
-7. Review: one independent reviewer confirms that every changed, retired or added row is not weaker.
+7. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
+8. Review: one independent reviewer confirms that every changed, retired, restored or added row is not weaker.
    Not weaker means the same test and the same mutant intent with the same claim or a CoC-approved narrowed claim, or a replacement that guards as tightly.
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
    The driver supplies read-only checkouts at the base and the frozen head. The admission record lists the row file in each checkout.
@@ -280,7 +299,7 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The driver then admits only the head copy.
    Any later push to the PR needs a new review at the pushed head. Return a ready PR to draft before that push.
    Mark it ready again only after the new review passes.
-8. The mutation proof runs after merge, under its execution admission.
+9. The mutation proof runs after merge, under its execution admission.
 
 Send these rows to the CoC: a new or changed mutant on an existing row, a changed designated test, a retirement without a replacement, and a row that the PR's own diff does not break.
 A lane may narrow the claim of a row that its own PR breaks, under a CoC approval.
@@ -290,7 +309,7 @@ A CoC approval is a frozen decision file named by absolute path and SHA256.
 It binds the row ID, the source commit, the fields and their replacement values.
 The writer verifies its SHA256 and bindings before the edit. The driver verifies them again at the frozen head and records the result in the reviewer brief.
 The writer applies only those fields with native Edit and `replace_all=false`, then commits the row file alone.
-Step 7 reviews that row, and a follow-up row guards any new code.
+Step 8 reviews that row, and a follow-up row guards any new code.
 The CoC audits a 10% sample of lane-owned row changes.
 The writer locates a named row by its row ID and reads only that row's lines. It never parses or searches a whole row file.
 Keep row TOML text and pair bytes out of messages, briefs and PR bodies. Name each edit by path, row ID and field.
