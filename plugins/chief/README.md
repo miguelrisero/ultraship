@@ -1,6 +1,7 @@
 # chief
 
-Coordinate multi-lane engineering work from the main session. Chief plans, dispatches one `ship:driver` per lane, keeps a persistent board, and closes lanes at verified pull requests.
+Coordinate multi-lane engineering work from the main session. Chief plans, dispatches one `ship:driver` per lane, and keeps a persistent board.
+Chief reports on transitions and deadlines. Chief tracks each ticket until the change passes production verification.
 
 ```text
 /chief:run <task>

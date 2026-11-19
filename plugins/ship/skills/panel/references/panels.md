@@ -5,13 +5,13 @@
 | Tier | Seats (`ship:` prefix) | Use |
 |---|---|---|
 | `light` | `reviewer--luna`, `reviewer--astra`, `reviewer--sol` | Cheap checks |
-| `design` | `reviewer--astra`, `reviewer--fable`, `reviewer--kimi` | Design and architecture |
-| `high` (default) | `reviewer--sol`, `reviewer--astra`, `reviewer--kimi` | Plan refutation and branch review |
-| `final` | `reviewer--sol`, `reviewer--fable`, `reviewer--kimi` | Final review before push |
+| `design` | `reviewer--astra`, `reviewer--fable`, `reviewer--luna` | Design and architecture |
+| `high` (default) | `reviewer--sol`, `reviewer--astra`, `reviewer--opus` | Plan refutation and branch review |
+| `final` | `reviewer--sol`, `reviewer--fable`, `reviewer--luna` | Final review before push |
 
-`reviewer--fable` uses `claude-opus-5-5` at xhigh effort and is a required seat in `design` and `final`. When it is unavailable, `reviewer--astra` takes the seat; in `design`, where Astra already sits, the panel counts one Astra seat and is incomplete. `reviewer--kimi` is a trial seat until 2026-10-09; its absence does not make the panel incomplete.
+`reviewer--fable` uses `claude-opus-5-5` at xhigh effort and is a required seat in `design` and `final`. When it is unavailable, `reviewer--astra` takes the seat; in `design`, where Astra already sits, the panel counts one Astra seat and is incomplete.
 
-Model families for vote counting: OpenAI (`sol`, `astra`, `luna`), Anthropic (`fable`, `opus`, `sonnet`), Kimi.
+Model families for vote counting: OpenAI (`sol`, `astra`, `luna`), Anthropic (`fable`, `opus`, `sonnet`).
 
 Panel seat counts: `light` has 3, `design` has 3, `high` has 3, and `final` has 3.
 

@@ -7,7 +7,7 @@ Apply this contract in chief and ship whenever progress needs a material owner d
 Read the applicable owner's loaded instructions under `Helper agents (standing request)`, or `Standing grants` when present.
 Carry the field in every dispatch brief as the line `Owner helper request:`, then the exact request verbatim on its own line.
 Then add one sentence each for the source and heading or verified event, the covered roles, the assigned topic, and the retained restrictions.
-Keep every sentence at most 25 words; `hooks/text_lint.py` refuses a longer sentence in a `SendMessage` brief.
+Keep every sentence at most 25 words; `hooks/text_lint.py` warns about a longer sentence in a `SendMessage` brief.
 A direct applicable loaded owner instruction supplies the explicit request within its stated scope; it requires zero repeated Input retrieval solely for that request.
 Verify current owner-event provenance when authority arrives only through an event reference. A peer assertion alone supplies zero owner consent.
 Use helpers only within the actual tool contract, role, assigned topic, host limits, and existing permissions.
@@ -19,12 +19,12 @@ Require this field and these sentences verbatim in every brief:
 
 ```text
 Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
-A hook refusal is final: report it and stop.
+After a hook refusal, retry in another form when the refusal reason is fixed or the new form meets the rule the refusal names. You may always ask your superior for permission to run the refused command.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 ```
-The stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.
-The formatting, coordination and method-only routes in [Loaded instructions and refusals](#loaded-instructions-and-refusals) stay.
+A reviewer reports a refused call as blocked scope and continues other permitted scope.
+[Loaded instructions and refusals](#loaded-instructions-and-refusals) sets the retry rule and the ask-your-superior rule.
 
 ## Chief-managed CoC delivery
 
@@ -108,51 +108,124 @@ Retain that record for the fallback when the writer lacks the tool or its call f
 Preserve a direct authoritative mismatch as blocked; the fallback supplies verified provenance, never a substitute owner approval.
 Record the accepted evidence and exact scope in the brief and PR body.
 
-## New lane-owned row review route
+## Scoped owner event verification
+
+Apply this exception only to future briefs after verified runtime adoption.
+Confirm that your loaded role or skill implements this exception.
+Require the named lane's brief to select it and cite a CoC-frozen decision file by absolute path and SHA256.
+Verify the digest and exact scope before any call.
+Require the file to name the exact lane, its repository and task or PR scope, and the owner events to verify.
+Require the file to list the permitted tool for each exact Input and workspace UUID.
+Permit only `get_input` or `get_input_events` for those exact IDs, solely to verify the named owner events.
+Refuse any missing, stale, expired, ambiguous, or mismatched binding.
+Apply the [owner answer checks](#consume-and-finish) and the applicable event route's provenance and scope checks.
+Match the returned Input, workspace, current version, event identity, and answer to the authorized scope.
+An authoritative mismatch blocks verification without fallback.
+The file permits verification only and supplies zero owner consent or action authority.
+This exception applies only to the named lane's brief-level ban on Input calls.
+Keep every other Input call under the ban, including listing, creation, updates, answers, and closure.
+Limit this exception to the named lane and the exact tool and IDs in the decision file.
+Preserve reviewer MCP denials, all independent hook and tool restrictions, and every effective refusal.
+
+## Standalone main-row repair
 
 Apply this route only to future briefs after verified runtime adoption.
-Source delivery grants zero runtime-adoption authority.
-Source delivery grants zero retry authority.
-Source delivery grants zero installation authority.
-Source delivery grants zero publication authority.
-Preserve every existing refusal, tool and hook denial, and affected-session hold.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
-Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
-Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
-A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
-It made zero protected reads and named no content, scope, protected-access, hook, permission or tool finding.
-Its cause resolves only when a new CoC decision, with a new SHA256, quotes the refusal verbatim, names that sole cause and records its zero protected reads.
-The next agent in the refusing role must also find the selected route heading in its own loaded contract by native Read, under a section that implements that route and does not refuse it.
-A follow-on refusal is a refusal whose only reason is that an earlier refusal stayed effective; it also made zero protected reads.
-A follow-on refusal resolves with that earlier refusal when this rule resolves the earlier one and the same CoC decision quotes the follow-on refusal verbatim.
-Hook, permission and tool denials, `REFUSED` tool results, and any refusal with a reason outside these two definitions never qualify.
-The fresh disposition and every other route requirement still apply.
+Apply it outside the lane-owned row route.
+Require a repair-only lane whose entire diff changes only the named rows' paired `old` and `new` fields.
+Use this route only as the follow-up row repair for code from an earlier merged PR.
+Before any protected access, read `~/.claude/CLAUDE.md` directly under `CoC decisions (standing grant)`.
+Verify the CoC testing delegation and the clause for adapting rows when a PR makes the stored mutant impossible to apply.
+Verify that the clause requires a follow-up row for new code and independent not-weaker review.
+Require the frozen CoC decision to identify this repair as the follow-up for the named breaking PR under that grant.
+Record the path, heading, verified grant, and verification time.
+Refuse a missing, unreadable, or mismatched grant; accept zero relay and require zero per-row owner events.
 
-## Draft PR for new lane-owned row review
+Require the brief to name the CoC-frozen decision file by absolute path and SHA256.
+Bind the repository, exact repair lane and branch, and repair PR URL when assigned.
+Bind the permitted actors and operations, and the full main and pre-edit commit and tree identities.
+Bind every affected row to its earlier breaking PR, full merged commit SHA, and pre-merge main SHA.
+Verify that the breaking commit is an ancestor of or equals the bound main commit.
+Bind each exact stored row ID, canonical row file, subject file, and approved line extent to the applicable commit.
+Keep each decision file immutable. Freeze a new file for any additional scope or evidence.
+A discovery decision permits only its named reads. Bind the causal proof and `old`/`new` field scope in the edit decision.
+Before review, bind the frozen before and after commits, read-only trees, and exact row extents in a decision file that also binds the edit decision.
+Verify the digest and every applicable binding before access or editing.
+The read-only reviewer checks the driver's digest evidence and the frozen file's bindings without running a digest command.
+List the decision files, shared reference, owner grant, and exact role-specific read paths in each applicable brief.
+Refuse missing, stale, expired, mismatched, ambiguous, or unlawfully obtained evidence.
 
-Apply this section only with the new lane-owned row review route and its runtime-adoption boundary.
-Permit the driver to open the PR that carries the new rows as a draft before protected review.
-The draft supplies the repository and PR number that the read admission and receipt name.
-In this route, publication means marking the draft ready for review, pushing to a ready PR, posting `/merge` or any other merge.
-Opening the draft and pushing to it while it stays a draft publish nothing.
-Bind the receipt to the draft PR number and frozen final commit.
-A push that moves the draft head away from the frozen final commit invalidates the receipt and its approval.
-Before each publication step, confirm that the PR head equals the frozen final commit.
-Return a ready PR to draft before any further push, then repeat the review and approval.
+Use only whole-line grep for the exact stored `id = "<ID>"` line in each named file, with zero context.
+Read only the approved row extent, from its `[[` header to the line before the next table, or EOF for the last row.
+Refuse an ambiguous ID or extent. Forbid adjacent-row reads, broader searches, and whole-file reads or parsing.
+Require an active row at the bound main commit.
+Refuse an existing `[[retired]]` row on this same-row route.
+Preserve the retirement record.
+Use the [lane-owned row route](../SKILL.md#lane-owned-row-route) for its replacement row.
+Require a new row ID and separate creation authority for the replacement.
+Require proof that each stored `old` anchor met its expected count before the breaking commit.
+Require proof that it counts zero at that commit and on the bound main.
+Require scoped source evidence that the named merge caused the zero count and that the repair lane changed no subject code.
+Use the bound pre-merge main and merged commit to show that the breaking PR changed the guarded code itself.
+Require positive evidence that this code change made the stored mutant impossible to apply at the guarded site.
+Require the frozen decision to bind this evidence to the follow-up under the owner standing grant before authorizing the edit.
+Require one disposition for each row: a landed designated-test change or mutant adaptation under that grant, or a CoC decision receipt.
+A CoC decision receipt is the disposition only when the breaking change is not the repair lane's own diff and no landed disposition exists.
+The receipt states that it is the disposition and names the row ID, the breaking commit and the paired-field re-anchor.
+The receipt also records the evidence that no landed disposition exists for the row in every commit from the breaking commit through the bound main commit.
+It names that range by the full breaking commit SHA and the full bound main SHA.
+Before publication, recheck that range through the current main SHA. Record that SHA and the result in a separate note beside the frozen receipt digest. A disposition that landed after the bound main commit invalidates the receipt.
+The receipt itself stays unchanged.
+Name the receipt by absolute path and SHA256. Verify the digest before any protected access.
+For a landed disposition, require the disposition record to cite the landed row change and its CoC decision.
+For a landed disposition, require a receipt for the independent not-weaker review of that disposition.
+For a landed disposition, require that reviewer to differ from the breaking PR author and the person who applied the disposition.
+For a landed disposition, bind the review receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.
+For a landed disposition, verify that the reviewed disposition is the one that landed for the named row.
+A CoC decision receipt needs no landed disposition and no prior disposition review.
+For a CoC decision receipt, the independent repair review below is the one not-weaker review.
+That reviewer also differs from the breaking PR author.
+Record the disposition and its evidence references in the frozen edit decision, with the receipt path and SHA256 for a CoC receipt.
+Bind them to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.
+Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or landed-disposition review.
+For a CoC decision receipt, require the independent repair review below before publication.
+A zero count alone supplies zero repair authority. A disposition label supplies zero proof.
+Before editing, confirm that the lane head equals the bound pre-edit commit and that the named rows and subjects match bound main.
+Use one native Edit per row with `replace_all=false` and a unique `old_string` within the approved extent that includes the row ID.
+Refuse a missing or ambiguous match without widening the scope. Keep the row pending after a hook refusal. Ask the driver for a permitted route under the protected row rules.
+Change only `old` and `new`. Require the repaired anchor to count exactly once at the current source site.
+Preserve the identical mutant operation, row ID, claim, subject, designated test, assertions, pins, bounds, and every other field.
+The driver applies zero protected edits. The writer has zero publication authority.
+
+Require independent read-only review by a reviewer who differs from the PR author and the applying writer.
+Bind the repair PR URL before review, even when the edit decision identified the lane by branch alone.
+The brief may independently authorize an unpublished draft to supply that URL.
+Keep the draft under every existing push and publication hold.
+Require the separate [reviewer admission record](#reviewer-admission-record-for-protected-row-reads) before any reviewer row read.
+Compare only the approved row extents in the frozen before and after trees.
+Confirm the causal proof, paired-field-only repair, identical mutant operation, and the same guarantee for every row.
+Require content-free evidence that the repair diff contains zero other edits.
+Require a CoC-approved frozen review receipt before publication. Bind its path and SHA256 to the decision file path and SHA256.
+Match the receipt to the reviewer, approving verdict, admission, repository, lane and PR, exact rows and fields, source evidence, and frozen final commit.
+Recheck those bindings and the publication head before publishing. Any change to the bound authority, scope, source, or evidence invalidates approval.
+Keep protected bytes out of briefs, reports, receipts, and PR bodies.
+Keep all mutation, checker, selector, CI, and GO requirements under separate applicable execution admission.
+Keep mutation proof after merge and preserve the existing CI runner and merge queue authority.
+Source delivery grants zero runtime-adoption, retry, installation, or publication authority.
+Preserve all other routes, higher-priority instructions, effective refusals, hook and tool denials, and affected-session holds.
 
 ## Reviewer admission record for protected row reads
 
 The pre hook denies every reviewer read under a `tests/mutation` path unless the driver admits it first.
-Every route that needs row reads uses this flow: lane-derived, lane-owned, retirement, and owner-approved subject.
+Use this record for lane-owned row review and standalone main-row repair review.
 
-1. Dispatch the reviewer. Make the first message ask it to return `ready` and read nothing.
+1. Dispatch `ship:reviewer--sol`, `ship:reviewer--opus`, or, for lane-owned row review only, `ship:reviewer--astra`.
+   Ask the reviewer to return `ready` and read nothing.
 2. Take the agent ID from the Agent tool result.
 3. Write `${XDG_STATE_HOME:-~/.local/state}/ultraship/row-review/<agent ID>.json` with native Write, with the full record as its content. In the file name, replace each character outside letters, digits, `_`, `.` and `-` with `_`.
 4. The record has four fields: `pr` (the PR URL), `agent_id` (the agent ID), `row_files` (the exact canonical absolute row-file paths) and `expires_at` (`YYYY-MM-DDTHH:MM:SSZ`, UTC, at most 4 hours ahead).
 5. Run `chmod 600` on the file. The hook refuses a file that the group or others can write.
-6. Record the `ready` result with `ledger.py append row-review-ready <agent-type>@<agent-id> <sha> ready` before you send the brief.
-7. Send the review brief to the reviewer with SendMessage.
-8. Delete the file when the review returns.
+6. Send the review brief to the reviewer with SendMessage.
+7. Delete the file when the review returns.
 
 In Bash, name the record by its literal absolute path for `chmod 600` and the final delete.
 The hook refuses a Bash command that names the state folder together with any of these triggers:
@@ -160,7 +233,6 @@ The hook refuses a Bash command that names the state folder together with any of
 - a backtick;
 - `cd` or `pushd`;
 - the text `text`.
-This guidance grants no replay of an earlier refused command and no other tool route.
 
 The hook admits Read of one listed file, and Grep with one listed file as `path` and no `glob` or `type`.
 Glob, LSP, and every other read under `tests/mutation` stay denied.
@@ -169,6 +241,8 @@ The hook denies Write, Edit, and NotebookEdit to the record folder for every age
 
 ## Row re-anchor tool admission record
 
+Use this record to admit the sanctioned re-anchor command on the lane-owned row route.
+
 1. Dispatch the writer with a first message that asks for `ready` and permits zero row reads.
 2. Take the agent ID from the Agent tool result.
 3. Write `${XDG_STATE_HOME:-~/.local/state}/ultraship/row-reanchor/<agent ID>.json` with native Write.
@@ -176,9 +250,8 @@ The hook denies Write, Edit, and NotebookEdit to the record folder for every age
 5. Include `pr` (the PR URL), `agent_id`, `row_file` (the canonical absolute protected path), `row_id` and `expires_at`.
 6. Set `expires_at` to `YYYY-MM-DDTHH:MM:SSZ`, UTC, later than now and at most 4 hours ahead.
 7. Run `chmod 600` on the record.
-8. Record the ready result with `ledger.py append row-reanchor-ready <agent-type>@<agent-id> <sha> ready`.
-9. Send the exact scoped brief, built from the [row re-anchor tool brief](#row-re-anchor-tool-brief), with SendMessage.
-10. Remove the record when the writer returns.
+8. Send the [row re-anchor tool brief](#row-re-anchor-tool-brief) with SendMessage.
+9. Remove the record when the writer returns.
 
 In Bash, name the record by its literal absolute path for `chmod 600` and the final removal.
 The hook refuses a Bash command that names the state folder together with any of these triggers:
@@ -186,7 +259,6 @@ The hook refuses a Bash command that names the state folder together with any of
 - a backtick;
 - `cd` or `pushd`;
 - the text `text`.
-This guidance grants no replay of an earlier refused command and no other tool route.
 
 The hook requires a regular record owned by its user, at most 64 KiB, without group or world write permission.
 Only the driver and the main session write admission records.
@@ -194,202 +266,44 @@ The record grants zero protected access or edit authority by itself.
 Keep the route's authority, independent review, execution admission and publication rules.
 
 Use exactly `python3 -I <plugin root>/skills/ship/scripts/row_reanchor.py --row-file <absolute path> --row-id <id> --subject <repository-relative path> --base <ref> --head <ref>`.
+On the restore route, append ` --restoration <commit>` with the full restoration commit SHA.
 Use single spaces and unquoted arguments, with nothing before or after the command.
 The hook accepts only its own plugin's tool path for a writer with a matching record.
 
 ## Row re-anchor tool brief
 
-The driver fills every field of this template and sends it as the step 9 brief.
-Each field supplies one lane-derived route requirement; a writer refuses a missing, unfilled or mismatched field.
-Put identifiers in backticks and keep each sentence at most 25 words, so the message passes `text_lint.py`.
-`text_lint.py` removes backtick spans, then counts a leading `-` and any punctuation left beside a removed span as words.
-It also refuses three or more words of 22 or more characters outside backticks, so times and file names go in backticks.
-Each template sentence leaves at least 12 words for its values; split a long value or an added line into short sentences.
-The brief carries no row text, pair bytes or TOML text.
+Fill every field and verify that it matches the lane, the source and the admission record.
+Apply the [helper standing request](#helper-standing-request) and the brief's routing and output contracts.
+Include the global grant and this reference in `Readable files`.
+Keep each sentence at most 25 words.
+Keep all row TOML text and pair bytes out of the brief.
 
 ```text
-Re-anchor row `<row ID>` of <PR URL> once with the sanctioned row re-anchor tool. Then commit the row file.
-
-Owner helper request: the owner's global CLAUDE.md, heading "Helper agents (standing request)", requests helper agents. Covered role: writer. Topic: <assigned topic>. Every permission, denial and gate stays in force.
-Readable files: `<worktree path>`, `<plugin root>/skills/ship/references/owner-decisions.md`, `<decision file path>`, `<tool route decision path>`, `<denial record path>`, `<attempt record path>`; every other path is out of scope
-A hook refusal is final: report it and stop.
-Never print a key value; never post outside bettergroupinc and miguelrisero.
-Never chain a glob listing into a write command.
+Re-anchor row `<row ID>` of `<PR URL>` under the lane-owned row route.
 
 Facts:
-- Route: lane-derived, with the sanctioned row re-anchor tool.
-- Standing rule: category 5 of owner rule Input `<rule Input UUID>` in workspace `<workspace UUID>`, choice `plugin_rule`.
-- Standing rule event: `<rule event ID>`, hash `<rule event hash>`, `answer_submitted`, `owner_ui`. <rule verifier name> read it with `get_input` at `<rule verification time>`.
-- Owner access: Input `<Input UUID>` version <version>, workspace `<workspace UUID>`, choice B, answer text null.
-- Owner event: `<event ID>`, hash `<event hash>`, `answer_submitted`, `owner_ui`, `no_answer_yet` false.
-- Verifier: <verifier name> read the event with `get_input` at `<verification time>`.
-- CoC decision: `<decision file path>`, SHA256 `<decision file SHA256>`.
-- Allowlist: row file `<row file path>`, stored row ID `<row ID>`, subject `<subject path>`.
-- CI: run `<run ID>`, attempt <attempt>, job `<job ID>` named `<job name>`, log <job log URL>.
-- CI failure: row `<row ID>` found <count> times, expected <expected>.
-- Tested merge `<tested merge SHA>`, tree `<tested merge tree SHA>`, parents `<CI base SHA>` and `<author head SHA>`.
-- Subject change: PR commit `<subject commit SHA>` changed `<subject path>` lines <subject line range> at the author head. From the CI base, the subject diff has <added> added and <deleted> deleted lines.
-- Same operation: the CoC reviewed the same-operation, same-claim reason at `<review time>`. The decision file above records it.
-- Tool base `<tool base SHA>`: <tool base reason>.
-- Method-only denials: <method-only denials>. They came at `<denial times>`. Lines <denial record lines> of `<denial record path>` record them. Each named only the method, never row content or scope.
-- Tool route: the CoC selected the sanctioned tool for this row in `<tool route decision path>`.
-- Earlier attempts: <earlier attempts>. Each made zero native Edit calls and zero tool runs, or ended only in a tool error under another head's grant. None drew `REFUSED` or a hook or permission refusal or denial other than the listed method-only denials. The tool attempt for this grant and head is therefore unused.
-- Attempt record: `<attempt record path>`. It names each earlier attempt's decision file, SHA256, head SHA and outcome.
-- Admission record: written for your agent ID, expires at `<expiry time>`.
-- Worktree: `<worktree path>` at `<author head SHA>`, clean.
+- Authority: the owner's global CLAUDE.md, heading "CoC decisions (standing grant)".
+- Row file: `<row file path>`.
+- Subject: `<subject path>` at commit `<subject commit SHA>`.
+- CI: run `<run ID>` found `<count>` anchors and expected `<expected>`.
+- Base: `<base SHA>`.
+- Worktree: `<worktree path>` at head `<head SHA>`.
+- Admission record: `<admission record path>`, expires at `<expiry time>`.
 
 Decision:
-- Verify the standing rule event with `get_input` against choice `plugin_rule`, and the access event against choice B.
-- Without `get_input`, or on an auth or tool error, use the records above.
-- Record the tool attempt with the decision file, its SHA256 and `<author head SHA>` in the attempt record. Then run once, alone: `<tool command>`
-- Record the run's outcome in the attempt record before any other step.
-- On success, stage only the row file by its path and commit once: `<commit subject>`.
-- On `REFUSED` or any denial, stop. Push, test and row-line reads stay forbidden.
-- A content, scope or protected-access denial blocks the tool run; only the listed method-only denials may precede it.
+- Read the standing grant directly.
+- Verify each binding before running the tool.
+- Run once, alone: `<tool command>`.
+- Commit only the row file on success.
+- Keep the row pending on a refusal.
+- Report the refusal to the driver.
 
 Next:
-- Return the tool output and the commit SHA by `<return time>`.
-Receipt: `<decision file name>`
+- Return the tool output, the generated authorization record path and the commit SHA to `<driver>` by `<return time UTC>`.
 ```
+On the restore route, write `none` for the CI run, count and expected values when the starting head deletes the row.
 
-## False-claim retirement route
-
-Use this route only when the brief names the False-claim retirement route.
-It retires an active protected row whose claim the PR's own design makes false at the final code.
-A brief that names this route uses it in place of every other retirement and row review route.
-This route is an exception to the identical-mutant edit rule and to the rule that sends every other row change to Lane-derived row review.
-Its named row-ID lookups and row-line reads are an exception to the mutation TOML search prohibition.
-Refuse a row that CI reports `in the base file, missing at HEAD`; that row uses the Removed-behavior retirement route.
-Refuse a row that is absent at the base SHA.
-Refuse a row whose lines at the author head SHA differ from its lines at the base SHA.
-Keep every other retirement route, its CI-line requirement and its authority unchanged.
-Require the PR body to name each row ID and its claim, and to quote the claim.
-Require the PR body to state why each claim is false at the final code, citing `file:line` at the PR head.
-Require the PR body to state the intended behavior change; a claim that a defect made false never qualifies.
-Require the PR's own base/head diff to change the subject file that each named row names.
-Refuse a row whose subject file the PR leaves unchanged.
-Require a hunk that a PR-authored commit wrote in that subject file to make the claim false; a main merge alone never qualifies.
-A merge commit counts as PR-authored unless its subject blob equals the subject blob of the clean automatic merge of its parents.
-Refuse when any part of the claim still holds at the final code; that row uses the lane-derived route or the Lane-owned disposition route's surviving-claim adaptation.
-Require a CoC decision file that the brief names by absolute path and SHA256.
-Require that file to bind the repository, PR, base SHA, author head SHA, row-file path and each exact unique row ID.
-Require that file to state that the CoC accepts the behavior change as the PR's intended design.
-That file cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority; it is this route's loaded edit authority.
-Verify that event as the Lane-owned disposition route verifies a decision that cites it; the standing grant alone supplies zero authority on this route.
-Owner-scoped protected row access grants nothing on this route.
-Before any protected read, the driver or writer verifies the file SHA256 and every binding.
-A reviewer checks the driver's recorded SHA256 and bindings and runs zero digest commands.
-Refuse a SHA256 mismatch, a missing or different binding, a passed expiry that the file states, and a branch head other than the bound author head SHA before the edit.
-Permit the applying writer to locate each named row by its row ID inside its named file.
-Read only that row's table lines, including its owned child tables.
-Forbid whole-file parsing, adjacent-row reads, unnamed-row reads and broader protected searches.
-Replace only each named row's table with exactly one `[[retired]]` table that carries its exact ID.
-Allow only `id` and `reason` in that table; copy `reason` verbatim from the PR body's statement for that row.
-Encode the reason as a TOML basic string with backslash, quote and every control character escaped.
-Before the edit, validate only the generated `[[retired]]` text through one quoted-delimiter `python3 -I -` heredoc importing only `tomllib`.
-Run that inert parse alone in its Bash call; read zero files and write zero files.
-Use native Edit with replace_all=false; require old_string to cover the full row table extent, including all owned child tables and the unique row ID.
-Refuse unclear extent, missing or multiple matches, and any unapproved neighboring content.
-Change nothing else in the named file: no other line, row, field, pin, or table.
-Another approved exact edit to the same file, such as a `claims` pin change, needs its own authority and its own commit; this route grants none.
-Commit the retirement alone, with one native Edit per named row.
-Check it only with content-free `git diff --numstat` counts for each named file against the retirement commit's parent.
-Let s be the lines that a row table and its `[[retired]]` table share, such as the `id` line.
-Require the deleted lines to equal the row table lines minus s, and the added lines to equal the `[[retired]]` table lines minus s, summed over the named rows.
-Refuse any other count.
-Before the push, require an independent reviewer who differs from the PR author and the applying writer.
-Require the brief to supply read-only trees at the base SHA, the author head SHA and the frozen commit after the edit, with the retirement commit SHA and its line counts.
-Require the frozen commit to contain the author head SHA and the retirement commit.
-Admit each reviewer row read with the driver's reviewer admission record for protected row reads.
-Permit the reviewer to locate each named row ID and read only its row lines at the base SHA and the author head SHA, and its `[[retired]]` table at the frozen commit.
-Permit the reviewer to read the follow-up row's lines by its row ID at its frozen commit; the admission record lists that row file.
-Require the reviewer to read each retired row's lines at the base SHA and confirm its row ID, subject file and claim.
-Require the reviewer to confirm that the claim held at the base SHA.
-Require the reviewer to confirm that the PR body quotes that claim exactly and that the PR's own diff changes that subject file.
-Require the reviewer to cite the PR-authored hunk that makes the claim false.
-Require the reviewer to read the cited final code at the frozen commit and to search non-row source and test files for the claimed behavior.
-Require the reviewer to confirm that no part of the claim holds at the final code and that the final code implements the stated behavior change.
-Agreement with the PR body alone supplies zero confirmation.
-Require the reviewer to confirm that the retirement commit replaces only the named row tables, each with one `[[retired]]` table, and that the line counts match the lines it read.
-Require the reviewer to confirm one `[[retired]]` entry and zero active entries for each named row ID at the frozen commit.
-Require a follow-up row that guards the new behavior, in this PR or in a follow-up PR that this PR body names by direct URL.
-Create the follow-up row only under its own applicable route; this route grants zero row-creation authority.
-Require the same reviewer to read the follow-up row at its frozen commit and confirm that it is not weaker than the retired row.
-Not weaker means that the follow-up row guards the new behavior at least as tightly as the retired row guarded the old behavior.
-For a follow-up PR, bind its URL, head SHA, row-file path and row ID in the review receipt; a later follow-up head needs a new verdict.
-A later head that only merges main keeps the verdict when the follow-up row's lines, its subject file and its designated test file stay byte-identical; judge each merge commit by the merge-commit rule above, applied to those files.
-Run this PR's post-merge battery after that follow-up PR merges at a head that keeps the verdict, at a commit that contains both.
-The follow-up row merges within 24 hours of this PR's merge, the same limit as the post-merge battery.
-If the follow-up PR has not merged 24 hours after this PR merges, run the battery then and report the retired claim to the CoC as unguarded.
-After that report, the CoC has the follow-up row merged or the retirement reverted; a retirement never stays on main without a merged follow-up row.
-The CoC decides any revert of this retirement.
-The lane that applied the retirement opens the revert as a normal PR with an independent review.
-A revert that restores retired rows is a CoC-owned protected edit, limited to the rows that this PR retired.
-Only a `git revert` of this PR's merge commit may restore those rows; a hand edit never restores a row.
-The CoC names the revert commit in a frozen file before the push.
-Each restored row must equal its bytes at the parent of this PR's merge commit.
-The revert may remove a follow-up row only when this PR's merge commit added it.
-Every other line of each row file that the revert changes must equal that file at the revert's parent.
-The CoC's content-free git check proves these equalities, without a not-weaker review.
-Any other row change in the revert stops the push.
-Refuse the retirement when the claim is still true at the final code, or when the reviewer cannot confirm any requirement.
-Refuse on any doubt about any requirement.
-Bind the review receipt to reviewer identity, approving verdict, decision file SHA256, frozen commit SHA, row-file paths, row IDs, cited `file:line`, cited hunk and follow-up row ID.
-Require CoC approval of that review receipt before the push; changed source, decision file or evidence invalidates the receipt and approval.
-Keep messages, briefs and PR bodies free of pair bytes and row TOML text; the quoted claim is the only exception.
-Identify each edit only by path, row ID and the `[[retired]]` table.
-Beyond the reads above, this route grants zero TOML search or parse authority, protected reads, or anchor extraction.
-This route grants a reviewer zero edit, execution, mutation or checker authority.
-Require separate admission for every mutation or checker execution; keep mutation proof after merge.
-Hook, permission and tool denials and every earlier refusal stay effective under their existing rules; this route lifts none of them by itself.
-The driver applies zero protected edits; preserve zero writer publication authority, protected holds, and Peral's CI-runner and merge-queue authority.
-
-## Lane-owned disposition route
-
-Apply this route only to future briefs after verified runtime adoption.
-Source delivery grants zero runtime-adoption authority.
-Source delivery grants zero retry authority.
-Native Edit grants zero alternate form for an existing or recorded denied operation.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
-Preserve every effective refusal, tool and hook denial, and affected-session hold.
-Require actual cause resolution and fresh applicable disposition before any affected-session attempt.
-Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
-A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
-It made zero protected reads and named no content, scope, protected-access, hook, permission or tool finding.
-Its cause resolves only when a new CoC decision, with a new SHA256, quotes the refusal verbatim, names that sole cause and records its zero protected reads.
-The next agent in the refusing role must also find the selected route heading in its own loaded contract by native Read, under a section that implements that route and does not refuse it.
-A follow-on refusal is a refusal whose only reason is that an earlier refusal stayed effective; it also made zero protected reads.
-A follow-on refusal resolves with that earlier refusal when this rule resolves the earlier one and the same CoC decision quotes the follow-on refusal verbatim.
-Hook, permission and tool denials, `REFUSED` tool results, and any refusal with a reason outside these two definitions never qualify.
-The fresh disposition and every other route requirement still apply.
-The driver applies zero protected edits; the writer has zero publication authority.
-
-## Owner-approved protected-row subject route
-
-Apply this route only to future briefs after verified runtime adoption.
-A matching existing denial blocks the action, recipient and scope under every route.
-Preserve every effective tool, hook, owner and loaded-instruction refusal and every affected-session hold.
-Native Edit grants zero alternate form for a denied operation.
-Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt.
-Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.
-Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.
-A contract-gap refusal is a writer or driver refusal whose quoted reason is only that its loaded contract lacked the route the decision selected.
-It made zero protected reads and named no content, scope, protected-access, hook, permission or tool finding.
-Its cause resolves only when a new CoC decision, with a new SHA256, quotes the refusal verbatim, names that sole cause and records its zero protected reads.
-The next agent in the refusing role must also find the selected route heading in its own loaded contract by native Read, under a section that implements that route and does not refuse it.
-A follow-on refusal is a refusal whose only reason is that an earlier refusal stayed effective; it also made zero protected reads.
-A follow-on refusal resolves with that earlier refusal when this rule resolves the earlier one and the same CoC decision quotes the follow-on refusal verbatim.
-Hook, permission and tool denials, `REFUSED` tool results, and any refusal with a reason outside these two definitions never qualify.
-The fresh disposition and every other route requirement still apply.
-The driver applies zero protected edits; the writer publishes nothing.
-A product-limit or cost approval alone grants zero protected read, subject, paired-field, retirement or pin-edit authority.
-Require a separate exact written CoC decision for each subject edit under the supported writer's loaded subject route.
-That decision cites owner event `dc03370c-c170-4284-b9e4-75aac2dcaab0` on Input `1b143a6d-e303-4fe4-82ab-69c0f235a4a5` as its authority.
-Keep Owner-scoped protected row access independent, with its full owner-event verification requirements.
-Apply the exact access and edit provenance requirements in the supported writer's loaded subject route.
-Keep all other routes' subject and field freezes binding outside that exact approved route scope.
-
-### Future ordinary-file identity checkpoints
+## Future ordinary-file identity checkpoints
 
 Use direct Git and file-hash tools only for independently authorized future ordinary-file identity checkpoints.
 Require literal worktree paths and an exact permitted file allowlist; exclude protected files.
@@ -421,10 +335,11 @@ For a policy change, supply its applicable dedicated authority; a register label
 
 ## Loaded instructions and refusals
 
-An explicit owner refusal blocks all routes for that edit until applicable owner authority resolves it. Except under the ordinary-file method-only rule below: a writer uses no other process to do a step that a hook or permission denied. Script files, other interpreters, module flags and wrapper commands are other processes. The writer tells the driver about the denial and stops that step. Checks that the brief names stay permitted when the hook admits them.
-Apply your own loaded definition; a checkout, cache entry, or version supplies zero additional authority. Prospective source changes and their delivery supply zero runtime-adoption, affected-retry, or action authority. For ordinary lane-derived review of a row file the PR creates absent at the CI base, use the last PR commit before the re-anchor as the before tree and row comparison base. Keep the original CI base for causality and evidence; preserve every other route condition. If only main merges into the PR branch changed the subject after the last PR-authored commit before the re-anchor that edited that row file, use that commit as the before tree instead, and require that no PR-authored commit after it changed the subject. A merge commit changes the subject as a PR-authored commit unless its subject blob equals the subject blob of the clean automatic merge of its parents. Preserve existing loaded-session restrictions and affected-session holds. A fresh writer or driver belongs to the named hook-fix lane when its starting brief quotes the CoC ruling naming that lane's owner. Keep actors outside that lane refused, hook-denied commands refused in every form, and every content, protected-path, and publication denial final.
-When diagnosing a contract mismatch, report the loaded identity evidence available and identify unknown fields without inference. Repairing missing verification evidence resolves only that evidence gap; it cannot override a binding prohibition or tool denial.
-Preserve applicable higher-priority prohibitions, tool and hook denials, protected paths, and approval, GO, installation, and publication holds. Except under the ordinary-file method-only rule below: Every safety-hook refusal remains final. Ordinary-file native Edit exception: Method-only denial (owner Input e6ba1705-42f2-491c-ac0b-43ae191596b6, choice B): a refusal naming only the method, never the content, permits one native Edit retry. The method-only rule applies only to ordinary files and to the granted protected-row re-anchor below; it never covers any other protected-row operation. A fresh writer applies the already-approved edit text exactly once with native Edit; the commit stays a separate step. The method ban and every content, scope, protected-access and publication denial stay final. Consume that single attempt on the canonical durable record before the edit; a failed attempt stays consumed. Granted protected-row re-anchor: a hook can deny only the shell method, such as a heredoc, `sed` or `python`, of an exact row re-anchor. When that re-anchor is on the explicit-pair or lane-derived route that its verified owner grant covers, one fresh writer applies that route's approved edit once with native Edit and `replace_all=false`. The brief names the CI-named row file and the unique row ID. The edit changes only that row's paired `old` and `new` fields with the identical mutant edit: the CoC-approved pair on the explicit-pair route, or the subject's new source text on the lane-derived route. Require that route's independent not-weaker review before the push. Refuse a native Edit outside the named file, row or paired fields, a second attempt, a denial of the native Edit itself, and every content, scope or protected-access denial. This re-anchor is part of the ordinary-file method-only rule wherever that rule is named. On the lane-derived route, when the brief names the sanctioned row re-anchor tool, run it once in place of native Edit with the brief's row file, row ID, subject, base and head; the tool derives and checks both fields and prints only results. A tool refusal or hook denial ends the attempt. This tool is the only process form for a protected row edit. The tool's statement scan and whole-file `tomllib` check print no row text and are the only exception to the no-whole-file-parse rule; the writer still reads no row lines. This tool form extends only the Granted protected-row re-anchor above, under its existing scope and independent review requirements. The [row re-anchor tool brief](#row-re-anchor-tool-brief) lists the fields that supply this evidence; the tool run is its own single attempt under one CoC grant and its head SHA, unused by an earlier attempt that made zero native Edit calls and zero tool runs, and used by any native Edit call on the row, any tool run, and any refusal or hook denial of the tool command. A new CoC grant bound to a head SHA with no used attempt on the row gets one fresh attempt only when every earlier used attempt ended only in a tool error, such as a native Edit no-match or file-changed error, and no earlier attempt on the row drew `REFUSED` or a hook or permission refusal or denial other than the listed method-only shell denials; any other grant for a head that already used its attempt frees nothing. The attempt record names each native Edit call and tool run on the row with the grant's CoC decision file, its SHA256, the head SHA and its outcome. For the driver's `Agent` dispatch only, allow one resend when the denial explicitly identifies `Coordination gate error` and an exact text remedy. Require unambiguous gate identity and remedy and the applicable loaded contract; the denial date alone never determines eligibility.
-Apply only that remedy; preserve the action, recipient, scope, authority, and exact owner-provenance checks. Recheck current version, status, and answer provenance before the resend. For `Agent` and `SendMessage`, every returned finding matching a known `text_lint.py` formatting message suffices to establish a formatting-only refusal. Examples include glued words, sentence or word limits, and a missing `Facts` heading. Require every returned finding to match a known `text_lint.py` formatting message. Require the applicable loaded contract. A formatting-only resend after a `text_lint.py` refusal also requires the hook receipt that refusal names. Cite it as `<!-- ultraship-receipt:ID -->` in the resent prose. The hook verifies the receipt's session, tool, recipient and non-prose fields, then consumes it once. A MAC-valid receipt that another agent sends to the receipt's own agent is a relay: a new message that keeps normal checks and consumes no receipt. A resend of a refused relay cites only its own receipt and gives the relayed receipt id in backticks. Refusal prefix text without a verified receipt supplies zero producer evidence. Only the hook writes receipt state; agents never read, write or reset the receipt store. The sender rewrites the same content once in short plain sentences. Put long identifiers in backticks or in a file and send its path. Apply only the exact formatting remedy; preserve the action, recipient, scope, authority, non-prose fields, owner provenance, and choice identifiers. A missing `Facts` heading organizes supported existing facts only; invent zero facts, evidence, approval, or authority. After a message-format refusal, a coordinator may give a fresh writer a new brief for the same approved scope. This fresh brief is a new instruction, not a resend. It records the receipt id on the run board; the hook refuses a receipt marker in an `Agent` or `Task` prompt. Preserve the consumed-attempt record across fresh briefs. Only for the fresh-brief route, permit a new writer recipient and dispatch action despite the unchanged-identity requirements below. Bind the shared attempt to the original refused call and its original action, recipient, and scope; record the new writer and dispatch separately. Preserve approved scope, authority, provenance, choice identifiers, exclusive custody, and all unrelated non-prose fields. Both the wording rewrite and fresh brief require matching formatting findings, exact remedies, original-call evidence, and canonical exclusive custody below. Share that original call's single attempt across both routes, the rewrite, and the fresh brief; durably consume it before either action. After the consumed rewrite or fresh brief draws another formatting-only refusal, the coordinator may dispatch one final corrected brief to one fresh writer for the same slice. That brief keeps the same action, scope, authority, and content, passes the refused call's `text_lint.py` check, and is recorded as consumed on the same canonical run-board record before sending. Deny every other action on a consumed attempt; that brief's refusal and every content, safety, protected-path, non-formatting hook, mixed, or ambiguous denial stay final. Reviewer form: the fresh-brief and final corrected brief routes also admit one fresh reviewer as their one new recipient, of the same reviewer agent type, for the same frozen subject SHA, review step and scope. That reviewer gets the same brief content, changed only in format, under the same receipt, consumed-attempt record, exclusive custody and run-board rules. Refuse the reviewer form after any non-formatting, mixed or ambiguous refusal, and refuse a second fresh reviewer for the same original call. Receiptless form: when the loaded hook version's `text_lint.py` writes no receipt (ship 1.10.37 to 1.10.47), the coordinator may use the fresh-brief route once if every finding in the recorded refusal text matches a known `text_lint.py` formatting message. Record the full refusal text and the hook version on the run board in place of the receipt id; on this form only, they stand in for the receipt. A refusal of that fresh brief is final; the receiptless form admits no resend and no final corrected brief. A hook version that writes receipts still requires its receipt. No form resets a consumed attempt. For `create_input`, pending receipts bind to the Input's `external_key` within the recipient workspace. The first uncited call for that key spends its pending receipt and stays refused; an unrelated key receives normal checks. For other tools, the first uncited message to that recipient spends the pending receipt and stays refused, even when the message is unrelated. Record the spend on the run board as the consumed attempt. Later messages need no citation and receive normal content checks. A later message must not carry the refused content.
-For the existing coordination route only: Block missing or ambiguous gate identity, missing or ambiguous remedy, generic `Output contract` denials, broader edits, and changed action, recipient, scope, or authority. Any safety-hook refusal, mixed safety denial, binding tool denial, or higher-priority restriction blocks the resend. For formatting-only resends, block absent, invalid, expired or consumed hook receipts, unmatched findings, incomplete original-call evidence, missing or ambiguous formatting remedies, unknown or mixed reasons, safety refusals, affected-operation denials, uncertain delivery, and changed action, recipient, scope, authority, non-prose fields, owner provenance, or choice identifiers. Keep every safety refusal, other binding tool denial, higher-priority restriction, and affected-operation denial effective under both routes.
-Record the denial and consumed resend on the durable run board before sending, keyed by the unchanged action, recipient, and scope. Use one canonical durable record binding the original refused call and unchanged action, recipient, and scope. Require one verified sender with proven exclusive custody before consuming the attempt. Verify absence of overlapping senders; require explicit custody transfer during replacement. An existing atomic claim qualifies only when its guarantees cover this same canonical record. A read followed by an append alone supplies zero exclusivity proof. Durably consume the single attempt and confirm persistence before sending. Recovery, replacement, and new sessions use the same record and retain its consumed state; absent records, consumed attempts, a failed second attempt, and a recorded final corrected brief stay blocked across recovery, except one eligible final corrected brief not yet recorded. For resend consumption, block unknown custody, overlapping senders, replacement without explicit custody transfer, uncertain persistence, absent or uncertain records, and consumed attempts. A failed corrected send stays consumed. Except under the ordinary-file method-only rule or the fresh message-format instruction: Never use alternate delivery or substitute execution for a still-effective refusal. Except under the ordinary-file method-only rule or the fresh message-format instruction: A version, restart, or new session alone lifts nothing; never reset an attempt or substitute an executor to bypass a still-effective refusal. Other refusals lift only when their cause is actually fixed or applicable authority resolves them.
+An explicit owner refusal blocks all routes for that edit until applicable owner authority resolves it. Apply your own loaded definition; a checkout, cache entry, or version supplies zero additional authority. Prospective source changes and their delivery supply zero runtime-adoption, affected-retry, or action authority. Preserve existing loaded-session restrictions and affected-session holds. Keep each helper within its assigned lane and authority. When diagnosing a contract mismatch, report the loaded identity evidence available and identify unknown fields without inference. Repairing missing verification evidence resolves only that evidence gap; it cannot override a binding prohibition or tool denial.
+Retry rule: after a hook or permission refusal, an agent may retry in another form when the refusal reason is fixed or the new form meets the rule the refusal names. A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too. An agent may always ask its superior for permission to run the refused command.
+A hook refusal never drops work: keep the task pending, then retry in a fixed form or ask the superior.
+Push, merge and protected-write refusals stay final; a retry in another form never bypasses them.
+A writer asks its driver, a reviewer asks its coordinator, a driver asks its chief, and a chief asks the CoC. The CoC asks the owner only for product, billing, security policy or big architecture. The superior may grant the request, or run the command itself when it considers that appropriate. The superior records the grant or the run in the lane state file. Never ask the owner to paste or run a command. A version, restart, or new session alone lifts nothing. Checks that the brief names stay permitted when the hook admits them. Safety blocks: keep destructive actions, secrets, production data writes, flag flips, deploys, customer-data deletion, protected paths, and approval, GO, installation, and publication holds blocked as their own rules say. A retry in another form never bypasses a safety block. A superior grants or runs a command only within its own authority, and its own hooks and permissions apply. Protected mutation-row edits use only the [lane-owned row route](../SKILL.md#lane-owned-row-route), the [standalone main-row repair](#standalone-main-row-repair) and their tools.
+Decision-defect rule: it applies only to an agent's own refusal whose sole stated cause is a defect in a CoC decision. The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction. Quote the refusal and the defect to your superior, who relays them up the superior chain to the CoC. Only a corrected CoC decision with a new SHA256 can resolve that refusal for that cause. Require the corrected decision to quote the refusal verbatim, name the defective decision by path and SHA256, and name the defect it corrects. A corrected decision grants nothing beyond what the defective decision grants and changes only the defective fields. Before the next attempt, verify the corrected decision in full and compare its actor, action, target and scope with the defective decision's grant. Keep the refusal pending when that comparison is inconclusive or shows a wider grant. Follow every other route requirement. This rule lifts no hook, permission, tool or owner refusal, and no security, secret or production gate. It lifts no refusal of a push, a merge or a protected write, including your own refusal of one. Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal.
+Message-format rule: `text_lint.py` warns about prose formatting and lets the call proceed. Examples include glued words and sentence or word limits. Apply the formatting guidance to the next message. Preserve the action, recipient, scope, authority, non-prose fields, owner provenance, and choice identifiers. Invent zero facts, evidence, approval, or authority while you apply it. Keep the Input classification requirement and receipt validation in force. After a receipt citation refusal, remove the receipt marker and resend with the same action, recipient and scope. Only the hook writes receipt state; agents never read, write or reset the receipt store. A MAC-valid receipt that another agent sends to the receipt's own agent is a relay: a new message that keeps normal checks and consumes no receipt. Keep receipt markers out of `Agent` and `Task` prompts. For a content refusal, fix the content to meet the named rule or ask the superior for permission within existing authority.
+Coordination gate: for the driver's `Agent` dispatch, resend when the denial explicitly identifies `Coordination gate error` and an exact text remedy. Require unambiguous gate identity and remedy and the applicable loaded contract; the denial date alone never determines eligibility. Apply only that remedy; preserve the action, recipient, scope, authority, and exact owner-provenance checks. Recheck current version, status, and answer provenance before the resend.

@@ -24,7 +24,10 @@ A CoC GO grants zero additional publication authority.
 
 ## Concurrent lanes
 
-Check remote main against the board's last-seen SHA at actionable checkpoints. For each observed foreign merge, record SHA, URL, attribution, and whether main CI stayed green after that merge; unknown is not green. Notify overlapping or dependent lanes. Merge main into already-pushed lane branches and rerun affected evidence. Preserve published history unless the user explicitly authorizes a rewrite.
+Check remote main against the board's last-seen SHA before advancing a lane or at a deadline.
+For each observed foreign merge, record the SHA, URL, attribution, and whether main CI stayed green after the merge.
+Require positive evidence that main CI is green.
+Notify overlapping or dependent lanes. Merge main into already-pushed lane branches and rerun affected evidence. Preserve published history unless the user explicitly authorizes a rewrite.
 
 Use the repository's serial merge queue when it validates the speculative merged result. Otherwise test the combined result after integrating current main. When a migration lands, notify other migration lanes immediately and chain their migration parent onto the new head. Preserve a single migration head.
 
@@ -53,4 +56,8 @@ Define conversion eligibility, success, and data source before landing. Zero eli
 
 Reproduce the specific failure predicate against the fixed head and record both versions. Use safe isolated replay; use a fixture or fresh equivalent event when replay creates side effects. Inspect failures and unexpected outcomes during verification. Record a genuinely unavailable stage with its cause and next action.
 
-Close a deployable lane as `live-verified` only when its applicable stages pass. Close an approved dark release as `dark` with an activation runbook. A `ready-for-review` handoff retains its worktree and direct PR URL.
+Close a deployable lane as `live-verified` only when its applicable stages pass.
+Mark a ticket done only after you verify its change in production and record the evidence on the board.
+Link every proof follow-up to its parent ticket.
+Record the direct PR URL for each proof follow-up PR, including a post-merge mutation proof PR.
+Close an approved dark release as `dark` with an activation runbook. A `ready-for-review` handoff retains its worktree and direct PR URL.

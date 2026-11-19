@@ -33,8 +33,8 @@ Light mode runs steps 1, 3, 5, 7, 9, 10, and 12. Detail: [`skills/ship/reference
 
 The plugin defines 21 agents. [`skills/ship/references/roster.md`](skills/ship/references/roster.md) lists each model, effort, use, and fallback chain.
 
-- Writers: `gpt-6.1-sol` at high effort, with `claude-sonnet-5-5` (high) as the fallback.
-- Reviewers: `gpt-6.1-sol`, `claude-opus-5-5`, `gpt-6-astra`, `gpt-6-luna`, and `kimi-k3`.
+- Writers: `gpt-6.2-sol` at xhigh effort, with `claude-sonnet-5-5` (high) as the fallback.
+- Reviewers: `gpt-6.2-sol` at xhigh, `claude-opus-5-5`, `gpt-6.2-astra` and `gpt-6-luna`.
 - Opt-in Fable 5.2 seats: `writer--fable52` and `reviewer--fable52` run `claude-fable-5-2`. Dispatch them only when the brief or the owner names Fable 5.2.
 - Read-only agents get read, LSP, and web tools only. Planners and researchers also get fff tools. Reviewers, triage and verifiers use no MCP (`mcp__`) tools, and their LSP use is hover and documentSymbol only.
 
@@ -55,7 +55,30 @@ Non-Claude models need a gateway. See [`docs/setup-shunt.md`](../../docs/setup-s
 
 The ship hooks need Claude Code 2.1.295 or later.
 
-The review-thread guard scans command text. Script files run by path, `gh` aliases and extensions, and command words built from variables or globs escape its checks. It also misses opaque URLs in other clients and files written by Write or Edit then run. Interpreter scripts such as `python3 -c` or `node -e` can run `gh` outside this check. Shell runners can also build `gh` from escapes or expansions. The upgrade path is a GitHub token that the driver cannot use for review-thread writes.
+The prose hook checks `SendMessage`, `create_input`, and `update_input` text.
+Only owner-facing text gets the 25-word sentence limit and the section checks.
+The `decision` and `result` CLI modes check owner-facing text. The `peer` mode checks peer text.
+Decision Inputs need the five decision sections. Result Inputs can use free-form text.
+`Agent` and `Task` prompts get receipt checks only.
+
+Set `SHIP_LINT_OFF` to a comma-separated list of rule names, such as `glued,sentence`.
+Use `all` to disable every rule in this list.
+Input classification, safety, and receipt checks stay active.
+
+| Rule | Check |
+|---|---|
+| `glued` | Glued words and compressed shorthand |
+| `sentence` | Sentences longer than 25 words in owner-facing text |
+| `sections` | Missing sections in decision text |
+| `hold` | Repeated standing holds in peer status messages |
+| `unicode` | Invalid Unicode in message and Input fields |
+
+The first four rules warn and let the call proceed.
+Input HTML requires exactly one `output-kind` marker with the value `decision` or `result`.
+Invalid Unicode and classification findings give an exact remedy for a resend.
+Keep the action, recipient, and non-prose fields the same on a resend.
+
+The review-thread guard scans command text. It admits one static, single-quoted GraphQL query through a narrow `gh api graphql` read route. The data argument rule applies only when every command is plain `printf`, `echo`, safe-option `grep`, `ps` or a literal assignment. A command substitution keeps the full runner check. Script files run by path, `gh` aliases and extensions, and command words built from variables or globs escape its checks. It also misses opaque URLs in other clients and files written by Write or Edit then run. Interpreter scripts such as `python3 -c` or `node -e` can run `gh` outside this check. Shell runners can also build `gh` from escapes or expansions. The upgrade path is a GitHub token that the driver cannot use for review-thread writes.
 
 This boundary checks names and paths. It cannot see a copy of a protected row kept under another name, such as a scratch file. GitHub addresses content by ID, such as a blob or a `.diff`, with no path, so the hook denies `WebFetch` for these agents when the raw or decoded URL names `github.com`, `githubusercontent.com` or a subdomain after Unicode normalization, and denies any host that stays non-ASCII. A URL on another code host that addresses content by ID carries no path, so the hook cannot check it.
 
@@ -68,8 +91,8 @@ The command must match its canonical protected row file and row ID.
 Only the driver and the main session write this folder through Write, Edit or NotebookEdit.
 The Bash custody check matches `ultraship/row-reanchor` as command text.
 The tool derives both fields from Git blobs, preserves the whole-file mutant hunks, and prints only results.
-A tool refusal or hook denial ends the attempt.
-See [Row re-anchor tool admission record](skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
+Keep the row task pending after a refusal. Record the outcome and request a permitted route from the driver.
+See the [lane-owned row route](skills/ship/SKILL.md#lane-owned-row-route) and its [tool admission record](skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
 
 The hook sees these tools: `Agent`, `Task`, `Bash`, `Edit`, `Write`, `NotebookEdit`, `WebSearch`, `Read`, `Grep`, `Glob`, `LSP`, `WebFetch`, `mcp__fff__*`, and the three `mcp__bettercoding__` Input tools (`create_input`, `update_input`, `set_input_status`). Reviewer, triage and verifier agents list no MCP tools, so no other `mcp__` tool reaches these agents.
 
@@ -84,6 +107,33 @@ The first local resolution imports the same-branch legacy TSV byte-for-byte, inc
 The sole driver must hold run custody and retire old legacy writers before import. Old writers can race the snapshot read. Local locking covers cooperating importers only. Import requires legacy read permission and local directory write permission. It grants zero legacy write permission. CLI commands, completion checks, Stop, and compact share the resolver. Stop retains exact pending evidence through access failures, missing runs, and failed appends. Notifications bind to the ledger path and run-start identity when ledger access succeeds. Stop accepts accounting from that run after successful closure. Persistent hook-state receipts consume each accounting row once across Stop cycles and sessions. Each notification has a fresh ID, including repeat notifications from the same agent. Receipt publication precedes pending-evidence clearing. Legacy notifications require one unambiguous time-containing run; ambiguous evidence stays pending.
 
 Set `SHIP_LEDGER_DIR` to an absolute permitted directory for an explicit home, for example `export SHIP_LEDGER_DIR="$PWD/../.scratch/ship-ledgers"`. Export it for ledger commands and hooks. The directory directly contains the branch TSV; branch filenames replace `/` with `__`. Empty and relative values raise an error. The override selects its home without legacy import.
+
+## Count source at a commit
+
+Run the executable helper directly to count overlapping UTF-8 literal bytes in a committed regular file.
+Pass each option once, with its value as a separate word, in any order.
+
+```bash
+<installed ship plugin root>/skills/ship/scripts/source-count.py --repo /absolute/repo --commit <full-sha> --subject src/example.py --literal 'exact text'
+```
+
+Use the literal absolute path of the installed plugin's script; the writer hook refuses a shell expansion in that command word.
+The writer hook also refuses literals combining `$` with interpreter-like text, ANSI-C quoting, and raw whitespace beyond space, tab, and newline.
+Keep the count pending after a refusal. Use the literal helper form above only when it meets the named rule. Ask the driver for a permitted proof route when the literal itself is blocked.
+
+The repository path must be canonical and absolute; the commit must be a full lowercase SHA.
+The subject must be a normalized repository-relative POSIX path.
+The helper reads the committed blob and ignores checkout edits, replacement objects, and `GIT_*` environment variables.
+It refuses `tests/mutation` paths, `.git` path segments, `.env` and `.env.*` files, `.pem` and `.key` files, directories, symlinks, and submodules.
+Python isolated mode comes from the executable shebang.
+
+Success prints one JSON line with `result`, `repo`, `commit`, `subject`, `blob`, `count`, `literal_bytes`, and `literal_sha256`.
+Refusal prints one JSON line with `error` and `result: REFUSED`, and exits with status 2.
+In a partial clone, the helper never fetches a missing object; it refuses with the `git` identifier instead.
+The guard needs a Git build that honors `GIT_NO_LAZY_FETCH`; the partial-clone test fails on a build that ignores it.
+Bound each run with a caller-owned `timeout --signal=TERM <seconds>`; the signal reaches the helper and its Git child.
+Output contains neither source bytes nor the literal; stderr stays empty.
+For positive counts, blob readers can recover the literal using `literal_bytes` and `literal_sha256`, so give the output the same handling as the literal.
 
 ## Test
 

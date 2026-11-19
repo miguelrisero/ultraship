@@ -16,17 +16,19 @@ Require this field and these sentences verbatim in every brief:
 
 ```text
 Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
-A hook refusal is final: report it and stop.
+After a hook refusal, retry in another form when the refusal reason is fixed or the new form meets the rule the refusal names. You may always ask your superior for permission to run the refused command.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 ```
-The stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.
+A reviewer reports a refused call as blocked scope and continues other permitted scope.
 Triage does the same. Its Readable files name only search directories that hold no `tests/mutation/` directory.
-The formatting, coordination and method-only routes in [Loaded instructions and refusals](../ship/references/owner-decisions.md#loaded-instructions-and-refusals) stay.
+[Loaded instructions and refusals](../ship/references/owner-decisions.md#loaded-instructions-and-refusals) sets the retry rule and the ask-your-superior rule.
 
 ## Push boundary
 
 Before every authorized feature push, including direct invocation, retries, round fixes, and main merges, apply the [resolved destination preflight](../ship/references/pipeline.md#9-push-and-pr). Use only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted. Writers prepare evidence only; the authorized driver executes the preflight and push; writers retain zero push authority, including push dry-runs. Preserve existing push authority, approval holds, merge holds, and verification gates.
+
+When the PR carries [lane-owned row](../ship/SKILL.md#lane-owned-row-route) changes, return a ready PR to draft before each push. Mark it ready only after the new row review passes at the pushed head.
 
 Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) during polling and guard execution.
 
@@ -35,8 +37,10 @@ Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) durin
 1. **Wait for Better Review.** For `.github/workflows/better-review.yml`, the sole reader takes an initial snapshot of the latest `better-review/review` check through `gh pr checks` or `gh pr view --json statusCheckRollup`.
    Pending work uses the installed chief-of-chiefs `watchers.py wait` route in [CI reads and flaky guard locks](../ship/references/ci-and-locks.md), with Bash `run_in_background: true`; model polling and watcher subagents are forbidden. Unchanged samples stay silent; after each wait exits, the sole reader verifies Better Review on the current head. Messages contain only transitions, blockers, or decision needs. The 5-minute polling cadence covers the initial snapshot and every reader handoff. Better Review custody finishes before the CI reader starts. While it is `in_progress` and younger than 25 minutes, do not push or merge main. A push during a run discards that run.
 2. **Wait for CI.** The same background `watchers.py wait` route owns recurring reads. At CI entry and after the wait exits, the sole reader checks required contexts on the current head with `bash "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/watch-checks.sh" <PR> 0 0`, subject to the same cadence. This invocation takes one snapshot and never runs beside the background wait. The checker requires every context from classic protection and branch rules to report and pass. An absent context counts as pending. Pending contexts return custody to the background wait; a rollup transition alone proves neither required-context success nor Better Review coverage. Exit 4 means the checker cannot determine the required contexts; its reason blocks progress until access or protection configuration permits verification. `WATCH_CHECKS_IGNORE` defaults to empty and accepts exact context names, one per line. For checks that report only after `/merge`, the snapshot command is `WATCH_CHECKS_IGNORE="Merge Queue Gate" bash "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/watch-checks.sh" <PR> 0 0`. Ignore only the repository's post-merge-command checks.
-3. **Collect.** Read one failed log once per failure with `gh run view <run-id> --log-failed`. List threads with `bash "${CLAUDE_SKILL_DIR}/scripts/threads.sh" <PR>`.
+   The explicit unprotected-branch route in [Completion gate](../ship/SKILL.md#explicit-checks-on-an-unprotected-branch) accepts only the CoC-approved external policy and separately approved digest. Pass both named-check options to the same snapshot command. Keep ignore settings empty. The checker must positively prove the unprotected branch and verify every approved tuple on the exact head. Exit 4 blocks progress; it never selects this route automatically. Preserve the sole-reader cadence, background-wait custody, every earlier outcome and every effective refusal.
+3. **Collect.** Read one failed log once per failure with `gh run view <run-id> --log-failed`. List threads with `bash "${CLAUDE_SKILL_DIR}/scripts/threads.sh" <PR>`. Read full comments with `python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" read <PR-URL> <thread-id>` using an ID from `threads.sh` for this PR.
    Save each failed log to `<run-scratch>/ci/<run-id>.log`, and list that path under Readable files in the triage brief.
+   Save each thread read to `<run-scratch>/threads/<thread-id>.json`, and list that path under Readable files too.
 4. **Triage.** Give the failures and threads to `ship:triage--sol`. It returns `real`, `false-positive`, `duplicate`, `already-fixed`, or blocked scope for each item, with evidence.
 5. **Fix.** Collect every failing check and every unresolved thread before the fix. Send all `real` items to `ship:writer--sol` as one batch. Rerun the affected tests, unless the brief bans local test execution; then CI reruns them. Push once for the round. Never push a partial batch.
 6. **Answer every thread.** Reply with the fix commit or the refuting evidence, then resolve the thread.
@@ -44,6 +48,10 @@ Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) durin
    Put the reply text in a file under the run scratch directory.
    The helper reads the thread from GitHub and refuses unless it belongs to this PR's repository and number.
    The ship hook refuses raw review-thread mutations and REST review-comment replies.
+   If the guard refuses a compound discovery and PR read, keep the work pending. Run each permitted step in its own call.
+   Find the repository first. Then run `gh pr view <PR-URL> --json state` with the verified literal URL.
+   Reply or resolve only after a successful read reports `OPEN`. Keep a failed or unclear read pending.
+   Read UTC with `date -u +%FT%TZ` in its own call. Append it as literal data to the run's scratch log.
 
    ```bash
    python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" reply <PR-URL> <thread-id> <run-scratch>/reply.md
