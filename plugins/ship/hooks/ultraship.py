@@ -5381,16 +5381,26 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
     result_id = json.dumps([session, cwd, result['id']])
     if 'ledger' in result and result['run'] is None:
         return
-    # Recorded results keep their ledger across branch changes. Only legacy results resolve the current branch.
-    home = Path(result['ledger']) if 'ledger' in result else ledger.ledger_path(cwd).resolve()
+    match = None
+    if 'ledger' in result:
+        home, bound_run = Path(result['ledger']), result['run']
+    else:
+        agent_id = result.get('agent_id')
+        binding = None
+        if isinstance(agent_id, str) and agent_id.strip():
+            binding = ledger.find_non_git_agent_run(cwd, agent, agent_id, histories)
+        if binding is None:
+            home = ledger.ledger_path(cwd).resolve()
+        else:
+            home, bound_run, match = binding
     if not home.is_absolute() or home.resolve() != home:
         raise ValueError('Recorded ledger must be an absolute path without symlinks')
     if home not in histories:
         histories[home] = ledger.rows(home)
     history = histories[home]
     starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
-    if 'ledger' in result:
-        candidates = [i for i in starts if run_identity(i, history[i]) == result['run']]
+    if 'ledger' in result or match is not None:
+        candidates = [i for i in starts if run_identity(i, history[i]) == bound_run]
     else:
         # Legacy notifications have no run identity: accept only one time-containing run.
         candidates = []
@@ -5419,8 +5429,8 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
             raise ReceiptIntegrityError('Accounting receipt row belongs to another run')
         return
     # Reserve an exact-result record before consuming an interchangeable ordinary review row.
-    candidates = sorted(range(start + 1, len(history)), key=lambda i:
-                        not ledger.accounting_row(history[i], result_id, run))
+    candidates = [match] if match is not None else sorted(
+        range(start + 1, len(history)), key=lambda i: not ledger.accounting_row(history[i], result_id, run))
     for i in candidates:
         row = history[i]
         explicit = ledger.accounting_row(row, result_id, run)

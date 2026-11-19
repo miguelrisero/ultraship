@@ -128,6 +128,42 @@ def rows(path):
     return [line.split('\t') for line in path.read_text().splitlines() if line]
 
 
+def find_non_git_agent_run(cwd, agent, agent_id, histories):
+    # A broken or inaccessible checkout must keep the normal ledger resolution error.
+    probe = subprocess.run(['git', '-C', cwd, 'rev-parse', '--git-dir'],
+                           env={**os.environ, 'LC_ALL': 'C'}, capture_output=True, text=True)
+    if probe.returncode != 128 or not probe.stderr.startswith('fatal: not a git repository ('):
+        return None
+    override = os.environ.get('SHIP_LEDGER_DIR')
+    if override is not None:
+        directory = Path(override)
+        if not directory.is_absolute():
+            raise ValueError('SHIP_LEDGER_DIR must be an absolute path')
+        candidates = directory.glob('*.tsv')
+    else:
+        workspace = Path(cwd).resolve()
+        candidates = [*workspace.glob('.scratch/ship-ledgers/*/*.tsv'),
+                      *workspace.glob('*/.git/ship/ledger/*.tsv')]
+    count = 0
+    for path in candidates:
+        if not path.is_absolute() or path.resolve() != path or not path.is_file():
+            continue
+        if path not in histories:
+            histories[path] = rows(path)
+        start = None
+        for index, row in enumerate(histories[path]):
+            if row[1] == 'run-start':
+                start = index
+            elif row[1] not in MARKS and agent_key(row[2]) == (agent, agent_id):
+                count += 1
+                home, run_start, match = path, start, index
+    if count != 1:
+        raise ValueError(f'Found {count} ledger rows for agent {agent}@{agent_id}; expected exactly one')
+    if run_start is None:
+        raise ValueError(f'Ledger row for agent {agent}@{agent_id} has no preceding run-start')
+    return home, run_identity(run_start, histories[home][run_start]), match
+
+
 def open_run(path):
     """Return (start_row, rows_after_start) for the open run, or None."""
     all_rows = rows(path)

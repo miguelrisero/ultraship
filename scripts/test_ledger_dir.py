@@ -196,6 +196,46 @@ class LedgerDirTests(unittest.TestCase):
             self.assertEqual(self.cli('append', step, 'driver', 'sha', 'pass').returncode, 0)
         self.assertEqual(self.cli('run-end').returncode, 0)
 
+    def record_non_git_result(self):
+        self.env['GIT_CEILING_DIRECTORIES'] = str(self.base)
+        agent = 'ship:reviewer--sol'
+        self.hook('subagent-stop', cwd=str(self.workspace), agent_type=agent, agent_id='reviewer')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        evidence = owed.read_bytes()
+        self.assertNotIn('ledger', json.loads(evidence.split(b'\t')[3]))
+        return owed, evidence, f'{agent}@reviewer'
+
+    def test_stop_accounts_one_non_git_match(self):
+        owed, _, agent = self.record_non_git_result()
+        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
+        self.assertEqual(self.hook('stop', cwd=str(self.workspace)), '')
+        self.assertEqual(owed.read_bytes(), b'')
+        receipts = json.loads((owed.parent.parent / 'accounted.json').read_bytes())
+        self.assertEqual([receipt[0] for receipt in receipts.values()], [str(self.resolve())])
+
+    def test_stop_blocks_zero_non_git_matches(self):
+        owed, evidence, agent = self.record_non_git_result()
+        for other in ('ship:reviewer--sol@other', 'ship:reviewer--opus@reviewer'):
+            self.assertEqual(self.cli('append', 'deep-review', other, 'sha', 'pass').returncode, 0)
+        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn(f'Found 0 ledger rows for agent {agent}; expected exactly one', blocked['reason'])
+        self.assertEqual(owed.read_bytes(), evidence)
+
+    def test_stop_blocks_two_non_git_matches_across_ledgers(self):
+        owed, evidence, agent = self.record_non_git_result()
+        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
+        sibling = self.workspace / 'sibling'
+        self.git(self.workspace, 'init', '-q', '-b', 'second', str(sibling))
+        self.git(sibling, '-c', 'user.name=t', '-c', 'user.email=t@t',
+                 'commit', '-q', '--allow-empty', '-m', 'init')
+        self.assertEqual(self.cli('run-start', 'light', 'run-2', cwd=sibling).returncode, 0)
+        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass', cwd=sibling).returncode, 0)
+        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn(f'Found 2 ledger rows for agent {agent}; expected exactly one', blocked['reason'])
+        self.assertEqual(owed.read_bytes(), evidence)
+
     def test_stop_accounts_closed_run_and_refuses_next_run_evidence(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
