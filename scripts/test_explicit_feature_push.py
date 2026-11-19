@@ -108,6 +108,12 @@ class ExplicitFeaturePushTests(unittest.TestCase):
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, boundary)
+        self.assertIn(
+            'When the PR carries [lane-owned row](../ship/SKILL.md#lane-owned-row-route) changes, '
+            'return a ready PR to draft before each push. '
+            'Mark it ready only after the new row review passes at the pushed head.',
+            boundary,
+        )
 
     def test_chief_template_carries_the_same_push_boundary(self):
         text = (ROOT / 'plugins/chief/skills/run/references/dispatch.md').read_text()

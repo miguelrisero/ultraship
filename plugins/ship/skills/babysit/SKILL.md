@@ -28,6 +28,8 @@ Triage does the same. Its Readable files name only search directories that hold 
 
 Before every authorized feature push, including direct invocation, retries, round fixes, and main merges, apply the [resolved destination preflight](../ship/references/pipeline.md#9-push-and-pr). Use only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted. Writers prepare evidence only; the authorized driver executes the preflight and push; writers retain zero push authority, including push dry-runs. Preserve existing push authority, approval holds, merge holds, and verification gates.
 
+When the PR carries [lane-owned row](../ship/SKILL.md#lane-owned-row-route) changes, return a ready PR to draft before each push. Mark it ready only after the new row review passes at the pushed head.
+
 Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) during polling and guard execution.
 
 ## One round
