@@ -207,25 +207,79 @@ class LedgerDirTests(unittest.TestCase):
 
     def test_stop_accounts_one_non_git_match(self):
         owed, evidence, agent = self.record_non_git_result()
+        evidence = b'10\t' + evidence.split(b'\t', 1)[1]
+        owed.write_bytes(evidence)
         self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
+        home = self.resolve()
+        history = ledger.rows(home)
+        history[-1][0] = '11'
+        home.write_text(''.join('\t'.join(row) + '\n' for row in history))
         self.assertEqual(self.hook('stop', cwd=str(self.workspace)), '')
         self.assertEqual(owed.read_bytes(), b'')
         receipts = owed.parent.parent / 'accounted.json'
         identifier = json.loads(evidence.split(b'\t')[3])['id']
         key = json.dumps([str(owed), str(self.workspace), identifier])
-        home = self.resolve()
-        history = ledger.rows(home)
         run = ledger.run_identity(0, history[0])
         row = ledger.run_identity(len(history) - 1, history[-1])
         self.assertEqual(json.loads(receipts.read_bytes()), {key: [str(home), run, row]})
         saved = receipts.read_bytes()
         owed.write_bytes(evidence)
-        self.finish_run()
-        self.assertEqual(self.cli('run-start', 'light', 'run-2').returncode, 0)
-        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
+        with home.open('a') as fh:
+            fh.write('12\trun-end\tlight\tsha\tclosed\trun-1\n'
+                     '13\trun-start\tlight\tsha\topen\trun-2\n'
+                     f'14\tdeep-review\t{agent}\tsha\tpass\t\n')
         self.assertEqual(self.hook('stop', cwd=str(self.workspace)), '')
         self.assertEqual(owed.read_bytes(), b'')
         self.assertEqual(receipts.read_bytes(), saved)
+
+    @unittest.skipIf(os.geteuid() == 0, 'root can list unreadable directories')
+    def test_stop_blocks_when_a_nested_ledger_directory_cannot_be_listed(self):
+        owed, evidence, agent = self.record_non_git_result()
+        pending = b'10\t' + evidence.split(b'\t', 1)[1]
+        owed.write_bytes(pending)
+        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
+        home = self.resolve()
+        history = ledger.rows(home)
+        history[-1][0] = '11'
+        home.write_text(''.join('\t'.join(row) + '\n' for row in history))
+        hidden = self.workspace / 'nested/checkout/.git/ship/ledger'
+        hidden.mkdir(parents=True)
+        hidden.chmod(0)
+        try:
+            blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
+            self.assertEqual(blocked['decision'], 'block')
+            self.assertIn('Permission denied', blocked['reason'])
+            self.assertIn(str(hidden), blocked['reason'])
+            self.assertEqual(owed.read_bytes(), pending)
+        finally:
+            hidden.chmod(0o700)
+
+    def test_stop_blocks_non_git_match_after_the_run_end(self):
+        owed, evidence, agent = self.record_non_git_result()
+        pending = b'20\t' + evidence.split(b'\t', 1)[1]
+        owed.write_bytes(pending)
+        self.resolve().write_text(f'10\trun-start\tlight\tsha\topen\trun-1\n'
+                                  f'18\tdeep-review\t{agent}\tsha\tpass\t\n'
+                                  '19\trun-end\tlight\tsha\tclosed\trun-1\n')
+        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn('Notification epoch falls outside the bound ship run', blocked['reason'])
+        self.assertEqual(owed.read_bytes(), pending)
+
+    def test_stop_rejects_malformed_or_outside_non_git_receipts(self):
+        owed, pending, _ = self.record_non_git_result()
+        identifier = json.loads(pending.split(b'\t')[3])['id']
+        key = json.dumps([str(owed), str(self.workspace), identifier])
+        receipts = owed.parent.parent / 'accounted.json'
+        for saved in ([[], [0, 'run'], [0]], [str(self.resolve()), [True, 'run'], [0]],
+                      [str(self.base / 'other.tsv'), [0, 'run'], [0]]):
+            with self.subTest(saved=saved):
+                receipts.write_text(json.dumps({key: saved}))
+                owed.with_suffix('.stop-state').unlink(missing_ok=True)
+                blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
+                self.assertEqual(blocked['decision'], 'block')
+                self.assertIn('Accounting receipt', blocked['reason'])
+                self.assertEqual(owed.read_bytes(), pending)
 
     def test_stop_blocks_non_git_match_from_a_later_run(self):
         owed, evidence, agent = self.record_non_git_result()

@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -128,7 +129,7 @@ def rows(path):
     return [line.split('\t') for line in path.read_text().splitlines() if line]
 
 
-def find_non_git_agent_run(cwd, agent, agent_id, histories, saved):
+def find_non_git_agent_run(cwd, agent, agent_id, histories, saved, receipt_error):
     if 'SHIP_LEDGER_DIR' in os.environ:
         return None
     workspace = Path(cwd).resolve()
@@ -138,51 +139,73 @@ def find_non_git_agent_run(cwd, agent, agent_id, histories, saved):
         pass
     else:
         return None
-    # A broken or inaccessible checkout must keep the normal ledger resolution error.
+    # Git errors other than a missing repository keep normal ledger resolution.
     probe = subprocess.run(['git', '-C', cwd, 'rev-parse', '--git-dir'],
                            env={**os.environ, 'LC_ALL': 'C'}, capture_output=True, text=True)
     if probe.returncode != 128 or not probe.stderr.startswith('fatal: not a git repository ('):
         return None
-    scratch = workspace / '.scratch/ship-ledgers'
-    if saved is not None:
-        home = Path(saved[0])
-        parts = home.relative_to(workspace).parts if home.is_relative_to(workspace) else ()
-        if home.suffix != '.tsv' or not (
-                (len(parts) == 4 and parts[:2] == ('.scratch', 'ship-ledgers')) or
-                (len(parts) == 5 and parts[1:4] == ('.git', 'ship', 'ledger'))):
-            raise ValueError('Accounting receipt ledger is outside the workspace layouts')
-        if home.resolve() != home or not stat.S_ISREG(home.lstat().st_mode):
-            raise ValueError('Accounting receipt ledger must be a regular file without symlinks')
-        return home, saved[1], None
 
-    def entries(directory):
-        if directory.resolve() == directory:
-            try:
-                yield from directory.iterdir()
-            except (FileNotFoundError, NotADirectoryError):
-                pass
+    def census_timeout(*_):
+        raise ValueError('Workspace ledger inventory exceeds 5 seconds')
 
-    directories = [*entries(workspace / '.scratch/ship-ledgers'),
-                   *(child / '.git/ship/ledger' for child in entries(workspace))]
-    count = 0
-    for directory in directories:
-        for path in entries(directory):
-            if path.suffix != '.tsv' or path.resolve() != path or not stat.S_ISREG(path.stat().st_mode):
+    def listing_error(exc):
+        raise exc
+
+    def ledger_directory(directory):
+        return (directory.parts[-2:] == ('ship', 'ledger') or
+                directory.parts[-3:-1] == ('.scratch', 'ship-ledgers'))
+
+    def read_rows(path):
+        if path not in checked:
+            with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)) as fh:
+                if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                    raise ValueError(f'Workspace ledger must be a regular file: {path}')
+                histories[path] = [line.split('\t') for line in fh.read().splitlines() if line]
+            checked.add(path)
+        return histories[path]
+
+    checked, budget = histories.setdefault(None, (set(), [time.monotonic() + 5, 20000]))
+    remaining = budget[0] - time.monotonic()
+    if remaining <= 0:
+        census_timeout()
+    previous = signal.signal(signal.SIGALRM, census_timeout)
+    try:
+        signal.setitimer(signal.ITIMER_REAL, remaining)
+        if saved is not None:
+            home = Path(saved[0])
+            if (not home.is_relative_to(workspace) or home.suffix != '.tsv' or
+                    not ledger_directory(home.parent.relative_to(workspace)) or home.resolve() != home):
+                raise receipt_error('Accounting receipt ledger is outside the workspace layouts')
+            read_rows(home)
+            return home, saved[1], None
+
+        count = 0
+        for root, _, files in os.walk(workspace, onerror=listing_error, followlinks=False):
+            if budget[1] == 0:
+                raise ValueError('Workspace ledger inventory exceeds 20000 directories')
+            budget[1] -= 1
+            directory = Path(root)
+            if not ledger_directory(directory.relative_to(workspace)):
                 continue
-            if path not in histories:
-                histories[path] = rows(path)
-            start = None
-            for index, row in enumerate(histories[path]):
-                if row[1] == 'run-start':
-                    start = index
-                elif row[1] not in MARKS and agent_key(row[2]) == (agent, agent_id):
-                    count += 1
-                    home, run_start, match = path, start, index
-    if count != 1:
-        raise ValueError(f'Found {count} ledger rows for agent {agent}@{agent_id}; expected exactly one')
-    if run_start is None:
-        raise ValueError(f'Ledger row for agent {agent}@{agent_id} has no preceding run-start')
-    return home, run_identity(run_start, histories[home][run_start]), match
+            for name in files:
+                path = directory / name
+                if path.suffix != '.tsv' or path.resolve() != path:
+                    continue
+                start = None
+                for index, row in enumerate(read_rows(path)):
+                    if row[1] == 'run-start':
+                        start = index
+                    elif row[1] not in MARKS and agent_key(row[2]) == (agent, agent_id):
+                        count += 1
+                        home, run_start, match = path, start, index
+        if count != 1:
+            raise ValueError(f'Found {count} ledger rows for agent {agent}@{agent_id}; expected exactly one')
+        if run_start is None:
+            raise ValueError(f'Ledger row for agent {agent}@{agent_id} has no preceding run-start')
+        return home, run_identity(run_start, histories[home][run_start]), match
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def open_run(path):

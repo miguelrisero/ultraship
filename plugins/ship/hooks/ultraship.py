@@ -5384,7 +5384,9 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
     saved = None
     if result_id in receipts:
         saved = receipts[result_id]
-        if (not isinstance(saved, list) or len(saved) != 3
+        if (not isinstance(saved, list) or len(saved) != 3 or not isinstance(saved[0], str)
+                or not isinstance(saved[1], list) or len(saved[1]) != 2
+                or type(saved[1][0]) is not int or not isinstance(saved[1][1], str)
                 or not isinstance(saved[2], list) or not saved[2] or type(saved[2][0]) is not int):
             raise ReceiptIntegrityError('Accounting receipt has an invalid shape')
     binding = None
@@ -5394,7 +5396,7 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
     else:
         agent_id = result.get('agent_id')
         if isinstance(agent_id, str) and agent_id.strip():
-            binding = ledger.find_non_git_agent_run(cwd, agent, agent_id, histories, saved)
+            binding = ledger.find_non_git_agent_run(cwd, agent, agent_id, histories, saved, ReceiptIntegrityError)
         if binding is None:
             home = ledger.ledger_path(cwd).resolve()
         else:
