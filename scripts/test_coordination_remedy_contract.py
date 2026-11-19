@@ -52,7 +52,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'blocked as their own rules say.',
             'A retry in another form never bypasses a safety block.',
             'A superior grants or runs a command only within its own authority, and its own hooks and permissions apply.',
-            'Protected mutation-row edits use only the [lane-owned row route](../SKILL.md#lane-owned-row-route) and its tools.',
+            'Protected mutation-row edits use only the [lane-owned row route](../SKILL.md#lane-owned-row-route), '
+            'the [standalone main-row repair](#standalone-main-row-repair) and their tools.',
             'Push, merge and protected-write refusals stay final; a retry in another form never bypasses them.',
         ):
             with self.subTest(requirement=requirement):
@@ -103,10 +104,9 @@ class CoordinationRemedyContractTests(unittest.TestCase):
     def test_message_warnings_and_receipt_refusals_keep_existing_authority(self):
         for requirement in (
             'Message-format rule: `text_lint.py` warns about prose formatting and lets the call proceed.',
-            'Examples include glued words, sentence or word limits, and a missing `Facts` heading.',
+            'Examples include glued words and sentence or word limits.',
             'Preserve the action, recipient, scope, authority, non-prose fields, owner provenance, and choice identifiers.',
-            'A missing `Facts` heading organizes supported existing facts only; '
-            'invent zero facts, evidence, approval, or authority.',
+            'Invent zero facts, evidence, approval, or authority while you apply it.',
             'Keep the Input classification requirement and receipt validation in force.',
             'After a receipt citation refusal, remove the receipt marker and resend with the same action, recipient and scope.',
             'Only the hook writes receipt state; agents never read, write or reset the receipt store.',

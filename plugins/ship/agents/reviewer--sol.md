@@ -65,14 +65,13 @@ Read rows only under the driver's reviewer admission record. Read only the named
 You differ from the PR author and the writer.
 For each re-anchored row, confirm the same test, the same claim and the same mutant intent at the base and the frozen head.
 Confirm that the paired `old` and `new` fields are the only changed fields of that row.
-Confirm that the generated authorization record names the frozen head, the row ID, the expected count and an unchanged mutant.
+Use the record fields that the brief copies from the tool output. Read no file under `.git`.
+Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.
 For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.
 Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.
-For each restored row, confirm that only the lane's own unmerged commits changed it, and that its record entry shows `base_equal` true.
-Check independently that each authorized restored range has an empty diff against the merge base.
-Check that the restoration commit shows no change outside those ranges against its starting head.
-Confirm that each restored row ID is unique and that each range covers its complete row.
-For each added row, confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
+For each added row, confirm that its row ID is absent at the base.
+Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
 Return a blocking finding for a changed claim, a changed mutant, a changed test or a weaker row. The CoC decides those rows.
+A changed claim also needs a current task-specific owner event, which the CoC obtains.
 Report only paths, row IDs, fields and content-free findings. Quote no row text.
 You keep zero edit, execution and publication authority.

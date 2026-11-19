@@ -30,9 +30,11 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             for requirement in (
                 'No CoC decision file is required.',
                 'Authority: the owner\'s global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.',
-                "Scope: each row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it.",
+                "Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, and each new row that step 4 admits.",
                 'Admit the writer with the [row re-anchor tool admission record]',
                 'The record names the lane, base, head, row IDs, exact line ranges, expected counts and the unchanged mutant check.',
+                'The tool prints the record path and every record field as `key=value` lines, with no row text.',
+                'The driver copies the printed fields of that run into the reviewer brief. The reviewer reads no file under `.git`.',
                 'The record expires on any head change. Rerun the tool at the frozen head before review; that run changes zero statements.',
                 'the anchor guard requires each anchor count to equal the row\'s expected count, not only a nonzero count.',
                 'The mutation proof runs after merge, under its execution admission.',
@@ -51,7 +53,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'It never parses or searches a whole row file.',
                 'Keep row TOML text and pair bytes out of messages, briefs and PR bodies. Name each edit by path, row ID and field.',
                 'The driver applies zero protected edits. Writers keep zero publication authority.',
-                "Send these rows to the CoC: a changed claim, a new or changed mutant on an existing row, a changed designated test, a retirement without a replacement, and a row that the PR's own diff does not break.",
+                "Send these rows to the CoC: a new or changed mutant on an existing row, a changed designated test, a retirement without a replacement, and a row that the PR's own diff does not break.",
+                'Send a changed claim to the CoC too. The CoC approves it only with a current task-specific owner event.',
                 'The CoC audits a 10% sample of lane-owned row changes.',
             ):
                 with self.subTest(path=name, requirement=requirement):
@@ -66,27 +69,24 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The replacement row guards the new code.',
                 'The anchor guard fails a removed row without a `[[retired]]` entry.',
                 "the writer adds rows for the PR's own new code, each with a claim, a designated test, a subject and a mutant.",
-                'one independent reviewer confirms that every changed, retired, restored or added row is not weaker.',
+                'Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.',
+                'The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.',
+                'Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.',
+                'The driver marks the draft ready only after the review in step 7 passes at the exact head.',
+                'one independent reviewer confirms that every changed, retired or added row is not weaker.',
                 'The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record]',
             ):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, route)
 
-    def test_lane_owned_restore_requires_own_unmerged_commits_and_exact_base_bytes(self):
-        for name in ROUTE_CARRIERS:
-            route = section((SHIP / name).read_text(), '### Lane-owned row route')
-            for requirement in (
-                'Restore: a lane may restore rows that only its own unmerged commits changed, back to their merge-base bytes.',
-                'When a lane commit changed only those rows, the writer runs a plain `git revert` of that commit.',
-                'When it also changed other lines, the writer restores only each complete row range with native Edit and keeps the other edits.',
-                'The writer commits the restoration alone, then runs the re-anchor tool on each restored row.',
-                "The record binds the merge base, the starting head (the restoration commit's parent), the paths, the row IDs and the exact line ranges.",
-                'Each restored range must have an empty diff against the merge base; its record entry shows `base_equal` true.',
-                'Outside those ranges, the restoration commit must show no change against its starting head.',
-                'Any byte difference from the merge base leaves the restore route. That row follows the re-anchor route or goes to the CoC.',
-            ):
-                with self.subTest(path=name, requirement=requirement):
-                    self.assertIn(requirement, route)
+    def test_lane_owned_route_and_review_copies_match(self):
+        for names, heading in ((ROUTE_CARRIERS, '### Lane-owned row route'),
+                               ([f'agents/{name}' for name in REVIEWERS], '## Lane-owned row review')):
+            canonical = section((SHIP / names[0]).read_text(), heading).rstrip('\n')
+            for name in names[1:]:
+                with self.subTest(path=name):
+                    copy = section((SHIP / name).read_text(), heading).rstrip('\n')
+                    self.assertEqual(canonical, copy.replace('](../skills/ship/references/', '](references/'))
 
     def test_lane_owned_review_pins_independence_scope_and_all_row_verdicts(self):
         for name in REVIEWERS:
@@ -101,15 +101,14 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'You differ from the PR author and the writer.',
                 'For each re-anchored row, confirm the same test, the same claim and the same mutant intent at the base and the frozen head.',
                 'Confirm that the paired `old` and `new` fields are the only changed fields of that row.',
-                'Confirm that the generated authorization record names the frozen head, the row ID, the expected count and an unchanged mutant.',
+                'Use the record fields that the brief copies from the tool output. Read no file under `.git`.',
+                'Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.',
                 'For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.',
                 'Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.',
-                "For each restored row, confirm that only the lane's own unmerged commits changed it, and that its record entry shows `base_equal` true.",
-                'Check independently that each authorized restored range has an empty diff against the merge base.',
-                'Check that the restoration commit shows no change outside those ranges against its starting head.',
-                'Confirm that each restored row ID is unique and that each range covers its complete row.',
-                'For each added row, confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.',
+                'For each added row, confirm that its row ID is absent at the base.',
+                'Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.',
                 'Return a blocking finding for a changed claim, a changed mutant, a changed test or a weaker row. The CoC decides those rows.',
+                'A changed claim also needs a current task-specific owner event, which the CoC obtains.',
                 'Report only paths, row IDs, fields and content-free findings. Quote no row text.',
                 'You keep zero edit, execution and publication authority.',
             ):
@@ -256,6 +255,7 @@ class ScopedDecisionRouteTests(unittest.TestCase):
     def test_main_row_repair_requires_exact_causal_scope_and_separate_gates(self):
         self.check_route('Standalone main-row repair', (
             'only to future briefs after verified runtime adoption',
+            'Apply it outside the lane-owned row route.',
             'Require a repair-only lane',
             'read `~/.claude/CLAUDE.md` directly under `CoC decisions (standing grant)`',
             'clause for adapting rows when a PR makes the stored mutant impossible to apply',
@@ -322,6 +322,15 @@ class ScopedDecisionRouteTests(unittest.TestCase):
             'Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched record or review.',
             'A zero count alone supplies zero repair authority. A disposition label supplies zero proof.',
             'accept zero relay and require zero per-row owner events',
+        ))
+
+    def test_ordinary_file_checkpoint_binds_literal_scope_and_unchanged_source(self):
+        self.check_route('Future ordinary-file identity checkpoints', (
+            'Require literal worktree paths and an exact permitted file allowlist; exclude protected files.',
+            'Disable fsmonitor with `-c core.fsmonitor=false` on direct Git reads.',
+            'Disable external diff helpers and text conversion with `--no-ext-diff --no-textconv` where applicable.',
+            'Bind the revision, status, diff and hash results to one unchanged checkpoint.',
+            'Invalidate an inconsistent checkpoint collection or any collection whose source changes during capture.',
         ))
 
     def test_scoped_owner_event_verification_preserves_all_other_input_bans(self):
