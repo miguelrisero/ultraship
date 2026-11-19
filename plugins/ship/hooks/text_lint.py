@@ -461,11 +461,12 @@ def hook(event, parse_error=None):
         output = {'additionalContext': 'Output contract warning: ' + str(exc)
                   + ' This call proceeds. Use this shape next time:\n' + template}
     except Exception as exc:
-        retry = retry or (' This refusal is not formatting-only. Resend after the content meets the rule above,'
-                          ' or ask your superior for permission.')
-        tool = event.get('tool_name', '')
-        if isinstance(tool, str) and tool.endswith(('create_input', 'update_input')):
-            retry += ' Use this shape:\n' + INPUT_TEMPLATE
+        if not retry:
+            retry = (' This refusal is not formatting-only. Resend after the content meets the rule above,'
+                     ' or ask your superior for permission.')
+            tool = event.get('tool_name', '')
+            if isinstance(tool, str) and tool.endswith(('create_input', 'update_input')):
+                retry += ' Use this shape:\n' + INPUT_TEMPLATE
         reason = 'Output contract: ' + str(exc) + ' Keep the work pending.' + retry
         try:
             reason += ' Receipt: `' + write_receipt(event, [str(exc)], False, parent)['id'] + '`.'

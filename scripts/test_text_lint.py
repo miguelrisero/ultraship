@@ -737,9 +737,10 @@ class TextLintTests(unittest.TestCase):
         copied = self.input_event('input-two', '<meta name="output-kind" content="result">'
                                  '<p>The review passes.</p><!-- ultraship-receipt:' + receipt_id + ' -->')
 
-        self.assertIn('Invalid receipt citation: Receipt tool, recipient or non-prose fields differ.',
-                      self.hook_refusal(copied))
-
+        reason = self.hook_refusal(copied)
+        self.assertEqual(reason, 'Output contract: Invalid receipt citation: Receipt tool, recipient '
+                         'or non-prose fields differ. Keep the work pending. Remove the receipt '
+                         'marker and resend with the same action, recipient and scope.')
         self.assertFalse(self.last_receipt['resend_allowed'])
         self.assertFalse((self.state / 'receipts' / (receipt_id + '.consumed')).exists())
 

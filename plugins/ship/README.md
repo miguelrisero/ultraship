@@ -96,7 +96,7 @@ Pass each option once, with its value as a separate word, in any order.
 
 Use the literal absolute path of the installed plugin's script; the writer hook refuses a shell expansion in that command word.
 The writer hook also refuses literals combining `$` with interpreter-like text, ANSI-C quoting, and raw whitespace beyond space, tab, and newline.
-A hook refusal ends the lane's attempt.
+Keep the count pending after a refusal. Use the literal helper form above only when it meets the named rule. Ask the driver for a permitted proof route when the literal itself is blocked.
 
 The repository path must be canonical and absolute; the commit must be a full lowercase SHA.
 The subject must be a normalized repository-relative POSIX path.

@@ -180,7 +180,7 @@ Verify those bindings and the recorded evidence before the edit. Refuse a missin
 A zero count alone supplies zero repair authority. A disposition label supplies zero proof.
 Before editing, confirm that the lane head equals the bound pre-edit commit and that the named rows and subjects match bound main.
 Use one native Edit per row with `replace_all=false` and a unique `old_string` within the approved extent that includes the row ID.
-Refuse a missing or ambiguous match without widening the scope. A hook refusal ends the step.
+Refuse a missing or ambiguous match without widening the scope. Keep the row pending after a hook refusal. Ask the driver for a permitted route under the protected row rules.
 Change only `old` and `new`. Require the repaired anchor to count exactly once at the current source site.
 Preserve the identical mutant operation, row ID, claim, subject, designated test, assertions, pins, bounds, and every other field.
 The driver applies zero protected edits. The writer has zero publication authority.

@@ -3479,7 +3479,8 @@ def git_commit_step(command):
 
 def deny(reason):
     retry = ('Keep the work pending. Retry only after you meet the rule above. '
-             'If blocked, report the blocked step, the rule, and the next permitted action to your coordinator.')
+             'If blocked, report the blocked step, the rule, and the next permitted action to the role named above. '
+             'If no role is named, report it to your superior or in this conversation.')
     print(json.dumps({'hookSpecificOutput': {
         'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': reason + '\n' + retry}}))
     sys.exit(0)

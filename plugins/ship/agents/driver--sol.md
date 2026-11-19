@@ -269,7 +269,7 @@ Permit the applying writer to parse only the appended text, never the named file
 Append with `python3 -I <script> <record-file>`, one call per named file, where `<script>` is the literal absolute path of the installed ship plugin's `skills/ship/scripts/retire-rows.py` that the brief names; the hook refuses a shell expansion in that command.
 Write the record file with native Write outside the repository checkout: a JSON object with `row_file`, the literal absolute row-file path, and `rows`, a list of objects with `id` and `reason`.
 The script checks only the appended text with `tomllib.loads`, never reads the named file, and appends to that path.
-Use this command for new retirements. Keep a refused retirement pending and ask the driver for an authorized route.
+Use this command for new retirements. Keep a refused retirement pending and ask the driver for an authorized route. The recorded refusal still blocks that call.
 Run nothing else in that Bash call; get the line counts with `git diff --numstat` in a later, separate call.
 Check the retirement commit only with content-free line counts for each named file: added lines only, zero deleted lines.
 Refuse a row whose guarded behavior still exists in any form, including a changed form at the same site, or that moved or has a replacement row.
