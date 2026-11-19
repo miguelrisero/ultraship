@@ -171,7 +171,9 @@ Require the frozen decision to bind this evidence to the follow-up under the own
 Require one disposition for each row: a landed designated-test change or mutant adaptation under that grant, or a CoC decision receipt.
 A CoC decision receipt is the disposition only when the breaking change is not the repair lane's own diff and no landed disposition exists.
 The receipt states that it is the disposition and names the row ID, the breaking commit and the paired-field re-anchor.
-The receipt also records the evidence that no landed disposition exists for the row, with the commits it checked.
+The receipt also records the evidence that no landed disposition exists for the row in every commit from the breaking commit through the bound main commit.
+It names that range by the full breaking commit SHA and the full bound main SHA.
+Before publication, recheck that range through the current main. A disposition that landed after the bound main commit invalidates the receipt.
 Name the receipt by absolute path and SHA256. Verify the digest before any protected access.
 For a landed disposition, require the disposition record to cite the landed row change and its CoC decision.
 For a landed disposition, require a receipt for the independent not-weaker review of that disposition.
