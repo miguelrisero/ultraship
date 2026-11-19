@@ -1980,6 +1980,13 @@ class HookTests(unittest.TestCase):
                     if rule:
                         self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
 
+    def preflight_without_probe_prefix_or_remote_steps(self, command):
+        return command.replace('env -i PATH="$PATH" HOME="$HOME" ', '', 1).replace(
+            '''remote=$(git for-each-ref --format='%(upstream:remotename) %(upstream:remoteref)' "refs/heads/$branch"); '''
+            'test "$remote" = "origin refs/heads/$branch"; ',
+            '', 1,
+        )
+
     def test_preflight_clears_inherited_probe_environment(self):
         command = self.preflight_command()
         prefix = 'env -i PATH="$PATH" HOME="$HOME" '
@@ -1989,6 +1996,12 @@ class HookTests(unittest.TestCase):
             for caller in ('', 'ship:driver'):
                 with self.subTest(replacement=replacement, caller=caller):
                     self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+        legacy = self.preflight_without_probe_prefix_or_remote_steps(command)
+        self.assertNotEqual(legacy, command)
+        for caller in ('', 'ship:driver'):
+            with self.subTest(case='legacy', caller=caller):
+                self.assertEqual(self.preflight_decision(legacy, caller).get('permissionDecision'), 'deny')
 
     def test_preflight_checks_upstream_remote_ref(self):
         command = self.preflight_command()
@@ -2006,6 +2019,12 @@ class HookTests(unittest.TestCase):
             for caller in ('', 'ship:driver'):
                 with self.subTest(replacement=new, caller=caller):
                     self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+        legacy = self.preflight_without_probe_prefix_or_remote_steps(command)
+        self.assertNotEqual(legacy, command)
+        for caller in ('', 'ship:driver'):
+            with self.subTest(case='legacy', caller=caller):
+                self.assertEqual(self.preflight_decision(legacy, caller).get('permissionDecision'), 'deny')
 
     def test_preflight_ships_without_targets(self):
         self.assertEqual(ultraship.REVIEW_THREAD_PREFLIGHT_TARGETS, frozenset())
