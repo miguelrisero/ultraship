@@ -2864,7 +2864,10 @@ def launcher_word(words, index):
 
 
 def shell_launches_commands(words, command):
-    return bool(command and not unresolved_shell_word(command[0]) and launcher_word(words, words.index(command)))
+    data_consumer = command and command[0] in {'tee', 'grep', 'cat'}
+    return any(launcher_word(words, index) and not (
+        data_consumer and word[2] > command[2] and re.fullmatch(r'[\w./-]+', word[0]))
+        for index, word in enumerate(words))
 
 
 def launcher_may_change_paths(words, command):
@@ -3049,7 +3052,7 @@ def inline_interpreter_denial(command, cwd=None):
             command_words = list(shell_without_redirections(words))
             consumer, wrapped = shell_segment_command(command_words, command_positions)
             launches = shell_launches_commands(command_words, consumer)
-            paths_changed = (launches or runtime_paths or any(changing_segments[:index])
+            paths_changed = (runtime_paths or any(changing_segments[:index])
                              or any(changing_segments[index + 1:])
                              or launcher_may_change_paths(command_words, consumer))
             classified.append((words, piped, paths_changed, launches, consumer, wrapped))

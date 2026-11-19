@@ -384,8 +384,13 @@ class EnvDirectoryTests(unittest.TestCase):
         self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
         self.assertFalse(self.denied('printf input | timeout 5 cat'), self.reason)
 
+    def test_unknown_pipeline_consumer_cannot_prove_launcher_is_data(self):
+        self.assertTrue(self.denied('printf input | fixture-consumer xargs'))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
     def test_pipeline_launcher_names_as_data_stay_admitted(self):
-        for command in ('printf input | tee xargs', 'printf input | timeout 5 grep xargs'):
+        for command in ('printf input | tee xargs', 'printf input | timeout 5 grep xargs',
+                        'printf input | cat xargs'):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
 
