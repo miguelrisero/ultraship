@@ -4177,13 +4177,85 @@ def hidden_gh_api_calls(text):
     return max(counts)
 
 
+# Each approved target binds the Git host, repository, exact queue URL, and PR number.
+REVIEW_THREAD_PREFLIGHT_TARGETS: frozenset[tuple[str, str, str, int]] = frozenset()
+REVIEW_THREAD_QUEUE_CHECK = (
+    'import json,sys; '
+    'unique=lambda pairs:dict(pairs) if len(dict(pairs))==len(pairs) else sys.exit(1); '
+    'q=json.load(sys.stdin,object_pairs_hook=unique,parse_constant=lambda _:sys.exit(1)); '
+    'uint=lambda n:type(n) is int and n>=0; '
+    'ok=(type(q) is dict and q.get("truncated") is False and type(q.get("entries")) is list '
+    'and uint(q.get("limit")) and q["limit"]==100 and uint(q.get("total")) and uint(q.get("returned")) '
+    'and q["total"]==q["returned"]==len(q["entries"])<=q["limit"] '
+    'and all(type(e) is dict and uint(e.get("pr_number")) and e["pr_number"]>0 '
+    'and e["pr_number"]!=int(sys.argv[1]) for e in q["entries"])); sys.exit(0 if ok else 1)')
+
+# shortcut: recognize one ordered preflight shape; use a shell parser for broader syntax.
+REVIEW_THREAD_PREFLIGHT = re.compile(
+    r'[ \t]*set -euo pipefail; w=/[A-Za-z0-9_./-]+; cd "\$w"; '
+    r'root=\$\(git rev-parse --show-toplevel\); test "\$root" = "\$w"; '
+    r'branch=\$\(git branch --show-current\); test "\$branch" = (?P<branch>[A-Za-z0-9_][A-Za-z0-9_./-]*); '
+    r'commit=\$\(git rev-parse --verify HEAD\); test "\$commit" = [0-9a-f]{40}; '
+    r'dirty=\$\(git --no-optional-locks -c core\.fsmonitor=false status --porcelain=v1 --untracked-files=all\); '
+    r'test -z "\$dirty"; '
+    r'''upstream=\$\(git rev-parse --symbolic-full-name --verify '@\{u\}'\); '''
+    r'test "\$upstream" = "refs/remotes/origin/\$branch"; '
+    r'''remote=\$\(git for-each-ref --format='%\(upstream:remotename\) %\(upstream:remoteref\)' "refs/heads/\$branch"\); '''
+    r'test "\$remote" = "origin refs/heads/\$branch"; '
+    r'''git remote get-url --push --all origin \| awk '\$0=="(?P<url>https://(?P<host>[A-Za-z0-9.-]+)/'''
+    r'''(?P<repo>[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+)\.git)" \{n\+\+\} END\{exit !\(n==1 && NR==1\)\}'; '''
+    r'url=\$\(GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -c http\.(?P=url)\.followRedirects=false -c credential\.helper= '
+    r"ls-remote --get-url '(?P=url)'\); test \"\$url\" = '(?P=url)'; "
+    r'env -i PATH="\$PATH" HOME="\$HOME" '
+    r'GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ALLOW_PROTOCOL=https '
+    r'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -C / -c http\.sslVerify=true '
+    r'-c http\.(?P=url)\.followRedirects=false -c credential\.helper= '
+    r"ls-remote --symref '(?P=url)' HEAD \| "
+    r'''awk 'NR==1 && NF==3 && \$1=="ref:" && \$2=="refs/heads/(?P<default>[A-Za-z0-9_./-]+)" && \$3=="HEAD" \{n\+\+\} '''
+    r'''NR==2 && NF==2 && \$1 ~ /\^\[0-9a-f\]\+\$/ && length\(\$1\)==40 && \$2=="HEAD" \{n\+\+\} '''
+    r"END\{exit !\(n==2 && NR==2\)\}'; "
+    r'repo="\$\(gh repo view (?P=host)/(?P=repo) '
+    r'''--json nameWithOwner,defaultBranchRef --jq '(?P<filter>\.nameWithOwner\+" "\+\.defaultBranchRef\.name)'\)"; '''
+    r"test \"\$repo\" = '(?P=repo) (?P=default)'; "
+    r'test "\$upstream" != "refs/remotes/origin/(?P=default)"; '
+    r"curl -q -fsS --proto '=https' --max-time 15 '(?P<queue>https://[A-Za-z0-9.-]+/mq/queue\?limit=100)' \| "
+    rf"python3 -I -c '{re.escape(REVIEW_THREAD_QUEUE_CHECK)}' (?P<pr>[1-9][0-9]{{0,9}})")
+
+
+def approved_review_thread_preflight(command):
+    if not REVIEW_THREAD_PREFLIGHT_TARGETS or len(command) > 4096 or '"$(gh repo view ' not in command:
+        return None
+    match = REVIEW_THREAD_PREFLIGHT.match(command)
+    if not match or match['branch'] in ('main', match['default']):
+        return None
+    if (match['host'], match['repo'], match['queue'], int(match['pr'])) not in REVIEW_THREAD_PREFLIGHT_TARGETS:
+        return None
+    return match
+
+
+def review_thread_preflight_denial(command, normalized, data_mode, reason):
+    match = approved_review_thread_preflight(command)
+    if not match:
+        return reason
+    tail = command[match.end():].strip(' \t')
+    if tail not in ('', ';'):
+        # A literal API suffix can refine the denial only.
+        api_tail = re.fullmatch(r';[ \t]*(gh api(?:[ \t]+[A-Za-z0-9_./:@=+,%\-]+)+)', tail)
+        return (review_thread_denial(api_tail[1], outer=False) or reason) if api_tail else reason
+    start, end = match.span('filter')
+    # The outer shlex pass removes these escapes before the nested scan reads the jq argument.
+    quoted = command[:start] + match['filter'].replace('"', r'\"') + command[end:]
+    return review_thread_scan(quoted, normalized, data_mode)
+
+
 # shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
-def review_thread_denial(command, data_mode=False):
+def review_thread_denial(command, data_mode=False, *, outer=True):
     if read_only_shell(command) or literal_search_shell(command):
         return None
     if '$' not in command and re.fullmatch(
             r"git commit(?: +-[A-Za-z]+| +--[a-z-]+)*(?: +-m +'[^']*'(?: +-[A-Za-z]+| +--[a-z-]+)*)+ *", command):
         return None
+    original = command
     command = command.replace('\\\n', '')
     normalized = re.sub(r'''['"\\]''', '', command).casefold()
     if re.search(r'\bgh\b', normalized) and '`' in outside_single_quotes(command):
@@ -4199,7 +4271,13 @@ def review_thread_denial(command, data_mode=False):
                                                'resolvereviewthread'))
             or re.search(r'comments/\S*/replies', mutation_text)):
         return 'raw review-thread mutation'
-    command = cat_heredoc_data(command)
+    reason = review_thread_scan(cat_heredoc_data(command), normalized, data_mode)
+    if outer and reason == 'unparsed shell syntax rule: No closing quotation':
+        return review_thread_preflight_denial(original, normalized, data_mode, reason)
+    return reason
+
+
+def review_thread_scan(command, normalized, data_mode):
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace = ' \t\r'
@@ -4262,7 +4340,7 @@ def review_thread_denial(command, data_mode=False):
             if any(gh_word(token) for token in re.split(r'[\s;&|()<>`]+', text)):
                 api_calls = hidden_gh_api_calls(text)
                 argument_data = data_command and position > 0 and not api_calls
-                reason = review_thread_denial(text if argument_data else value, data_mode=argument_data)
+                reason = review_thread_denial(text if argument_data else value, data_mode=argument_data, outer=False)
                 if reason == 'unparsed shell syntax rule: No closing quotation' and (
                         position > 0 and words[0][1] == 'grep' and '"' in value and not api_calls
                         and re.fullmatch(r"'[^']*'", raw)
@@ -4847,6 +4925,8 @@ def pre(data):
             command = pr_comment_body_removed(tin.get('command', ''))
             reason = review_thread_denial(command)
             if reason is None:
+                preflight = approved_review_thread_preflight(command)
+                exact_preflight = preflight and command[preflight.end():].strip(' \t') in ('', ';')
                 separated = re.sub(r'''['"\\]''', ' ', command).casefold()
                 normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()
                 if re.search(r'\bgh\b', separated) and not re.search(r'\bgh\b', normalized):
@@ -4854,7 +4934,7 @@ def pre(data):
                 elif (re.search(r'(?<!<)<<(?!<)', command) and '\\\n' in command
                       and (re.search(r'\bgh\b', separated) or re.search(r'\bgh\b', normalized))):
                     reason = 'heredoc with line continuation'
-                elif thread_command_config(command):
+                elif not exact_preflight and thread_command_config(command):
                     reason = 'git configuration token'
                 elif '--config-env' in command:
                     reason = 'git configuration environment option'
