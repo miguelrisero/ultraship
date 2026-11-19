@@ -1682,7 +1682,37 @@ class HookTests(unittest.TestCase):
             with self.subTest(caller=caller):
                 self.assertEqual(self.decision(command, caller), {})
 
+    PREFLIGHT_TARGET = ('git.example.invalid', 'o/r', 'https://queue.example.invalid/mq/queue?limit=100', 71)
+
+    def preflight_decision(self, command, caller):
+        with patch.object(ultraship, 'REVIEW_THREAD_PREFLIGHT_TARGETS', frozenset({self.PREFLIGHT_TARGET})):
+            return self.decision(command, caller)
+
     def preflight_command(self):
+        return (
+            r'''set -euo pipefail; w=/work/example/repo; cd "$w"; '''
+            r'''root=$(git rev-parse --show-toplevel); test "$root" = "$w"; '''
+            r'''branch=$(git branch --show-current); test "$branch" = lane/example; '''
+            r'''commit=$(git rev-parse --verify HEAD); test "$commit" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; '''
+            r'''dirty=$(git --no-optional-locks -c core.fsmonitor=false status --porcelain=v1 --untracked-files=all); '''
+            r'''test -z "$dirty"; upstream=$(git rev-parse --symbolic-full-name --verify '@{u}'); '''
+            r'''test "$upstream" = "refs/remotes/origin/$branch"; '''
+            r'''git remote get-url --push --all origin | awk '$0=="https://git.example.invalid/o/r.git" '''
+            r'''{n++} END{exit !(n==1 && NR==1)}'; '''
+            r'''url=$(git ls-remote --get-url 'https://git.example.invalid/o/r.git'); '''
+            r'''test "$url" = 'https://git.example.invalid/o/r.git'; '''
+            r'''git ls-remote --symref 'https://git.example.invalid/o/r.git' HEAD | '''
+            r'''awk 'NR==1 && NF==3 && $1=="ref:" && $2=="refs/heads/trunk" && $3=="HEAD" {n++} '''
+            r'''NR==2 && NF==2 && $1 ~ /^[0-9a-f]+$/ && length($1)==40 && $2=="HEAD" {n++} '''
+            r'''END{exit !(n==2 && NR==2)}'; '''
+            r'''repo="$(gh repo view git.example.invalid/o/r --json nameWithOwner,defaultBranchRef '''
+            r'''--jq '.nameWithOwner+" "+.defaultBranchRef.name')"; test "$repo" = 'o/r trunk'; '''
+            r'''case "$upstream" in */trunk) exit 1;; esac; '''
+            r"curl -q -fsS --proto '=https' --max-time 15 'https://queue.example.invalid/mq/queue?limit=100' | "
+            f"python3 -I -c '{ultraship.REVIEW_THREAD_QUEUE_CHECK}' 71"
+        )
+
+    def legacy_preflight_command(self):
         return (
             r"""set -euo pipefail; w=/work/example/repo; d=${w%/*}/intake; cd "$w"; """
             r"""test "$(git rev-parse --show-toplevel)" = "$w"; """
@@ -1709,8 +1739,8 @@ class HookTests(unittest.TestCase):
         command = self.preflight_command()
         for caller in ('', 'ship:driver'):
             with self.subTest(caller=caller):
-                self.assertEqual(self.decision(command, caller), {})
-        result = self.decision(command, 'ship:writer--sol')
+                self.assertEqual(self.preflight_decision(command, caller), {})
+        result = self.preflight_decision(command, 'ship:writer--sol')
         self.assertEqual(result.get('permissionDecision'), 'deny')
         self.assertIn(' Rule: git writer expansion or glob rule.', result['permissionDecisionReason'])
 
@@ -1725,7 +1755,7 @@ class HookTests(unittest.TestCase):
         for shell, rule in cases:
             for caller in ('', 'ship:driver'):
                 with self.subTest(rule=rule, caller=caller):
-                    result = self.decision(shell, caller)
+                    result = self.preflight_decision(shell, caller)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
 
@@ -1733,14 +1763,33 @@ class HookTests(unittest.TestCase):
         command = self.preflight_command() + ';   '
         for caller in ('', 'ship:driver'):
             with self.subTest(caller=caller):
-                self.assertEqual(self.decision(command, caller), {})
+                self.assertEqual(self.preflight_decision(command, caller), {})
+
+    def test_preflight_denies_without_approved_target(self):
+        command = self.preflight_command()
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                result = self.decision(command, caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(' Rule: unparsed shell syntax rule: No closing quotation.',
+                              result['permissionDecisionReason'])
 
     def test_preflight_retry_requires_fixed_steps(self):
         command = self.preflight_command()
         cases = (
+            ('legacy preflight', self.legacy_preflight_command()),
             ('Python isolation', command.replace('python3 -I -c', 'python3 -c', 1)),
-            ('Python body', command.replace('sys.exit(not ok)', 'sys.exit(0)', 1)),
-            ('awk body', command.replace('END{exit n!=1}', 'END{exit 0}', 1)),
+            ('Python body', command.replace('sys.exit(0 if ok else 1)', 'sys.exit(0)', 1)),
+            ('awk body', command.replace('exit !(n==1 && NR==1)', 'exit 0', 1)),
+            ('Git status without an exit check', command.replace('test -z "$dirty"', 'test -z "$(git status --porcelain=v1)"', 1)),
+            ('upstream failure swallowed', command.replace("'@{u}')", "'@{u}' || :)", 1)),
+            ('upstream name', command.replace('refs/remotes/origin/$branch', 'refs/remotes/other/$branch', 1)),
+            ('push URL mismatch', command.replace('o/r.git', 'o/other.git', 1)),
+            ('unapproved Git host', command.replace('git.example.invalid', 'other.example.invalid')),
+            ('unapproved repository', command.replace('/o/r', '/o/other').replace("'o/r trunk'", "'o/other trunk'")),
+            ('unapproved queue', command.replace('queue.example.invalid', 'other.example.invalid', 1)),
+            ('unapproved PR', command.removesuffix('71') + '711'),
+            ('file output', command.replace("HEAD | awk 'NR==1", "HEAD > /work/example/head.tsv; awk 'NR==1", 1)),
             ('extra Git step', command + '; git log -1'),
             ('missing pipeline stage', command + ' |   '),
             ('missing next command', command + ' &&   '),
@@ -1748,10 +1797,37 @@ class HookTests(unittest.TestCase):
         for case, shell in cases:
             for caller in ('', 'ship:driver'):
                 with self.subTest(case=case, caller=caller):
-                    result = self.decision(shell, caller)
+                    result = self.preflight_decision(shell, caller)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn(' Rule: unparsed shell syntax rule: No closing quotation.',
                                   result['permissionDecisionReason'])
+
+    def test_preflight_queue_check_validates_counts_and_exact_pr(self):
+        clean = dict(truncated=False, total=1, returned=1, limit=100, entries=[{'pr_number': 711, 'label': '71'}])
+        bad = (
+            json.dumps([]),
+            json.dumps({**clean, 'truncated': True}),
+            json.dumps({**clean, 'entries': None}),
+            json.dumps({**clean, 'entries': [None]}),
+            json.dumps({**clean, 'total': 2}),
+            json.dumps({**clean, 'returned': 0}),
+            json.dumps({**clean, 'limit': 99}),
+            json.dumps({**clean, 'total': 101, 'returned': 101, 'entries': clean['entries'] * 101}),
+            json.dumps({**clean, 'total': True}),
+            json.dumps({**clean, 'total': 1.0}),
+            json.dumps({**clean, 'entries': [{'pr_number': 71}]}),
+            json.dumps({**clean, 'entries': [{'pr_number': '711'}]}),
+            json.dumps({**clean, 'entries': [{'pr_number': 0}]}),
+            json.dumps({**clean, 'entries': [{}]}),
+            json.dumps({**clean, 'unrecognized': float('nan')}),
+            json.dumps(clean).replace('"pr_number": 711', '"pr_number": 71, "pr_number": 711'),
+            json.dumps(clean) + '\n{}',
+        )
+        for payload, allowed in [(json.dumps(clean), True), *((text, False) for text in bad)]:
+            with self.subTest(payload=payload[:100]):
+                result = subprocess.run([sys.executable, '-I', '-c', ultraship.REVIEW_THREAD_QUEUE_CHECK, '71'],
+                                        input=payload, text=True, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode == 0, allowed)
 
     def test_guard_exception_denies_every_caller(self):
         with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):

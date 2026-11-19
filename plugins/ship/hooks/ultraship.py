@@ -4177,37 +4177,49 @@ def hidden_gh_api_calls(text):
     return max(counts)
 
 
+# Each approved target binds the Git host, repository, exact queue URL, and PR number.
+REVIEW_THREAD_PREFLIGHT_TARGETS: frozenset[tuple[str, str, str, int]] = frozenset()
+REVIEW_THREAD_QUEUE_CHECK = (
+    'import json,sys; '
+    'unique=lambda pairs:dict(pairs) if len(dict(pairs))==len(pairs) else sys.exit(1); '
+    'q=json.load(sys.stdin,object_pairs_hook=unique,parse_constant=lambda _:sys.exit(1)); '
+    'uint=lambda n:type(n) is int and n>=0; '
+    'ok=(type(q) is dict and q.get("truncated") is False and type(q.get("entries")) is list '
+    'and uint(q.get("limit")) and q["limit"]==100 and uint(q.get("total")) and uint(q.get("returned")) '
+    'and q["total"]==q["returned"]==len(q["entries"])<=q["limit"] '
+    'and all(type(e) is dict and uint(e.get("pr_number")) and e["pr_number"]>0 '
+    'and e["pr_number"]!=int(sys.argv[1]) for e in q["entries"])); sys.exit(0 if ok else 1)')
+
 # shortcut: recognize one ordered preflight shape; use a shell parser for broader syntax.
 REVIEW_THREAD_PREFLIGHT = re.compile(
-    r'[ \t]*set -euo pipefail; w=/[A-Za-z0-9_./-]+; d=\$\{w%/\*\}/intake; cd "\$w"; '
-    r'test "\$\(git rev-parse --show-toplevel\)" = "\$w"; '
-    r'test "\$\(git branch --show-current\)" = [A-Za-z0-9_][A-Za-z0-9_./-]*; '
-    r'test "\$\(git rev-parse HEAD\)" = [0-9a-f]{40}; '
-    r'test -z "\$\(git status --porcelain=v1\)"; '
-    r"git remote get-url --push --all origin \| python3 -I -c 'import sys; "
-    r'u=sys\.stdin\.read\(\)\.splitlines\(\); ok=u==\["https://[A-Za-z0-9.-]+/[A-Za-z0-9_./-]+\.git"\]; '
-    r'''print\("[A-Za-z .;-]+" if ok else "[A-Za-z .;-]+"\); sys\.exit\(not ok\)'; '''
-    r'url=\$\(git remote get-url --push --all origin\); '
-    r'git ls-remote --symref "\$url" HEAD > "\$d/(?P<file>[A-Za-z0-9_.-]+\.tsv)"; '
-    r'''awk '\$1=="ref:" && \$2=="refs/heads/(?P<branch>[A-Za-z0-9_./-]+)" && \$3=="HEAD" '''
-    r'''\{n\+\+\} END\{exit n!=1\}' "\$d/(?P=file)"; '''
-    r'test "\$\(gh repo view (?P<repo>[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+) '
-    r'''--json nameWithOwner,defaultBranchRef --jq '(?P<filter>\.nameWithOwner\+" "\+\.defaultBranchRef\.name)'\)" '''
-    r"= '(?P=repo) (?P=branch)'; "
-    r'''upstream=\$\(git rev-parse --abbrev-ref '@\{u\}' 2>/dev/null \|\| :\); '''
-    r'case "\$upstream" in (?P=branch)\|\*/(?P=branch)\) exit 1;; esac; '
-    r"printf 'Branch: %s\\nHead: %s\\nEndpoint: %s\\nUpstream: %s\\n' "
-    r'"\$\(git branch --show-current\)" "\$\(git rev-parse HEAD\)" "\$url" "\$\{upstream:-none\}"; '
-    r"curl -fsS --max-time 15 'https://[A-Za-z0-9.-]+/mq/queue\?limit=100' \| "
-    r'''jq -e '\(\.truncated == false\) and \(\[\.entries\[\] \| select\(tostring \| '''
-    r"""contains\("[A-Za-z0-9_-]+"\)\)\] \| length == 0\)'""")
+    r'[ \t]*set -euo pipefail; w=/[A-Za-z0-9_./-]+; cd "\$w"; '
+    r'root=\$\(git rev-parse --show-toplevel\); test "\$root" = "\$w"; '
+    r'branch=\$\(git branch --show-current\); test "\$branch" = [A-Za-z0-9_][A-Za-z0-9_./-]*; '
+    r'commit=\$\(git rev-parse --verify HEAD\); test "\$commit" = [0-9a-f]{40}; '
+    r'dirty=\$\(git --no-optional-locks -c core\.fsmonitor=false status --porcelain=v1 --untracked-files=all\); '
+    r'test -z "\$dirty"; '
+    r'''upstream=\$\(git rev-parse --symbolic-full-name --verify '@\{u\}'\); '''
+    r'test "\$upstream" = "refs/remotes/origin/\$branch"; '
+    r'''git remote get-url --push --all origin \| awk '\$0=="(?P<url>https://(?P<host>[A-Za-z0-9.-]+)/'''
+    r'''(?P<repo>[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+)\.git)" \{n\+\+\} END\{exit !\(n==1 && NR==1\)\}'; '''
+    r"url=\$\(git ls-remote --get-url '(?P=url)'\); test \"\$url\" = '(?P=url)'; "
+    r"git ls-remote --symref '(?P=url)' HEAD \| "
+    r'''awk 'NR==1 && NF==3 && \$1=="ref:" && \$2=="refs/heads/(?P<default>[A-Za-z0-9_./-]+)" && \$3=="HEAD" \{n\+\+\} '''
+    r'''NR==2 && NF==2 && \$1 ~ /\^\[0-9a-f\]\+\$/ && length\(\$1\)==40 && \$2=="HEAD" \{n\+\+\} '''
+    r"END\{exit !\(n==2 && NR==2\)\}'; "
+    r'repo="\$\(gh repo view (?P=host)/(?P=repo) '
+    r'''--json nameWithOwner,defaultBranchRef --jq '(?P<filter>\.nameWithOwner\+" "\+\.defaultBranchRef\.name)'\)"; '''
+    r"test \"\$repo\" = '(?P=repo) (?P=default)'; "
+    r'case "\$upstream" in \*/(?P=default)\) exit 1;; esac; '
+    r"curl -q -fsS --proto '=https' --max-time 15 '(?P<queue>https://[A-Za-z0-9.-]+/mq/queue\?limit=100)' \| "
+    rf"python3 -I -c '{re.escape(REVIEW_THREAD_QUEUE_CHECK)}' (?P<pr>[1-9][0-9]{{0,9}})")
 
 
 def review_thread_preflight_denial(command, normalized, data_mode, reason):
-    if len(command) > 4096 or '"$(gh repo view ' not in command:
+    if not REVIEW_THREAD_PREFLIGHT_TARGETS or len(command) > 4096 or '"$(gh repo view ' not in command:
         return reason
     match = REVIEW_THREAD_PREFLIGHT.match(command)
-    if not match:
+    if not match or (match['host'], match['repo'], match['queue'], int(match['pr'])) not in REVIEW_THREAD_PREFLIGHT_TARGETS:
         return reason
     tail = command[match.end():].strip(' \t')
     if tail not in ('', ';'):
