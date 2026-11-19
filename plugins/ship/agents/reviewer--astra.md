@@ -44,9 +44,11 @@ For each restored row, confirm from the copied record fields `restoration_base_e
 Confirm that `restoration` and `restoration_parent` match the brief, and that `starting_lines` is `null` for a row that the starting head deletes.
 Confirm from the brief's commit list that only the lane's own unmerged commits changed the row file after the merge base.
 Read the row lines at the merge base and the frozen head. Confirm that they are equal, or that only a re-anchor changed the paired fields.
-For each added row, confirm that its row ID is absent at the base.
+Read each row in the base checkout and the frozen-head checkout that the admission record lists, at the base and head line ranges.
+For each added row, grep the base copy of the row file for its ID and confirm zero matches.
 Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
-Return a blocking finding for a changed claim, a changed mutant, a changed test or a weaker row. The CoC decides those rows.
+For a CoC-approved row change, confirm that only the fields the CoC decision names changed, and that the row is not weaker.
+Return a blocking finding for an unapproved changed claim, mutant or test, or a weaker row. The CoC decides those rows.
 A changed claim also needs a current task-specific owner event, which the CoC obtains.
 Report only paths, row IDs, fields and content-free findings. Quote no row text.
 You keep zero edit, execution and publication authority.
