@@ -1,5 +1,7 @@
 """Read-only routing contracts discovered by the existing plugin-rules CI job."""
+from contextlib import redirect_stdout
 import importlib.util
+import io
 import json
 from pathlib import Path
 import re
@@ -31,6 +33,12 @@ class NativePeerRoutingTests(unittest.TestCase):
                     lint.outgoing({'tool_name': tool, 'tool_input': {'content': {'html': '<p>Please decide.</p>', 'contract': {'allow_text': True}}}})
                 with self.assertRaisesRegex(ValueError, 'Missing section'):
                     lint.outgoing({'tool_name': tool, 'tool_input': {'content': {'html': '<meta name="output-kind" content="decision"><p>Please decide.</p>', 'contract': {'allow_text': True}}}})
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    lint.hook({'tool_name': tool, 'tool_input': {'content': {'html': '<meta name="output-kind" content="decision"><p>Please decide.</p>'}}})
+                warning = json.loads(output.getvalue())['hookSpecificOutput']
+                self.assertNotIn('permissionDecision', warning)
+                self.assertIn('Missing section', warning['additionalContext'])
         with self.assertRaisesRegex(ValueError, '25 words'):
             lint.check('<p>' + 'word ' * 13 + '<span>' + 'word ' * 13 + '</span>.</p>')
         lint.check('<h2>What <em>is</em> wrong</h2><h2>Why now</h2><h2>Options</h2><h2>Recommendation</h2><h2>If no answer</h2>', 'decision')
