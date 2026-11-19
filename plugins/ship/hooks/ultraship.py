@@ -2813,7 +2813,7 @@ def shell_segment_command(words, command_positions):
                 continue
             if start not in command_positions:
                 return None, False
-        name = os.path.basename(value)
+        name = value
         if name not in PIPE_WRAPPER_FLAGS:
             return words[cursor], wrapped
         wrapped = True
@@ -2868,7 +2868,7 @@ def shell_launches_commands(words, command, paths_changed):
                      and not any(SHELL_ASSIGNMENT.match(value) for _, value, start, _ in words
                                  if start < command[2]))
     return any(launcher_word(words, index) and not (
-        data_consumer and word[2] > command[2] and re.fullmatch(r'[\w./-]+', word[0]))
+        data_consumer and word[2] > command[2] and re.fullmatch(r"(['\"]?)[\w./-]+\1", word[0]))
         for index, word in enumerate(words))
 
 

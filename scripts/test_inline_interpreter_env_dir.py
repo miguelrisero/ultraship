@@ -373,6 +373,9 @@ class EnvDirectoryTests(unittest.TestCase):
                                f'-exec {interpreter} {script} \\;')
                     self.assertTrue(self.denied(command))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+                    command = f'find . -maxdepth 0 -exec {interpreter} {script} \\;'
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
             self.assertFalse(self.denied('timeout 5 python3 scripts/x.py', cwd=directory), self.reason)
 
     def test_piped_launcher_with_opaque_job_is_denied(self):
@@ -396,6 +399,8 @@ class EnvDirectoryTests(unittest.TestCase):
             'printf input & printf input | cat parallel',
             'printf input | ./cat parallel',
             'printf input | /fixture/bin/cat parallel',
+            'printf input | ./timeout 5 cat parallel',
+            'printf input | /tmp/x/nice cat parallel',
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
@@ -404,7 +409,8 @@ class EnvDirectoryTests(unittest.TestCase):
     def test_pipeline_launcher_names_as_data_stay_admitted(self):
         for command in ('printf input | tee xargs', 'printf input | timeout 5 grep xargs',
                         'printf input | cat xargs', 'printf input | cat parallel',
-                        'printf input | tee parallel'):
+                        'printf input | tee parallel', "printf 'node -e 1' | cat parallel",
+                        "printf parallel | grep 'parallel'", 'printf parallel | grep "parallel"'):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
 
