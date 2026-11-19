@@ -383,6 +383,13 @@ class ToolTests(unittest.TestCase):
         self.invoke(2, 'restoration changed bytes outside restored rows', restoration=restoration)
         self.assertFalse(self.record_path().exists())
 
+    def test_restoration_refuses_dropping_a_starting_head_separator(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.commit_rows(prefix + suffix)
+        restoration = self.commit_rows(prefix + table.removesuffix('\n') + suffix)
+        self.invoke(2, 'restoration changed bytes outside restored rows', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
     def test_restoration_refuses_outside_edit_and_misplaced_row(self):
         prefix, table, suffix = self.restoration_fixture()
         starting = self.commit_rows(prefix + suffix)
