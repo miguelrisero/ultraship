@@ -1520,6 +1520,34 @@ class HookTests(unittest.TestCase):
                 self.assertEqual(result.get('permissionDecision'), 'deny')
                 self.assertIn(' Rule: git configuration token.', result['permissionDecisionReason'])
 
+    def test_literal_git_reads_with_directory_or_grep_count_are_admitted(self):
+        commands = (
+            'git -C /tmp/repo log --oneline -3 && gh pr view 7',
+            'GIT_CONFIG_COUNT=1 git -C /tmp/repo log --oneline -3 && gh pr view 7',
+            "git grep -c 'api$' -- plugins",
+            "git grep -nc 'api$' -- plugins",
+            "git -C /tmp/repo grep -c 'api$' -- plugins",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+
+    def test_git_read_exemptions_preserve_config_and_quote_refusals(self):
+        cases = (
+            ("git -c core.quotepath=off grep -c 'api$' -- plugins", 'ambiguous shell quote pattern'),
+            ("git grep -c $'api' -- plugins", 'ambiguous shell quote pattern'),
+            ('GIT_CONFIG_COUNT=2 git -C /tmp/repo log --oneline -3 && gh pr view 7', 'git configuration token'),
+            ('git -C /tmp/repo --config-env=core.pager=PAGER log --oneline -3 && gh pr view 7',
+             'git configuration environment option'),
+        )
+        for command, rule in cases:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
+
     def test_git_config_value_assignment_stays_refused(self):
         self.assertEqual(self.decision("GIT_CONFIG_VALUE_0='!echo hi' git log -1", '').get('permissionDecision'), 'deny')
 

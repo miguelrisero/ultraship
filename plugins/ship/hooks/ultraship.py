@@ -4695,7 +4695,7 @@ def review_thread_scan(command, normalized, data_mode):
 # In this literal Git read, the only dollar signs belong to the single-quoted pattern.
 LITERAL_GIT_GREP_ANCHOR = re.compile(
     r"[ \t]*git(?:[ \t]+-C[ \t]+(?!-)[\w./-]+)*[ \t]+grep"
-    r"(?:[ \t]+-[nilwEFvz]+)*[ \t]+'(?!-)[^'\x00\r\n]*\$'"
+    r"(?:[ \t]+-[nilwEFvzc]+)*[ \t]+'(?!-)[^'\x00\r\n]*\$'"
     r"(?:[ \t]+(?!-)[\w./-]+)*(?:[ \t]+--(?:[ \t]+[\w./-]+)*)?[ \t]*\n?")
 
 
