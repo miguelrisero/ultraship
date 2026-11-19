@@ -804,7 +804,12 @@ class LedgerDirTests(unittest.TestCase):
     def test_fail_unparsed_accounts_a_missing_commit(self):
         owed, transcript, result, epoch = self.auto_owed([
             (-2, 'user', 'Review.'), (-1, 'assistant', 'Verdict: PASS abcd1234')])
+        before = self.cli('gaps')
+        self.assertEqual(before.returncode, 1, before.stderr)
+        self.assertIn('deep-review', before.stdout)
         self.assert_auto_accounts_unparsed(owed, transcript, result, epoch, 'expected one commit')
+        after = self.cli('gaps')
+        self.assertEqual((after.returncode, after.stdout), (before.returncode, before.stdout))
 
     def test_fail_unparsed_accounts_conflicting_verdicts_as_fail(self):
         owed, transcript, result, epoch = self.auto_owed([
@@ -857,15 +862,59 @@ class LedgerDirTests(unittest.TestCase):
             f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} pass", '1 accounted, 0 pending'])
         self.assertEqual(ledger.rows(self.resolve())[-1][3:5], [sha, 'pass'])
 
+    def test_account_auto_accepts_a_hyphen_prefixed_path(self):
+        owed, _, result, _ = self.auto_owed(None)
+        relative = Path('-archive/s1.tsv')
+        target = self.checkout / relative
+        target.parent.mkdir()
+        owed.rename(target)
+        auto = self.cli('account-auto', str(relative))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout.splitlines(), [
+            f"pending {result['id']} no transcript", '0 accounted, 1 pending'])
+
     def test_account_auto_rejects_invalid_flag_shapes(self):
-        for args in ((), ('--fail-unparsed',), ('--other', 'pending.tsv'),
-                     ('pending.tsv', '--fail-unparsed'), ('--fail-unparsed', '--fail-unparsed'),
-                     ('--fail-unparsed', 'pending.tsv', 'extra')):
+        session_refusal = 'account-auto requires CLAUDE_CODE_SESSION_ID to match the owed file session.'
+        usage = 'usage: ledger.py '
+        for args, error in (
+            ((), usage),
+            (('--fail-unparsed',), session_refusal),
+            (('--other', 'pending.tsv'), usage),
+            (('pending.tsv', '--fail-unparsed'), usage),
+            (('--fail-unparsed', '--fail-unparsed'), session_refusal),
+            (('--fail-unparsed', 'pending.tsv', 'extra'), usage),
+        ):
             with self.subTest(args=args):
                 auto = self.cli('account-auto', *args)
                 self.assertNotEqual(auto.returncode, 0)
                 self.assertEqual(auto.stdout, '')
-                self.assertTrue(auto.stderr.startswith('usage: ledger.py '), auto.stderr)
+                self.assertTrue(auto.stderr.startswith(error), auto.stderr)
+
+    def test_fail_unparsed_preserves_transcript_and_binding_refusals(self):
+        home = self.resolve()
+        for reason in ('transcript unavailable', 'transcript scan limit reached',
+                       'transcript path does not match the recorded agent and session'):
+            with self.subTest(reason=reason):
+                owed, transcript, result, _ = self.auto_owed([(-2, 'user', 'Review.')])
+                if reason == 'transcript unavailable':
+                    transcript.unlink()
+                    transcript.mkdir()
+                elif reason == 'transcript scan limit reached':
+                    with transcript.open('wb') as source:
+                        source.truncate(ledger.TRANSCRIPT_SCAN_LIMIT + 1)
+                else:
+                    fields = owed.read_text().rstrip('\n').split('\t')
+                    fields[-1] = json.dumps({**result, 'agent_transcript_path': str(transcript.with_name('agent-other.jsonl'))})
+                    owed.write_text('\t'.join(fields) + '\n')
+                before = home.read_bytes()
+                auto = self.cli('account-auto', '--fail-unparsed', str(owed))
+                if transcript.is_dir():
+                    transcript.rmdir()
+                owed.write_text('')
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                self.assertEqual(auto.stdout.splitlines(), [
+                    f"pending {result['id']} {reason}", '0 accounted, 1 pending'])
+                self.assertEqual(home.read_bytes(), before)
 
     def test_account_auto_counts_underscored_and_backticked_commits(self):
         sha, other = 'ab' * 20, 'cd' * 20

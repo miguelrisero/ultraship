@@ -531,9 +531,9 @@ def main(argv):
         print(account(*args))
         return
     if cmd == 'account-auto':
-        if len(args) == 1 and not args[0].startswith('-'):
+        if len(args) == 1:
             account_auto(args[0])
-        elif len(args) == 2 and args[0] == '--fail-unparsed' and not args[1].startswith('-'):
+        elif len(args) == 2 and args[0] == '--fail-unparsed':
             account_auto(args[1], fail_unparsed=True)
         else:
             sys.exit(USAGE)
