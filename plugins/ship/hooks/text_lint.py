@@ -75,9 +75,11 @@ class VisibleText(HTMLParser):
             self.hidden.append(tag)
         if self.hidden:
             return
-        attrs = dict(attrs)
-        if tag == 'meta' and attrs.get('name') == 'output-kind':
-            self.kinds.append(attrs.get('content'))
+        if tag == 'meta':
+            names = [value for key, value in attrs if key == 'name']
+            if 'output-kind' in names:
+                contents = [value for key, value in attrs if key == 'content']
+                self.kinds.append(contents[0] if len(names) == len(contents) == 1 else None)
         if tag in self.BLOCKS:
             self.parts.append('\n')
         elif tag in ('td', 'th'):
@@ -121,6 +123,8 @@ def hold_wall(text):
 
 
 def check(text, kind='result'):
+    if re.search(r'[\ud800-\udfff]', text):
+        raise ValueError('Use valid Unicode in the message or Input.')
     visible = ''.join(VisibleText(text).parts)
     plain = peer_text(text) if kind == 'peer' else visible
     # A peer reads plain text; main's HTML view of the raw text keeps every word and sentence refusal main made.

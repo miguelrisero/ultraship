@@ -838,10 +838,26 @@ class TextLintTests(unittest.TestCase):
         for field in ('session_id', 'agent_id', 'tool_use_id'):
             self.assertIsNone(receipt[field])
 
-    def test_lone_surrogate_entrypoint_warns_without_exception(self):
-        result = self.entrypoint_output(json.dumps(self.event('\ud800')))
-        self.assertNotIn('permissionDecision', result)
-        self.assertIn('Missing section: Facts', result['additionalContext'])
+    def test_invalid_unicode_remains_denied_with_or_without_headings(self):
+        for suffix in ('', '\nFacts: Checks pass.\nDecision: Continue.\nNext: Resume.'):
+            with self.subTest(headings=bool(suffix)):
+                event = self.event('\ud800' + suffix)
+                result = self.entrypoint_output(json.dumps(event))
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn('valid Unicode', result['permissionDecisionReason'])
+
+    def test_conflicting_classification_attributes_keep_input_denied(self):
+        for tool in ('create_input', 'update_input'):
+            for tag in ('<meta name="output-kind" content="unknown" content="decision">',
+                        '<meta name="other" name="output-kind" content="decision">',
+                        '<meta name="output-kind" name="other" content="result">'
+                        '<meta name="output-kind" content="decision">'):
+                with self.subTest(tool=tool, tag=tag):
+                    event = {'tool_name': 'mcp__bettercoding__' + tool,
+                             'tool_input': {'content': {'html': tag + '<p>Please decide.</p>'}}}
+                    result = self.hook_output(event)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn('output-kind classification', result['permissionDecisionReason'])
 
     def test_format_warning_without_session_needs_no_receipt(self):
         for session in (None, '', 123):
