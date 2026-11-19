@@ -2863,8 +2863,10 @@ def launcher_word(words, index):
         word[1] in {'-exec', '-execdir', '-ok', '-okdir'} for word in words[index + 1:])
 
 
-def shell_launches_commands(words, command):
-    data_consumer = command and command[0] in {'tee', 'grep', 'cat'}
+def shell_launches_commands(words, command, paths_changed):
+    data_consumer = (not paths_changed and command and command[0] in {'tee', 'grep', 'cat'}
+                     and not any(SHELL_ASSIGNMENT.match(value) for _, value, start, _ in words
+                                 if start < command[2]))
     return any(launcher_word(words, index) and not (
         data_consumer and word[2] > command[2] and re.fullmatch(r'[\w./-]+', word[0]))
         for index, word in enumerate(words))
@@ -3051,10 +3053,9 @@ def inline_interpreter_denial(command, cwd=None):
         for index, (words, piped) in enumerate(segments):
             command_words = list(shell_without_redirections(words))
             consumer, wrapped = shell_segment_command(command_words, command_positions)
-            launches = shell_launches_commands(command_words, consumer)
-            paths_changed = (runtime_paths or any(changing_segments[:index])
-                             or any(changing_segments[index + 1:])
-                             or launcher_may_change_paths(command_words, consumer))
+            paths_changed = runtime_paths or any(changing_segments[:index]) or any(changing_segments[index + 1:])
+            launches = shell_launches_commands(command_words, consumer, paths_changed)
+            paths_changed = paths_changed or launcher_may_change_paths(command_words, consumer)
             classified.append((words, piped, paths_changed, launches, consumer, wrapped))
         shell_programs = set()
         for index, token in enumerate(tokens):

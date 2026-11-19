@@ -388,9 +388,23 @@ class EnvDirectoryTests(unittest.TestCase):
         self.assertTrue(self.denied('printf input | fixture-consumer xargs'))
         self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
+    def test_pipeline_consumer_requires_unchanged_paths_to_prove_launcher_is_data(self):
+        for command in (
+            'printf input | PATH=/fixture/bin cat parallel',
+            'printf input | env PATH=/fixture/bin cat parallel',
+            'PATH=/fixture/bin; printf input | cat parallel',
+            'printf input & printf input | cat parallel',
+            'printf input | ./cat parallel',
+            'printf input | /fixture/bin/cat parallel',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
     def test_pipeline_launcher_names_as_data_stay_admitted(self):
         for command in ('printf input | tee xargs', 'printf input | timeout 5 grep xargs',
-                        'printf input | cat xargs'):
+                        'printf input | cat xargs', 'printf input | cat parallel',
+                        'printf input | tee parallel'):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
 
