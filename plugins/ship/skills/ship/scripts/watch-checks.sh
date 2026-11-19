@@ -8,6 +8,12 @@
 set -euo pipefail
 
 pr="${1:?usage: watch-checks.sh <PR> [start-timeout] [timeout]}"
+# Named checks require a separate, externally approved policy; ordinary failures never select this route.
+for argument in "$@"; do
+  if [ "$argument" = "--named-checks" ] || [ "$argument" = "--approved-policy-sha256" ]; then
+    exec python3 -I "$(dirname -- "${BASH_SOURCE[0]}")/named-checks.py" "$@"
+  fi
+done
 start_timeout="${2:-600}"
 timeout="${3:-5400}"
 interval=300

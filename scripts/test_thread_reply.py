@@ -1,5 +1,6 @@
 """Thread ownership checks and the Bash boundary for review-thread writes."""
 import contextlib
+import copy
 import importlib.util
 import io
 import json
@@ -9,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / 'plugins/ship/skills/babysit/scripts/thread_reply.py'
@@ -116,12 +117,10 @@ REFUSE = (
     'S=\'gh api repos/o/r/pulls/7/comments\'; bash -c "$S"',
     "bash -c 'gh pr view 7'",
     'gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$THREAD"',
-    "gh api graphql -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}' -F owner=o -F name=r",
     "gh api graphql --paginate -f query='query($endCursor:String){viewer{repositories(first:10,after:$endCursor){nodes{name}}}}'",
     'gh api repos/o/r/issues/7/comments -f body=hello',
     'gh api graphql -f "query=query{viewer{login}}"',
     'gh api graphql -f query=query{viewer{login}}',
-    "gh api graphql -f 'query=query($id:ID!){node(id:$id){id}}' -F id=PRRT_x",
     'bash -c \'gh api graphql -f "query=query{viewer{login}}"\'',
     'gh api repos/{owner}/{repo}/issues/7/comments -f body=hello',
     'gh api repos/o/r/issues/7/comments -f body="$BODY"',
@@ -157,7 +156,6 @@ REFUSE = (
     'timeout 60 flock /tmp/x -c \'g"h" api repos/o/r/pulls/7/comments -f body=x\'',
     'echo api repos/o/r/pulls/7/comments -f body=x | xargs gh',
     r'gh api repos/o/r/pulls/7; sudo -s g\"h\" api repos/o/r/pulls/7/comments -f body=x',
-    'gh pr create --title "fix(ship): refuse gh api writes" --body-file body.md',
     "env --split-string='gh api repos/o/r/pulls/7/comments --input reply.json'",
     "env -S'gh api repos/o/r/pulls/7/comments --input reply.json'",
     "env -iS'gh api repos/o/r/pulls/7/comments --input reply.json'",
@@ -207,6 +205,8 @@ REFUSE = (
 )
 
 ADMIT = (
+    "gh api graphql -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}' -F owner=o -F name=r",
+    "gh api graphql -f 'query=query($id:ID!){node(id:$id){id}}' -F id=PRRT_x",
     "gh api graphql -f query='query{viewer{login}}'",
     "gh api graphql -f query='query{viewer{login}}' && gh api https://api.github.com/user",
     'python3 /abs/plugins/ship/skills/babysit/scripts/thread_reply.py reply https://github.com/o/r/pull/7 PRRT_kwDOabc /abs/.scratch/reply.md',
@@ -262,6 +262,13 @@ ADMIT = (
     'gh pr view 7 >| out.txt',
     'gh api repos/o/r/pulls/7 | head',
     'gh pr ready https://github.com/o/r/pull/7',
+    'gh pr create --title "fix(ship): refuse gh api writes" --body-file body.md',
+)
+
+# Two real push checks that read `gh api` once inside a quoted `$(...)`.
+QUOTED_READ_PUSHES = (
+    "set -euo pipefail\nroot=/w\nw=\"$root/wt/a-pdf-filename\"\ns=\"$root/.scratch/a-pdf-filename\"\napproved=https://github.com/miguelrisero/shunt.git\nbase=e22b65642a4135a90f2abe564528952fe020ca1d\nexport LC_ALL=C\ntest \"$(cat \"$s/upstream-push-preflight.exit\")\" = 0\ntest ! -s \"$s/upstream-push-preflight.stderr\"\ntest \"$(cat \"$s/upstream-push-preflight.stdout\")\" = \"$(printf 'To %s\\n*\\tHEAD:refs/heads/fix/responses-untitled-document-filename\\t[new branch]\\nDone' \"$approved\")\"\ntest \"$(cat \"$s/upstream-push-preflight.command\")\" = 'LC_ALL=C git -C /w/wt/a-pdf-filename -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git push --dry-run --porcelain origin HEAD:refs/heads/fix/responses-untitled-document-filename'\nendpoint=$(git -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git remote get-url --push --all origin 2>/dev/null && printf END)\ntest \"$endpoint\" = \"$(printf '%s\\nEND' \"$approved\")\"\ngit -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git remote get-url --push --all origin\ntest \"$(git -C \"$w\" rev-parse --show-toplevel)\" = \"$w\"\ntest \"$(git -C \"$w\" rev-parse HEAD)\" = ceb993337fe1cd408610fe942e6b0802fd6175bb\ntest \"$(git -C \"$w\" branch --show-current)\" = fix/responses-untitled-document-filename\ntest -z \"$(git -C \"$w\" status --porcelain=v1)\"\ntest -z \"$(git -C \"$w\" rev-parse --abbrev-ref '@{u}' 2>/dev/null || :)\"\ntest \"$(git -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git ls-remote --symref \"$approved\" HEAD refs/heads/fix/responses-untitled-document-filename)\" = \"$(printf 'ref: refs/heads/main\\tHEAD\\n%s\\tHEAD' \"$base\")\"\ntest \"$(gh api repos/pleaseai/shunt/branches/main --jq .commit.sha)\" = \"$base\"\ngit -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git push origin HEAD:refs/heads/fix/responses-untitled-document-filename\ngit -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git ls-remote --exit-code \"$approved\" refs/heads/fix/responses-untitled-document-filename | tee \"$s/upstream-push-ref.txt\"\ntest \"$(cat \"$s/upstream-push-ref.txt\")\" = \"$(printf 'ceb993337fe1cd408610fe942e6b0802fd6175bb\\trefs/heads/fix/responses-untitled-document-filename')\"",
+    "set -euo pipefail\nroot=/w\nw=\"$root/wt/e-cache-ttl\"\ns=\"$root/.scratch/e-cache-ttl\"\napproved=https://github.com/miguelrisero/shunt.git\nbase=e22b65642a4135a90f2abe564528952fe020ca1d\nexport LC_ALL=C\ntest \"$(cat \"$s/upstream-push-preflight.exit\")\" = 0\ntest ! -s \"$s/upstream-push-preflight.stderr\"\ntest \"$(cat \"$s/upstream-push-preflight.stdout\")\" = \"$(printf 'To %s\\n*\\tHEAD:refs/heads/feat/metrics-anthropic-cache-ttl-writes\\t[new branch]\\nDone' \"$approved\")\"\ntest \"$(cat \"$s/upstream-push-preflight.command\")\" = 'LC_ALL=C git -C /w/wt/e-cache-ttl -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git push --dry-run --porcelain origin HEAD:refs/heads/feat/metrics-anthropic-cache-ttl-writes'\nendpoint=$(git -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git remote get-url --push --all origin 2>/dev/null && printf END)\ntest \"$endpoint\" = \"$(printf '%s\\nEND' \"$approved\")\"\ngit -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git remote get-url --push --all origin\ntest \"$(git -C \"$w\" rev-parse --show-toplevel)\" = \"$w\"\ntest \"$(git -C \"$w\" rev-parse HEAD 'HEAD^{tree}')\" = \"$(printf '57c2a9debe55e43db4a5c0ef78cfe52d95ad3313\\n0fe40cf2bae042e0a48508a25b19eaef229d269a')\"\ntest \"$(git -C \"$w\" branch --show-current)\" = feat/metrics-anthropic-cache-ttl-writes\ntest -z \"$(git -C \"$w\" status --porcelain=v1)\"\ntest -z \"$(git -C \"$w\" rev-parse --abbrev-ref '@{u}' 2>/dev/null || :)\"\ntest \"$(git -C \"$w\" -c remote.origin.pushurl=https://github.com/miguelrisero/shunt.git ls-remote --symref \"$approved\" HEAD refs/heads/feat/metrics-anthropic-cache-ttl-writes)\" = \"$(printf 'ref: refs/heads/main\\tHEAD\\n%s\\tHEAD' \"$base\")\"\ntest \"$(gh api repos/pleaseai/shunt/branches/main --jq .commit.sha)\" = \"$base\"",
 )
 
 
@@ -531,12 +538,588 @@ sys.exit(response['code'])
                 self.assertEqual(calls, [self.call(LOOKUP)] + [self.call(query, after=cursor) for cursor in cursors])
 
 
+page_spec = importlib.util.spec_from_file_location('thread_page_helper', HELPER)
+page_helper = importlib.util.module_from_spec(page_spec)
+page_spec.loader.exec_module(page_helper)
+PAGE_QUERY = ('query($owner:String!,$name:String!,$pr:Int!,$after:String){'
+              'repository(owner:$owner,name:$name){nameWithOwner pullRequest(number:$pr){number '
+              'reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}'
+              'nodes{id isResolved isOutdated path line comments(first:1){nodes{author{login}url body}}}}}}}')
+
+
+class ThreadPageTests(unittest.TestCase):
+    def response(self):
+        return {'data': {'repository': {'nameWithOwner': 'o/r', 'pullRequest': {
+            'number': 7, 'reviewThreads': {'pageInfo': {'hasNextPage': False, 'endCursor': None},
+            'nodes': [{'id': 'PRRT_example', 'isResolved': False, 'isOutdated': False,
+                       'path': 'example.py', 'line': 3, 'comments': {'nodes': [
+                           {'author': {'login': 'reviewer'}, 'url': COMMENT, 'body': 'First\nFull preview'}]}}]}}}}}
+
+    def invoke(self, arguments, outputs, clock=None):
+        children = []
+        def spawn(vector, **options):
+            child = Mock(pid=123456, returncode=0, stdout=io.StringIO(), stderr=io.StringIO())
+            child.communicate.return_value = (outputs[len(children)].encode('utf-8'), b'')
+            children.append(child)
+            return child
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(page_helper, 'Popen', side_effect=spawn) as popen, \
+                patch.object(page_helper, 'monotonic', side_effect=clock or (lambda: 0)), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = page_helper.main(['page', *arguments])
+        return code, stdout.getvalue(), stderr.getvalue(), popen, children
+
+    def test_page_uses_fixed_vectors_and_sanitized_environment(self):
+        root = str(ROOT.resolve())
+        response = self.response()
+        nodes = response['data']['repository']['pullRequest']['reviewThreads']['nodes']
+        resolved = copy.deepcopy(nodes[0])
+        resolved.update(id='PRRT_resolved', isResolved=True, isOutdated=True, line=None)
+        resolved['comments']['nodes'][0]['author'] = None
+        nodes.append(resolved)
+        cursor = '@cursor/+==;$(echo inert)'
+        with patch.dict(os.environ, {'GH_REPO': 'other/repo', 'GH_HOST': 'other.invalid',
+                                     'GIT_DIR': '/inert/git', 'GIT_CONFIG_COUNT': '1'}):
+            code, out, err, popen, children = self.invoke(
+                ['7', cursor], [root + '\n', 'https://github.com/o/r.git\n', json.dumps(response)])
+        self.assertEqual((code, err), (0, ''))
+        result = json.loads(out)
+        self.assertEqual(result, {'repository': 'o/r', 'number': 7,
+                                 'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                                 'threads': [
+                                     {'id': 'PRRT_example', 'isResolved': False, 'isOutdated': False,
+                                      'path': 'example.py', 'line': 3, 'comments': [
+                                          {'author': 'reviewer', 'url': COMMENT, 'body': 'First\nFull preview'}]},
+                                     {'id': 'PRRT_resolved', 'isResolved': True, 'isOutdated': True,
+                                      'path': 'example.py', 'line': None, 'comments': [
+                                          {'author': 'ghost', 'url': COMMENT, 'body': 'First\nFull preview'}]}]})
+        vectors = [call.args[0] for call in popen.call_args_list]
+        self.assertEqual(vectors, [
+            ['git', 'rev-parse', '--show-toplevel'],
+            ['git', 'config', '--local', '--get-all', 'remote.origin.url'],
+            ['gh', 'api', '--hostname', 'github.com', 'graphql', '-f', 'query=' + PAGE_QUERY,
+             '-f', 'owner=o', '-f', 'name=r', '-F', 'pr=7', '-f', 'after=' + cursor]])
+        for call in popen.call_args_list:
+            self.assertIs(call.kwargs['shell'], False)
+            self.assertNotIn('text', call.kwargs)
+            self.assertNotIn('encoding', call.kwargs)
+            self.assertNotIn('start_new_session', call.kwargs)
+            self.assertNotIn('process_group', call.kwargs)
+            self.assertEqual(call.kwargs['stdin'], subprocess.DEVNULL)
+            self.assertFalse(set(call.kwargs['env']) & {'GH_REPO', 'GH_HOST'})
+            self.assertFalse(any(key.startswith('GIT_') for key in call.kwargs['env']))
+        self.assertEqual(popen.call_args_list[0].kwargs['cwd'], Path.cwd().resolve())
+        self.assertEqual([call.kwargs['cwd'] for call in popen.call_args_list[1:]], [ROOT.resolve()] * 2)
+        for child in children:
+            child.terminate.assert_not_called()
+            child.kill.assert_not_called()
+
+    def test_page_rejects_inputs_before_starting_children(self):
+        for arguments in ([], ['0'], ['-1'], ['01'], ['1.0'], ['2147483648'], ['99999999999'],
+                          ['7', ''], ['7', '\x00'], ['7', 'cursor', 'extra'],
+                          ['--host', 'example.invalid'], ['--query', 'query{viewer{login}}']):
+            with self.subTest(arguments=arguments):
+                code, out, err, popen, _ = self.invoke(arguments, [])
+                self.assertEqual((code, out), (1, ''))
+                self.assertTrue(err.startswith('failed: '))
+                popen.assert_not_called()
+
+    def test_page_validates_local_origin_before_github_access(self):
+        root = str(ROOT.resolve()) + '\n'
+        for origin in ('', 'https://github.com/o/r\nhttps://github.com/o/other\n',
+                       'git@github.com:o/r.git\n', 'https://user:secret@github.com/o/r\n',
+                       'https://example.invalid/o/r\n', 'https://github.com/o/r?token=secret\n'):
+            with self.subTest(origin=origin):
+                code, out, err, popen, _ = self.invoke(['7'], [root, origin])
+                self.assertEqual((code, out, popen.call_count), (1, '', 2))
+                self.assertNotIn('secret', err)
+        for root_text in ('', 'relative/path\n', '/one\n/two\n'):
+            with self.subTest(root=root_text):
+                code, out, _, popen, _ = self.invoke(['7'], [root_text])
+                self.assertEqual((code, out, popen.call_count), (1, '', 1))
+
+    def test_page_accepts_boundary_pr_and_progressing_cursor(self):
+        response = self.response()
+        pull = response['data']['repository']['pullRequest']
+        pull['number'] = 2147483647
+        pull['reviewThreads']['nodes'][0]['comments']['nodes'][0]['url'] = (
+            'https://github.com/o/r/pull/2147483647#discussion_r123')
+        pull['reviewThreads']['pageInfo'] = {'hasNextPage': True, 'endCursor': 'next/+=='}
+        code, out, err, popen, _ = self.invoke(['2147483647'], [
+            str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(response)])
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(json.loads(out)['pageInfo'], {'hasNextPage': True, 'endCursor': 'next/+=='})
+        self.assertEqual(popen.call_args.args[0][-2:], ['-F', 'pr=2147483647'])
+
+    def test_page_malformed_response_emits_zero_partial_threads(self):
+        cases = [None, [], {}, {'errors': []}, {'data': None}]
+        base = self.response()
+        for repository in ('other/repo', None, 1):
+            value = copy.deepcopy(base)
+            value['data']['repository']['nameWithOwner'] = repository
+            cases.append(value)
+        for number in (8, '7', True):
+            value = copy.deepcopy(base)
+            value['data']['repository']['pullRequest']['number'] = number
+            cases.append(value)
+        for page in ({}, None, {'hasNextPage': 1, 'endCursor': None},
+                     {'hasNextPage': True, 'endCursor': None}, {'hasNextPage': True, 'endCursor': 'same'},
+                     {'hasNextPage': False, 'endCursor': ''}, {'hasNextPage': False, 'endCursor': 1}):
+            value = copy.deepcopy(base)
+            value['data']['repository']['pullRequest']['reviewThreads']['pageInfo'] = page
+            cases.append(value)
+        for key, bad in (('id', 'other'), ('id', None), ('isResolved', 1), ('isOutdated', None),
+                         ('path', ''), ('line', True), ('line', 0), ('comments', {})):
+            value = copy.deepcopy(base)
+            nodes = value['data']['repository']['pullRequest']['reviewThreads']['nodes']
+            invalid = copy.deepcopy(nodes[0])
+            invalid['id'] = 'PRRT_second'
+            invalid[key] = bad
+            nodes.append(invalid)
+            cases.append(value)
+        for field, bad in (('author', {}), ('author', {'login': ''}), ('body', None),
+                           ('url', 'https://github.com/foreign/repo/pull/7#discussion_r1')):
+            value = copy.deepcopy(base)
+            value['data']['repository']['pullRequest']['reviewThreads']['nodes'][0]['comments']['nodes'][0][field] = bad
+            cases.append(value)
+        for bad in (None, {}, 'threads'):
+            value = copy.deepcopy(base)
+            value['data']['repository']['pullRequest']['reviewThreads']['nodes'] = bad
+            cases.append(value)
+        value = copy.deepcopy(base)
+        nodes = value['data']['repository']['pullRequest']['reviewThreads']['nodes']
+        nodes.append(copy.deepcopy(nodes[0]))
+        cases.append(value)
+        for response in cases:
+            with self.subTest(response=response):
+                code, out, err, _, _ = self.invoke(['7', 'same'], [
+                    str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(response)])
+                self.assertEqual((code, out), (1, ''))
+                self.assertTrue(err.startswith('failed: '))
+
+    def test_page_shared_deadline_reduces_each_child_timeout(self):
+        now = [0]
+        calls = []
+        outputs = [str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(self.response())]
+        def spawn(vector, **options):
+            child = Mock(pid=123456, returncode=0, stdout=io.StringIO(), stderr=io.StringIO())
+            index = len(calls)
+            def communicate(timeout):
+                calls.append(timeout)
+                now[0] += 4
+                return outputs[index].encode('utf-8'), b''
+            child.communicate.side_effect = communicate
+            return child
+        with patch.object(page_helper, 'Popen', side_effect=spawn), \
+                patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]):
+            page_helper.thread_page(['7'])
+        self.assertEqual(calls, [29, 25, 21])
+
+    def lifecycle(self, term_latency=0, term_error=False, wait_exit=False, identity=True, start=0):
+        now, events = [start], []
+        child = Mock(pid=123456, returncode=None, stdout=io.StringIO(), stderr=io.StringIO())
+        process = object.__new__(page_helper.PageProcess)
+        process.work_deadline, process.transport_deadline, process.deadline = 30, 29, 40
+        process.overhead = 0
+        process.child, process.pid, process.reaped = child, child.pid, False
+        def terminate():
+            events.append(('TERM', now[0]))
+            now[0] += term_latency
+            if term_error:
+                raise OSError('synthetic TERM failure')
+        def wait(timeout):
+            events.append(('wait', now[0], timeout))
+            if wait_exit or any(event[0] == 'KILL' for event in events):
+                child.returncode = 0
+                return 0
+            now[0] += timeout
+            raise subprocess.TimeoutExpired('synthetic', timeout)
+        child.terminate.side_effect = terminate
+        child.kill.side_effect = lambda: events.append(('KILL', now[0]))
+        child.wait.side_effect = wait
+        state = None if identity else Mock(si_pid=123457)
+        with patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(page_helper.os, 'waitid', return_value=state):
+            try:
+                process.cleanup(child, 123456)
+                error = None
+            except ValueError as caught:
+                error = str(caught)
+        return events, error, child
+
+    def test_lifecycle_preserves_full_post_term_grace_and_bounded_reap(self):
+        events, error, _ = self.lifecycle(term_latency=0.5, start=29)
+        self.assertIsNone(error)
+        self.assertEqual(events, [('TERM', 29), ('wait', 29.5, 5), ('KILL', 34.5), ('wait', 34.5, 5)])
+
+    def test_lifecycle_insufficient_reserve_and_term_failure_never_kill(self):
+        for options in ({'term_latency': 1, 'start': 30}, {'term_error': True, 'start': 25}, {'start': 40}):
+            with self.subTest(options=options):
+                events, error, child = self.lifecycle(**options)
+                self.assertIn('unsettled', error)
+                self.assertFalse(any(event[0] in ('KILL', 'wait') for event in events))
+                child.kill.assert_not_called()
+
+    def test_lifecycle_early_exit_and_uncertain_identity_never_signal(self):
+        events, error, child = self.lifecycle(wait_exit=True, start=25)
+        self.assertIsNone(error)
+        self.assertEqual(events, [('TERM', 25), ('wait', 25, 5)])
+        child.kill.assert_not_called()
+        events, error, child = self.lifecycle(identity=False, start=25)
+        self.assertIn('uncertain', error)
+        self.assertEqual(events, [])
+        child.terminate.assert_not_called()
+        child.kill.assert_not_called()
+
+    def test_page_work_timeout_cleans_only_owned_child_and_emits_zero_stdout(self):
+        now, events = [0], []
+        child = Mock(pid=123456, returncode=None, stdout=io.StringIO(), stderr=io.StringIO())
+        def communicate(timeout):
+            now[0] += timeout
+            raise subprocess.TimeoutExpired('synthetic', timeout)
+        def wait(timeout):
+            events.append(('wait', now[0], timeout))
+            if now[0] < 34:
+                now[0] += timeout
+                raise subprocess.TimeoutExpired('synthetic', timeout)
+            child.returncode = -9
+            return -9
+        child.communicate.side_effect = communicate
+        child.wait.side_effect = wait
+        child.terminate.side_effect = lambda: events.append(('TERM', now[0]))
+        child.kill.side_effect = lambda: events.append(('KILL', now[0]))
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(page_helper, 'Popen', return_value=child), \
+                patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(page_helper.os, 'waitid', return_value=None), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = page_helper.main(['page', '7'])
+        self.assertEqual((code, out.getvalue()), (1, ''))
+        self.assertEqual(events, [('TERM', 29), ('wait', 29, 5), ('KILL', 34), ('wait', 34, 5)])
+        self.assertTrue(err.getvalue().startswith('failed: '))
+
+    def test_page_empty_final_page_and_total_expiry(self):
+        response = self.response()
+        response['data']['repository']['pullRequest']['reviewThreads']['nodes'] = []
+        outputs = [str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(response)]
+        code, out, err, _, _ = self.invoke(['7'], outputs)
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(json.loads(out)['threads'], [])
+        real_dumps = json.dumps
+        now = [0]
+        def serialize(value, **options):
+            result = real_dumps(value, **options)
+            now[0] = 40
+            return result
+        with patch.object(page_helper.json, 'dumps', side_effect=serialize):
+            code, out, err, _, _ = self.invoke(['7'], outputs, clock=lambda: now[0])
+        self.assertEqual((code, out, err), (1, '', 'failed: thread page unavailable.\n'))
+
+    def test_page_exhausted_work_reserve_starts_zero_children(self):
+        with patch.object(page_helper, 'monotonic', side_effect=[0, 30]), \
+                patch.object(page_helper, 'Popen') as popen:
+            process = page_helper.PageProcess()
+            with self.assertRaisesRegex(ValueError, 'work budget'):
+                process.run(['git', 'rev-parse', '--show-toplevel'], ROOT)
+        popen.assert_not_called()
+
+    def test_page_cleanup_errors_keep_owned_child_and_fixed_unsettled_output(self):
+        for failure in ('term', 'kill', 'wait', 'reap_timeout', 'identity', 'observation', 'cached', 'stream', 'reserve'):
+            with self.subTest(failure=failure):
+                now, processes, events = [0], [], []
+                child = Mock(pid=123456, returncode=None, stdout=io.StringIO(), stderr=io.StringIO())
+                def communicate(timeout):
+                    if failure == 'stream':
+                        child.returncode = 0
+                        child.stdout = Mock()
+                        child.stdout.close.side_effect = OSError('private stream error')
+                        return (str(ROOT.resolve()) + '\n').encode('utf-8'), b''
+                    now[0] += timeout
+                    if failure == 'cached':
+                        child.returncode = 0
+                    raise subprocess.TimeoutExpired('synthetic', timeout)
+                def terminate():
+                    events.append('TERM')
+                    if failure == 'term':
+                        raise OSError('private TERM error')
+                    if failure == 'reserve':
+                        now[0] += 2
+                def wait(timeout):
+                    if failure == 'wait':
+                        raise OSError('private wait error')
+                    now[0] += timeout
+                    raise subprocess.TimeoutExpired('synthetic', timeout)
+                def kill():
+                    events.append('KILL')
+                    if failure == 'kill':
+                        raise OSError('private KILL error')
+                child.communicate.side_effect = communicate
+                child.terminate.side_effect = terminate
+                child.kill.side_effect = kill
+                child.wait.side_effect = wait
+                original = page_helper.PageProcess.__init__
+                def initialize(process):
+                    original(process)
+                    processes.append(process)
+                state = Mock(si_pid=123457) if failure == 'identity' else None
+                cleanup_errors = []
+                original_cleanup = page_helper.PageProcess.cleanup
+                def cleanup(owner, process, pid):
+                    try:
+                        return original_cleanup(owner, process, pid)
+                    except page_helper.CleanupUnsettled as error:
+                        cleanup_errors.append(error)
+                        raise
+                out, err = io.StringIO(), io.StringIO()
+                with patch.object(page_helper.PageProcess, '__init__', initialize), \
+                        patch.object(page_helper.PageProcess, 'cleanup', cleanup), \
+                        patch.object(page_helper, 'Popen', return_value=child), \
+                        patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                        patch.object(page_helper.os, 'waitid', return_value=state,
+                                     side_effect=OSError('private observation error')
+                                     if failure == 'observation' else None), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = page_helper.main(['page', '7'])
+                self.assertEqual((code, out.getvalue(), err.getvalue()), (
+                    1, '', 'failed: thread page unavailable. Cleanup unsettled.\n'))
+                self.assertIs(processes[0].child, child)
+                self.assertEqual(processes[0].pid, 123456)
+                self.assertEqual(processes[0].reaped, failure == 'stream')
+                self.assertEqual(len(cleanup_errors), 0 if failure == 'stream' else 1)
+                if cleanup_errors:
+                    self.assertIsInstance(cleanup_errors[0], page_helper.CleanupUnsettled)
+                if failure in ('term', 'wait', 'identity', 'observation', 'cached', 'stream', 'reserve'):
+                    child.kill.assert_not_called()
+                if failure in ('identity', 'observation', 'cached', 'stream'):
+                    child.terminate.assert_not_called()
+                self.assertLessEqual(now[0], 40)
+
+    def test_cleanup_completed_child_requires_verified_reap(self):
+        process = object.__new__(page_helper.PageProcess)
+        child = Mock(pid=123456, returncode=None)
+        process.child, process.pid, process.reaped = child, child.pid, False
+        process.deadline = 40
+        process.overhead = 0
+        def wait(timeout):
+            child.returncode = 0
+            return 0
+        child.wait.side_effect = wait
+        with patch.object(page_helper, 'monotonic', return_value=0), \
+                patch.object(page_helper.os, 'waitid', return_value=Mock(si_pid=123456)):
+            process.cleanup(child, child.pid)
+        self.assertTrue(process.reaped)
+        child.terminate.assert_not_called()
+        child.kill.assert_not_called()
+        process.reaped = False
+        with self.assertRaises(page_helper.CleanupUnsettled):
+            process.cleanup(child, child.pid)
+        self.assertFalse(process.reaped)
+
+    def test_cleanup_rechecks_identity_before_escalation(self):
+        now = [25]
+        process = object.__new__(page_helper.PageProcess)
+        child = Mock(pid=123456, returncode=None)
+        process.child, process.pid, process.reaped = child, child.pid, False
+        process.deadline, process.transport_deadline = 40, 29
+        process.overhead = 0
+        def wait(timeout):
+            now[0] += timeout
+            child.pid = 123457
+            raise subprocess.TimeoutExpired('synthetic', timeout)
+        child.wait.side_effect = wait
+        with patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(page_helper.os, 'waitid', return_value=None):
+            with self.assertRaises(page_helper.CleanupUnsettled):
+                process.cleanup(child, 123456)
+        child.terminate.assert_called_once()
+        child.kill.assert_not_called()
+        self.assertIs(process.child, child)
+        self.assertEqual(process.pid, 123456)
+
+    def test_page_transport_failures_hide_child_output(self):
+        for failure in ('spawn', 'exit', 'json', 'encoding'):
+            children = []
+            outputs = [(str(ROOT.resolve()) + '\n').encode(), b'https://github.com/o/r\n',
+                       b'\xff' if failure == 'encoding' else b'private malformed payload']
+            def spawn(vector, **options):
+                if failure == 'spawn':
+                    raise OSError('private spawn error')
+                child = Mock(pid=123456, returncode=1 if failure == 'exit' else 0,
+                             stdout=io.BytesIO(), stderr=io.BytesIO())
+                child.communicate.return_value = (outputs[len(children)], b'private stderr')
+                children.append(child)
+                return child
+            out, err = io.StringIO(), io.StringIO()
+            with patch.object(page_helper, 'monotonic', return_value=0), \
+                    patch.object(page_helper, 'Popen', side_effect=spawn) as popen, \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = page_helper.main(['page', '7'])
+            self.assertEqual((code, out.getvalue()), (1, ''))
+            self.assertEqual(err.getvalue(), 'failed: thread page unavailable.\n')
+            self.assertEqual(popen.call_count, 3 if failure in ('json', 'encoding') else 1)
+            for child in children:
+                child.terminate.assert_not_called()
+                child.kill.assert_not_called()
+
+    def test_page_identity_capability_blocks_child_start(self):
+        for capability in (None, 'unavailable'):
+            with self.subTest(capability=capability), \
+                    patch.object(page_helper.os, 'waitid', capability):
+                code, out, err, popen, _ = self.invoke(['7'], [])
+                self.assertEqual((code, out, err), (
+                    1, '', 'failed: thread page unavailable. Cleanup unsettled.\n'))
+                popen.assert_not_called()
+
+    def test_page_empty_progress_and_nonexistent_root_fail_closed(self):
+        response = self.response()
+        connection = response['data']['repository']['pullRequest']['reviewThreads']
+        connection['nodes'] = []
+        connection['pageInfo'] = {'hasNextPage': True, 'endCursor': 'next'}
+        code, out, err, _, _ = self.invoke(['7'], [
+            str(ROOT.resolve()) + '\n', 'https://github.com/o/r\n', json.dumps(response)])
+        self.assertEqual((code, out, err), (1, '', 'failed: thread page unavailable.\n'))
+        with tempfile.TemporaryDirectory() as directory:
+            absent = str(Path(directory) / 'absent')
+            code, out, err, popen, _ = self.invoke(['7'], [absent + '\n'])
+        self.assertEqual((code, out, err, popen.call_count), (
+            1, '', 'failed: thread page unavailable.\n', 1))
+
+    def test_cleanup_primary_error_survives_secondary_stream_error(self):
+        now = [0]
+        process = page_helper.PageProcess
+        instances = []
+        child = Mock(pid=123456, returncode=None, stdout=Mock(), stderr=Mock())
+        child.stdout.close.side_effect = OSError('secondary close error')
+        child.terminate.side_effect = OSError('primary TERM error')
+        def communicate(timeout):
+            now[0] += timeout
+            raise subprocess.TimeoutExpired('synthetic', timeout)
+        child.communicate.side_effect = communicate
+        original = process.__init__
+        def initialize(instance):
+            original(instance)
+            instances.append(instance)
+        with patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(page_helper, 'Popen', return_value=child), \
+                patch.object(page_helper.os, 'waitid', return_value=None), \
+                patch.object(process, '__init__', initialize):
+            owner = process()
+            with self.assertRaisesRegex(page_helper.CleanupUnsettled, 'child cleanup failed'):
+                owner.run(['git', 'rev-parse', '--show-toplevel'], ROOT)
+        self.assertIs(instances[0].child, child)
+        self.assertFalse(instances[0].reaped)
+        child.kill.assert_not_called()
+
+    def test_transport_overhead_below_and_above_allowance(self):
+        for latency, expected_unsettled in ((0.125, False), (0.5, True)):
+            with self.subTest(latency=latency):
+                now, events, owners = [0], [], []
+                child = Mock(pid=123456, returncode=None, stdout=io.BytesIO(), stderr=io.BytesIO())
+                def spawn(vector, **options):
+                    now[0] += latency
+                    return child
+                def communicate(timeout):
+                    now[0] += timeout + latency
+                    raise subprocess.TimeoutExpired('synthetic', timeout)
+                def terminate():
+                    events.append(('TERM', now[0]))
+                    now[0] += latency
+                def wait(timeout):
+                    events.append(('wait', now[0], timeout))
+                    if any(event[0] == 'KILL' for event in events):
+                        child.returncode = -9
+                        return -9
+                    now[0] += timeout
+                    raise subprocess.TimeoutExpired('synthetic', timeout)
+                child.communicate.side_effect = communicate
+                child.terminate.side_effect = terminate
+                child.wait.side_effect = wait
+                child.kill.side_effect = lambda: events.append(('KILL', now[0]))
+                original = page_helper.PageProcess.__init__
+                def initialize(owner):
+                    original(owner)
+                    owners.append(owner)
+                out, err = io.StringIO(), io.StringIO()
+                with patch.object(page_helper.PageProcess, '__init__', initialize), \
+                        patch.object(page_helper, 'monotonic', side_effect=lambda: now[0]), \
+                        patch.object(page_helper, 'Popen', side_effect=spawn), \
+                        patch.object(page_helper.os, 'waitid', return_value=None), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = page_helper.main(['page', '7'])
+                self.assertEqual((code, out.getvalue()), (1, ''))
+                self.assertEqual(err.getvalue(), 'failed: thread page unavailable.'
+                                 + (' Cleanup unsettled.' if expected_unsettled else '') + '\n')
+                self.assertIs(owners[0].child, child)
+                self.assertLessEqual(now[0], 40)
+                if expected_unsettled:
+                    child.kill.assert_not_called()
+                    self.assertFalse(owners[0].reaped)
+                else:
+                    self.assertEqual(events, [('TERM', 29.125), ('wait', 29.25, 5),
+                                              ('KILL', 34.25), ('wait', 34.25, 5)])
+                    self.assertTrue(owners[0].reaped)
+
+    def test_page_synthetic_git_and_gh_path_stubs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            script = f'#!{sys.executable}\n' + '''import json, os, sys
+from pathlib import Path
+vector = sys.argv[1:]
+with Path(os.environ['PAGE_LOG']).open('a') as stream:
+    stream.write(json.dumps({'program': Path(sys.argv[0]).name, 'vector': vector,
+                             'cwd': os.getcwd(), 'keys': sorted(os.environ)}) + '\\n')
+if Path(sys.argv[0]).name == 'git':
+    if vector == ['rev-parse', '--show-toplevel']:
+        print(os.environ['PAGE_ROOT'])
+    elif vector == ['config', '--local', '--get-all', 'remote.origin.url']:
+        print('https://github.com/o/r.git')
+    else:
+        sys.exit(9)
+else:
+    print(os.environ['PAGE_RESPONSE'])
+    sys.exit(int(os.environ['PAGE_EXIT']))
+'''
+            for name in ('git', 'gh'):
+                path = folder / name
+                path.write_text(script)
+                path.chmod(0o700)
+            for status in ('0', '1'):
+                log = folder / ('calls-' + status)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                environment = {**os.environ, 'PATH': directory, 'PAGE_ROOT': str(folder),
+                               'PAGE_LOG': str(log), 'PAGE_RESPONSE': json.dumps(self.response()),
+                               'PAGE_EXIT': status, 'GH_REPO': 'foreign/repo',
+                               'GH_HOST': 'other.invalid', 'GIT_DIR': '/inert/git'}
+                protocol_overhead = property(lambda process: 0, lambda process, value: None)
+                with patch.dict(os.environ, environment, clear=True), \
+                        patch.object(page_helper.Path, 'cwd', return_value=folder), \
+                        patch.object(page_helper.PageProcess, 'overhead', protocol_overhead, create=True), \
+                        contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    code = page_helper.main(['page', '7', 'opaque/+=='])
+                calls = [json.loads(line) for line in log.read_text().splitlines()]
+                self.assertEqual([call['program'] for call in calls], ['git', 'git', 'gh'])
+                for call in calls:
+                    self.assertEqual(call['cwd'], str(folder.resolve()))
+                    self.assertFalse(set(call['keys']) & {'GH_HOST', 'GH_REPO'})
+                    self.assertFalse(any(key.startswith('GIT_') for key in call['keys']))
+                self.assertEqual(calls[-1]['vector'], [
+                    'api', '--hostname', 'github.com', 'graphql', '-f', 'query=' + PAGE_QUERY,
+                    '-f', 'owner=o', '-f', 'name=r', '-F', 'pr=7', '-f', 'after=opaque/+=='])
+                if status == '0':
+                    self.assertEqual((code, stderr.getvalue()), (0, ''))
+                    self.assertEqual(json.loads(stdout.getvalue())['threads'][0]['id'], 'PRRT_example')
+                else:
+                    self.assertEqual((code, stdout.getvalue()), (1, ''))
+                    self.assertEqual(stderr.getvalue(), 'failed: thread page unavailable.\n')
+
+
 class HookTests(unittest.TestCase):
-    def decision(self, command, agent_type):
+    def decision(self, command, agent_type, cwd=None):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             try:
-                ultraship.pre({'agent_type': agent_type, 'tool_name': 'Bash', 'tool_input': {'command': command}})
+                ultraship.pre({'agent_type': agent_type, 'cwd': cwd, 'tool_name': 'Bash',
+                               'tool_input': {'command': command}})
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
@@ -547,6 +1130,13 @@ class HookTests(unittest.TestCase):
         for agent_type in ('ship:driver', ''):
             with self.subTest(agent_type=agent_type):
                 self.assertEqual(self.decision(command, agent_type), {})
+
+    def test_fixed_page_action_is_admitted_for_main_and_driver(self):
+        for cursor in ('', ' cursor/+==', " '@cursor/+=='"):
+            command = 'python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" page 7' + cursor
+            for caller in ('', 'ship:driver'):
+                with self.subTest(cursor=cursor, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
 
     def test_refuse_forms_for_every_caller(self):
         for agent_type in ('', 'ship:driver', 'ship:writer--sol'):
@@ -564,6 +1154,88 @@ class HookTests(unittest.TestCase):
             for command in ADMIT:
                 with self.subTest(agent_type=agent_type, command=command):
                     self.assertEqual(self.decision(command, agent_type), {})
+
+    def test_literal_pr_comment_body_is_data_for_main_and_driver(self):
+        bodies = (
+            r"$'§9 summary for `example`\n\nThe sample text names GIT_CONFIG_COUNT and --config-env.'",
+            "'Summary\nExample: gh pr view 7\nA literal \" mark'",
+            '"Summary\nA literal \\" mark"',
+        )
+        for body in bodies:
+            command = f'gh pr comment {PR} --body {body}'
+            for caller in ('', 'ship:driver', 'ship:writer--sol'):
+                with self.subTest(body=body, caller=caller):
+                    result = self.decision(command, caller)
+                    if caller == 'ship:writer--sol':
+                        self.assertEqual(result.get('permissionDecision'), 'deny')
+                    else:
+                        self.assertEqual(result, {})
+
+    def test_pr_comment_mask_requires_one_complete_literal_invocation(self):
+        prefix = f'gh pr comment {PR} --body '
+        commands = (
+            prefix + '"$BODY"',
+            prefix + "$'unfinished",
+            prefix + "'first'$'second'",
+            prefix + "$'\\n'",
+            prefix + "'Summary' > output.txt",
+            prefix + "'Summary' --edit-last",
+            'env ' + prefix + "'Summary'",
+            prefix.replace(PR, '$PR') + "'Summary'",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(ultraship.pr_comment_body_removed(command), command)
+
+    def test_pr_comment_preserves_config_and_thread_denials(self):
+        command = f"gh pr comment {PR} --body 'Summary'"
+        cases = (
+            ('GIT_CONFIG_COUNT=2 ' + command, 'git config from the command line'),
+            (command + '\ngit --config-env=core.pager=PAGER status', 'git config from the command line'),
+            (command + ' && gh api repos/o/r/pulls/7/comments/123/replies -f body=sample',
+             'raw review-thread mutation'),
+        )
+        for shell, rule in cases:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(shell=shell, caller=caller):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
+
+    def test_quoted_gh_api_read_counts_once(self):
+        commands = QUOTED_READ_PUSHES + ('test "$(gh api repos/o/r/branches/main --jq .commit.sha)" = abc',)
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command[:60], caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+
+    def test_quoted_gh_api_write_stays_refused(self):
+        command = 'test "$(gh api -X POST repos/o/r/issues/7/comments -f body=x)" = abc'
+        for caller in ('', 'ship:driver', 'ship:writer--sol'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller).get('permissionDecision'), 'deny')
+
+    def test_quoted_grep_pattern_in_pipeline_is_data(self):
+        command = '''cd /repo && grep -nE 'gh [^"]+' docs/notes.md | head -n 5'''
+        nested_write = 'test "$(gh api -X POST repos/o/r/pulls/7/comments -f body=x)" = abc'
+        for caller in ('', 'ship:driver', 'ship:writer--sol'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+                result = self.decision(command + ' && ' + nested_write, caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                rule = ('writer GitHub read-only rule' if caller == 'ship:writer--sol'
+                        else 'REST review-comment write or opaque endpoint.')
+                self.assertIn(' Rule: ' + rule, result['permissionDecisionReason'])
+        expanded = 'grep -nE "$(gh pr create --title x)" docs/notes.md | head -n 5'
+        result = self.decision(expanded, 'ship:writer--sol')
+        self.assertEqual(result.get('permissionDecision'), 'deny')
+        self.assertIn('Writers never push', result['permissionDecisionReason'])
+
+    def test_writer_quoted_grep_end_anchor_is_data(self):
+        command = '''cd /repo && grep -nE 'gh [^"]+$' docs/notes.md | head -n 5'''
+        self.assertIsNone(ultraship.writer_gh_denial_main(command))
+        self.assertIsNone(ultraship.writer_gh_denial(command))
+        self.assertEqual(self.decision(command, 'ship:writer--sol'), {})
 
     def test_static_graphql_read_documents(self):
         documents = (
@@ -584,6 +1256,119 @@ class HookTests(unittest.TestCase):
                     self.assertEqual(self.decision(command, caller), {})
             with self.subTest(document=document, caller='writer'):
                 self.assertEqual(self.decision(command, 'ship:writer--sol').get('permissionDecision'), 'deny')
+
+    def test_graphql_scalar_variables_keep_unsafe_inputs_refused(self):
+        read = "gh api graphql -f query='query($id:ID!){node(id:$id){id}}'"
+        commands = (
+            ("gh api graphql -f query='mutation($id:ID!){deleteIssue(input:{issueId:$id}){clientMutationId}}' -F id=x",
+             'gh api write outside the helper'),
+            ("gh api graphql -f query='query{viewer{login}} mutation{deleteIssue(input:{issueId:\"x\"}){clientMutationId}}' -F id=x",
+             'gh api write outside the helper'),
+            (read + " -f query='query{viewer{id}}' -F id=x", 'gh api write outside the helper'),
+            ("gh api graphql -F query=@query.graphql -F id=x", 'opaque GraphQL query'),
+            (read + ' --input payload.json -F id=x', 'opaque GraphQL query'),
+            (read + ' -F id=@identifier.txt', 'gh api write outside the helper'),
+            (read + ' -F id="$ID"', 'gh api write outside the helper'),
+            (read + ' -F id=$(cat identifier.txt)', 'review-thread guard parse failure'),
+            (read + ' -F id=x -F id=y', 'gh api write outside the helper'),
+            (read + " -F 'id[]=x'", 'gh api write outside the helper'),
+            (read + " -F 'id[value]=x'", 'gh api write outside the helper'),
+            (read + ' -F undeclared=x', 'gh api write outside the helper'),
+        )
+        for command, reason in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: ' + reason + '.', result['permissionDecisionReason'])
+
+    def test_executable_arguments_keep_shell_runner_refusals(self):
+        commands = (
+            "bash -c 'gh pr view 7'",
+            "eval 'gh pr view 7'",
+            "source /dev/stdin <<<'gh pr view 7'",
+            "watch -n 60 'gh pr view 7'",
+            "python3 /repo/scripts/record.py append \"$(bash -c 'gh pr view 7')\"",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: shell runner names gh.', result['permissionDecisionReason'])
+
+    def test_literal_git_grep_end_anchor_is_data(self):
+        command = "git -C /work/example grep -n -E '^.{121,}$' abc123 -- src/example.py"
+        for search in (command, command.replace('src/example.py', 'src/api/example.py')):
+            for caller in ('', 'ship:driver', 'ship:writer--sol'):
+                with self.subTest(search=search, caller=caller):
+                    self.assertEqual(self.decision(search, caller), {})
+
+    def test_git_grep_end_anchor_keeps_config_and_ansi_quote_refusals(self):
+        search = "git -C /work/example grep -n -E '^.{121,}$' abc123 -- src/api/example.py"
+        commands = (
+            'GIT_CONFIG_COUNT=2 ' + search,
+            search.replace(' grep ', ' --config-env=core.pager=PAGER grep '),
+            search + "; printf '%s' $'api'",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
+
+    def test_actual_ansi_quotes_keep_the_caller_refusal(self):
+        commands = (
+            "printf '%s' $'api'",
+            "printf '%s' $'gh'",
+            "printf '%s' $'api' && grep -v '^$' /repo/notes.txt",
+            "grep -v '^$' /repo/notes.txt; printf '%s' $'api'",
+            "grep -nE 'gh [^\"]+$' /repo/notes.txt; printf '%s' $'api'",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
+
+    def test_git_count_pipeline_treats_grep_anchor_as_data(self):
+        command = r'''echo "files: $(git ls-tree -r --name-only abc123 -- src/api/ | grep -c '\.toml$')"'''
+        refused = (
+            ('GIT_CONFIG_COUNT=2; ' + command, 'git config from the command line'),
+            (command + "; printf '%s' $'api'", 'git config from the command line'),
+            (command + '; echo "$(printf \'%s\' $\'api\')"', 'git config from the command line'),
+            (command + '; echo "$(gh api repos/o/r/pulls/7/comments -f body=x)"', 'REST review-comment write'),
+        )
+        for caller in ('', 'ship:driver'):
+            self.assertEqual(self.decision(command, caller), {})
+            self.assertEqual(self.decision('cd /work/example && ' + command, caller), {})
+            for shell, rule in refused:
+                with self.subTest(caller=caller, rule=rule):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(rule, result['permissionDecisionReason'])
+
+    def test_git_count_pipeline_requires_a_complete_literal_pipeline(self):
+        command = r'''echo "$(git ls-tree -r --name-only abc123 -- src/api/ | grep -c '\.toml$')"'''
+        other_shapes = (
+            command.replace(' | ', ' >| '),
+            command.replace(' | ', ' || '),
+            command.replace('abc123', '$TREE'),
+            command.replace('git ls-tree -r --name-only abc123 -- src/api/', 'printf api'),
+            command.replace("')", "' example.txt)"),
+            command.replace('$(', r'\$('),
+            'echo $(' + command,
+            command.removesuffix('"'),
+        )
+        for caller in ('', 'ship:driver'):
+            self.assertEqual(self.decision(command, caller), {})
+            for shell in other_shapes:
+                with self.subTest(caller=caller, shell=shell):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
 
     def test_graphql_read_route_refuses_other_documents_and_options(self):
         documents = ('mutation{createIssue{ id }}', 'subscription{events{id}}',
@@ -726,6 +1511,30 @@ class HookTests(unittest.TestCase):
     def test_git_literal_pager_stays_admitted(self):
         self.assertEqual(self.decision('git -c core.pager=cat log -1', ''), {})
 
+    def test_git_pager_config_env_stays_refused(self):
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                result = self.decision('git --config-env=core.pager=PAGER log -1', caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn('git config from the command line', result['permissionDecisionReason'])
+
+    def test_writer_admits_literal_commit_abbreviation_override(self):
+        command = ('git -C /abs/lane -c core.abbrev=40 commit --only '
+                   '-m "fix(mcp): pull editable skill versions" -- src/example.py')
+        self.assertEqual(self.decision(command, 'ship:writer--sol'), {})
+        commands = (
+            ('git -C /abs/lane config --local core.abbrev 40', 'git stored config write rule'),
+            ('git -C /abs/lane -c core.abbrev=40 status', 'git config value rule'),
+            (command.replace('core.abbrev=40', 'core.editor=cat'), 'git config value rule'),
+            (command.replace('core.abbrev=40', 'core.abbrev=12'), 'git config value rule'),
+            (command + ' && git push origin HEAD', 'git remote writer rule (push)'),
+        )
+        for command, rule in commands:
+            with self.subTest(command=command):
+                result = self.decision(command, 'ship:writer--sol')
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(rule, result['permissionDecisionReason'])
+
     def test_driver_count_and_shell_options_stay_admitted(self):
         for command in ("grep -c 'FAIL backend' f.log", "jq -c '.[]' f.json", "timeout 60 bash -c 'echo hi'"):
             with self.subTest(command=command):
@@ -833,13 +1642,53 @@ class HookTests(unittest.TestCase):
     def test_base_pr_ready_decision(self):
         self.assertIsNone(ultraship.review_thread_denial('gh pr ready https://github.com/o/r/pull/7'))
 
+    def test_pr_body_file_edit_keeps_role_limits(self):
+        for path in ('.scratch/pr-body.md', "'.scratch/resolveReviewThread.md'", '.scratch/comments/123/replies.md'):
+            command = 'gh pr edit 7 --body-file ' + path
+            for caller in ('', 'ship:driver'):
+                with self.subTest(path=path, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+            result = self.decision(command, 'ship:writer--sol')
+            self.assertEqual(result.get('permissionDecision'), 'deny')
+            self.assertIn('Writers never push', result['permissionDecisionReason'])
+
+    def test_top_level_pr_comment_with_literal_body_file_keeps_role_limits(self):
+        command = 'gh pr comment 7 --body-file .scratch/reconciliation.md'
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+        result = self.decision(command, 'ship:writer--sol')
+        self.assertEqual(result.get('permissionDecision'), 'deny')
+        self.assertIn('Writers never push', result['permissionDecisionReason'])
+
+    def test_pr_body_file_edit_keeps_compound_thread_writes_refused(self):
+        edit = 'gh pr edit 7 --body-file .scratch/resolveReviewThread.md'
+        commands = (
+            (edit + " && gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"PRRT_x\"}){thread{id}}}'",
+             'raw review-thread mutation'),
+            (edit + '; gh api repos/o/r/pulls/7/comments -f body=done -F in_reply_to=123',
+             'REST review-comment write or opaque endpoint'),
+        )
+        for command, rule in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: ' + rule + '.', result['permissionDecisionReason'])
+
+    def test_pr_create_admits_quoted_heredoc_text_in_title(self):
+        command = "gh pr create --title 'docs: describe <<BODY' --body-file body.md"
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+
     def test_guard_exception_denies_every_caller(self):
         with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):
             for agent_type in ('', 'ship:driver', 'ship:writer--sol'):
                 with self.subTest(agent_type=agent_type):
                     result = self.decision('echo hello', agent_type)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn('review-thread guard parse failure', result['permissionDecisionReason'])
+                    self.assertIn('review-thread guard exception: ValueError', result['permissionDecisionReason'])
 
 
 if __name__ == '__main__':

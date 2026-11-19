@@ -33,8 +33,8 @@ Light mode runs steps 1, 3, 5, 7, 9, 10, and 12. Detail: [`skills/ship/reference
 
 The plugin defines 21 agents. [`skills/ship/references/roster.md`](skills/ship/references/roster.md) lists each model, effort, use, and fallback chain.
 
-- Writers: `gpt-6.1-sol` at high effort, with `claude-sonnet-5-5` (high) as the fallback.
-- Reviewers: `gpt-6.1-sol`, `claude-opus-5-5`, `gpt-6-astra`, `gpt-6-luna`, and `kimi-k3`.
+- Writers: `gpt-6.2-sol` at xhigh effort, with `claude-sonnet-5-5` (high) as the fallback.
+- Reviewers: `gpt-6.2-sol` at xhigh, `claude-opus-5-5`, `gpt-6.2-astra` and `gpt-6-luna`.
 - Opt-in Fable 5.2 seats: `writer--fable52` and `reviewer--fable52` run `claude-fable-5-2`. Dispatch them only when the brief or the owner names Fable 5.2.
 - Read-only agents get read, LSP, and web tools only. Planners and researchers also get fff tools. Reviewers, triage and verifiers use no MCP (`mcp__`) tools, and their LSP use is hover and documentSymbol only.
 
@@ -84,6 +84,33 @@ The first local resolution imports the same-branch legacy TSV byte-for-byte, inc
 The sole driver must hold run custody and retire old legacy writers before import. Old writers can race the snapshot read. Local locking covers cooperating importers only. Import requires legacy read permission and local directory write permission. It grants zero legacy write permission. CLI commands, completion checks, Stop, and compact share the resolver. Stop retains exact pending evidence through access failures, missing runs, and failed appends. Notifications bind to the ledger path and run-start identity when ledger access succeeds. Stop accepts accounting from that run after successful closure. Persistent hook-state receipts consume each accounting row once across Stop cycles and sessions. Each notification has a fresh ID, including repeat notifications from the same agent. Receipt publication precedes pending-evidence clearing. Legacy notifications require one unambiguous time-containing run; ambiguous evidence stays pending.
 
 Set `SHIP_LEDGER_DIR` to an absolute permitted directory for an explicit home, for example `export SHIP_LEDGER_DIR="$PWD/../.scratch/ship-ledgers"`. Export it for ledger commands and hooks. The directory directly contains the branch TSV; branch filenames replace `/` with `__`. Empty and relative values raise an error. The override selects its home without legacy import.
+
+## Count source at a commit
+
+Run the executable helper directly to count overlapping UTF-8 literal bytes in a committed regular file.
+Pass each option once, with its value as a separate word, in any order.
+
+```bash
+<installed ship plugin root>/skills/ship/scripts/source-count.py --repo /absolute/repo --commit <full-sha> --subject src/example.py --literal 'exact text'
+```
+
+Use the literal absolute path of the installed plugin's script; the writer hook refuses a shell expansion in that command word.
+The writer hook also refuses literals combining `$` with interpreter-like text, ANSI-C quoting, and raw whitespace beyond space, tab, and newline.
+A hook refusal ends the lane's attempt.
+
+The repository path must be canonical and absolute; the commit must be a full lowercase SHA.
+The subject must be a normalized repository-relative POSIX path.
+The helper reads the committed blob and ignores checkout edits, replacement objects, and `GIT_*` environment variables.
+It refuses `tests/mutation` paths, `.git` path segments, `.env` and `.env.*` files, `.pem` and `.key` files, directories, symlinks, and submodules.
+Python isolated mode comes from the executable shebang.
+
+Success prints one JSON line with `result`, `repo`, `commit`, `subject`, `blob`, `count`, `literal_bytes`, and `literal_sha256`.
+Refusal prints one JSON line with `error` and `result: REFUSED`, and exits with status 2.
+In a partial clone, the helper never fetches a missing object; it refuses with the `git` identifier instead.
+The guard needs a Git build that honors `GIT_NO_LAZY_FETCH`; the partial-clone test fails on a build that ignores it.
+Bound each run with a caller-owned `timeout --signal=TERM <seconds>`; the signal reaches the helper and its Git child.
+Output contains neither source bytes nor the literal; stderr stays empty.
+For positive counts, blob readers can recover the literal using `literal_bytes` and `literal_sha256`, so give the output the same handling as the literal.
 
 ## Test
 

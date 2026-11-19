@@ -1,0 +1,11 @@
+{
+  "bettergroupinc/patricia-monorepo": {
+    "paths": [
+      "backend/api/openapi.json",
+      "frontend/packages/api-types/src/generated/api.ts"
+    ],
+    "workflow": ".github/workflows/ci.yml",
+    "job": "contract · openapi → api-types drift",
+    "step": "Fail on contract drift"
+  }
+}
