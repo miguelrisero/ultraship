@@ -4194,7 +4194,7 @@ REVIEW_THREAD_QUEUE_CHECK = (
 REVIEW_THREAD_PREFLIGHT = re.compile(
     r'[ \t]*set -euo pipefail; w=/[A-Za-z0-9_./-]+; cd "\$w"; '
     r'root=\$\(git rev-parse --show-toplevel\); test "\$root" = "\$w"; '
-    r'branch=\$\(git branch --show-current\); test "\$branch" = [A-Za-z0-9_][A-Za-z0-9_./-]*; '
+    r'branch=\$\(git branch --show-current\); test "\$branch" = (?P<branch>[A-Za-z0-9_][A-Za-z0-9_./-]*); '
     r'commit=\$\(git rev-parse --verify HEAD\); test "\$commit" = [0-9a-f]{40}; '
     r'dirty=\$\(git --no-optional-locks -c core\.fsmonitor=false status --porcelain=v1 --untracked-files=all\); '
     r'test -z "\$dirty"; '
@@ -4202,15 +4202,16 @@ REVIEW_THREAD_PREFLIGHT = re.compile(
     r'test "\$upstream" = "refs/remotes/origin/\$branch"; '
     r'''git remote get-url --push --all origin \| awk '\$0=="(?P<url>https://(?P<host>[A-Za-z0-9.-]+)/'''
     r'''(?P<repo>[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+)\.git)" \{n\+\+\} END\{exit !\(n==1 && NR==1\)\}'; '''
-    r"url=\$\(git ls-remote --get-url '(?P=url)'\); test \"\$url\" = '(?P=url)'; "
-    r"git ls-remote --symref '(?P=url)' HEAD \| "
+    r'url=\$\(git -c http\.followRedirects=false -c credential\.helper= '
+    r"ls-remote --get-url '(?P=url)'\); test \"\$url\" = '(?P=url)'; "
+    r"git -c http\.followRedirects=false -c credential\.helper= ls-remote --symref '(?P=url)' HEAD \| "
     r'''awk 'NR==1 && NF==3 && \$1=="ref:" && \$2=="refs/heads/(?P<default>[A-Za-z0-9_./-]+)" && \$3=="HEAD" \{n\+\+\} '''
     r'''NR==2 && NF==2 && \$1 ~ /\^\[0-9a-f\]\+\$/ && length\(\$1\)==40 && \$2=="HEAD" \{n\+\+\} '''
     r"END\{exit !\(n==2 && NR==2\)\}'; "
     r'repo="\$\(gh repo view (?P=host)/(?P=repo) '
     r'''--json nameWithOwner,defaultBranchRef --jq '(?P<filter>\.nameWithOwner\+" "\+\.defaultBranchRef\.name)'\)"; '''
     r"test \"\$repo\" = '(?P=repo) (?P=default)'; "
-    r'case "\$upstream" in \*/(?P=default)\) exit 1;; esac; '
+    r'test "\$upstream" != "refs/remotes/origin/(?P=default)"; '
     r"curl -q -fsS --proto '=https' --max-time 15 '(?P<queue>https://[A-Za-z0-9.-]+/mq/queue\?limit=100)' \| "
     rf"python3 -I -c '{re.escape(REVIEW_THREAD_QUEUE_CHECK)}' (?P<pr>[1-9][0-9]{{0,9}})")
 
@@ -4219,7 +4220,9 @@ def review_thread_preflight_denial(command, normalized, data_mode, reason):
     if not REVIEW_THREAD_PREFLIGHT_TARGETS or len(command) > 4096 or '"$(gh repo view ' not in command:
         return reason
     match = REVIEW_THREAD_PREFLIGHT.match(command)
-    if not match or (match['host'], match['repo'], match['queue'], int(match['pr'])) not in REVIEW_THREAD_PREFLIGHT_TARGETS:
+    if not match or match['branch'] == match['default']:
+        return reason
+    if (match['host'], match['repo'], match['queue'], int(match['pr'])) not in REVIEW_THREAD_PREFLIGHT_TARGETS:
         return reason
     tail = command[match.end():].strip(' \t')
     if tail not in ('', ';'):

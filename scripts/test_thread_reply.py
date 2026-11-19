@@ -1699,15 +1699,17 @@ class HookTests(unittest.TestCase):
             r'''test "$upstream" = "refs/remotes/origin/$branch"; '''
             r'''git remote get-url --push --all origin | awk '$0=="https://git.example.invalid/o/r.git" '''
             r'''{n++} END{exit !(n==1 && NR==1)}'; '''
-            r'''url=$(git ls-remote --get-url 'https://git.example.invalid/o/r.git'); '''
+            r'''url=$(git -c http.followRedirects=false -c credential.helper= ls-remote '''
+            r'''--get-url 'https://git.example.invalid/o/r.git'); '''
             r'''test "$url" = 'https://git.example.invalid/o/r.git'; '''
-            r'''git ls-remote --symref 'https://git.example.invalid/o/r.git' HEAD | '''
+            r'''git -c http.followRedirects=false -c credential.helper= ls-remote '''
+            r'''--symref 'https://git.example.invalid/o/r.git' HEAD | '''
             r'''awk 'NR==1 && NF==3 && $1=="ref:" && $2=="refs/heads/trunk" && $3=="HEAD" {n++} '''
             r'''NR==2 && NF==2 && $1 ~ /^[0-9a-f]+$/ && length($1)==40 && $2=="HEAD" {n++} '''
             r'''END{exit !(n==2 && NR==2)}'; '''
             r'''repo="$(gh repo view git.example.invalid/o/r --json nameWithOwner,defaultBranchRef '''
             r'''--jq '.nameWithOwner+" "+.defaultBranchRef.name')"; test "$repo" = 'o/r trunk'; '''
-            r'''case "$upstream" in */trunk) exit 1;; esac; '''
+            r'''test "$upstream" != "refs/remotes/origin/trunk"; '''
             r"curl -q -fsS --proto '=https' --max-time 15 'https://queue.example.invalid/mq/queue?limit=100' | "
             f"python3 -I -c '{ultraship.REVIEW_THREAD_QUEUE_CHECK}' 71"
         )
@@ -1801,6 +1803,45 @@ class HookTests(unittest.TestCase):
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn(' Rule: unparsed shell syntax rule: No closing quotation.',
                                   result['permissionDecisionReason'])
+
+    def test_preflight_requires_disabled_git_http_redirects(self):
+        command = self.preflight_command()
+        for flag in ('--get-url', '--symref'):
+            for redirect in ('', '-c http.followRedirects=true '):
+                with self.subTest(flag=flag, redirect=redirect):
+                    suffix = f'-c credential.helper= ls-remote {flag}'
+                    shell = command.replace(f'-c http.followRedirects=false {suffix}', redirect + suffix)
+                    result = self.preflight_decision(shell, 'ship:driver')
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+        shell = command.replace(' -c http.followRedirects=false -c credential.helper=', '').replace(
+            'test "$upstream" != "refs/remotes/origin/trunk"', 'case "$upstream" in */trunk) exit 1;; esac')
+        self.assertEqual(self.preflight_decision(shell, 'ship:driver').get('permissionDecision'), 'deny')
+
+    def test_preflight_requires_empty_git_credential_helper(self):
+        command = self.preflight_command()
+        for flag in ('--get-url', '--symref'):
+            for helper in ('', '-c credential.helper=store '):
+                with self.subTest(flag=flag, helper=helper):
+                    suffix = f'ls-remote {flag}'
+                    shell = command.replace(f'-c credential.helper= {suffix}', helper + suffix)
+                    result = self.preflight_decision(shell, 'ship:driver')
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+        shell = command.replace(' -c http.followRedirects=false -c credential.helper=', '').replace(
+            'test "$upstream" != "refs/remotes/origin/trunk"', 'case "$upstream" in */trunk) exit 1;; esac')
+        self.assertEqual(self.preflight_decision(shell, 'ship:driver').get('permissionDecision'), 'deny')
+
+    def test_preflight_compares_full_default_branch_ref(self):
+        command = self.preflight_command()
+        feature = command.replace('lane/example', 'lane/trunk')
+        self.assertEqual(self.preflight_decision(feature, 'ship:driver'), {})
+        cases = (
+            ('pinned default branch', command.replace('lane/example', 'trunk')),
+            ('suffix check', feature.replace('test "$upstream" != "refs/remotes/origin/trunk"',
+                                             'case "$upstream" in */trunk) exit 1;; esac')),
+        )
+        for case, shell in cases:
+            with self.subTest(case=case):
+                self.assertEqual(self.preflight_decision(shell, 'ship:driver').get('permissionDecision'), 'deny')
 
     def test_preflight_queue_check_validates_counts_and_exact_pr(self):
         clean = dict(truncated=False, total=1, returned=1, limit=100, entries=[{'pr_number': 711, 'label': '71'}])
