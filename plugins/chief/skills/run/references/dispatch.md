@@ -6,7 +6,7 @@ Answer all five questions before each dispatch. A "no" means fix the brief first
 2. **Contract.** Does the brief state the goal, the files in scope, the readable files, and a check that proves done?
 3. **Base.** Does the brief name the worktree, branch, and base SHA, based on current remote main?
 4. **Authority.** Does the brief state which of commit, push, PR, merge, and production actions are granted?
-5. **Return.** Does the brief name the checkpoint fields the agent must return?
+5. **Return.** Does the brief name when the agent reports and what the report contains?
 
 ## Native peer routing contract
 
@@ -84,6 +84,7 @@ Mode: /ship:ship light
 Routing: <copy the Native peer routing contract above verbatim into this brief and every timer, recovery, driver, writer, reviewer, and child brief, including retries and replacements>
 Output: <copy the Model-independent output contract above verbatim; preserve it in every inherited brief>
 Owner custody: canonical CoC Input ID/version, exact owner answer event, continuing driver and acceptance, result Input receipt; preserve pending handoff and critical holds when CoC is unavailable.
+Report on a transition or at a deadline. Report a blocked lane once with evidence and again only when the blocker changes.
 Return: agent ID, head SHA, PR URL, ledger gaps, CI and review state, next action, blockers with evidence
 Guard: <the guard constraint block, verbatim>
 ```

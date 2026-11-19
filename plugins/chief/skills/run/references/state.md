@@ -11,14 +11,17 @@ Persist these sections after each transition:
 | Current status | Goal, repository, run ID, chief model, last-seen main SHA, delivery authority |
 | In-flight lanes | Task, status, dependencies, worktree, branch, base/head/reviewed SHA, agent/transcript ID, requested and observed model, PR URL, next action |
 | Next tasks | Ordered eligible queue and queued-at timestamps |
-| Done ledger | Ready, merged, live-verified, dark, reported, or abandoned; PR URL, evidence, timestamp, worktree disposition |
+| Delivery ledger | Ticket ID, ready/merged/live-verified/dark/reported/abandoned status, PR URL, evidence, timestamp, worktree disposition, linked proof follow-ups |
 | Owner-blocked topics | CoC publisher identity and verified liveness, pending native handoff, critical hold, stable external key, canonical CoC Input ID/version, exact owner answer event and cursor, continuing driver and acceptance, blocked scope, next scheduled handoff action, result Input receipt with ID/version/owner URL, completion evidence |
 | Foreign merges observed | SHA, PR URL, attribution, main CI state, affected lanes |
 | Engine status | Model health, failure evidence, last attempt, next retry |
 
 Use `planned` for dependencies, `queued` for eligible work, and `implementing`, `in-review`, `babysitting-CI`, or `e2e` for active work. Use `stood-down` for an external wait, `parked` for rate limits, and `BLOCKED` for an owner/external blocker. `reported` closes a read-only investigation.
 
-Post-merge verification has its own state.
+Keep production verification open after merge until you record live evidence for the ticket.
+Report a blocked lane once with the blocker, its evidence, and the exact action needed.
+Record the reported blocker and evidence on the board.
+Report the lane as blocked again only when the blocker changes.
 
 ## Continuation and waits
 
@@ -28,12 +31,19 @@ Use native `SendMessage` or the native agent channel; a child without the tool r
 Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simulated user input for peer coordination.
 Batch actionable and terminal reports; keep unchanged routine reports silent.
 Only the CoC publishes canonical owner decisions and results in CoC workspace Inputs; chief-local Inputs never satisfy delivery.
-Verify CoC liveness with its recorded identity. If unavailable, retain the pending decision and critical hold and retry through existing scheduling.
+Verify CoC liveness with its recorded identity and the process check below.
+If unavailable, retain the pending decision and critical hold.
+Retry through existing scheduling.
 Create zero additional pollers or duplicate Inputs. Reconcile the canonical CoC Input ID before any publication request.
 Preserve actual owner Input event delivery and the exact owner answer event → continuing driver → result Input receipt across handoff and restart.
 Resume pending answer actions before consuming further events. Keep only the dependent scope blocked and continue eligible work.
 
-Rehydrate the board before new dispatch. Reconcile worktrees, branch heads, PR state, and native agent liveness. Continue each existing agent with its native ID when the session supports it. If an ID cannot resume across sessions, first preserve WIP and recover the frozen contract, files, and completed evidence before creating a replacement. Record that replacement explicitly.
+Rehydrate the board before new dispatch. Reconcile worktrees, branch heads, and PR state.
+Check liveness by reading the agent's `ListAgents` row and its process state.
+Never ping an agent to check liveness.
+Treat missing or inconclusive process evidence as unknown.
+Confirm the original agent stopped before you replace it.
+Continue each existing agent with its native ID when the session supports it. If an ID cannot resume across sessions, first preserve WIP and recover the frozen contract, files, and completed evidence before creating a replacement. Record that replacement explicitly.
 
 An external-only wait records the exact CI/deploy identity, current SHA, expected completion, and next command. The chief owns a harness-supported completion wake. Include failure and timeout among actionable terminal results. When a run is superseded, follow its replacement. Verify external state before loading a lane's full context. Avoid short polling of harness-tracked agents; their completion notification supplies the result.
 
