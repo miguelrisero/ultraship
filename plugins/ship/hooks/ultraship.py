@@ -4857,11 +4857,14 @@ def receipt_custody(data, read_search=False):
                         return 'ledger' in account_command
                     saw_ledger = False
                     for raw_word, word, _, _ in shell_without_redirections(tokens):
-                        if raw_word in {';', '&', '|', '(', ')', '`', '\n'}:
+                        if raw_word in {';', '&', '|', '\n'}:
                             saw_ledger = False
                             continue
-                        if saw_ledger and (word.casefold().startswith('account') or unresolved_shell_word(raw_word)):
+                        if saw_ledger and (raw_word in {'(', '`'} or word.casefold().startswith('account')
+                                           or unresolved_shell_word(raw_word)):
                             return True
+                        if raw_word in {'(', ')', '`'}:
+                            continue
                         word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
                         path = cwd / Path(word).expanduser()
                         try:

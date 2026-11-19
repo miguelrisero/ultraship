@@ -606,6 +606,9 @@ class ReceiptCustodyTests(unittest.TestCase):
         (self.cwd / 'helper').symlink_to(cached)
         self.assert_account_custody_denial('echo ./helper 2>/dev/null account-auto ./other.tsv')
 
+    def test_account_custody_checks_substitution_after_ledger_reference(self):
+        self.assert_account_custody_denial(f'echo {shlex.quote(str(LEDGER))} `printf accounting`')
+
     def test_account_custody_stops_at_command_separator(self):
         self.assert_account_command_allowed(f'echo {shlex.quote(str(LEDGER))}; echo account')
 
