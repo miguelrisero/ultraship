@@ -28,6 +28,8 @@ Triage does the same. Its Readable files name only search directories that hold 
 
 Before every authorized feature push, including direct invocation, retries, round fixes, and main merges, apply the [resolved destination preflight](../ship/references/pipeline.md#9-push-and-pr). Use only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted. Writers prepare evidence only; the authorized driver executes the preflight and push; writers retain zero push authority, including push dry-runs. Preserve existing push authority, approval holds, merge holds, and verification gates.
 
+When the PR carries [lane-owned row](../ship/SKILL.md#lane-owned-row-route) changes, return a ready PR to draft before each push. Mark it ready only after the new row review passes at the pushed head.
+
 Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) during polling and guard execution.
 
 ## One round
@@ -46,6 +48,10 @@ Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) durin
    Put the reply text in a file under the run scratch directory.
    The helper reads the thread from GitHub and refuses unless it belongs to this PR's repository and number.
    The ship hook refuses raw review-thread mutations and REST review-comment replies.
+   If the guard refuses a compound discovery and PR read, keep the work pending. Run each permitted step in its own call.
+   Find the repository first. Then run `gh pr view <PR-URL> --json state` with the verified literal URL.
+   Reply or resolve only after a successful read reports `OPEN`. Keep a failed or unclear read pending.
+   Read UTC with `date -u +%FT%TZ` in its own call. Append it as literal data to the run's scratch log.
 
    ```bash
    python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" reply <PR-URL> <thread-id> <run-scratch>/reply.md

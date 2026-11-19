@@ -1142,11 +1142,12 @@ esac
 
 
 class HookTests(unittest.TestCase):
-    def decision(self, command, agent_type):
+    def decision(self, command, agent_type, cwd=None):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             try:
-                ultraship.pre({'agent_type': agent_type, 'tool_name': 'Bash', 'tool_input': {'command': command}})
+                ultraship.pre({'agent_type': agent_type, 'cwd': cwd, 'tool_name': 'Bash',
+                               'tool_input': {'command': command}})
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
@@ -1176,11 +1177,85 @@ class HookTests(unittest.TestCase):
                             'Ship replies to and resolves review threads only through '))
                         self.assertIn(' Rule: ', result['permissionDecisionReason'])
 
+    def test_compound_discovery_denial_has_independent_read_steps(self):
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                denied = self.decision('find . -name x && gh pr view 7', caller)
+                self.assertEqual(denied.get('permissionDecision'), 'deny')
+                for step in ('find . -name x', 'gh pr view https://github.com/o/r/pull/7 --json state',
+                             'date -u +%FT%TZ',
+                             "printf '%s\\n' '2026-11-19T07:00:00Z Review stays open.' >> /work/lane/.scratch/round.log"):
+                    with self.subTest(step=step):
+                        self.assertEqual(self.decision(step, caller), {})
+
+    def test_refused_review_call_keeps_task_and_names_superior(self):
+        command = 'git --config-env=core.pager=PAGER log -1'
+        for caller, superior in (('', 'the superior named in your brief'),
+                                 ('ship:driver', 'your chief'),
+                                 ('ship:driver--sol', 'your chief'),
+                                 ('ship:reviewer--sol', 'your coordinator')):
+            with self.subTest(caller=caller):
+                denial = self.decision(command, caller)
+                self.assertEqual(denial.get('permissionDecision'), 'deny')
+                reason = denial['permissionDecisionReason']
+                self.assertIn('Keep the task.', reason)
+                self.assertIn('Report the blocked step and named rule to ' + superior, reason)
+                self.assertIn('Continue independent work within your authority.', reason)
+                if not caller:
+                    self.assertIn('If the brief names no superior, report it here.', reason)
+
     def test_admit_forms_for_main_and_driver(self):
         for agent_type in ('', 'ship:driver'):
             for command in ADMIT:
                 with self.subTest(agent_type=agent_type, command=command):
                     self.assertEqual(self.decision(command, agent_type), {})
+
+    def test_literal_pr_comment_body_is_data_for_main_and_driver(self):
+        bodies = (
+            r"$'§9 summary for `example`\n\nThe sample text names GIT_CONFIG_COUNT and --config-env.'",
+            "'Summary\nExample: gh pr view 7\nA literal \" mark'",
+            '"Summary\nA literal \\" mark"',
+        )
+        for body in bodies:
+            command = f'gh pr comment {PR} --body {body}'
+            for caller in ('', 'ship:driver', 'ship:writer--sol'):
+                with self.subTest(body=body, caller=caller):
+                    result = self.decision(command, caller)
+                    if caller == 'ship:writer--sol':
+                        self.assertEqual(result.get('permissionDecision'), 'deny')
+                    else:
+                        self.assertEqual(result, {})
+
+    def test_pr_comment_mask_requires_one_complete_literal_invocation(self):
+        prefix = f'gh pr comment {PR} --body '
+        commands = (
+            prefix + '"$BODY"',
+            prefix + "$'unfinished",
+            prefix + "'first'$'second'",
+            prefix + "$'\\n'",
+            prefix + "'Summary' > output.txt",
+            prefix + "'Summary' --edit-last",
+            'env ' + prefix + "'Summary'",
+            prefix.replace(PR, '$PR') + "'Summary'",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(ultraship.pr_comment_body_removed(command), command)
+
+    def test_pr_comment_preserves_config_and_thread_denials(self):
+        command = f"gh pr comment {PR} --body 'Summary'"
+        cases = (
+            ('GIT_CONFIG_COUNT=2 ' + command, 'git configuration token'),
+            (command + '\ngit --config-env=core.pager=PAGER status', 'git configuration environment option'),
+            (command + ' && gh api repos/o/r/pulls/7/comments/123/replies -f body=sample',
+             'raw review-thread mutation'),
+        )
+        for shell, rule in cases:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(shell=shell, caller=caller):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
 
     def test_quoted_gh_api_read_counts_once(self):
         commands = QUOTED_READ_PUSHES + ('test "$(gh api repos/o/r/branches/main --jq .commit.sha)" = abc',)
@@ -1194,6 +1269,28 @@ class HookTests(unittest.TestCase):
         for caller in ('', 'ship:driver', 'ship:writer--sol'):
             with self.subTest(caller=caller):
                 self.assertEqual(self.decision(command, caller).get('permissionDecision'), 'deny')
+
+    def test_quoted_grep_pattern_in_pipeline_is_data(self):
+        command = '''cd /repo && grep -nE 'gh [^"]+' docs/notes.md | head -n 5'''
+        nested_write = 'test "$(gh api -X POST repos/o/r/pulls/7/comments -f body=x)" = abc'
+        for caller in ('', 'ship:driver', 'ship:writer--sol'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+                result = self.decision(command + ' && ' + nested_write, caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                rule = ('writer GitHub read-only rule' if caller == 'ship:writer--sol'
+                        else 'REST review-comment write or opaque endpoint.')
+                self.assertIn(' Rule: ' + rule, result['permissionDecisionReason'])
+        expanded = 'grep -nE "$(gh pr create --title x)" docs/notes.md | head -n 5'
+        result = self.decision(expanded, 'ship:writer--sol')
+        self.assertEqual(result.get('permissionDecision'), 'deny')
+        self.assertIn('Writers never push', result['permissionDecisionReason'])
+
+    def test_writer_quoted_grep_end_anchor_is_data(self):
+        command = '''cd /repo && grep -nE 'gh [^"]+$' docs/notes.md | head -n 5'''
+        self.assertIsNone(ultraship.writer_gh_denial_main(command))
+        self.assertIsNone(ultraship.writer_gh_denial(command))
+        self.assertEqual(self.decision(command, 'ship:writer--sol'), {})
 
     def test_static_graphql_read_documents(self):
         documents = (
@@ -1255,19 +1352,78 @@ class HookTests(unittest.TestCase):
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn(' Rule: shell runner names gh.', result['permissionDecisionReason'])
 
+    def test_literal_git_grep_end_anchor_is_data(self):
+        command = "git -C /work/example grep -n -E '^.{121,}$' abc123 -- src/example.py"
+        for search in (command, command.replace('src/example.py', 'src/api/example.py')):
+            for caller in ('', 'ship:driver', 'ship:writer--sol'):
+                with self.subTest(search=search, caller=caller):
+                    self.assertEqual(self.decision(search, caller), {})
+
+    def test_git_grep_end_anchor_keeps_config_and_ansi_quote_refusals(self):
+        search = "git -C /work/example grep -n -E '^.{121,}$' abc123 -- src/api/example.py"
+        commands = (
+            ('GIT_CONFIG_COUNT=2 ' + search, 'git configuration token'),
+            (search.replace(' grep ', ' --config-env=core.pager=PAGER grep '), 'git configuration environment option'),
+            (search + "; printf '%s' $'api'", 'ambiguous shell quote pattern'),
+        )
+        for command, rule in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
+
     def test_actual_ansi_quotes_keep_the_caller_refusal(self):
         commands = (
             "printf '%s' $'api'",
             "printf '%s' $'gh'",
             "printf '%s' $'api' && grep -v '^$' /repo/notes.txt",
             "grep -v '^$' /repo/notes.txt; printf '%s' $'api'",
+            "grep -nE 'gh [^\"]+$' /repo/notes.txt; printf '%s' $'api'",
         )
         for command in commands:
             for caller in ('', 'ship:driver'):
                 with self.subTest(command=command, caller=caller):
                     result = self.decision(command, caller)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
-                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
+                    self.assertIn(' Rule: ambiguous shell quote pattern.', result['permissionDecisionReason'])
+
+    def test_git_count_pipeline_treats_grep_anchor_as_data(self):
+        command = r'''echo "files: $(git ls-tree -r --name-only abc123 -- src/api/ | grep -c '\.toml$')"'''
+        refused = (
+            ('GIT_CONFIG_COUNT=2; ' + command, 'git configuration token'),
+            (command + "; printf '%s' $'api'", 'ambiguous shell quote pattern'),
+            (command + '; echo "$(printf \'%s\' $\'api\')"', 'ambiguous shell quote pattern'),
+            (command + '; echo "$(gh api repos/o/r/pulls/7/comments -f body=x)"', 'REST review-comment write'),
+        )
+        for caller in ('', 'ship:driver'):
+            self.assertEqual(self.decision(command, caller), {})
+            self.assertEqual(self.decision('cd /work/example && ' + command, caller), {})
+            for shell, rule in refused:
+                with self.subTest(caller=caller, rule=rule):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(rule, result['permissionDecisionReason'])
+
+    def test_git_count_pipeline_requires_a_complete_literal_pipeline(self):
+        command = r'''echo "$(git ls-tree -r --name-only abc123 -- src/api/ | grep -c '\.toml$')"'''
+        other_shapes = (
+            command.replace(' | ', ' >| '),
+            command.replace(' | ', ' || '),
+            command.replace('abc123', '$TREE'),
+            command.replace('git ls-tree -r --name-only abc123 -- src/api/', 'printf api'),
+            command.replace("')", "' example.txt)"),
+            command.replace('$(', r'\$('),
+            'echo $(' + command,
+            command.removesuffix('"'),
+        )
+        for caller in ('', 'ship:driver'):
+            self.assertEqual(self.decision(command, caller), {})
+            for shell in other_shapes:
+                with self.subTest(caller=caller, shell=shell):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: ambiguous shell quote pattern.', result['permissionDecisionReason'])
 
     def test_graphql_read_route_refuses_other_documents_and_options(self):
         documents = ('mutation{createIssue{ id }}', 'subscription{events{id}}',
@@ -1351,11 +1507,18 @@ class HookTests(unittest.TestCase):
         )
         for command in commands:
             with self.subTest(command=command):
-                self.assertEqual(self.decision(command, '').get('permissionDecision'), 'deny')
+                result = self.decision(command, '')
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                if '--config-env' in command:
+                    self.assertIn(' Rule: git configuration environment option.', result['permissionDecisionReason'])
 
     def test_git_config_key_assignment_stays_refused(self):
-        self.assertEqual(self.decision('GIT_CONFIG_KEY_0=alias.x git log -1', '').get('permissionDecision'), 'deny')
-        self.assertEqual(self.decision('GIT_CONFIG_KEY_1=include.path git log -1', '').get('permissionDecision'), 'deny')
+        for command in ('GIT_CONFIG_KEY_0=alias.x git log -1',
+                        'GIT_CONFIG_KEY_1=include.path git log -1'):
+            with self.subTest(command=command):
+                result = self.decision(command, '')
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(' Rule: git configuration token.', result['permissionDecisionReason'])
 
     def test_git_config_value_assignment_stays_refused(self):
         self.assertEqual(self.decision("GIT_CONFIG_VALUE_0='!echo hi' git log -1", '').get('permissionDecision'), 'deny')
@@ -1409,6 +1572,30 @@ class HookTests(unittest.TestCase):
 
     def test_git_literal_pager_stays_admitted(self):
         self.assertEqual(self.decision('git -c core.pager=cat log -1', ''), {})
+
+    def test_git_pager_config_env_stays_refused(self):
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                result = self.decision('git --config-env=core.pager=PAGER log -1', caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(' Rule: git configuration environment option.', result['permissionDecisionReason'])
+
+    def test_writer_admits_literal_commit_abbreviation_override(self):
+        command = ('git -C /abs/lane -c core.abbrev=40 commit --only '
+                   '-m "fix(mcp): pull editable skill versions" -- src/example.py')
+        self.assertEqual(self.decision(command, 'ship:writer--sol'), {})
+        commands = (
+            ('git -C /abs/lane config --local core.abbrev 40', 'git stored config write rule'),
+            ('git -C /abs/lane -c core.abbrev=40 status', 'git config value rule'),
+            (command.replace('core.abbrev=40', 'core.editor=cat'), 'git config value rule'),
+            (command.replace('core.abbrev=40', 'core.abbrev=12'), 'git config value rule'),
+            (command + ' && git push origin HEAD', 'git remote writer rule (push)'),
+        )
+        for command, rule in commands:
+            with self.subTest(command=command):
+                result = self.decision(command, 'ship:writer--sol')
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(rule, result['permissionDecisionReason'])
 
     def test_driver_count_and_shell_options_stay_admitted(self):
         for command in ("grep -c 'FAIL backend' f.log", "jq -c '.[]' f.json", "timeout 60 bash -c 'echo hi'"):
@@ -1517,6 +1704,398 @@ class HookTests(unittest.TestCase):
     def test_base_pr_ready_decision(self):
         self.assertIsNone(ultraship.review_thread_denial('gh pr ready https://github.com/o/r/pull/7'))
 
+    def test_pr_body_file_edit_keeps_role_limits(self):
+        for path in ('.scratch/pr-body.md', "'.scratch/resolveReviewThread.md'", '.scratch/comments/123/replies.md'):
+            command = 'gh pr edit 7 --body-file ' + path
+            for caller in ('', 'ship:driver'):
+                with self.subTest(path=path, caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+            result = self.decision(command, 'ship:writer--sol')
+            self.assertEqual(result.get('permissionDecision'), 'deny')
+            self.assertIn('Writers never push', result['permissionDecisionReason'])
+
+    def test_top_level_pr_comment_with_literal_body_file_keeps_role_limits(self):
+        command = 'gh pr comment 7 --body-file .scratch/reconciliation.md'
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+        result = self.decision(command, 'ship:writer--sol')
+        self.assertEqual(result.get('permissionDecision'), 'deny')
+        self.assertIn('Writers never push', result['permissionDecisionReason'])
+
+    def test_pr_body_file_edit_keeps_compound_thread_writes_refused(self):
+        edit = 'gh pr edit 7 --body-file .scratch/resolveReviewThread.md'
+        commands = (
+            (edit + " && gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"PRRT_x\"}){thread{id}}}'",
+             'raw review-thread mutation'),
+            (edit + '; gh api repos/o/r/pulls/7/comments -f body=done -F in_reply_to=123',
+             'REST review-comment write or opaque endpoint'),
+        )
+        for command, rule in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: ' + rule + '.', result['permissionDecisionReason'])
+
+    def test_pr_create_admits_quoted_heredoc_text_in_title(self):
+        command = "gh pr create --title 'docs: describe <<BODY' --body-file body.md"
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+
+    PREFLIGHT_TARGET = ('git.example.invalid', 'o/r', 'https://queue.example.invalid/mq/queue?limit=100', 71)
+    PREFLIGHT_GET_URL = (
+        'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git '
+        '-c http.https://git.example.invalid/o/r.git.followRedirects=false -c credential.helper= ls-remote'
+    )
+    PREFLIGHT_PROBE = (
+        'env -i PATH="$PATH" HOME="$HOME" '
+        'GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ALLOW_PROTOCOL=https '
+        'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -C / -c http.sslVerify=true '
+        '-c http.https://git.example.invalid/o/r.git.followRedirects=false -c credential.helper= ls-remote'
+    )
+
+    def preflight_decision(self, command, caller):
+        with patch.object(ultraship, 'REVIEW_THREAD_PREFLIGHT_TARGETS', frozenset({self.PREFLIGHT_TARGET})):
+            return self.decision(command, caller)
+
+    def preflight_command(self):
+        return (
+            r'''set -euo pipefail; w=/work/example/repo; cd "$w"; '''
+            r'''root=$(git rev-parse --show-toplevel); test "$root" = "$w"; '''
+            r'''branch=$(git branch --show-current); test "$branch" = lane/example; '''
+            r'''commit=$(git rev-parse --verify HEAD); test "$commit" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; '''
+            r'''dirty=$(git --no-optional-locks -c core.fsmonitor=false status --porcelain=v1 --untracked-files=all); '''
+            r'''test -z "$dirty"; upstream=$(git rev-parse --symbolic-full-name --verify '@{u}'); '''
+            r'''test "$upstream" = "refs/remotes/origin/$branch"; '''
+            r'''remote=$(git for-each-ref --format='%(upstream:remotename) %(upstream:remoteref)' "refs/heads/$branch"); '''
+            r'''test "$remote" = "origin refs/heads/$branch"; '''
+            r'''git remote get-url --push --all origin | awk '$0=="https://git.example.invalid/o/r.git" '''
+            r'''{n++} END{exit !(n==1 && NR==1)}'; '''
+            f'''url=$({self.PREFLIGHT_GET_URL} --get-url 'https://git.example.invalid/o/r.git'); '''
+            r'''test "$url" = 'https://git.example.invalid/o/r.git'; '''
+            f'''{self.PREFLIGHT_PROBE} --symref 'https://git.example.invalid/o/r.git' HEAD | '''
+            r'''awk 'NR==1 && NF==3 && $1=="ref:" && $2=="refs/heads/trunk" && $3=="HEAD" {n++} '''
+            r'''NR==2 && NF==2 && $1 ~ /^[0-9a-f]+$/ && length($1)==40 && $2=="HEAD" {n++} '''
+            r'''END{exit !(n==2 && NR==2)}'; '''
+            r'''repo="$(gh repo view git.example.invalid/o/r --json nameWithOwner,defaultBranchRef '''
+            r'''--jq '.nameWithOwner+" "+.defaultBranchRef.name')"; test "$repo" = 'o/r trunk'; '''
+            r'''test "$upstream" != "refs/remotes/origin/trunk"; '''
+            r"curl -q -fsS --proto '=https' --max-time 15 'https://queue.example.invalid/mq/queue?limit=100' | "
+            f"python3 -I -c '{ultraship.REVIEW_THREAD_QUEUE_CHECK}' 71"
+        )
+
+    def legacy_preflight_command(self):
+        return (
+            r"""set -euo pipefail; w=/work/example/repo; d=${w%/*}/intake; cd "$w"; """
+            r"""test "$(git rev-parse --show-toplevel)" = "$w"; """
+            r"""test "$(git branch --show-current)" = lane/example; """
+            r"""test "$(git rev-parse HEAD)" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; """
+            r"""test -z "$(git status --porcelain=v1)"; """
+            r"""git remote get-url --push --all origin | python3 -I -c 'import sys; """
+            r"""u=sys.stdin.read().splitlines(); ok=u==["https://git.example.invalid/o/r.git"]; """
+            r"""print("Endpoint matches" if ok else "Endpoint differs"); sys.exit(not ok)'; """
+            r"""url=$(git remote get-url --push --all origin); """
+            r"""git ls-remote --symref "$url" HEAD > "$d/default.tsv"; """
+            r"""awk '$1=="ref:" && $2=="refs/heads/trunk" && $3=="HEAD" {n++} END{exit n!=1}' "$d/default.tsv"; """
+            r"""test "$(gh repo view o/r --json nameWithOwner,defaultBranchRef """
+            r"""--jq '.nameWithOwner+" "+.defaultBranchRef.name')" = 'o/r trunk'; """
+            r"""upstream=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null || :); """
+            r"""case "$upstream" in trunk|*/trunk) exit 1;; esac; """
+            r"""printf 'Branch: %s\nHead: %s\nEndpoint: %s\nUpstream: %s\n' """
+            r""""$(git branch --show-current)" "$(git rev-parse HEAD)" "$url" "${upstream:-none}"; """
+            r"""curl -fsS --max-time 15 'https://queue.example.invalid/mq/queue?limit=100' | """
+            r"""jq -e '(.truncated == false) and ([.entries[] | select(tostring | contains("example-id"))] | length == 0)'"""
+        )
+
+    def test_preflight_with_nested_repo_read_keeps_role_limits(self):
+        command = self.preflight_command()
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(command, caller), {})
+        result = self.preflight_decision(command, 'ship:writer--sol')
+        self.assertEqual(result.get('permissionDecision'), 'deny')
+        self.assertIn(' Rule: git writer expansion or glob rule.', result['permissionDecisionReason'])
+
+        cases = (
+            (command + '; test "unfinished', 'unparsed shell syntax rule: No closing quotation'),
+            (command.replace(".defaultBranchRef.name')", ".defaultBranchRef.name'", 1),
+             'unparsed shell syntax rule: No closing quotation'),
+            (command.replace('; ', ';\n', 1), 'unparsed shell syntax rule: No closing quotation'),
+        )
+        for shell, rule in cases:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(rule=rule, caller=caller):
+                    result = self.preflight_decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
+
+    def test_preflight_accepts_spaces_after_final_semicolon(self):
+        command = self.preflight_command() + ';   '
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(command, caller), {})
+
+    def test_preflight_denies_without_approved_target(self):
+        command = self.preflight_command()
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                result = self.decision(command, caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(' Rule: unparsed shell syntax rule: No closing quotation.',
+                              result['permissionDecisionReason'])
+
+    def test_preflight_retry_requires_fixed_steps(self):
+        command = self.preflight_command()
+        cases = (
+            ('legacy preflight', self.legacy_preflight_command()),
+            ('Python isolation', command.replace('python3 -I -c', 'python3 -c', 1)),
+            ('Python body', command.replace('sys.exit(0 if ok else 1)', 'sys.exit(0)', 1)),
+            ('awk body', command.replace('exit !(n==1 && NR==1)', 'exit 0', 1)),
+            ('Git status without an exit check', command.replace('test -z "$dirty"', 'test -z "$(git status --porcelain=v1)"', 1)),
+            ('upstream failure swallowed', command.replace("'@{u}')", "'@{u}' || :)", 1)),
+            ('upstream name', command.replace('refs/remotes/origin/$branch', 'refs/remotes/other/$branch', 1)),
+            ('push URL mismatch', command.replace('o/r.git', 'o/other.git', 1)),
+            ('unapproved Git host', command.replace('git.example.invalid', 'other.example.invalid')),
+            ('unapproved repository', command.replace('/o/r', '/o/other').replace("'o/r trunk'", "'o/other trunk'")),
+            ('unapproved queue', command.replace('queue.example.invalid', 'other.example.invalid', 1)),
+            ('unapproved PR', command.removesuffix('71') + '711'),
+            ('file output', command.replace("HEAD | awk 'NR==1", "HEAD > /work/example/head.tsv; awk 'NR==1", 1)),
+            ('extra Git step', command + '; git log -1'),
+            ('missing pipeline stage', command + ' |   '),
+            ('missing next command', command + ' &&   '),
+        )
+        for case, shell in cases:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(case=case, caller=caller):
+                    result = self.preflight_decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: unparsed shell syntax rule: No closing quotation.',
+                                  result['permissionDecisionReason'])
+
+    def replace_preflight_ls_remote(self, command, replacement):
+        shell = command.replace(self.PREFLIGHT_GET_URL, replacement).replace(self.PREFLIGHT_PROBE, replacement)
+        self.assertNotEqual(shell, command)
+        return shell
+
+    def test_preflight_requires_disabled_git_http_redirects(self):
+        command = self.preflight_command()
+        key = 'http.https://git.example.invalid/o/r.git.followRedirects'
+        redirects = (
+            '',
+            '-c http.followRedirects=false ',
+            '-c http.followRedirects=true ',
+            '-c http.https://other.example.invalid/o/r.git.followRedirects=false ',
+            f'-c {key}=true ',
+        )
+        for flag in ('--get-url', '--symref'):
+            suffix = f'-c credential.helper= ls-remote {flag}'
+            for redirect in redirects:
+                shell = command.replace(f'-c {key}=false {suffix}', redirect + suffix, 1)
+                for caller in ('', 'ship:driver'):
+                    with self.subTest(flag=flag, redirect=redirect, caller=caller):
+                        result = self.preflight_decision(shell, caller)
+                        self.assertEqual(result.get('permissionDecision'), 'deny')
+        shell = self.replace_preflight_ls_remote(command, 'git -c http.followRedirects=false -c credential.helper= ls-remote')
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_disables_git_prompts(self):
+        command = self.preflight_command()
+        prompts = 'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 '
+        variants = (
+            'GIT_TERMINAL_PROMPT=0 ',
+            'GIT_ASKPASS= ',
+            'GIT_ASKPASS= GIT_TERMINAL_PROMPT=1 ',
+            'GIT_ASKPASS=/work/example/askpass GIT_TERMINAL_PROMPT=0 ',
+        )
+        for flag, prefix in (('--get-url', self.PREFLIGHT_GET_URL), ('--symref', self.PREFLIGHT_PROBE)):
+            for variant in variants:
+                shell = command.replace(prefix, prefix.replace(prompts, variant, 1), 1)
+                for caller in ('', 'ship:driver'):
+                    with self.subTest(flag=flag, prompts=variant, caller=caller):
+                        result = self.preflight_decision(shell, caller)
+                        self.assertEqual(result.get('permissionDecision'), 'deny')
+        shell = self.replace_preflight_ls_remote(command, 'git -c http.followRedirects=false -c credential.helper= ls-remote')
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_requires_empty_git_credential_helper(self):
+        command = self.preflight_command()
+        for flag in ('--get-url', '--symref'):
+            suffix = f'ls-remote {flag}'
+            for helper in ('', '-c credential.helper=store '):
+                shell = command.replace(f'-c credential.helper= {suffix}', helper + suffix, 1)
+                for caller in ('', 'ship:driver'):
+                    with self.subTest(flag=flag, helper=helper, caller=caller):
+                        result = self.preflight_decision(shell, caller)
+                        self.assertEqual(result.get('permissionDecision'), 'deny')
+        shell = self.replace_preflight_ls_remote(command, 'git ls-remote').replace(
+            'test "$upstream" != "refs/remotes/origin/trunk"', 'case "$upstream" in */trunk) exit 1;; esac')
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_compares_full_default_branch_ref(self):
+        command = self.preflight_command()
+        feature = command.replace('lane/example', 'lane/trunk')
+        cases = (
+            ('pinned default branch', command.replace('lane/example', 'trunk')),
+            ('suffix check', feature.replace('test "$upstream" != "refs/remotes/origin/trunk"',
+                                             'case "$upstream" in */trunk) exit 1;; esac')),
+        )
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(feature, caller), {})
+            for case, shell in cases:
+                with self.subTest(case=case, caller=caller):
+                    self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_refuses_main_and_remote_default(self):
+        command = self.preflight_command()
+        main = command.replace('lane/example', 'main', 1)
+        legacy = main.replace(self.PREFLIGHT_PROBE, self.PREFLIGHT_GET_URL, 1)
+        self.assertNotEqual(legacy, main)
+        cases = (
+            ('main', main),
+            ('trunk', command.replace('lane/example', 'trunk', 1)),
+            ('main with checkout probe', legacy),
+        )
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(command.replace('lane/example', 'lane/main', 1), caller), {})
+            for case, shell in cases:
+                with self.subTest(case=case, caller=caller):
+                    self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_isolates_probe_git_config(self):
+        command = self.preflight_command()
+        probe = self.PREFLIGHT_PROBE
+        legacy = command.replace(probe, self.PREFLIGHT_GET_URL, 1)
+        self.assertNotEqual(legacy, command)
+        cases = [
+            ('checkout probe', legacy, None),
+            ('standalone config', 'GIT_CONFIG_GLOBAL=/dev/null git status', 'git configuration token'),
+            ('API tail', command + '; gh api -X POST repos/o/r/pulls/7/comments -f body=x',
+             'REST review-comment write or opaque endpoint'),
+        ]
+        for old, new in (
+            ('GIT_CONFIG_NOSYSTEM=1 ', ''),
+            ('GIT_CONFIG_GLOBAL=/dev/null ', ''),
+            ('GIT_ALLOW_PROTOCOL=https ', ''),
+            ('GIT_ASKPASS= ', ''),
+            ('GIT_TERMINAL_PROMPT=0 ', ''),
+            ('GIT_CONFIG_GLOBAL=/dev/null ', 'GIT_CONFIG_GLOBAL=/work/example/gitconfig '),
+            ('GIT_ALLOW_PROTOCOL=https ', 'GIT_ALLOW_PROTOCOL=https:ext '),
+            ('-C / ', ''),
+            ('-C / ', '-C /work/example/repo '),
+            ('-c http.sslVerify=true ', ''),
+            ('-c http.sslVerify=true ', '-c http.sslVerify=false '),
+        ):
+            shell = command.replace(probe, probe.replace(old, new, 1), 1)
+            self.assertNotEqual(shell, command)
+            cases.append(((old, new), shell, None))
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(command, caller), {})
+            for case, shell, rule in cases:
+                with self.subTest(case=case, caller=caller):
+                    result = self.preflight_decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    if rule:
+                        self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
+
+    def preflight_without_probe_prefix_or_remote_steps(self, command):
+        return command.replace('env -i PATH="$PATH" HOME="$HOME" ', '', 1).replace(
+            '''remote=$(git for-each-ref --format='%(upstream:remotename) %(upstream:remoteref)' "refs/heads/$branch"); '''
+            'test "$remote" = "origin refs/heads/$branch"; ',
+            '', 1,
+        )
+
+    def test_preflight_clears_inherited_probe_environment(self):
+        command = self.preflight_command()
+        prefix = 'env -i PATH="$PATH" HOME="$HOME" '
+        for replacement in ('', 'env PATH="$PATH" HOME="$HOME" ', prefix + 'GIT_DIR=/work/example/repo/.git '):
+            shell = command.replace(prefix, replacement, 1)
+            self.assertNotEqual(shell, command)
+            for caller in ('', 'ship:driver'):
+                with self.subTest(replacement=replacement, caller=caller):
+                    self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+        legacy = self.preflight_without_probe_prefix_or_remote_steps(command)
+        self.assertNotEqual(legacy, command)
+        for caller in ('', 'ship:driver'):
+            with self.subTest(case='legacy', caller=caller):
+                self.assertEqual(self.preflight_decision(legacy, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_checks_upstream_remote_ref(self):
+        command = self.preflight_command()
+        remote_steps = (
+            '''remote=$(git for-each-ref --format='%(upstream:remotename) %(upstream:remoteref)' "refs/heads/$branch"); '''
+            'test "$remote" = "origin refs/heads/$branch"; '
+        )
+        for old, new in (
+            (remote_steps, ''),
+            ('"origin refs/heads/$branch"', '"other refs/heads/$branch"'),
+            ('"origin refs/heads/$branch"', '"origin refs/heads/trunk"'),
+        ):
+            shell = command.replace(old, new, 1)
+            self.assertNotEqual(shell, command)
+            for caller in ('', 'ship:driver'):
+                with self.subTest(replacement=new, caller=caller):
+                    self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+        legacy = self.preflight_without_probe_prefix_or_remote_steps(command)
+        self.assertNotEqual(legacy, command)
+        for caller in ('', 'ship:driver'):
+            with self.subTest(case='legacy', caller=caller):
+                self.assertEqual(self.preflight_decision(legacy, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_ships_without_targets(self):
+        self.assertEqual(ultraship.REVIEW_THREAD_PREFLIGHT_TARGETS, frozenset())
+
+    def test_preflight_read_only_api_tail_keeps_quote_refusal(self):
+        command = self.preflight_command()
+        shell = command + '; gh api repos/o/r/pulls/71'
+        self.assertNotEqual(shell, command)
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(command, caller), {})
+                result = self.preflight_decision(shell, caller)
+                self.assertEqual(result.get('permissionDecision'), 'deny')
+                self.assertIn(' Rule: unparsed shell syntax rule: No closing quotation.',
+                              result['permissionDecisionReason'])
+
+    def test_preflight_queue_check_validates_counts_and_exact_pr(self):
+        clean = dict(truncated=False, total=1, returned=1, limit=100, entries=[{'pr_number': 711, 'label': '71'}])
+        bad = (
+            json.dumps([]),
+            json.dumps({**clean, 'truncated': True}),
+            json.dumps({**clean, 'entries': None}),
+            json.dumps({**clean, 'entries': [None]}),
+            json.dumps({**clean, 'total': 2}),
+            json.dumps({**clean, 'returned': 0}),
+            json.dumps({**clean, 'limit': 99}),
+            json.dumps({**clean, 'total': 101, 'returned': 101, 'entries': clean['entries'] * 101}),
+            json.dumps({**clean, 'total': True}),
+            json.dumps({**clean, 'total': 1.0}),
+            json.dumps({**clean, 'entries': [{'pr_number': 71}]}),
+            json.dumps({**clean, 'entries': [{'pr_number': '711'}]}),
+            json.dumps({**clean, 'entries': [{'pr_number': 0}]}),
+            json.dumps({**clean, 'entries': [{}]}),
+            json.dumps({**clean, 'unrecognized': float('nan')}),
+            json.dumps(clean).replace('"pr_number": 711', '"pr_number": 71, "pr_number": 711'),
+            json.dumps(clean) + '\n{}',
+        )
+        for payload, allowed in [(json.dumps(clean), True), *((text, False) for text in bad)]:
+            with self.subTest(payload=payload[:100]):
+                result = subprocess.run([sys.executable, '-I', '-c', ultraship.REVIEW_THREAD_QUEUE_CHECK, '71'],
+                                        input=payload, text=True, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode == 0, allowed)
+
     def test_guard_exception_denies_every_caller(self):
         with patch.object(ultraship, 'review_thread_denial', create=True, side_effect=ValueError('bad parse')):
             for agent_type in ('', 'ship:driver', 'ship:writer--sol'):
@@ -1524,6 +2103,9 @@ class HookTests(unittest.TestCase):
                     result = self.decision('echo hello', agent_type)
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn('review-thread guard exception: ValueError', result['permissionDecisionReason'])
+                    if agent_type == 'ship:writer--sol':
+                        self.assertIn('Report the blocked step and named rule to your driver.',
+                                      result['permissionDecisionReason'])
 
 
 if __name__ == '__main__':

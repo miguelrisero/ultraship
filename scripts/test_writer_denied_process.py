@@ -12,9 +12,11 @@ REFERENCE_FILE = 'plugins/ship/skills/ship/references/owner-decisions.md'
 HEADING = 'Loaded instructions and refusals\n'
 CHECKS_SENTENCE = 'Checks that the brief names stay permitted when the hook admits them.'
 WRITER_SENTENCES = (
-    'After any other hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.',
+    'After a hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.',
     'A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too.',
-    'Otherwise tell the driver about the denial and ask for permission to run the command; the driver may grant it or run the command itself.',
+    'Keep the work pending after a hook refusal.',
+    'Ask the driver for permission to run the refused command at any time.',
+    'The driver may grant it or run the command within its authority.',
     CHECKS_SENTENCE,
 )
 REFERENCE_SENTENCES = (
@@ -28,25 +30,6 @@ REFERENCE_SENTENCES = (
     'A retry in another form never bypasses a safety block.',
     CHECKS_SENTENCE,
 )
-SUPERSEDED_RULING_SENTENCES = (
-    'A superseded-ruling free is the one exception to every rule that keeps a used protected-row attempt, or its record, consumed.',
-    'It is also the one exception to the rule that a refusal outside the contract-gap and follow-on definitions never qualifies.',
-    'Only a fresh CoC row decision file with a new SHA256 grants it, for exactly one further attempt on one named row.',
-    'That file names the repository, PR, row file and row ID, and quotes each earlier refusal on that row verbatim.',
-    'It records that every earlier attempt on that row made zero protected reads, zero edits and zero commits.',
-    'It records that the first refusal named only a chief or CoC ruling, never the row content.',
-    'It records that each later refusal named only that first refusal or the attempt it used.',
-    'It supersedes that ruling by name, and it resolves the quoted refusals for that row only.',
-    'Refuse the free when the file lacks any of these records.',
-    'A row gets at most one free, whatever the decision file or head SHA; refuse a second free.',
-    "Only the driver with exclusive custody of the row's attempt record may record a free.",
-    "Before it admits one writer, the driver records the free, the decision file, its SHA256 and that writer on the row's attempt record.",
-    'A writer refuses the free when that record is missing or names another writer.',
-    'Content refusals, method bans, `REFUSED` tool results, and every hook, permission or tool denial keep their row attempts used; no decision frees those attempts.',
-    'The freed attempt keeps every other route requirement, authority, independent review and publication hold.',
-)
-
-
 def refusals_section(text):
     start = text.index(HEADING) + len(HEADING)
     end = text.find('\n#', start)
@@ -67,49 +50,68 @@ class WriterDeniedProcessTests(unittest.TestCase):
     def test_shared_reference_carries_the_retry_and_superior_rule(self):
         self.check((REFERENCE_FILE,), REFERENCE_SENTENCES)
 
-    def test_writers_carry_the_superseded_ruling_rule_once(self):
-        block = '\n'.join(SUPERSEDED_RULING_SENTENCES)
-        for name in WRITER_FILES:
-            with self.subTest(file=name):
-                section = refusals_section((ROOT / name).read_text(encoding='utf-8'))
-                self.assertEqual(section.count(block), 1)
+    def test_writers_and_shared_reference_keep_final_safety_refusals(self):
+        self.check((*WRITER_FILES, REFERENCE_FILE), (
+            'Push, merge and protected-write refusals stay final; a retry in another form never bypasses them.',
+        ))
 
-    def test_reference_carries_the_superseded_ruling_rule_once(self):
-        paragraph = ' '.join(SUPERSEDED_RULING_SENTENCES)
-        section = refusals_section((ROOT / REFERENCE_FILE).read_text(encoding='utf-8'))
-        self.assertEqual(section.count(paragraph), 1)
-
-    def test_one_free_frees_exactly_one_further_attempt(self):
-        self.check((*WRITER_FILES, REFERENCE_FILE), tuple(SUPERSEDED_RULING_SENTENCES[i] for i in (0, 2, 10, 11, 12)))
-
-    def test_second_free_for_the_same_row_refuses(self):
-        self.check((*WRITER_FILES, REFERENCE_FILE), (SUPERSEDED_RULING_SENTENCES[9],))
-
-    def test_free_without_the_zero_read_record_refuses(self):
-        self.check((*WRITER_FILES, REFERENCE_FILE), tuple(SUPERSEDED_RULING_SENTENCES[i] for i in (4, 8)))
-
-    def test_content_refusal_stays_final(self):
-        self.check((*WRITER_FILES, REFERENCE_FILE), tuple(SUPERSEDED_RULING_SENTENCES[i] for i in (5, 13)))
-
-    def test_free_lifts_the_never_qualify_rule(self):
-        self.check((*WRITER_FILES, REFERENCE_FILE), (SUPERSEDED_RULING_SENTENCES[1],))
-
-    def test_row_reanchor_brief_names_the_free(self):
-        reference = (ROOT / REFERENCE_FILE).read_text(encoding='utf-8')
-        section = reference.split('## Row re-anchor tool brief\n', 1)[1].split('\n## ', 1)[0]
-        before, template, after = section.split('```')
-        unused = 'The tool attempt for this grant and head is therefore unused.'
-        lines = (
-            "For a superseded-ruling free, add one line after `- Earlier attempts:` that names "
-            "the free's decision file, its SHA256 and the attempt record entry.",
-            'Add that decision file to `Readable files:`.',
-            f'In that brief, replace `{unused}` with '
-            '`The attempt is used, and the superseded-ruling free authorizes one further attempt.`',
+    def test_decision_defect_rule_limits_refusal_resolution(self):
+        defect = 'The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.'
+        resolution = (
+            'Only a corrected CoC decision with a new SHA256 can resolve that refusal for that cause.',
+            'Require the corrected decision to quote the refusal verbatim, name the defective decision by path and SHA256, '
+            'and name the defect it corrects.',
+            'A corrected decision grants nothing beyond what the defective decision grants and changes only the defective fields.',
+            'Before the next attempt, verify the corrected decision in full and compare its actor, action, target and scope '
+            "with the defective decision's grant.",
+            'Keep the refusal pending when that comparison is inconclusive or shows a wider grant.',
+            'Follow every other route requirement.',
+            'This rule lifts no hook, permission, tool or owner refusal, and no security, secret or production gate.',
+            'It lifts no refusal of a push, a merge or a protected write, including your own refusal of one.',
+            "Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal.",
         )
-        for line in lines:
-            self.assertIn(line, before + after)
-            self.assertNotIn(line, template)
-        self.assertIn(unused, template)
+        reference = ' '.join((
+            "Decision-defect rule: it applies only to an agent's own refusal "
+            'whose sole stated cause is a defect in a CoC decision.',
+            defect,
+            'Quote the refusal and the defect to your superior, who relays them up the superior chain to the CoC.',
+            *resolution,
+        ))
+        writer = '\n'.join((
+            'This [decision-defect rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) '
+            'applies only to your own refusal whose sole stated cause is a defect in a CoC decision.',
+            defect,
+            'Quote the refusal and the defect to your driver.',
+            *resolution,
+        ))
+        self.check((REFERENCE_FILE,), (f'\n{reference}\n',))
+        self.check(WRITER_FILES, (f'\n{writer}\n',))
+
+    def test_drivers_relay_decision_defect_refusals_and_corrected_decisions(self):
+        for name in ('driver.md', 'driver--sol.md'):
+            with self.subTest(file=name):
+                driver = (ROOT / 'plugins/ship/agents' / name).read_text(encoding='utf-8')
+                self.assertIn(
+                    "\nRelay a writer's decision-defect refusal and its defect to your chief, "
+                    'and the corrected decision to the writer.\n'
+                    'Never run the refused step under the defective decision.\n',
+                    driver,
+                )
+
+    def test_chief_relays_decision_defect_refusals_and_corrected_decisions(self):
+        chief = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text(encoding='utf-8')
+        self.assertIn(
+            "\nRelay the lane's quoted refusal and defect to the CoC and the corrected decision to the lane "
+            "under ship's decision-defect rule.\n",
+            chief,
+        )
+
+    def test_retired_refusal_accounting_does_not_return(self):
+        for name in (*WRITER_FILES, REFERENCE_FILE):
+            text = (ROOT / name).read_text(encoding='utf-8')
+            for phrase in ('superseded-ruling free', 'attempt record', 'contract-gap refusal'):
+                with self.subTest(file=name, phrase=phrase):
+                    self.assertNotIn(phrase, text)
 
 
 if __name__ == '__main__':

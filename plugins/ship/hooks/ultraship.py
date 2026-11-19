@@ -1151,9 +1151,15 @@ SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh',
 STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su', 'trap'}
 
 
-def read_only_argument_word(command, tokens, words, index):
+def read_only_argument_word(command, tokens, words, index, *, literal_grep_anchor=False):
     # These commands never run an argument word within read-only pipelines after a literal directory change.
-    if not index or any(char in command for char in '$`<~'):
+    if not index:
+        return False
+    checked = command
+    raw, _, _, end = words[index]
+    if literal_grep_anchor and words[0][0] == 'grep' and re.fullmatch(r"'[^'\r\n]*\$'", raw):
+        checked = command[:end - 2] + command[end - 1:]
+    if any(char in checked for char in '$`<~'):
         return False
     try:
         original = shell_raw_words(command)
@@ -3472,8 +3478,11 @@ def git_commit_step(command):
 
 
 def deny(reason):
+    retry = ('Keep the work pending. Retry only after you meet the rule above. '
+             'If blocked, report the blocked step, the rule, and the next permitted action to the role named above. '
+             'If no role is named, report it to your superior or in this conversation.')
     print(json.dumps({'hookSpecificOutput': {
-        'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))
+        'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': reason + '\n' + retry}}))
     sys.exit(0)
 
 
@@ -3604,9 +3613,33 @@ def writer_repository_selector(option, value):
     return option == '--work-tree' and value == '.'
 
 
+def writer_quoted_grep_data(command):
+    if "'" not in command or '"' not in command:
+        return command
+    try:
+        tokens = shell_raw_words(command)
+    except ValueError:
+        return command
+    words, spans = [], []
+    for token in [*tokens, (';', '', 0, 0)]:
+        if token[0] not in {';', '&', '|', '(', ')', '`', '\n'}:
+            words.append(token)
+            continue
+        if words and words[0][0] == 'grep' and literal_search_shell(' '.join(word[0] for word in words)):
+            for index, (raw, value, start, end) in enumerate(words[1:], 1):
+                if (raw.startswith("'") and '"' in value and re.search(r'\bgh\b', value)
+                        and not hidden_gh_api_calls(value.replace('"', '').replace('\\', ''))
+                        and read_only_argument_word(command, tokens, words, index, literal_grep_anchor=True)):
+                    spans.append((start, end))
+        words = []
+    for start, end in reversed(spans):
+        command = command[:start] + "'pattern'" + command[end:]
+    return command
+
+
 def writer_gh_denial_main(command, depth=0):
     if depth == 0:
-        command = commit_message_removed(command)
+        command = writer_quoted_grep_data(commit_message_removed(command))
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = re.sub(r'''['"\\]''', '', command)
     if not re.search(r'\bgh\b', unquoted):
@@ -3711,7 +3744,7 @@ def writer_gh_denial_main(command, depth=0):
 
 def writer_gh_denial(command, depth=0):
     if depth == 0:
-        command = commit_message_removed(command)
+        command = writer_quoted_grep_data(commit_message_removed(command))
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = writer_trigger_text(command)
     if not re.search(r'\bgh\b|GIT_|\b(?:EDITOR|VISUAL|PAGER)\b|\bgit\b|ext::|-[iv0]*S|--s', unquoted):
@@ -3822,7 +3855,11 @@ def writer_gh_denial(command, depth=0):
                 return 'hidden gh word-part rule'
             if git_value:
                 if git_value == '-c' and tuple(word.split('=', 1)) not in WRITER_VALUE_ALLOWLIST:
-                    return 'git config value rule'
+                    commit_prefix = re.match(r'[ \t]*git[ \t]+(?:-C[ \t]+/[\w./-]+[ \t]+)?'
+                                             r'-c[ \t]+core\.abbrev=40[ \t]+commit(?=[ \t]|$)', command)
+                    if not (depth == 0 and words is segments[0] and commit_prefix
+                            and words[:index + 2] == commit_prefix[0].split()):
+                        return 'git config value rule'
                 if git_value in {'--git-dir', '--work-tree'} and not writer_repository_selector(git_value, word):
                     return 'git repository selector rule'
                 git_value = None
@@ -4143,22 +4180,107 @@ def hidden_gh_api_calls(text):
     return max(counts)
 
 
+# Each approved target binds the Git host, repository, exact queue URL, and PR number.
+REVIEW_THREAD_PREFLIGHT_TARGETS: frozenset[tuple[str, str, str, int]] = frozenset()
+REVIEW_THREAD_QUEUE_CHECK = (
+    'import json,sys; '
+    'unique=lambda pairs:dict(pairs) if len(dict(pairs))==len(pairs) else sys.exit(1); '
+    'q=json.load(sys.stdin,object_pairs_hook=unique,parse_constant=lambda _:sys.exit(1)); '
+    'uint=lambda n:type(n) is int and n>=0; '
+    'ok=(type(q) is dict and q.get("truncated") is False and type(q.get("entries")) is list '
+    'and uint(q.get("limit")) and q["limit"]==100 and uint(q.get("total")) and uint(q.get("returned")) '
+    'and q["total"]==q["returned"]==len(q["entries"])<=q["limit"] '
+    'and all(type(e) is dict and uint(e.get("pr_number")) and e["pr_number"]>0 '
+    'and e["pr_number"]!=int(sys.argv[1]) for e in q["entries"])); sys.exit(0 if ok else 1)')
+
+# shortcut: recognize one ordered preflight shape; use a shell parser for broader syntax.
+REVIEW_THREAD_PREFLIGHT = re.compile(
+    r'[ \t]*set -euo pipefail; w=/[A-Za-z0-9_./-]+; cd "\$w"; '
+    r'root=\$\(git rev-parse --show-toplevel\); test "\$root" = "\$w"; '
+    r'branch=\$\(git branch --show-current\); test "\$branch" = (?P<branch>[A-Za-z0-9_][A-Za-z0-9_./-]*); '
+    r'commit=\$\(git rev-parse --verify HEAD\); test "\$commit" = [0-9a-f]{40}; '
+    r'dirty=\$\(git --no-optional-locks -c core\.fsmonitor=false status --porcelain=v1 --untracked-files=all\); '
+    r'test -z "\$dirty"; '
+    r'''upstream=\$\(git rev-parse --symbolic-full-name --verify '@\{u\}'\); '''
+    r'test "\$upstream" = "refs/remotes/origin/\$branch"; '
+    r'''remote=\$\(git for-each-ref --format='%\(upstream:remotename\) %\(upstream:remoteref\)' "refs/heads/\$branch"\); '''
+    r'test "\$remote" = "origin refs/heads/\$branch"; '
+    r'''git remote get-url --push --all origin \| awk '\$0=="(?P<url>https://(?P<host>[A-Za-z0-9.-]+)/'''
+    r'''(?P<repo>[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+)\.git)" \{n\+\+\} END\{exit !\(n==1 && NR==1\)\}'; '''
+    r'url=\$\(GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -c http\.(?P=url)\.followRedirects=false -c credential\.helper= '
+    r"ls-remote --get-url '(?P=url)'\); test \"\$url\" = '(?P=url)'; "
+    r'env -i PATH="\$PATH" HOME="\$HOME" '
+    r'GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ALLOW_PROTOCOL=https '
+    r'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -C / -c http\.sslVerify=true '
+    r'-c http\.(?P=url)\.followRedirects=false -c credential\.helper= '
+    r"ls-remote --symref '(?P=url)' HEAD \| "
+    r'''awk 'NR==1 && NF==3 && \$1=="ref:" && \$2=="refs/heads/(?P<default>[A-Za-z0-9_./-]+)" && \$3=="HEAD" \{n\+\+\} '''
+    r'''NR==2 && NF==2 && \$1 ~ /\^\[0-9a-f\]\+\$/ && length\(\$1\)==40 && \$2=="HEAD" \{n\+\+\} '''
+    r"END\{exit !\(n==2 && NR==2\)\}'; "
+    r'repo="\$\(gh repo view (?P=host)/(?P=repo) '
+    r'''--json nameWithOwner,defaultBranchRef --jq '(?P<filter>\.nameWithOwner\+" "\+\.defaultBranchRef\.name)'\)"; '''
+    r"test \"\$repo\" = '(?P=repo) (?P=default)'; "
+    r'test "\$upstream" != "refs/remotes/origin/(?P=default)"; '
+    r"curl -q -fsS --proto '=https' --max-time 15 '(?P<queue>https://[A-Za-z0-9.-]+/mq/queue\?limit=100)' \| "
+    rf"python3 -I -c '{re.escape(REVIEW_THREAD_QUEUE_CHECK)}' (?P<pr>[1-9][0-9]{{0,9}})")
+
+
+def approved_review_thread_preflight(command):
+    if not REVIEW_THREAD_PREFLIGHT_TARGETS or len(command) > 4096 or '"$(gh repo view ' not in command:
+        return None
+    match = REVIEW_THREAD_PREFLIGHT.match(command)
+    if not match or match['branch'] in ('main', match['default']):
+        return None
+    if (match['host'], match['repo'], match['queue'], int(match['pr'])) not in REVIEW_THREAD_PREFLIGHT_TARGETS:
+        return None
+    return match
+
+
+def review_thread_preflight_denial(command, normalized, data_mode, reason):
+    match = approved_review_thread_preflight(command)
+    if not match:
+        return reason
+    tail = command[match.end():].strip(' \t')
+    if tail not in ('', ';'):
+        # A literal API suffix can refine the denial only.
+        api_tail = re.fullmatch(r';[ \t]*(gh api(?:[ \t]+[A-Za-z0-9_./:@=+,%\-]+)+)', tail)
+        return (review_thread_denial(api_tail[1], outer=False) or reason) if api_tail else reason
+    start, end = match.span('filter')
+    # The outer shlex pass removes these escapes before the nested scan reads the jq argument.
+    quoted = command[:start] + match['filter'].replace('"', r'\"') + command[end:]
+    return review_thread_scan(quoted, normalized, data_mode)
+
+
 # shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
-def review_thread_denial(command, data_mode=False):
+def review_thread_denial(command, data_mode=False, *, outer=True):
     if read_only_shell(command) or literal_search_shell(command):
         return None
     if '$' not in command and re.fullmatch(
             r"git commit(?: +-[A-Za-z]+| +--[a-z-]+)*(?: +-m +'[^']*'(?: +-[A-Za-z]+| +--[a-z-]+)*)+ *", command):
         return None
+    original = command
     command = command.replace('\\\n', '')
     normalized = re.sub(r'''['"\\]''', '', command).casefold()
     if re.search(r'\bgh\b', normalized) and '`' in outside_single_quotes(command):
         return 'review-thread guard parse failure'
-    if (any(name in normalized for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
-                                            'resolvereviewthread'))
-            or re.search(r'comments/\S*/replies', normalized)):
+    # shortcut: mask only the first literal PR body path; use shell token offsets if later segments need it.
+    body_file = re.match(r'[ \t]*gh[ \t]+pr[ \t]+edit[ \t]+[1-9][0-9]*[ \t]+--body-file[ \t]+'
+                         r'''([\w./-]+|'[\w./-]+'|"[\w./-]+")(?=[ \t\n;&|]|$)''', command)
+    mutation_text = normalized
+    if body_file:
+        masked = command[:body_file.start(1)] + '_' + command[body_file.end(1):]
+        mutation_text = re.sub(r'''['"\\]''', '', masked).casefold()
+    if (any(name in mutation_text for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
+                                               'resolvereviewthread'))
+            or re.search(r'comments/\S*/replies', mutation_text)):
         return 'raw review-thread mutation'
-    command = cat_heredoc_data(command)
+    reason = review_thread_scan(cat_heredoc_data(command), normalized, data_mode)
+    if outer and reason == 'unparsed shell syntax rule: No closing quotation':
+        return review_thread_preflight_denial(original, normalized, data_mode, reason)
+    return reason
+
+
+def review_thread_scan(command, normalized, data_mode):
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace = ' \t\r'
@@ -4219,8 +4341,15 @@ def review_thread_denial(command, data_mode=False):
                 continue
             text = re.sub(r'''['"\\]''', '', value)
             if any(gh_word(token) for token in re.split(r'[\s;&|()<>`]+', text)):
-                argument_data = data_command and position > 0 and not hidden_gh_api_calls(text)
-                reason = review_thread_denial(text if argument_data else value, data_mode=argument_data)
+                api_calls = hidden_gh_api_calls(text)
+                argument_data = data_command and position > 0 and not api_calls
+                reason = review_thread_denial(text if argument_data else value, data_mode=argument_data, outer=False)
+                if reason == 'unparsed shell syntax rule: No closing quotation' and (
+                        position > 0 and words[0][1] == 'grep' and '"' in value and not api_calls
+                        and re.fullmatch(r"'[^']*'", raw)
+                        and literal_search_shell(' '.join(word for _, word in words))):
+                    # A literal grep pattern can contain an unmatched quote as regex data.
+                    continue
                 if reason:
                     return reason
         command_words, skip_target = [], False
@@ -4403,6 +4532,39 @@ def review_thread_denial(command, data_mode=False):
             if method not in ('GET', 'HEAD'):
                 return 'gh api write outside the helper'
     return None
+
+
+# In this literal Git read, the only dollar signs belong to the single-quoted pattern.
+LITERAL_GIT_GREP_ANCHOR = re.compile(
+    r"[ \t]*git(?:[ \t]+-C[ \t]+(?!-)[\w./-]+)*[ \t]+grep"
+    r"(?:[ \t]+-[nilwEFvz]+)*[ \t]+'(?!-)[^'\x00\r\n]*\$'"
+    r"(?:[ \t]+(?!-)[\w./-]+)*(?:[ \t]+--(?:[ \t]+[\w./-]+)*)?[ \t]*\n?")
+
+
+# Match the wrapper as well as the pipeline so incomplete shell syntax keeps the fallback.
+LITERAL_GIT_COUNT_COMMAND = re.compile(
+    r'[ \t]*(?:cd[ \t]+(?!-)[A-Za-z0-9_./-]+[ \t]+&&[ \t]+)?'
+    r'echo[ \t]+"(?:[A-Za-z0-9_ .-]+:[ \t]+)?\$\([ \t]*git[ \t]+ls-tree[ \t]+-r[ \t]+--name-only'
+    r'[ \t]+[A-Za-z0-9_][A-Za-z0-9_./-]*[ \t]+--[ \t]+[A-Za-z0-9_./-]+'
+    r'''[ \t]*\|[ \t]*grep[ \t]+-c[ \t]+'(?!-)(?:[A-Za-z0-9_./-]|\\\.)+\$'[ \t]*\)"[ \t]*\n?''')
+
+
+def pr_comment_body_removed(command):
+    """Mask the quoted body of one complete top-level PR comment for the thread guard."""
+    # shortcut: omit escaped apostrophes in ANSI-C quotes until the shell dialect is known.
+    match = re.fullmatch(
+        r'([ \t]*gh[ \t]+pr[ \t]+comment[ \t]+'
+        r'(?:https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/)?[1-9][0-9]*[ \t]+--body[ \t]+)'
+        r'''(\$'(?:[^'\\\x00]|\\[\\nrt])*'|'[^'\x00]*'|"(?:[^"$`\\!\x00]|\\["$`\\])*")[ \t]*\n?''',
+        command)
+    if not match:
+        return command
+    # A blank body can lead to interactive input.
+    literal = match[2]
+    body = literal.removeprefix('$')[1:-1]
+    if literal.startswith('$'):
+        body = re.sub(r'\\[nrt]', '', body)
+    return match[1] + "'body'" if body.strip() else command
 
 
 def thread_command_config(command):
@@ -4622,11 +4784,13 @@ def row_record(data, folder, workspace_fallback=False):
 
 def row_reanchor_gate(data, command):
     tool = str(Path(__file__).resolve().parents[1] / 'skills/ship/scripts/row_reanchor.py')
-    form = ('python3 -I ' + tool + ' --row-file <abs> --row-id <id> --subject <rel> --base <ref> --head <ref>')
+    form = ('python3 -I ' + tool
+            + ' --row-file <abs> --row-id <id> --subject <rel> --base <ref> --head <ref> [--restoration <commit>]')
     reason = 'Row re-anchor gate requires exactly `' + form + '` and a matching driver-written row-reanchor admission record. '
     word = r'[A-Za-z0-9_./:@+,-]+'
     match = re.fullmatch(r'python3 -I (' + word + r') --row-file (' + word + r') --row-id (' + word
-                         + r') --subject (' + word + r') --base (' + word + r') --head (' + word + ')', command)
+                         + r') --subject (' + word + r') --base (' + word + r') --head (' + word
+                         + r')(?: --restoration ' + word + r')?', command)
     if not role(data, 'writer') or not match or match[1] != tool:
         deny(reason)
     fields, unmet = row_record(data, 'row-reanchor')
@@ -4763,9 +4927,11 @@ def pre(data):
                 deny('Writers do not edit GitHub CLI configuration.')
     if tool == 'Bash':
         try:
-            command = tin.get('command', '')
+            command = pr_comment_body_removed(tin.get('command', ''))
             reason = review_thread_denial(command)
             if reason is None:
+                preflight = approved_review_thread_preflight(command)
+                exact_preflight = preflight and command[preflight.end():].strip(' \t') in ('', ';')
                 separated = re.sub(r'''['"\\]''', ' ', command).casefold()
                 normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()
                 if re.search(r'\bgh\b', separated) and not re.search(r'\bgh\b', normalized):
@@ -4773,15 +4939,33 @@ def pre(data):
                 elif (re.search(r'(?<!<)<<(?!<)', command) and '\\\n' in command
                       and (re.search(r'\bgh\b', separated) or re.search(r'\bgh\b', normalized))):
                     reason = 'heredoc with line continuation'
-                elif (thread_command_config(command) or '--config-env' in command
-                      or "$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
-                                             or re.search(r'\b(?:gh|api)\b', normalized))):
-                    reason = 'git config from the command line'
+                elif not exact_preflight and thread_command_config(command):
+                    reason = 'git configuration token'
+                elif '--config-env' in command:
+                    reason = 'git configuration environment option'
+                elif ("$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
+                                          or re.search(r'\b(?:gh|api)\b', normalized))
+                      and not LITERAL_GIT_GREP_ANCHOR.fullmatch(command)
+                      and "$'" in writer_quoted_grep_data(command)
+                      and not LITERAL_GIT_COUNT_COMMAND.fullmatch(command)):
+                    reason = 'ambiguous shell quote pattern'
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__
         if reason:
+            agent_type = data.get('agent_type') or ''
+            if role(data, 'writer'):
+                superior = 'your driver'
+            elif agent_type in ('driver', 'ship:driver') or role(data, 'driver'):
+                superior = 'your chief'
+            elif LEDGER_ROLES.match(agent_type):
+                superior = 'your coordinator'
+            else:
+                superior = 'the superior named in your brief'
             deny("Ship replies to and resolves review threads only through `skills/babysit/scripts/thread_reply.py`, "
-                 "which first checks that the thread belongs to the PR's own repository and number. Rule: " + reason + '.')
+                 "which first checks that the thread belongs to the PR's own repository and number. Rule: " + reason + '.'
+                 ' Keep the task. Report the blocked step and named rule to ' + superior + '.'
+                 + (' If the brief names no superior, report it here.' if superior == 'the superior named in your brief' else '')
+                 + ' Continue independent work within your authority.')
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
         counter.parent.mkdir(parents=True, exist_ok=True)
