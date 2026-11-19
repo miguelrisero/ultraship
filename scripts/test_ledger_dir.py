@@ -27,7 +27,7 @@ class LedgerDirTests(unittest.TestCase):
         scratch.mkdir(exist_ok=True)
         self.base = Path(tempfile.mkdtemp(prefix='ship-ledger-regression-', dir=scratch))
         self.addCleanup(shutil.rmtree, self.base)
-        self.env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1',
+        self.env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'CLAUDE_CODE_SESSION_ID': 's1',
                     'XDG_STATE_HOME': str(self.base / 'state'), 'HOME': str(self.base)}
         self.env.pop('SHIP_LEDGER_DIR', None)
         self.common = self.base / 'external'
@@ -513,6 +513,74 @@ class LedgerDirTests(unittest.TestCase):
                                          'message': {'content': content}}))
             transcript.write_text(''.join(line + '\n' for line in lines))
         return owed, transcript, result, int(epoch)
+
+    def assert_account_auto_refuses_session(self, session):
+        sha = 'ab' * 20
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {sha}')])
+        home = self.resolve()
+        receipts = self.base / 'state/ultraship/accounted.json'
+        receipts.write_bytes(b'{}\n')
+        paths = (home, receipts, owed)
+        before = [path.read_bytes() for path in paths]
+        env = self.env.copy()
+        if session is None:
+            del env['CLAUDE_CODE_SESSION_ID']
+        else:
+            env['CLAUDE_CODE_SESSION_ID'] = session
+        refused = self.cli('account-auto', str(owed), env=env)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertEqual(refused.stdout, '')
+        self.assertEqual(refused.stderr.splitlines(), [
+            'account-auto requires CLAUDE_CODE_SESSION_ID to match the owed file session.'])
+        self.assertEqual([path.read_bytes() for path in paths], before)
+        allowed = self.cli('account-auto', str(owed))
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertIn('1 accounted, 0 pending\n', allowed.stdout)
+        self.assertNotEqual(home.read_bytes(), before[0])
+
+    def test_account_auto_refuses_foreign_session(self):
+        self.assert_account_auto_refuses_session('s2')
+
+    def test_account_auto_refuses_missing_session(self):
+        self.assert_account_auto_refuses_session(None)
+
+    def test_account_auto_refuses_empty_session(self):
+        self.assert_account_auto_refuses_session('')
+
+    def test_account_auto_refuses_a_symlinked_owed_file(self):
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])
+        target = owed.rename(owed.with_name('retained.tsv'))
+        owed.symlink_to(target)
+        home = self.resolve()
+        receipts = self.base / 'state/ultraship/accounted.json'
+        receipts.write_bytes(b'{}\n')
+        paths = (home, receipts, target)
+        before = [path.read_bytes() for path in paths]
+        with mock.patch.dict(os.environ, self.env, clear=True), \
+                mock.patch.object(Path, 'read_text', side_effect=AssertionError('unexpected read')):
+            with self.assertRaisesRegex(SystemExit, 'account-auto refuses a symlinked owed file'):
+                ledger.account_auto(owed)
+        self.assertTrue(owed.is_symlink())
+        self.assertEqual([path.read_bytes() for path in paths], before)
+
+    def test_account_auto_reads_the_owed_file_once(self):
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])
+        home = self.resolve()
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, self.env, clear=True), \
+                mock.patch.object(ledger, 'STATE', self.base / 'state/ultraship'), \
+                mock.patch.object(ledger.os, 'open', wraps=os.open) as fd_open, \
+                mock.patch.object(Path, 'open', autospec=True, side_effect=Path.open) as path_open, \
+                mock.patch('sys.stdout', output):
+            ledger.account_auto(owed)
+        reads = [call for spy in (fd_open, path_open) for call in spy.call_args_list
+                 if call.args[0] == owed]
+        self.assertEqual(len(reads), 1)
+        self.assertIn('1 accounted, 0 pending\n', output.getvalue())
+        self.assertEqual(ledger.rows(home)[-1][1], 'account-result')
 
     def test_account_auto_uses_own_final_text_and_skips_existing_accounting(self):
         sha = 'ab' * 20
