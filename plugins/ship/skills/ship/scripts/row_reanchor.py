@@ -40,10 +40,13 @@ def basic(value):
 def scan_rows(text):
     """Scan complete statements so string contents never become table headers."""
     source = lines(text)
-    rows, split_rows, current, index, nested = [], set(), None, 0, False
+    rows, split_rows, standalone_blanks = [], set(), set()
+    current, index, nested = None, 0, False
     while index < len(source):
         start = index
         if not source[index].strip() or source[index].lstrip().startswith('#'):
+            if not source[index].strip(' \t\r\n'):
+                standalone_blanks.add(index)
             index += 1
             continue
         while True:
@@ -72,11 +75,11 @@ def scan_rows(text):
                 current = None
         elif current is not None:
             current.append((start, index, statement, {} if nested else parsed))
-    return rows, split_rows
+    return rows, split_rows, standalone_blanks
 
 
 def row_statements(text, row_id):
-    rows, split_rows = scan_rows(text)
+    rows, split_rows, _ = scan_rows(text)
     matching = [(start, row) for start, row in rows if any(item[3].get('id') == row_id for item in row)]
     require(len(matching) == 1, 'row ID must match exactly once')
     first, selected = matching[0]
@@ -99,7 +102,11 @@ def row_statements(text, row_id):
 
 
 def row_extents(text):
-    rows, split_rows = scan_rows(text)
+    rows, split_rows, _ = scan_rows(text)
+    return scanned_extents(rows, split_rows)
+
+
+def scanned_extents(rows, split_rows):
     extents = {}
     for start, row in rows:
         for _, _, _, parsed in row:
@@ -117,7 +124,10 @@ def opcodes(a, b):
 
 def restoration_check(base_text, start_text, restored_text, row_id):
     b, h, f = map(lines, (base_text, start_text, restored_text))
-    eb, eh, ef = map(row_extents, (base_text, start_text, restored_text))
+    eb = row_extents(base_text)
+    h_rows, h_split, h_blanks = scan_rows(start_text)
+    f_rows, f_split, f_blanks = scan_rows(restored_text)
+    eh, ef = scanned_extents(h_rows, h_split), scanned_extents(f_rows, f_split)
 
     def row_lines(source, extents, key):
         return source[slice(*extents[key])] if key in extents else None
@@ -128,9 +138,10 @@ def restoration_check(base_text, start_text, restored_text, row_id):
     require(restored == row_lines(b, eb, row_id), 'restored row differs from the merge base')
     require(restored != row_lines(h, eh, row_id), 'restoration commit leaves the row unchanged')
 
-    restored_extents = [eb[key] for key in ef if key in eb
-                        and row_lines(f, ef, key) == row_lines(b, eb, key)
-                        and row_lines(f, ef, key) != row_lines(h, eh, key)]
+    restored_ids = [key for key in ef if key in eb
+                    and row_lines(f, ef, key) == row_lines(b, eb, key)
+                    and row_lines(f, ef, key) != row_lines(h, eh, key)]
+    restored_extents = [eb[key] for key in restored_ids]
     expected, from_head = [], []
     for tag, i1, i2, j1, j2 in opcodes(b, h):
         # For insertions, i1 == i2, so both bounds must be strict.
@@ -140,15 +151,29 @@ def restoration_check(base_text, start_text, restored_text, row_id):
         from_head.extend([not use_base] * len(chunk))
     require(expected == f, 'restoration changed bytes outside restored rows')
 
+    def outside_rows(source, rows, extents, blanks):
+        omitted = blanks.copy()
+        # Only blank separators outside row tables may return with a row.
+        for start, row in rows:
+            if row:
+                omitted.difference_update(range(start, row[-1][1]))
+        for key in restored_ids:
+            if key in extents:
+                omitted.update(range(*extents[key]))
+        return [line for index, line in enumerate(source) if index not in omitted]
+
+    require(outside_rows(f, f_rows, ef, f_blanks) == outside_rows(h, h_rows, eh, h_blanks),
+            'restoration changed bytes outside restored rows')
+
     def line_range(extents):
         if row_id in extents:
             start, end = extents[row_id]
             return [start + 1, end]
         return None
 
-    return {'base_lines': line_range(eb), 'restoration_lines': line_range(ef),
-            'starting_lines': line_range(eh), 'insert_after': sum(from_head[:ef[row_id][0]]),
-            'restored_rows': len(restored_extents), 'restoration_base_equal': True,
+    return {'restoration_lines': line_range(ef), 'starting_lines': line_range(eh),
+            'insert_after': sum(from_head[:ef[row_id][0]]),
+            'restored_rows': len(restored_ids), 'restoration_base_equal': True,
             'restoration_outside_equal': True}
 
 
@@ -310,19 +335,20 @@ def run(args):
     text = original.decode('utf-8')
     base_text = blob(base_sha, relative).decode('utf-8')
     restoration_fields = {}
-    if args.restoration is not None:
-        restoration = git('rev-parse', '--verify', '--end-of-options', args.restoration + '^{commit}').decode().strip()
+    restoration_ref = getattr(args, 'restoration', None)
+    if restoration_ref is not None:
+        restoration = git('rev-parse', '--verify', '--end-of-options', restoration_ref + '^{commit}').decode().strip()
         try:
             git('merge-base', '--is-ancestor', restoration, head_sha)
         except subprocess.CalledProcessError:
             raise Refused('restoration must be HEAD or an ancestor of HEAD') from None
-        try:
-            git('merge-base', '--is-ancestor', base_sha, restoration)
-        except subprocess.CalledProcessError:
-            raise Refused('merge base must be an ancestor of the restoration') from None
         parents = git('rev-list', '--parents', '-n', '1', restoration).decode().split()
-        require(len(parents) > 1, 'restoration parent required')
+        require(len(parents) == 2, 'restoration must have exactly one parent')
         restoration_parent = parents[1]
+        try:
+            git('merge-base', '--is-ancestor', base_sha, restoration_parent)
+        except subprocess.CalledProcessError:
+            raise Refused('merge base must be an ancestor of the restoration parent') from None
         restoration_fields = {'restoration': restoration, 'restoration_parent': restoration_parent,
                               **restoration_check(base_text, blob(restoration_parent, relative).decode('utf-8'),
                                                   blob(restoration, relative).decode('utf-8'), args.row_id)}

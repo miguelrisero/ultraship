@@ -216,7 +216,7 @@ class ToolTests(unittest.TestCase):
         before, output = self.invoke(restoration=restoration)
         self.assertEqual(self.row.read_bytes(), before)
         # The restored hunk includes the separator before the row.
-        fields = {'restoration': restoration, 'restoration_parent': starting, 'base_lines': [4, 12],
+        fields = {'restoration': restoration, 'restoration_parent': starting,
                   'restoration_lines': [4, 12], 'starting_lines': None, 'insert_after': 2,
                   'restored_rows': 1, 'restoration_base_equal': True, 'restoration_outside_equal': True,
                   'changed_statements': 0}
@@ -263,6 +263,22 @@ class ToolTests(unittest.TestCase):
         self.invoke(2, 'restored row differs from the merge base', restoration=restoration)
         self.assertFalse(self.record_path().exists())
 
+    def test_restoration_refuses_blank_line_change_inside_row(self):
+        prefix, table, suffix = self.restoration_fixture()
+        table = table.replace('claim = "same guarantee"', "claim = '''same\n\nguarantee'''")
+        self.base = self.commit_rows(prefix + table + suffix)
+        self.commit_rows(prefix + suffix)
+        restoration = self.commit_rows(prefix + table.replace('same\n\n', 'same\n') + suffix)
+        self.invoke(2, 'restored row differs from the merge base', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_adjacent_nonblank_change_in_same_hunk(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.commit_rows(prefix.removesuffix('\n') + '# lane comment\n' + suffix)
+        restoration = self.commit_rows(prefix + table + suffix)
+        self.invoke(2, 'restoration changed bytes outside restored rows', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
     def test_restoration_refuses_outside_edit_and_misplaced_row(self):
         prefix, table, suffix = self.restoration_fixture()
         starting = self.commit_rows(prefix + suffix)
@@ -294,6 +310,26 @@ class ToolTests(unittest.TestCase):
     def test_restoration_refuses_unchanged_row(self):
         self.restoration_fixture()
         self.invoke(2, 'restoration commit leaves the row unchanged', restoration=self.head_sha)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_the_merge_base_itself(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.commit_rows(prefix + suffix)
+        self.base = self.commit_rows(prefix + table + suffix)
+        self.head_sha = self.commit()
+        self.invoke(2, 'merge base must be an ancestor of the restoration parent', restoration=self.base)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_merge_commit(self):
+        prefix, table, suffix = self.restoration_fixture()
+        starting = self.commit_rows(prefix + suffix)
+        lane = self.git('branch', '--show-current')
+        self.git('checkout', '-qb', 'restore-side', starting)
+        self.commit_rows(prefix + table + suffix)
+        self.git('checkout', '-q', lane)
+        self.git('merge', '--no-ff', '--no-edit', 'restore-side')
+        self.head_sha = self.git('rev-parse', 'HEAD')
+        self.invoke(2, 'restoration must have exactly one parent', restoration=self.head_sha)
         self.assertFalse(self.record_path().exists())
 
     def test_restoration_refuses_commit_outside_head_history(self):
