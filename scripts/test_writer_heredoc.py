@@ -764,13 +764,13 @@ class WriterHeredocTests(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'), reason)
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'), reason)
         self.assertTrue(self.denied("git -C '$X' grep -e y -e code"))
         reason = 'git hidden subcommand rule'
-        self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'), reason)
+        self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'), reason)
         self.assertTrue(self.denied('grep -e "$(python3 -c code)" -e y f'))
         reason = 'process-capable python -c rule'
-        self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'), reason)
+        self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'), reason)
 
     def test_read_only_argument_words_with_interpreter_names_are_admitted(self):
         """Catch false refusals of literal read-only paths and patterns containing interpreter names."""
