@@ -92,7 +92,8 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](../skills/ship/references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
    The driver supplies read-only checkouts at the base and the frozen head. The admission record lists the row file in each checkout.
    The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.
-   For a row file absent at the base, the driver records that `git cat-file -e <base>:<path>` fails, and admits only the head copy.
+   For a row file absent at the base, the driver records that `git ls-tree --name-only <base> -- <path>` exits 0 and prints nothing.
+   The driver then admits only the head copy.
    Any later push to the PR needs a new review at the pushed head. Return a ready PR to draft before that push.
    Mark it ready again only after the new review passes.
 8. The mutation proof runs after merge, under its execution admission.
@@ -101,6 +102,7 @@ Send these rows to the CoC: a new or changed mutant on an existing row, a change
 Send a changed claim to the CoC too. The CoC approves it only with a current task-specific owner event.
 A CoC approval is a frozen decision file named by absolute path and SHA256.
 It binds the row ID, the source commit, the fields and their replacement values.
+The writer verifies its SHA256 and bindings before the edit. The driver verifies them again at the frozen head and records the result in the reviewer brief.
 The writer applies only those fields with native Edit and `replace_all=false`, then commits the row file alone.
 Step 7 reviews that row, and a follow-up row guards any new code.
 The CoC audits a 10% sample of lane-owned row changes.
