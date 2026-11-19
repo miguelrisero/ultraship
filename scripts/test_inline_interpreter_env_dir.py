@@ -299,6 +299,11 @@ class EnvDirectoryTests(unittest.TestCase):
                 with self.subTest(command=command):
                     self.assertTrue(self.denied(command, cwd=directory))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+            for command in (f'cd {sub} && python3 fd/0', f'pushd {sub} && python3 fd/0'):
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command, cwd=directory))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+                    self.assertNotIn(': relative script after an unproven directory change', self.reason)
             (sub / 'x.js').symlink_to('/dev/stdin')
             self.assertTrue(self.denied(f'cd {sub} && node x.js', cwd=directory))
             self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
@@ -353,6 +358,138 @@ class EnvDirectoryTests(unittest.TestCase):
                     command = f"ln -sfn /dev/stdin {script}; printf '{program}' | {interpreter} {script}"
                     self.assertTrue(self.denied(command))
                     self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_absolute_scripts_refuse_same_segment_launcher_path_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for interpreter, filename, program in (
+                ('node', 'p.js', 'console.log(1)'),
+                ('python3', 'p.py', 'print(1)'),
+            ):
+                with self.subTest(interpreter=interpreter):
+                    script = Path(directory) / filename
+                    self.assertFalse(script.exists())
+                    command = (f"printf '{program}' | find . -maxdepth 0 "
+                               f'-exec ln -sfn /dev/stdin {script} \\; '
+                               f'-exec {interpreter} {script} \\;')
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+                    self.assertFalse(self.denied(f'{interpreter} {script}'), self.reason)
+                    command = f'find . -maxdepth 0 -exec {interpreter} {script} \\;'
+                    self.assertTrue(self.denied(command))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+            self.assertFalse(self.denied('timeout 5 python3 scripts/x.py', cwd=directory), self.reason)
+
+    def test_piped_launcher_with_opaque_job_is_denied(self):
+        self.assertTrue(self.denied("printf input | parallel 'printf %s'"))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_pipeline_wrapper_requires_a_proven_child_command(self):
+        self.assertTrue(self.denied('printf input | timeout 5 "$CONSUMER"'))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+        self.assertTrue(self.denied('printf input | ./timeout 5 "$CONSUMER"'))
+        self.assertIn('inline interpreter code rule (unresolved command word)', self.reason)
+        self.assertFalse(self.denied('printf input | timeout 5 cat'), self.reason)
+
+    def test_unknown_pipeline_consumer_cannot_prove_launcher_is_data(self):
+        self.assertTrue(self.denied('printf input | fixture-consumer xargs'))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_pipeline_consumer_requires_unchanged_paths_to_prove_launcher_is_data(self):
+        for command in (
+            'printf input | PATH=/fixture/bin cat parallel',
+            'printf input | env PATH=/fixture/bin cat parallel',
+            'PATH=/fixture/bin; printf input | cat parallel',
+            'printf input & printf input | cat parallel',
+            'printf input | ./cat parallel',
+            'printf input | /fixture/bin/cat parallel',
+            'printf input | ./timeout 5 cat parallel',
+            'printf input | /tmp/x/nice cat parallel',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_pipeline_launcher_names_as_data_stay_admitted(self):
+        for command in ('printf input | tee xargs', 'printf input | timeout 5 grep xargs',
+                        'printf input | cat xargs', 'printf input | cat parallel',
+                        'printf input | tee parallel', "printf 'node -e 1' | cat parallel",
+                        "printf parallel | grep 'parallel'", 'printf parallel | grep "parallel"'):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+
+    def test_pipeline_nice_attached_adjustments_stay_admitted(self):
+        for option in ('-n5', '-5'):
+            with self.subTest(option=option):
+                self.assertFalse(self.denied(f'printf input | nice {option} cat'), self.reason)
+
+    def test_directory_names_as_script_arguments_stay_admitted(self):
+        for word in ('cd', 'pushd'):
+            with self.subTest(word=word):
+                self.assertFalse(self.denied(f'python3 scripts/x.py --label {word} frontend'), self.reason)
+
+    def test_launcher_names_as_script_arguments_stay_admitted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for command in ('python3 scripts/x.py --label xargs',
+                            'timeout 5 python3 scripts/x.py --label xargs',
+                            'X+=1 python3 scripts/x.py --label xargs',
+                            'git grep xargs', 'rg find',
+                            'python3 scripts/x.py parallel', 'node x.js -exec'):
+                with self.subTest(command=command):
+                    self.assertFalse(self.denied(command, cwd=directory), self.reason)
+            script = Path(directory) / 'p.js'
+            self.assertFalse(script.exists())
+            command = (f'timeout 5 find . -maxdepth 0 '
+                       f'-exec ln -sfn /dev/stdin {script} \\; '
+                       f'-exec node {script} \\;')
+            self.assertTrue(self.denied(command, cwd=directory))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_quoted_assignment_like_commands_do_not_hide_launchers(self):
+        for word in ("'X=1'", '"X=1"'):
+            with self.subTest(word=word):
+                self.assertTrue(self.denied(f'{word} python3 scripts/x.py --label xargs'))
+                self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_launchers_behind_unknown_wrappers_and_redirections_are_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / 'p.js'
+            self.assertFalse(script.exists())
+            find = (f'find . -maxdepth 0 -exec ln -sfn /dev/stdin {script} \\; '
+                    f'-exec node {script} \\;')
+            for command in (
+                f'sudo -Eu root {find}',
+                f'env -iu X {find}',
+                f'sudo -Eu root xargs node {script}',
+                f'stdbuf -oL {find}',
+                f'ionice -c3 {find}',
+                f'nice 2>/dev/null {find}',
+                f'timeout 5 2>err {find}',
+                f'env >/dev/null {find}',
+                f'sudo ionice -t xargs node {script}',
+                f'doas -u node /usr/bin/{find}',
+            ):
+                with self.subTest(command=command):
+                    self.assertTrue(self.denied(command, cwd=directory))
+                    self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_launcher_inherits_path_check_into_env_split_string(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / 'p.js'
+            self.assertTrue(self.denied(f"stdbuf -oL xargs env -S 'node {script}'", cwd=directory))
+            self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_relative_directory_is_unproven_without_hook_cdpath(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sub = Path(directory) / 'sub'
+            sub.mkdir()
+            with patch.dict(ultraship.os.environ):
+                ultraship.os.environ.pop('CDPATH', None)
+                for target in ('sub', './sub'):
+                    with self.subTest(target=target):
+                        command = f'cd {target} && python3 scripts/x.py'
+                        self.assertTrue(self.denied(command, cwd=directory))
+                        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+                self.assertFalse(self.denied(f'cd {sub} && python3 scripts/x.py', cwd=directory), self.reason)
 
 
 if __name__ == '__main__':
