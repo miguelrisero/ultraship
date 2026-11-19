@@ -259,6 +259,7 @@ The record grants zero protected access or edit authority by itself.
 Keep the route's authority, independent review, execution admission and publication rules.
 
 Use exactly `python3 -I <plugin root>/skills/ship/scripts/row_reanchor.py --row-file <absolute path> --row-id <id> --subject <repository-relative path> --base <ref> --head <ref>`.
+On the restore route, append ` --restoration <commit>` with the full restoration commit SHA.
 Use single spaces and unquoted arguments, with nothing before or after the command.
 The hook accepts only its own plugin's tool path for a writer with a matching record.
 
@@ -293,6 +294,7 @@ Decision:
 Next:
 - Return the tool output, the generated authorization record path and the commit SHA to `<driver>` by `<return time UTC>`.
 ```
+On the restore route, write `none` for the CI run, count and expected values when the starting head deletes the row.
 
 ## Future ordinary-file identity checkpoints
 
