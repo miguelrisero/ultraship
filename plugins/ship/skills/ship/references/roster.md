@@ -2,6 +2,8 @@
 
 Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable agent, dispatch the next entry in the chain and record it in the ledger note. A seat with no fallback stays missing, and its panel is incomplete.
 
+Use [reviewer admission for protected row reads](owner-decisions.md#reviewer-admission-record-for-protected-row-reads) to select a seat for a protected row review.
+
 | Agent | Model | Effort | Use | Fallback chain |
 |---|---|---|---|---|
 | `ship:planner--sol` | `gpt-6.2-sol` | xhigh | Plans, premises | `planner--opus`, `planner--sonnet` |

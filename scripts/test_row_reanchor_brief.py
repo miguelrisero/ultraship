@@ -22,22 +22,8 @@ hook = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hook)
 
 
-SHARED_VALUES = {
-    'Input UUID': 'f39a1c87-62de-4b09-a153-7cd02e8916ab', 'version': '1',
-    'workspace UUID': 'e17d0c39-84a1-4f6b-b205-9c73a8de621f',
-    'event ID': '7c9e01a4-d628-43fb-9a16-0e8b27d5c391',
-    'event hash': '3b8f14e29cd065a781b9e40c6f2a8d3174e95bc0a6d723f8c109b5e467a2d8c3',
-    'decision file SHA256': 'c8' * 32, 'run ID': '19874203156', 'attempt': '1',
-    'job ID': '67284901352', 'count': '0', 'expected': '1', 'tested merge SHA': 'b4' * 20,
-    'tested merge tree SHA': 'c5' * 20, 'subject commit SHA': 'd6' * 20,
-    'CI base SHA': '9e14c2f80a6d37b5914e08c2d6f7a3b9051ce824',
-    'author head SHA': 'a38d91e5c7b204f6d819ec03a7f52b6084de19c2',
-    'tool base SHA': '9e14c2f80a6d37b5914e08c2d6f7a3b9051ce824',
-    'rule Input UUID': 'a5c2e8f1-3b74-4d09-96e0-1f8d27b4c053',
-    'rule event ID': '2d6f9b08-71ce-4a35-8e14-b09c53a7d6f2',
-    'rule event hash': '9a1e5c73d08b4f26a7e3910c5d8b6f42e0a7c319d5b86e24f1a03c7d9e58b2f6',
-    'commit subject': 'test: re-anchor warning race',
-}
+BASE = '9e14c2f80a6d37b5914e08c2d6f7a3b9051ce824'
+HEAD = 'a38d91e5c7b204f6d819ec03a7f52b6084de19c2'
 
 
 def documented_command(reference, plugin_root, row, row_id, subject, base, head):
@@ -54,6 +40,19 @@ class BriefTests(unittest.TestCase):
         section = self.reference.split('## Row re-anchor tool brief\n', 1)[1].split('\n## ', 1)[0]
         self.template = section.split('```text\n', 1)[1].split('\n```', 1)[0]
 
+    def fill(self, worktree, row, row_id, expiry, pr, command):
+        values = {
+            'row ID': row_id, 'PR URL': pr, 'row file path': str(row),
+            'subject path': 'src/warning.py', 'subject commit SHA': HEAD,
+            'run ID': '19874203156', 'count': '0', 'expected': '1', 'base SHA': BASE,
+            'worktree path': str(worktree), 'head SHA': HEAD,
+            'admission record path': str(worktree / 'state/row-reanchor/agent-1.json'),
+            'expiry time': expiry, 'tool command': command,
+            'driver': 'Coordinator', 'return time UTC': '2026-11-16T11:00:00Z',
+        }
+        self.assertEqual(set(re.findall(r'<([^>]+)>', self.template)), set(values))
+        return re.sub(r'<([^>]+)>', lambda match: values[match[1]], self.template)
+
     def prepare_admission(self):
         temporary = self.enterContext(tempfile.TemporaryDirectory())
         root = Path(os.path.realpath(temporary))
@@ -61,42 +60,21 @@ class BriefTests(unittest.TestCase):
         row = worktree / 'tests/mutation/rows.toml'
         row.parent.mkdir(parents=True)
         row.write_text('synthetic')
-        base, head = SHARED_VALUES['CI base SHA'], SHARED_VALUES['author head SHA']
         row_id, subject = 'P25-warning-race', 'src/warning.py'
         plugin_root = str(ROOT / 'plugins/ship')
-        command = documented_command(self.reference, plugin_root, row, row_id, subject, base, head)
+        command = documented_command(self.reference, plugin_root, row, row_id, subject, BASE, HEAD)
         self.assertEqual(command, 'python3 -I ' + str(TOOL) + ' --row-file ' + str(row)
-                         + ' --row-id ' + row_id + ' --subject ' + subject + ' --base ' + base + ' --head ' + head)
+                         + ' --row-id ' + row_id + ' --subject ' + subject + ' --base ' + BASE + ' --head ' + HEAD)
         expiry = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 3600))
-        values = {
-            **SHARED_VALUES,
-            'row ID': row_id, 'PR URL': 'https://github.com/example/repo/pull/25',
-            'verifier name': 'Coordinator', 'verification time': '2026-11-16T10:00:00Z',
-            'decision file path': str(root / 'decision.md'),
-            'tool route decision path': str(root / 'tool-route.md'),
-            'row file path': str(row), 'subject path': subject, 'job name': 'Anchor validation',
-            'job log URL': 'https://github.com/example/repo/actions/runs/19874203156/job/67284901352',
-            'subject line range': '41-58', 'review time': '2026-11-16T09:30:00Z',
-            'added': '4', 'deleted': '2', 'tool base reason': 'the CI base',
-            'method-only denials': 'one `python3` heredoc denial',
-            'denial times': '08:10Z', 'denial record path': str(root / 'denial.jsonl'),
-            'denial record lines': '3', 'assigned topic': 'the warning race rows',
-            'plugin root': plugin_root,
-            'rule verifier name': 'Coordinator', 'rule verification time': '2026-11-16T10:00:00Z',
-            'earlier attempts': 'one heredoc attempt',
-            'attempt record path': str(root / 'attempt.jsonl'),
-            'expiry time': expiry, 'worktree path': str(worktree), 'tool command': command,
-            'return time': '2026-11-16T11:00:00Z', 'decision file name': 'decision.md',
-        }
-        self.assertEqual(set(re.findall(r'<([^>]+)>', self.template)), set(values))
-        brief = re.sub(r'<([^>]+)>', lambda match: values[match[1]], self.template)
+        pr = 'https://github.com/example/repo/pull/25'
+        brief = self.fill(worktree, row, row_id, expiry, pr, command)
         self.assertNotIn('<', brief)
         text_lint.check(brief, 'peer')
         self.assertIsNone(re.search(r'^\s*(old|new)\s*=', brief, re.M))
         self.assertFalse(any(line.startswith('[') for line in brief.splitlines()))
-        admitted_command = re.search(r'run once, alone: `([^`]+)`', brief)[1]
+        (admitted_command,) = re.findall(r'Run once, alone: `([^`]+)`', brief)
         self.assertEqual(admitted_command, command)
-        return root, worktree, row, row_id, expiry, values['PR URL'], admitted_command
+        return root, worktree, row, row_id, expiry, pr, admitted_command
 
     def hook_decision(self, root, worktree, command, **record_fields):
         state = root / 'state'
@@ -116,41 +94,14 @@ class BriefTests(unittest.TestCase):
         return json.loads(output.getvalue())['hookSpecificOutput'] if output.getvalue() else {}
 
     def test_filled_brief_long_values_and_twelve_word_headroom(self):
-        root = '/home/dev/workspaces/p25-warning-race-lane'
-        plugin_root = root + '/ultraship/plugins/ship'
-        row = root + '/repository/rows/warning-race.toml'
-        subject = 'backend/api/agent/warnings/race_window.py'
-        base, head = SHARED_VALUES['CI base SHA'], SHARED_VALUES['author head SHA']
-        command = documented_command(self.reference, plugin_root, row, 'P25-warning-race', subject, base, head)
-        values = {
-            **SHARED_VALUES,
-            'row ID': 'P25-warning-race', 'PR URL': 'https://github.com/example/repository/pull/7516',
-            'verifier name': 'Flow, the chief that drives the P25 acceptance lane',
-            'verification time': '2026-11-16T05:30:00.357469375Z',
-            'decision file path': root + '/records/decision.md',
-            'tool route decision path': root + '/records/tool-route.md',
-            'row file path': row, 'subject path': subject, 'job name': 'mutation-anchors · changed anchor guard',
-            'job log URL': 'https://github.com/example/repository/actions/runs/19874203156/job/67284901352',
-            'subject line range': '212 to 247',
-            'review time': '2026-11-16T05:45:00.357469375Z', 'added': '14', 'deleted': '8',
-            'tool base reason': 'the CI base, because the row file and the row both exist there',
-            'method-only denials': 'one python3 heredoc denial, one script file denial, and one wrapper command denial',
-            'denial times': '04:41Z, 04:55Z and 05:12Z',
-            'denial record path': root + '/records/denial.jsonl', 'denial record lines': '3, 7 and 12',
-            'assigned topic': 'the P25 warning race row re-anchor for pull request 7516',
-            'plugin root': plugin_root,
-            'rule verifier name': 'Flow, the chief that drives the P25 acceptance lane',
-            'rule verification time': '2026-11-16T05:30:00.357469375Z',
-            'earlier attempts': 'attempt 1 drew a heredoc denial, attempt 2 a script denial, and attempt 3 an output contract refusal',
-            'attempt record path': root + '/records/attempt.jsonl', 'expiry time': '2026-11-16T09:00:00+00:00',
-            'worktree path': root + '/repository', 'tool command': command,
-            'return time': '2026-11-16T08:15:00+00:00',
-            'decision file name': 'pr7516-p25-reanchor-tool-brief-20261116.md',
-        }
-        self.assertEqual(set(re.findall(r'<([^>]+)>', self.template)), set(values))
-        brief = re.sub(r'<([^>]+)>', lambda match: values[match[1]], self.template)
+        worktree = Path('/home/dev/workspaces/p25-warning-race-lane/repository')
+        row = worktree / 'tests/mutation/rows/warning-race.toml'
+        command = documented_command(self.reference, '/home/dev/workspaces/ultraship/plugins/ship',
+                                     row, 'P25-warning-race', 'src/warning.py', BASE, HEAD)
+        brief = self.fill(worktree, row, 'P25-warning-race', '2026-11-16T09:00:00Z',
+                          'https://github.com/example/repository/pull/7516', command)
         text_lint.check(brief, 'peer')
-        for placeholder in values:
+        for placeholder in set(re.findall(r'<([^>]+)>', self.template)):
             with self.subTest(placeholder=placeholder):
                 brief = re.sub(r'<([^>]+)>', lambda match: ' '.join(['value'] * 12)
                                if match[1] == placeholder else 'x', self.template)
@@ -171,69 +122,28 @@ class BriefTests(unittest.TestCase):
                 decision = self.hook_decision(root, worktree, command, pr=pr, expires_at=expiry, **fields)
                 self.assertEqual(decision.get('permissionDecision'), 'deny', decision)
 
-    def test_template_dispatch_lines(self):
-        lines = (
-            'Owner helper request: the owner\'s global CLAUDE.md, heading "Helper agents (standing request)", '
-            'requests helper agents. Covered role: writer. Topic: <assigned topic>. '
-            'Every permission, denial and gate stays in force.\n'
-            'Readable files: `<worktree path>`, `<plugin root>/skills/ship/references/owner-decisions.md`, '
-            '`<decision file path>`, `<tool route decision path>`, '
-            '`<denial record path>`, `<attempt record path>`; every other path is out of scope\n'
-            'Keep the row task pending after a hook refusal. Report the reason and ask the driver for a permitted route.\n'
-            'Never print a key value; never post outside bettergroupinc and miguelrisero.\n'
-            'Never chain a glob listing into a write command.'
-        )
-        first = self.template.split('\n', 1)[0]
-        self.assertIn(first + '\n\n' + lines + '\n\nFacts:\n', self.template)
-
-    def test_template_fields_map_to_writer_requirements(self):
-        writer = (ROOT / 'plugins/ship/agents/writer--sol.md').read_text()
-        requirements = (
-            ('Route: lane-derived', 'name this route in the brief'),
-            ('Input `<Input UUID>` version <version>, workspace `<workspace UUID>`',
-             'Bind full Input/workspace UUIDs, current version, event id/hash, choice, actual owner answer, verifier name, and verification time.'),
-            ('<verifier name>', 'verifier name, and verification time'),
-            ('<verification time>', 'verifier name, and verification time'),
-            ('choice B, answer text null', 'Record selected choice B and `payload.answer.text=null` separately'),
-            ('`answer_submitted`, `owner_ui`, `no_answer_yet` false',
-             'Require `event_type=answer_submitted`, `actor_kind=owner_ui`, and `payload.no_answer_yet=false`'),
-            ('Verify the standing rule event with `get_input` against choice `plugin_rule`',
-             'Verify the owner event yourself when you have a `get_input` tool'),
-            ('and the access event against choice B.', 'Use `get_input` directly when available'),
-            ('Without `get_input`, or on an auth or tool error, use the records above.',
-             'Verifier fallback: when you have no `get_input` tool, or the call fails with an auth or tool error'),
-            ('Allowlist: row file', 'Require CoC approval of the exact row allowlist before any protected read or edit.'),
-            ('CI: run', 'Evidence binds the repository, PR, base SHA, author head SHA, tested merge SHA/tree, CI run ID, attempt, and job ID/name.'),
-            ('parents `<CI base SHA>` and `<author head SHA>`', 'The tested merge must contain the recorded base and author head'),
-            ('Subject change:', "Require the recorded base/head diff to show that the PR's own subject change breaks each named row."),
-            ('Same operation:', 'The CoC reviews the same-operation, same-claim reason'),
-            ('Method-only denials:', "After a hook denies only the method of this route's row edit"),
-            ('Tool route:', 'When the brief names the sanctioned row re-anchor tool'),
-            ('Standing rule:', 'cites this owner rule'),
-            ('Standing rule event:', 'records in the brief the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name'),
-            ('zero tool runs', 'The tool run is its own single attempt'),
-            ("ended only in a tool error under another head's grant",
-             'a new CoC grant bound to a head SHA with no used attempt on the row gets one fresh attempt'),
-            ('None drew `REFUSED` or a hook or permission refusal or denial other than the listed method-only denials',
-             'no earlier attempt on the row drew `REFUSED` or a hook or permission refusal or denial other than the listed method-only shell denials'),
-            ('its SHA256 and `<author head SHA>` in the attempt record',
-             "with the grant's CoC decision file, its SHA256 and the head SHA before the call"),
-            ("It names each earlier attempt's decision file, SHA256, head SHA and outcome.", 'and its outcome after it'),
-            ("Record the run's outcome in the attempt record before any other step.", 'and its outcome after it'),
-            ('- Attempt record:', "record each native Edit call and tool run on the row on the brief's attempt record"),
-            ('- Worktree:', "with the brief's row file, row ID, subject, base and head"),
-            ('- On `REFUSED` or any denial, keep the row pending and ask the driver for a permitted route.', 'Keep the row task pending after a refusal. Record the outcome and request a permitted route from the driver.'),
-            ('run once, alone:', 'When the brief names the sanctioned row re-anchor tool, run it once'),
-        )
-        for field, rule in requirements:
-            with self.subTest(field=field):
-                self.assertIn(field, self.template)
-                self.assertIn(rule, writer)
-        standing_event = next(line for line in self.template.splitlines() if line.startswith('- Standing rule event:'))
-        self.assertIn('`answer_submitted`', standing_event)
-        self.assertIn('`owner_ui`', standing_event)
-        self.assertIn('A content, scope or protected-access denial blocks the tool run', self.template)
-        self.assertIn('every content, scope or protected-access denial', self.reference)
+    def test_template_keeps_exact_scope_and_reports_the_outcome(self):
+        for requirement in (
+            'Re-anchor row `<row ID>` of `<PR URL>` under the lane-owned row route.',
+            'Authority: the owner\'s global CLAUDE.md, heading "CoC decisions (standing grant)".',
+            'Row file: `<row file path>`.',
+            'Subject: `<subject path>` at commit `<subject commit SHA>`.',
+            'CI: run `<run ID>` found `<count>` anchors and expected `<expected>`.',
+            'Base: `<base SHA>`.',
+            'Worktree: `<worktree path>` at head `<head SHA>`.',
+            'Admission record: `<admission record path>`, expires at `<expiry time>`.',
+            'Read the standing grant directly.',
+            'Verify each binding before running the tool.',
+            'Commit only the row file on success.',
+            'Keep the row pending on a refusal.',
+            'Report the refusal to the driver.',
+            'Return the tool output, the generated authorization record path and the commit SHA',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.template)
+        self.assertIn('Keep all row TOML text and pair bytes out of the brief.', self.reference)
+        self.assertIn("Apply the [helper standing request](#helper-standing-request) and the brief's routing and output contracts.", self.reference)
+        self.assertIn('Include the global grant and this reference in `Readable files`.', self.reference)
 
     def test_carriers_and_admission_flow_link_the_brief(self):
         carriers = [Path('plugins/ship/agents') / name for name in
@@ -241,47 +151,13 @@ class BriefTests(unittest.TestCase):
         carriers.append(Path('plugins/ship/skills/ship/SKILL.md'))
         for carrier in carriers:
             link = ('../skills/ship/' if carrier.parent.name == 'agents' else '')
-            link += 'references/owner-decisions.md#row-re-anchor-tool-brief'
-            lines = (
-                'A brief built from the [row re-anchor tool brief](' + link + ') with every field filled supplies '
-                "this route's owner access record, CoC row allowlist, CI and source binding, and method-only denial evidence; "
-                'verify each field, use `get_input` when available, and refuse a missing or mismatched field.\n'
-                'The tool run is its own single attempt under one CoC grant and its head SHA: '
-                'an earlier attempt on the row that made zero native Edit calls and zero tool runs, '
-                'and drew only the listed method-only shell denials, leaves it unused, '
-                'even when its record marks that attempt consumed; any native Edit call on the row, '
-                'any tool run, and any refusal or hook denial of the tool command uses it; '
-                'a new CoC grant bound to a head SHA with no used attempt on the row gets one fresh attempt '
-                'only when every earlier used attempt ended only in a tool error, '
-                'such as a native Edit no-match or file-changed error, '
-                'and no earlier attempt on the row drew `REFUSED` or a hook or permission refusal or denial '
-                'other than the listed method-only shell denials; '
-                'any other grant for a head that already used its attempt frees nothing; '
-                "record each native Edit call and tool run on the row on the brief's attempt record, "
-                "with the grant's CoC decision file, its SHA256 and the head SHA before the call and its outcome after it."
-            )
+            link += 'references/owner-decisions.md#row-re-anchor-tool-admission-record'
             text = (ROOT / carrier).read_text()
             with self.subTest(carrier=carrier):
-                self.assertIn(lines, text)
-                self.assertEqual(text.count('The tool run is its own single attempt'), 1)
-                route = text.split('#### Lane-derived route\n', 1)[1]
-                route = re.split(r'\n#{1,4} ', route, maxsplit=1)[0]
-                self.assertIn('Keep the row task pending after a refusal. Record the outcome and request a permitted route from the driver.', route)
-        self.assertIn('9. Send the exact scoped brief, built from the [row re-anchor tool brief]'
-                      '(#row-re-anchor-tool-brief), with SendMessage.', self.reference)
-        self.assertIn('The [row re-anchor tool brief](#row-re-anchor-tool-brief) lists the fields that supply this evidence; '
-                      'the tool run is its own single attempt under one CoC grant and its head SHA, '
-                      'unused by an earlier attempt that made zero native Edit calls and zero tool runs, '
-                      'and used by any native Edit call on the row, any tool run, '
-                      'and any refusal or hook denial of the tool command. '
-                      'A new CoC grant bound to a head SHA with no used attempt on the row gets one fresh attempt '
-                      'only when every earlier used attempt ended only in a tool error, '
-                      'such as a native Edit no-match or file-changed error, '
-                      'and no earlier attempt on the row drew `REFUSED` or a hook or permission refusal or denial '
-                      'other than the listed method-only shell denials; '
-                      'any other grant for a head that already used its attempt frees nothing. '
-                      "The attempt record names each native Edit call and tool run on the row with the grant's "
-                      'CoC decision file, its SHA256, the head SHA and its outcome.', self.reference)
+                self.assertIn(f'Admit the writer with the [row re-anchor tool admission record]({link}).', text)
+        admission = self.reference.split('## Row re-anchor tool admission record\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('Send the [row re-anchor tool brief](#row-re-anchor-tool-brief) with SendMessage.', admission)
+        self.assertIn('The record grants zero protected access or edit authority by itself.', admission)
 
 
 if __name__ == '__main__':
