@@ -50,10 +50,14 @@ class EnvDirectoryTests(unittest.TestCase):
             ("python3 --version -c 'print(1)'", 'process-capable python -c rule'),
             ("printf sample | cat; python3 --version -c 'print(1)'",
              'process-capable python -c rule'),
+            ('python3 --version; printf x | python3',
+             'inline interpreter code rule (program from a pipe)'),
+            ("python3 --version && python3 -c 'import sys; print(sys.argv)'",
+             'process-capable python -c rule'),
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1], rule + '.')
+                self.assertEqual(self.reason.splitlines()[0].split('Rule: ', 1)[1], rule + '.')
 
     def test_env_directory_admits_verbatim_repository_script(self):
         command = 'env -C /home/miguel/.vk-worktrees/.bettercoding-workspaces/188e-pati-pr-backlog/lanes/pr-7890/backend/api API_ENVIRONMENT=testing uv run --frozen python scripts/integration_shards.py --refresh'
