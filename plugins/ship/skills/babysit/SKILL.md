@@ -48,7 +48,8 @@ Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) durin
    The ship hook refuses raw review-thread mutations and REST review-comment replies.
    If the guard refuses a compound discovery and PR read, keep the work pending. Run each permitted step in its own call.
    Find the repository first. Then run `gh pr view <PR-URL> --json state` with the verified literal URL.
-   Read UTC with `date -u +%FT%TZ` in its own call. Use that value as literal data in the log write.
+   Reply or resolve only after a successful read reports `OPEN`. Keep a failed or unclear read pending.
+   Read UTC with `date -u +%FT%TZ` in its own call. Append it as literal data to the run's scratch log.
 
    ```bash
    python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" reply <PR-URL> <thread-id> <run-scratch>/reply.md

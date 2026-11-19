@@ -1155,7 +1155,8 @@ class HookTests(unittest.TestCase):
                 denied = self.decision('find . -name x && gh pr view 7', caller)
                 self.assertEqual(denied.get('permissionDecision'), 'deny')
                 for step in ('find . -name x', 'gh pr view https://github.com/o/r/pull/7 --json state',
-                             'date -u +%FT%TZ', "printf '%s\\n' '2026-11-19T07:00:00Z Review stays open.'"):
+                             'date -u +%FT%TZ',
+                             "printf '%s\\n' '2026-11-19T07:00:00Z Review stays open.' >> /work/lane/.scratch/round.log"):
                     with self.subTest(step=step):
                         self.assertEqual(self.decision(step, caller), {})
 
