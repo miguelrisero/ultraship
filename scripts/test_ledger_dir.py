@@ -1,5 +1,7 @@
 """Synthetic linked-worktree ledger and hook regressions."""
+from datetime import datetime, timezone
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -343,18 +345,14 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(owed.read_bytes(), evidence)
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
         receipts = self.base / 'state/ultraship/accounted.json'
-        receipts_existed = receipts.exists()
-        committed = receipts.read_bytes() if receipts_existed else None
-        hook_spec = importlib.util.spec_from_file_location('ultraship', HOOK)
-        hook_module = importlib.util.module_from_spec(hook_spec)
-        hook_spec.loader.exec_module(hook_module)
-        with self.assertRaisesRegex(ValueError, result_ids[1]):
-            hook_module.account(ledger, str(self.checkout),
-                                [line.split('\t') for line in evidence.decode().splitlines()], {}, str(owed))
+        blocked = json.loads(self.hook('stop'))
+        self.assertIn(result_ids[1], blocked['reason'])
+        self.assertNotIn(result_ids[0], blocked['reason'])
+        committed = receipts.read_bytes()
+        self.assertEqual({json.loads(key)[2] for key in json.loads(committed)}, {result_ids[0]})
         self.assertEqual(self.hook('stop'), '')
         self.assertEqual(owed.read_bytes(), evidence)
-        self.assertEqual(receipts.exists(), receipts_existed)
-        self.assertEqual(receipts.read_bytes() if receipts.exists() else None, committed)
+        self.assertEqual(receipts.read_bytes(), committed)
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass').returncode, 0)
         self.assertEqual(self.hook('stop'), '')
         self.assertEqual(owed.read_bytes(), b'')
@@ -449,7 +447,173 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(recorded.returncode, 0, recorded.stderr)
         self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
         self.assertEqual(owed.read_bytes(), pending)
-        self.assertFalse((self.base / 'state/ultraship/accounted.json').exists())
+        receipts = json.loads((owed.parent.parent / 'accounted.json').read_text())
+        self.assertEqual({json.loads(key)[2] for key in receipts}, {result['id']})
+
+    def test_correct_binding_finds_receipt_while_other_evidence_stays_pending(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='missing')
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='complete')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        pending = owed.read_bytes()
+        missing, complete = (json.loads(row.split(b'\t')[3])['id'] for row in pending.splitlines())
+        receipts = owed.parent.parent / 'accounted.json'
+        receipts.write_text('{}')
+        self.finish_run()
+        recorded = self.cli('account', str(owed), complete, 'review', 'ship:reviewer--sol',
+                            'sha', 'pass', 'Completed review')
+        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+        home = self.resolve()
+        explicit = str(len(ledger.rows(home)))
+        blocked = json.loads(self.hook('stop'))
+        self.assertIn(missing, blocked['reason'])
+        self.assertEqual({json.loads(k)[2] for k in json.loads(receipts.read_text())}, {complete})
+        fixed = self.cli('correct-binding', complete, explicit, 'keep')
+        self.assertEqual(fixed.returncode, 0, fixed.stderr)
+        self.assertNotIn(complete, blocked['reason'])
+        refused = self.cli('correct-binding', missing, explicit, 'keep')
+        self.assertIn('has no Stop receipt', refused.stderr)
+        self.assertIn('run Stop to publish its receipt', refused.stderr)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), pending)
+
+    def test_correct_binding_moves_credit_to_its_own_explicit_row(self):
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='complete')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        pending = owed.read_bytes()
+        result = json.loads(pending.split(b'\t')[3])
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol@complete',
+                                  'sha', 'pass').returncode, 0)
+        self.assertEqual(self.hook('stop'), '')
+        self.finish_run()
+        owed.write_bytes(pending)
+        self.assertEqual(self.cli('account', str(owed), result['id'], 'review', 'ship:reviewer--sol',
+                                  'sha', 'pass', 'Completed review').returncode, 0)
+        home = self.resolve()
+        explicit = str(len(ledger.rows(home)))
+        fixed = self.cli('correct-binding', result['id'], explicit, 'bind exact result')
+        self.assertEqual(fixed.returncode, 0, fixed.stderr)
+        self.assertEqual(json.loads(self.bound()[result['id']])['step'], 'review')
+        self.assertEqual(self.hook('stop'), '')
+
+    def auto_owed(self, entries):
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        transcript = self.base / 'review.jsonl'
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='reviewer',
+                  **({'agent_transcript_path': str(transcript)} if entries is not None else {}))
+        epoch, _, _, raw = owed.read_text().splitlines()[-1].split('\t')
+        result = json.loads(raw)
+        if entries is not None:
+            lines = []
+            for offset, role, content in entries:
+                timestamp = datetime.fromtimestamp(int(epoch) + offset, timezone.utc).isoformat()
+                if isinstance(content, str) and role == 'assistant':
+                    content = [{'type': 'text', 'text': content}]
+                lines.append(json.dumps({'timestamp': timestamp, 'type': role,
+                                         'message': {'content': content}}))
+            transcript.write_text(''.join(line + '\n' for line in lines))
+        return owed, transcript, result, int(epoch)
+
+    def test_account_auto_uses_own_final_text_and_skips_existing_accounting(self):
+        sha = 'ab' * 20
+        owed, transcript, result, epoch = self.auto_owed([
+            (-5, 'user', 'Review the patch.'),
+            (-4, 'assistant', 'FAIL ' + 'cd' * 20),
+            (-3, 'assistant', [{'type': 'text', 'text': 'FAIL'}, {'type': 'tool_use'}]),
+            (-2, 'user', [{'type': 'tool_result', 'content': 'FAIL'}]),
+            (-1, 'assistant', 'Other findings; reviewed ' + sha),
+            (1, 'assistant', '**OVERALL:** PASS ' + sha.upper()),
+            (2, 'user', [{'type': 'text', 'text': 'Review another commit.'}]),
+            (3, 'assistant', 'Verdict: FAIL ' + 'ef' * 20),
+        ])
+        expected = f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} pass\n1 accounted, 0 pending\n"
+        home = self.resolve()
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout, expected)
+        row = ledger.rows(home)[-1]
+        self.assertEqual(row[1:5], ['account-result', 'ship:reviewer--sol@reviewer', sha, 'pass'])
+        note = json.loads(row[5])
+        self.assertEqual(note['step'], 'review')
+        self.assertEqual(note['evidence'], f'{transcript} at {datetime.fromtimestamp(epoch, timezone.utc).isoformat()}: pass')
+        transcript.unlink()
+        saved = home.read_bytes()
+        self.assertEqual(self.cli('account-auto', str(owed)).stdout, expected)
+        pending = owed.read_bytes()
+        self.assertEqual(self.hook('stop'), '')
+        owed.write_bytes(pending)
+        self.assertEqual(self.cli('account-auto', str(owed)).stdout, expected)
+        self.assertEqual(home.read_bytes(), saved)
+
+    def test_account_auto_leaves_unclear_results_pending(self):
+        sha = 'ab' * 20
+        prompt = (-5, 'user', [{'type': 'text', 'text': 'Review this commit.'}])
+        for case, entries, reason in (
+            ('no transcript', None, 'no transcript'),
+            ('missing file', [prompt], 'no transcript'),
+            ('no turn', [(-1, 'assistant', f'PASS {sha}')], 'no final turn text'),
+            ('later verdict', [(-8, 'user', 'Earlier review.'), (-7, 'assistant', f'PASS {sha}'),
+                               prompt, (-1, 'assistant', 'No result yet.'),
+                               (3, 'user', 'Later review.'), (4, 'assistant', f'PASS {sha}')], 'expected one commit'),
+            ('later turn in grace second', [prompt, (-1, 'assistant', 'No result yet.'),
+                                           (0.5, 'user', 'Later review.'),
+                                           (1, 'assistant', f'PASS {sha}')], 'no final turn text'),
+            ('last tool', [prompt, (-2, 'assistant', f'PASS {sha}'),
+                           (-1, 'assistant', [{'type': 'tool_use'}])], 'no final turn text'),
+            ('no commit', [prompt, (-1, 'assistant', 'PASS abcd1234')], 'expected one commit'),
+            ('several commits', [prompt, (-1, 'assistant', 'PASS ' + sha + ' ' + 'cd' * 20)], 'expected one commit'),
+            ('no verdict', [prompt, (-1, 'assistant', f'bypass PASSING {sha}')], 'expected one verdict'),
+            ('several verdicts', [prompt, (-1, 'assistant', f'PASS followed by findings {sha}')], 'expected one verdict'),
+            ('conflicting labels', [prompt, (-1, 'assistant', f'OVERALL: PASS\nVerdict: FAIL {sha}')], 'expected one verdict'),
+            ('repeated label', [prompt, (-1, 'assistant', f'OVERALL: PASS\nVerdict: PASS {sha}')], 'expected one verdict'),
+            ('unclear label', [prompt, (-1, 'assistant', f'Verdict: conditional PASS {sha}')], 'expected one verdict'),
+            ('parse error', [prompt], 'transcript parse error'),
+        ):
+            with self.subTest(case=case):
+                owed, transcript, result, _ = self.auto_owed(entries)
+                if case == 'missing file':
+                    transcript.unlink()
+                if case == 'parse error':
+                    transcript.write_text('{bad json\n')
+                before = (owed.read_bytes(), self.resolve().read_bytes())
+                auto = self.cli('account-auto', str(owed))
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                self.assertEqual(auto.stdout, f"pending {result['id']} {reason}\n0 accounted, 1 pending\n")
+                self.assertEqual((owed.read_bytes(), self.resolve().read_bytes()), before)
+                owed.write_text('')
+
+    def test_account_auto_preserves_account_run_refusal_and_continues(self):
+        sha = 'ab' * 20
+        owed, _, invalid, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'FAIL {sha}')])
+        fields = owed.read_text().rstrip('\n').split('\t')
+        invalid['run'] = [0, 'wrong']
+        fields[-1] = json.dumps(invalid)
+        owed.write_text('\t'.join(fields) + '\n')
+        _, _, valid, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'FAIL {sha}')])
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout.splitlines(), [f"pending {invalid['id']} recorded run is missing or differs",
+                         f"accounted {valid['id']} ship:reviewer--sol@reviewer {sha} fail", '1 accounted, 1 pending'])
+
+    def test_account_auto_reads_the_tail_in_bounded_chunks(self):
+        sha = 'ab' * 20
+        owed, transcript, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'findings {sha}' + ' ' * (128 * 1024))])
+        prefix = transcript.read_bytes()
+        cap = 64 * 1024 * 1024
+        with transcript.open('wb') as fh:
+            fh.seek(cap * 2)
+            fh.write(b'\n' + prefix)
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertIn(f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} findings", auto.stdout)
+        owed, transcript, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'pass {sha}')])
+        # The last line crosses the scan bound without a delimiter.
+        with transcript.open('r+b') as fh:
+            fh.seek(cap * 2, io.SEEK_END)
+            fh.write(b'\n')
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertIn(f"pending {result['id']} transcript scan limit reached", auto.stdout)
 
     def test_accounting_refuses_a_changed_bound_run(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')

@@ -33,7 +33,7 @@ class StopEvidenceStateTests(unittest.TestCase):
         loader = mock.patch.object(hook, 'load_ledger', return_value=self.ledger)
         loader.start()
         self.addCleanup(loader.stop)
-        account = mock.patch.object(hook, 'account', side_effect=ValueError('review row missing'))
+        account = mock.patch.object(hook, 'account', return_value=[], side_effect=ValueError('review row missing'))
         self.account = account.start()
         self.addCleanup(account.stop)
 
@@ -114,6 +114,16 @@ class StopEvidenceStateTests(unittest.TestCase):
         self.account.side_effect = ValueError('review row missing')
         self.write_rows(self.rows)
         self.assert_blocked()
+
+    def test_pending_list_has_twenty_results_with_utc_times_and_an_overflow_count(self):
+        self.write_rows([['100', 'ship:reviewer--sol', '/checkout',
+                          json.dumps({'id': f'result-{i:02d}', 'agent_id': 'seat'})] for i in range(22)])
+        reason = self.assert_blocked()['reason']
+        lines = [line for line in reason.splitlines() if line.startswith('result-')]
+        self.assertEqual(lines, [f'result-{i:02d} ship:reviewer--sol@seat 1970-01-01T00:01:40+00:00'
+                                 for i in range(20)])
+        self.assertIn('2 more results (22 total pending)', reason.splitlines())
+        self.assertIn(f'account-auto {self.path}', reason)
 
     def test_empty_pending_clears_reminder(self):
         self.assert_blocked()

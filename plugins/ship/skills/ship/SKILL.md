@@ -97,6 +97,14 @@ Copy both paths from the Stop diagnostic; run the command alone on one line with
 
 Use the pending file and result ID from the Stop diagnostic. Supply the actual agent, reviewed SHA, verdict and evidence from the completed result. The command appends an `account-result` record to the recorded ledger. It preserves all existing rows and the run's closure, and exact retries append nothing. This bookkeeping covers only the named result; it grants no pipeline step, review or completion evidence of its own. Never reopen a closed run or invent review rows to clear Stop.
 
+Use the Stop diagnostic's `account-auto` command to account for results with a clear commit and verdict in their recorded turns:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto "<pending.tsv>"
+```
+
+Run the command alone on one line. The command leaves unclear results pending. Run Stop to publish the receipts.
+
 When an accounted result is bound to another result's row, move its credit with:
 
 ```bash
@@ -104,6 +112,8 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" correct-binding <result-id> <led
 ```
 
 The line is the 1-based line of the correct review row in the bound ledger file, in the same run and with the same agent column. The command refuses a ledger with blank lines or other line breaks. The command appends a `correct-binding` audit row first and never rewrites earlier rows. It then moves the receipt; when another result holds the target row, the two results swap rows. A retry after a crash appends no second audit row, and an exact retry after success changes nothing.
+
+`correct-binding` also accepts the result's own `account-result` row. Run Stop to publish the result's receipt before using `correct-binding`.
 
 A linked checkout with an external common Git directory uses its existing parent `.scratch/ship-ledgers` with checkout and branch isolation. First use imports the legacy branch history and open run once, with canonical path and SHA256 provenance. The sole driver must hold run custody and retire old writers before import; old legacy writers can race the snapshot. Import needs legacy read permission and local write permission. All subsequent access uses the local ledger. Full checkouts retain the common-directory default. Ambiguous layouts require an absolute `SHIP_LEDGER_DIR`; the override directly contains branch files. See [ledger storage and permissions](../../README.md#hooks).
 
