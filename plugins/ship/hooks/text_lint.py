@@ -420,7 +420,7 @@ def read_receipt(receipt_id):
 def consume_receipt(receipt_id, event, receipt):
     try:
         if receipt.get('id') != receipt_id or receipt.get('resend_allowed') is not True:
-            raise ValueError('Receipt does not permit a resend.')
+            raise ValueError('This receipt cannot authorize this call. Fix the cause and retry, or ask your superior.')
         if not event.get('session_id') or receipt.get('session_id') != event['session_id']:
             raise ValueError('Receipt session differs or is absent.')
         if receipt.get('agent_id') != event.get('agent_id'):

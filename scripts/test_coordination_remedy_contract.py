@@ -54,7 +54,9 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'A superior grants or runs a command only within its own authority, and its own hooks and permissions apply.',
             'Protected mutation-row edits use only the [lane-owned row route](../SKILL.md#lane-owned-row-route), '
             'the [standalone main-row repair](#standalone-main-row-repair) and their tools.',
-            'Push, merge and protected-write refusals stay final; a retry in another form never bypasses them.',
+            'The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items '
+            'still need a compliant form or the authority they lacked.',
+            'A compliant retry never bypasses a hook, uses a different credential, or edits a guard.',
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, self.refusals)
@@ -95,11 +97,11 @@ class CoordinationRemedyContractTests(unittest.TestCase):
                       'the fallback supplies verified provenance, never a substitute owner approval.', self.owner)
 
     def test_hook_refusal_keeps_work_pending(self):
-        self.assertIn('A hook refusal never drops work: keep the task pending, then retry in a fixed form or ask the superior.',
-                      self.refusals)
+        self.assertIn('A refusal never ends the work.', self.refusals)
         ship = (ROOT / 'plugins/ship/skills/ship/SKILL.md').read_text()
         self.assertIn('Pause a refused tool step and keep the work pending.', ship)
-        self.assertIn('Retry under the refusal rule or ask your superior.', ship)
+        self.assertIn('After a refusal, find the cause and retry in a compliant form, '
+                      'or ask your superior how to proceed.', ship)
 
     def test_message_warnings_and_receipt_refusals_keep_existing_authority(self):
         for requirement in (
@@ -120,12 +122,16 @@ class CoordinationRemedyContractTests(unittest.TestCase):
     def test_contract_drops_final_and_once_only_wording(self):
         for removed in ('remains final', 'stays refused', 'once-only', 'in every form',
                         'superseded-ruling free', 'contract-gap refusal', 'ends the attempt',
-                        'substitute actor', 'substitute an executor', 'no resend', 'final corrected brief'):
+                        'substitute actor', 'substitute an executor', 'no resend', 'final corrected brief',
+                        'stay final', 'Never resend'):
             with self.subTest(removed=removed):
                 self.assertNotIn(removed, self.refusals)
-        for name in ('driver.md', 'driver--sol.md', 'writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+        for name in ('driver.md', 'driver--sol.md', 'writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md',
+                     'reviewer--fable.md', 'reviewer--fable52.md', 'reviewer--luna.md', 'reviewer--sonnet.md',
+                     'triage--sol.md', 'verifier--astra.md', 'verifier--fable.md'):
             text = (ROOT / 'plugins/ship/agents' / name).read_text()
-            for removed in ('once-only', 'remains final', 'substitute an executor', 'Never replay a denied command'):
+            for removed in ('once-only', 'remains final', 'substitute an executor', 'Never replay a denied command',
+                            'stay final', 'Never resend'):
                 with self.subTest(carrier=name, removed=removed):
                     self.assertNotIn(removed, text)
 

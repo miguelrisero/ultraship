@@ -50,10 +50,26 @@ class WriterDeniedProcessTests(unittest.TestCase):
     def test_shared_reference_carries_the_retry_and_superior_rule(self):
         self.check((REFERENCE_FILE,), REFERENCE_SENTENCES)
 
-    def test_writers_and_shared_reference_keep_final_safety_refusals(self):
-        self.check((*WRITER_FILES, REFERENCE_FILE), (
-            'Push, merge and protected-write refusals stay final; a retry in another form never bypasses them.',
-        ))
+    def test_every_agent_copy_carries_the_refusal_rule(self):
+        rule = (
+            'A refusal never ends the work. '
+            'After a refusal, find the cause and retry in a compliant form, or ask your superior how to proceed. '
+            'A writer asks its driver, a driver asks its chief, and a chief asks the CoC. '
+            'The ask never blocks your other work. '
+            'Only the CoC decides whether an owner-only item becomes an owner Input; agents never ask the owner. '
+            'The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items '
+            'still need a compliant form or the authority they lacked. '
+            'A compliant retry never bypasses a hook, uses a different credential, or edits a guard.'
+        )
+        agents = sorted((ROOT / 'plugins/ship/agents').glob('*.md'))
+        for path in (*agents, ROOT / REFERENCE_FILE, ROOT / 'plugins/ship/skills/ship/SKILL.md',
+                     ROOT / 'plugins/chief/skills/run/SKILL.md'):
+            name = path.relative_to(ROOT).as_posix()
+            with self.subTest(file=name):
+                text = path.read_text(encoding='utf-8')
+                if name in (*WRITER_FILES, REFERENCE_FILE):
+                    text = refusals_section(text)
+                self.assertIn(rule, ' '.join(text.splitlines()))
 
     def test_decision_defect_rule_limits_refusal_resolution(self):
         defect = 'The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.'
