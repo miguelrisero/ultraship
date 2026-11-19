@@ -2054,7 +2054,7 @@ def parameter_quote_mode(text, start):
     return 'other'
 
 
-def shell_substitution_bodies(text, arithmetic_quotes=False, *, substitution_quote_ends=None):
+def shell_substitution_bodies(text, arithmetic_quotes=False, *, closed_substitutions=None):
     """Keep substitution quote state separate from the surrounding shell word."""
     frames, quote, cursor, word_start = [], '', 0, True
     while cursor < len(text):
@@ -2089,8 +2089,6 @@ def shell_substitution_bodies(text, arithmetic_quotes=False, *, substitution_quo
             continue
         if quote == "'":
             if char == quote:
-                if substitution_quote_ends is not None and context == ')':
-                    substitution_quote_ends.add(cursor)
                 quote = ''
         elif char == '`' and context == '`':
             _, start, quote, _ = frames.pop()
@@ -2131,6 +2129,8 @@ def shell_substitution_bodies(text, arithmetic_quotes=False, *, substitution_quo
                 if depth == 1:
                     frames.pop()
                     if closing == ')':
+                        if closed_substitutions is not None:
+                            closed_substitutions.append((start, cursor))
                         yield text[start:cursor]
                     quote = outer_quote
                     cursor += len(closing)
@@ -4462,19 +4462,25 @@ LITERAL_GIT_GREP_ANCHOR = re.compile(
     r"(?:[ \t]+(?!-)[\w./-]+)*(?:[ \t]+--(?:[ \t]+[\w./-]+)*)?[ \t]*\n?")
 
 
+LITERAL_GIT_COUNT_PIPELINE = re.compile(
+    r"[ \t]*git[ \t]+ls-tree[ \t]+-r[ \t]+--name-only"
+    r"[ \t]+(?:[A-Za-z0-9_][A-Za-z0-9_./-]*|\$[A-Za-z_][A-Za-z0-9_]*)"
+    r"[ \t]+--[ \t]+[A-Za-z0-9_./-]+[ \t]*\|[ \t]*grep[ \t]+-c"
+    r"[ \t]+'(?!-)[^'\x00\r\n]*\$(?P<quote>')[ \t]*")
+
+
 def thread_ansi_quote(command):
-    """Keep the strict fallback unless each candidate closes a literal count pattern."""
+    """Keep the fallback unless each candidate ends a pattern in a proven count pipeline."""
     if re.search(r"[\x00#`]|<<|\\\n|[<>=]\(|\$[{\[]|\(\(", command):
         return True
-    quote_ends = set()
+    substitutions = []
     try:
-        list(shell_substitution_bodies(command, substitution_quote_ends=quote_ends))
+        list(shell_substitution_bodies(command, closed_substitutions=substitutions))
     except ValueError:
         return True
-    anchors = {match.end() - 1 for match in re.finditer(
-        r"(?<![\\|])\|[ \t]+grep[ \t]+-c[ \t]+'(?!-)[^'\n]*\$'(?=[ \t]*\))", command)}
-    return any(match.end() - 1 not in quote_ends or match.end() - 1 not in anchors
-               for match in re.finditer(r"\$'", command))
+    anchors = {match.start('quote') for start, end in substitutions
+               if (match := LITERAL_GIT_COUNT_PIPELINE.fullmatch(command, start, end))}
+    return any(match.end() - 1 not in anchors for match in re.finditer(r"\$'", command))
 
 
 def pr_comment_body_removed(command):
