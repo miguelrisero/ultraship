@@ -1651,6 +1651,16 @@ class HookTests(unittest.TestCase):
                 self.assertIn('literal PR body stdin form', result['permissionDecisionReason'])
                 self.assertEqual(self.decision(inert, caller), {})
 
+    def test_pr_create_heredoc_scan_keeps_lines_after_a_comment(self):
+        source = "# example: <<'END'\nprintf '%s' data\n"
+        self.assertEqual(ultraship.shell_without_heredoc_bodies(source, check_operators=True), source)
+
+    def test_pr_create_stdin_refuses_attached_repo_option_tokens(self):
+        words = ('gh', '-Rfixture', 'pr', 'create', '--body-file', '-')
+        tokens = [(word, word, i, i + 1) for i, word in enumerate(words)]
+        with patch.object(ultraship, 'shell_raw_words', return_value=tokens):
+            self.assertTrue(ultraship.pr_create_uses_shell_stdin('gh pr create --body-file'))
+
     def test_pr_create_admits_quoted_heredoc_text_in_title(self):
         command = "gh pr create --title 'docs: describe <<BODY' --body-file body.md"
         for caller in ('', 'ship:driver'):

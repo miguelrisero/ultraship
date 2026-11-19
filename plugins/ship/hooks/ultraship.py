@@ -1142,7 +1142,7 @@ def shell_raw_words(text):
     return words
 
 
-def shell_without_heredoc_bodies(command):
+def shell_without_heredoc_bodies(command, *, check_operators=False):
     """Keep headers and following shell commands, without interpreting data as shell words."""
     lines, kept, pending = command.splitlines(keepends=True), [], []
     if (lines and re.fullmatch(r'[ \t]*(?:cd +[\w./-]+ +&& +)?git +commit(?: +(?:-[a-zA-Z]|--[\w-]+))* +'
@@ -1159,8 +1159,14 @@ def shell_without_heredoc_bodies(command):
                     quoted_lines[index + 1:] = literal_quotes_removed(''.join(lines[index + 1:])).splitlines(keepends=True)
             continue
         kept.append(line)
+        header = quoted_lines[index]
+        operators = None
+        if check_operators and '<<' in header:
+            # A comment must not turn following shell commands into heredoc data.
+            operators = {start for raw, _, start, _ in shell_raw_words(line) if raw == '<'}
         for match in re.finditer(r"(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", line):
-            if quoted_lines[index][match.start():match.start() + 2] == '<<':
+            if (header[match.start():match.start() + 2] == '<<'
+                    and (operators is None or match.start() in operators)):
                 pending.append((shlex.split(match[2])[0], bool(match[1]), match[2][0] in '\'"\\'))
     return ''.join(kept)
 
@@ -2072,8 +2078,8 @@ def parameter_quote_mode(text, start):
     return 'other'
 
 
-def shell_substitution_bodies(text, arithmetic_quotes=False):
-    """Keep substitution quote state separate from the surrounding shell word."""
+def shell_substitution_bodies(text, arithmetic_quotes=False, *, with_offsets=False):
+    """Yield bodies or (opening, body start, closing) offsets with separate quote state."""
     frames, quote, cursor, word_start = [], '', 0, True
     while cursor < len(text):
         char = text[cursor]
@@ -2110,7 +2116,7 @@ def shell_substitution_bodies(text, arithmetic_quotes=False):
                 quote = ''
         elif char == '`' and context == '`':
             _, start, quote, _ = frames.pop()
-            yield text[start:cursor]
+            yield (start - 1, start, cursor) if with_offsets else text[start:cursor]
         elif text.startswith(('$((', '${', '$['), cursor):
             opening = 3 if text.startswith('$((', cursor) else 2
             closing = '))' if opening == 3 else '}' if text.startswith('${', cursor) else ']'
@@ -2147,7 +2153,7 @@ def shell_substitution_bodies(text, arithmetic_quotes=False):
                 if depth == 1:
                     frames.pop()
                     if closing == ')':
-                        yield text[start:cursor]
+                        yield (start - 2, start, cursor) if with_offsets else text[start:cursor]
                     quote = outer_quote
                     cursor += len(closing)
                     word_start = closing == ')'
@@ -2155,6 +2161,8 @@ def shell_substitution_bodies(text, arithmetic_quotes=False):
                 frames[-1] = (closing, start, outer_quote, depth - 1)
         word_start = not quote and char in ' \t\n;&|()'
         cursor += 1
+    if with_offsets and (frames or quote):
+        raise ValueError('shell substitution boundary')
     for closing, start, _, _ in frames:
         if closing in {')', '`'}:
             yield text[start:]
@@ -4478,21 +4486,30 @@ def pr_create_uses_shell_stdin(command):
             or not re.search(r'--body-file|-[A-Za-z]*F', raw)):
         return False
 
-    shell = shell_line_continuations(shell_without_heredoc_bodies(command))
+    shell = shell_line_continuations(shell_without_heredoc_bodies(command, check_operators=True))
     token_lists = [shell_raw_words(shell)]
-    token_lists.extend(shell_raw_words(shell_without_heredoc_bodies(body))
-                       for body in shell_substitution_bodies(shell))
+    substitutions = sorted(shell_substitution_bodies(shell, with_offsets=True))
+    token_lists.extend(shell_raw_words(shell_without_heredoc_bodies(shell[start:end], check_operators=True))
+                       for _, start, end in substitutions)
+    if substitutions:
+        # A substitution is part of a shell word, so its separators cannot end the outer command.
+        outer, end = [], 0
+        for opening, _, closing in substitutions:
+            if opening >= end:
+                outer.extend((shell[end:opening], '_'))
+                end = closing + 1
+        token_lists.append(shell_raw_words(''.join(outer) + shell[end:]))
     # A heredoc or here-string in an earlier command can write the PR body file.
     here_input = any(left[0] == right[0] == '<' and left[3] == right[2]
                      for tokens in token_lists for left, right in zip(tokens, tokens[1:]))
 
     def next_pr_word(arguments):
-        word = next(arguments, '')
-        if word in {'-R', '--repo'}:
-            next(arguments, '')
-        elif not word.startswith(('-R=', '--repo=')):
-            return word
-        return next(arguments, '')
+        for word in arguments:
+            if word in {'-R', '--repo'}:
+                next(arguments, '')
+            elif not word.startswith(('-R', '--repo=')):
+                return word
+        return ''
 
     separators = {';', '&', '|', '(', ')', '`', '\n'}
     body_option = re.compile(r'--body-file(?:=|$)|-[A-Za-z]*F=?')
