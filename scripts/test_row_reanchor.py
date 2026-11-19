@@ -376,6 +376,13 @@ class ToolTests(unittest.TestCase):
         self.invoke(2, 'restoration changed bytes outside restored rows', restoration=restoration)
         self.assertFalse(self.record_path().exists())
 
+    def test_restoration_refuses_an_extra_blank_next_to_the_row(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.commit_rows(prefix + suffix)
+        restoration = self.commit_rows(prefix + '\n' + table + suffix)
+        self.invoke(2, 'restoration changed bytes outside restored rows', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
     def test_restoration_refuses_outside_edit_and_misplaced_row(self):
         prefix, table, suffix = self.restoration_fixture()
         starting = self.commit_rows(prefix + suffix)
@@ -414,6 +421,17 @@ class ToolTests(unittest.TestCase):
         prefix, table, suffix = self.restoration_fixture()
         self.commit_rows(prefix + suffix)
         (self.root / 'other.txt').write_text('another edit\n')
+        restoration = self.commit_rows(prefix + table + suffix)
+        self.invoke(2, 'restoration commit must change only the row file', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_a_file_mode_change_back_to_base(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.git('config', 'core.filemode', 'true')
+        base_mode = self.row.stat().st_mode & 0o777
+        self.row.chmod(base_mode | 0o100)
+        self.commit_rows(prefix + suffix)
+        self.row.chmod(base_mode)
         restoration = self.commit_rows(prefix + table + suffix)
         self.invoke(2, 'restoration commit must change only the row file', restoration=restoration)
         self.assertFalse(self.record_path().exists())

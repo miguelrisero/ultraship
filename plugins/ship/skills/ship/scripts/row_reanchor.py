@@ -200,12 +200,8 @@ def restoration_position(expected_items, actual, actual_gaps, row_id):
                 return None
             beside_row = is_row(left[0]) or is_row(right[0])
             within_chunk = left[2] is not None and left[2] == right[2]
-            if not (beside_row or within_chunk):
+            if not (beside_row or within_chunk) or actual_gap != [line for line, from_head in gap if not from_head]:
                 return None
-            # Count only head lines that survive in the restoration's separator gap.
-            for tag, start, end, _, _ in opcodes(expected, actual_gap):
-                if tag == 'equal':
-                    head_count += sum(from_head for _, from_head in gap[start:end])
         if right:
             if right[0][0] == (row_id,):
                 position = head_count
@@ -440,10 +436,11 @@ def run(args):
                       restoration_parent, restoration).split(b'\0')
         path = relative.encode('utf-8')
         require(len(changes) == 3 and changes[1] == path and changes[2] == b'', reason)
-        _, mode, _, _, status = changes[0].split()
+        old_mode, mode, _, _, status = changes[0].split()
         base_entry = git('ls-tree', '--full-tree', '-z', base_sha, '--', ':(literal)' + relative)
         require(mode in (b'100644', b'100755') and base_entry.startswith(mode + b' blob ')
-                and base_entry.endswith(b'\t' + path + b'\0'), reason)
+                and base_entry.endswith(b'\t' + path + b'\0')
+                and (status != b'M' or old_mode == b':' + mode), reason)
         start_text = '' if status == b'A' else blob(restoration_parent, relative).decode('utf-8')
         restoration_fields = {'restoration': restoration, 'restoration_parent': restoration_parent,
                               **restoration_check(base_text, start_text, blob(restoration, relative).decode('utf-8'),
