@@ -374,7 +374,7 @@ def record_lock(path):
         yield
 
 
-def merge_record(path, identity, entry, row_file, original):
+def merge_record(path, identity, entry, check_before_replace):
     rows = {}
     try:
         metadata = path.lstat()
@@ -391,7 +391,7 @@ def merge_record(path, identity, entry, row_file, original):
     rows[entry['row_file'], entry['row_id']] = entry
     data = (json.dumps({'schema': 1, **identity, 'rows': list(rows.values())}) + '\n').encode('utf-8')
     with staged_bytes(path, data, 0o600) as record_stage:
-        require(row_file.read_bytes() == original, 'row file changed during staged write')
+        check_before_replace('staged write')
         os.replace(record_stage, path)
 
 
@@ -498,16 +498,22 @@ def run(args):
              'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements),
              'base_lines': base_extent, 'lines': edited_extent, **restoration_fields}
     identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
+
+    def check_worktree(phase):
+        require(git('branch', '--show-current').decode().rstrip('\n') == lane, 'lane branch changed during ' + phase)
+        require(git('rev-parse', 'HEAD').decode().strip() == head_sha, 'HEAD changed during ' + phase)
+        require(row_file.read_bytes() == original, 'row file changed during ' + phase)
+
     with record_lock(record):
-        require(row_file.read_bytes() == original, 'row file changed during derivation')
+        check_worktree('derivation')
         if replacements:
             mode = stat.S_IMODE(row_file.stat().st_mode)
             with staged_bytes(row_file, result, mode) as stage:
-                require(row_file.read_bytes() == original, 'row file changed during staged write')
+                check_worktree('staged write')
                 os.replace(stage, row_file)
             record_output = 'none'
         else:
-            merge_record(record, identity, entry, row_file, original)
+            merge_record(record, identity, entry, check_worktree)
             record_output = str(record)
     print('PASS')
     for key, value in {'schema': 1, **identity, **entry, 'base_span_lines': len(lines(base_values['old'])),

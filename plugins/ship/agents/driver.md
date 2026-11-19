@@ -71,6 +71,9 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
 2. Re-anchor: the writer runs the sanctioned re-anchor tool once per row, then commits the row file alone.
    The tool derives the paired `old` and `new` fields from the subject's new source text and keeps the identical mutant.
    It refuses a change to any other field, and it prints no row text.
+   The writer's worktree has one user. No other command runs there while the tool runs.
+   Concurrent Git commands in the writer's worktree are outside the tool's threat model.
+   The CI anchor guard and the mutation proof after merge catch a row that such a race leaves wrong.
 3. Retire: when the PR deletes the guarded code, the writer deletes the row table and runs `retire-rows.py`.
    The script appends one `[[retired]]` table per row with the row ID, the reason and the `replacement` row ID.
    The replacement row guards the new code. The anchor guard fails a removed row without a `[[retired]]` entry.
@@ -108,7 +111,8 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](../skills/ship/references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
    The driver supplies read-only checkouts at the base and the frozen head. The admission record lists the row file in each checkout.
    The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.
-   For a row file absent at the base, the driver records that `git ls-tree --name-only <base> -- <path>` exits 0 and prints nothing.
+   For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
+   From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.
    The driver then admits only the head copy.
    Any later push to the PR needs a new review at the pushed head. Return a ready PR to draft before that push.
    Mark it ready again only after the new review passes.
