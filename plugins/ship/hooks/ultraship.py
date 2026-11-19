@@ -5381,14 +5381,20 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
     result_id = json.dumps([session, cwd, result['id']])
     if 'ledger' in result and result['run'] is None:
         return
-    match = None
+    saved = None
+    if result_id in receipts:
+        saved = receipts[result_id]
+        if (not isinstance(saved, list) or len(saved) != 3
+                or not isinstance(saved[2], list) or not saved[2] or type(saved[2][0]) is not int):
+            raise ReceiptIntegrityError('Accounting receipt has an invalid shape')
+    binding = None
+    bound_run, match = None, None
     if 'ledger' in result:
         home, bound_run = Path(result['ledger']), result['run']
     else:
         agent_id = result.get('agent_id')
-        binding = None
         if isinstance(agent_id, str) and agent_id.strip():
-            binding = ledger.find_non_git_agent_run(cwd, agent, agent_id, histories)
+            binding = ledger.find_non_git_agent_run(cwd, agent, agent_id, histories, saved)
         if binding is None:
             home = ledger.ledger_path(cwd).resolve()
         else:
@@ -5399,7 +5405,7 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
         histories[home] = ledger.rows(home)
     history = histories[home]
     starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
-    if 'ledger' in result or match is not None:
+    if 'ledger' in result or binding is not None:
         candidates = [i for i in starts if run_identity(i, history[i]) == bound_run]
     else:
         # Legacy notifications have no run identity: accept only one time-containing run.
@@ -5415,11 +5421,10 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
     run = run_identity(start, history[start])
     end = next((i for i in starts if i > start), len(history))
     end = next((i for i in range(start + 1, end) if history[i][1] == 'run-end'), end)
-    if result_id in receipts:
-        saved = receipts[result_id]
-        if (not isinstance(saved, list) or len(saved) != 3
-                or not isinstance(saved[2], list) or not saved[2] or type(saved[2][0]) is not int):
-            raise ReceiptIntegrityError('Accounting receipt has an invalid shape')
+    if binding is not None and (int(epoch) < int(history[start][0]) or (
+            end < len(history) and history[end][1] == 'run-end' and int(epoch) > int(history[end][0]))):
+        raise ValueError('Notification epoch falls outside the bound ship run')
+    if saved is not None:
         if saved[0] != str(home) or saved[1] != run:
             raise ReceiptIntegrityError('Accounting receipt names a different ledger or run')
         index = saved[2][0]

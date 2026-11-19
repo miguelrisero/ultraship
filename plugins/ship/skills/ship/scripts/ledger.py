@@ -128,35 +128,56 @@ def rows(path):
     return [line.split('\t') for line in path.read_text().splitlines() if line]
 
 
-def find_non_git_agent_run(cwd, agent, agent_id, histories):
+def find_non_git_agent_run(cwd, agent, agent_id, histories, saved):
+    if 'SHIP_LEDGER_DIR' in os.environ:
+        return None
+    workspace = Path(cwd).resolve()
+    try:
+        (workspace / '.git').lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        return None
     # A broken or inaccessible checkout must keep the normal ledger resolution error.
     probe = subprocess.run(['git', '-C', cwd, 'rev-parse', '--git-dir'],
                            env={**os.environ, 'LC_ALL': 'C'}, capture_output=True, text=True)
     if probe.returncode != 128 or not probe.stderr.startswith('fatal: not a git repository ('):
         return None
-    override = os.environ.get('SHIP_LEDGER_DIR')
-    if override is not None:
-        directory = Path(override)
-        if not directory.is_absolute():
-            raise ValueError('SHIP_LEDGER_DIR must be an absolute path')
-        candidates = directory.glob('*.tsv')
-    else:
-        workspace = Path(cwd).resolve()
-        candidates = [*workspace.glob('.scratch/ship-ledgers/*/*.tsv'),
-                      *workspace.glob('*/.git/ship/ledger/*.tsv')]
+    scratch = workspace / '.scratch/ship-ledgers'
+    if saved is not None:
+        home = Path(saved[0])
+        parts = home.relative_to(workspace).parts if home.is_relative_to(workspace) else ()
+        if home.suffix != '.tsv' or not (
+                (len(parts) == 4 and parts[:2] == ('.scratch', 'ship-ledgers')) or
+                (len(parts) == 5 and parts[1:4] == ('.git', 'ship', 'ledger'))):
+            raise ValueError('Accounting receipt ledger is outside the workspace layouts')
+        if home.resolve() != home or not stat.S_ISREG(home.lstat().st_mode):
+            raise ValueError('Accounting receipt ledger must be a regular file without symlinks')
+        return home, saved[1], None
+
+    def entries(directory):
+        if directory.resolve() == directory:
+            try:
+                yield from directory.iterdir()
+            except (FileNotFoundError, NotADirectoryError):
+                pass
+
+    directories = [*entries(workspace / '.scratch/ship-ledgers'),
+                   *(child / '.git/ship/ledger' for child in entries(workspace))]
     count = 0
-    for path in candidates:
-        if not path.is_absolute() or path.resolve() != path or not path.is_file():
-            continue
-        if path not in histories:
-            histories[path] = rows(path)
-        start = None
-        for index, row in enumerate(histories[path]):
-            if row[1] == 'run-start':
-                start = index
-            elif row[1] not in MARKS and agent_key(row[2]) == (agent, agent_id):
-                count += 1
-                home, run_start, match = path, start, index
+    for directory in directories:
+        for path in entries(directory):
+            if path.suffix != '.tsv' or path.resolve() != path or not stat.S_ISREG(path.stat().st_mode):
+                continue
+            if path not in histories:
+                histories[path] = rows(path)
+            start = None
+            for index, row in enumerate(histories[path]):
+                if row[1] == 'run-start':
+                    start = index
+                elif row[1] not in MARKS and agent_key(row[2]) == (agent, agent_id):
+                    count += 1
+                    home, run_start, match = path, start, index
     if count != 1:
         raise ValueError(f'Found {count} ledger rows for agent {agent}@{agent_id}; expected exactly one')
     if run_start is None:

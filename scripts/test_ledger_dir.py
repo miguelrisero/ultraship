@@ -206,12 +206,56 @@ class LedgerDirTests(unittest.TestCase):
         return owed, evidence, f'{agent}@reviewer'
 
     def test_stop_accounts_one_non_git_match(self):
-        owed, _, agent = self.record_non_git_result()
+        owed, evidence, agent = self.record_non_git_result()
         self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
         self.assertEqual(self.hook('stop', cwd=str(self.workspace)), '')
         self.assertEqual(owed.read_bytes(), b'')
-        receipts = json.loads((owed.parent.parent / 'accounted.json').read_bytes())
-        self.assertEqual([receipt[0] for receipt in receipts.values()], [str(self.resolve())])
+        receipts = owed.parent.parent / 'accounted.json'
+        identifier = json.loads(evidence.split(b'\t')[3])['id']
+        key = json.dumps([str(owed), str(self.workspace), identifier])
+        home = self.resolve()
+        history = ledger.rows(home)
+        run = ledger.run_identity(0, history[0])
+        row = ledger.run_identity(len(history) - 1, history[-1])
+        self.assertEqual(json.loads(receipts.read_bytes()), {key: [str(home), run, row]})
+        saved = receipts.read_bytes()
+        owed.write_bytes(evidence)
+        self.finish_run()
+        self.assertEqual(self.cli('run-start', 'light', 'run-2').returncode, 0)
+        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
+        self.assertEqual(self.hook('stop', cwd=str(self.workspace)), '')
+        self.assertEqual(owed.read_bytes(), b'')
+        self.assertEqual(receipts.read_bytes(), saved)
+
+    def test_stop_blocks_non_git_match_from_a_later_run(self):
+        owed, evidence, agent = self.record_non_git_result()
+        pending = b'10\t' + evidence.split(b'\t', 1)[1]
+        owed.write_bytes(pending)
+        self.resolve().write_bytes(b'20\trun-start\tlight\tsha\topen\trun-2 /board\n')
+        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
+        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn('Notification epoch falls outside the bound ship run', blocked['reason'])
+        self.assertEqual(owed.read_bytes(), pending)
+
+    def test_stop_keeps_normal_error_for_a_broken_checkout(self):
+        owed, evidence, agent = self.record_non_git_result()
+        (self.workspace / '.git').mkdir()
+        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass').returncode, 0)
+        blocked = json.loads(self.hook('stop', cwd=str(self.workspace)))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn("'--abbrev-ref', 'HEAD']' returned non-zero exit status 128", blocked['reason'])
+        self.assertEqual(owed.read_bytes(), evidence)
+
+    def test_stop_keeps_normal_error_for_a_ledger_override(self):
+        owed, evidence, agent = self.record_non_git_result()
+        env = {**self.env, 'SHIP_LEDGER_DIR': str(self.base / 'override')}
+        self.assertEqual(self.cli('run-start', 'light', 'override', env=env).returncode, 0)
+        self.assertEqual(self.cli('append', 'deep-review', agent, 'sha', 'pass', env=env).returncode, 0)
+        blocked = json.loads(self.hook('stop', cwd=str(self.workspace), env=env))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn("'--abbrev-ref', 'HEAD']' returned non-zero exit status 128", blocked['reason'])
+        self.assertEqual(owed.read_bytes(), evidence)
 
     def test_stop_blocks_zero_non_git_matches(self):
         owed, evidence, agent = self.record_non_git_result()
