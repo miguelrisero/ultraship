@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Derive a row's paired fields while preserving its whole-file mutant hunks."""
 import argparse
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 import difflib
 import fcntl
 import json
@@ -254,7 +254,7 @@ def staged_bytes(path, data, mode):
         staged.unlink(missing_ok=True)
 
 
-def write_row_and_record(path, identity, entry, row_file, original, result):
+def write_record(path, identity, entry, row_file, original):
     try:
         path.parent.mkdir(mode=0o700)
     except FileExistsError:
@@ -269,10 +269,10 @@ def write_row_and_record(path, identity, entry, row_file, original, result):
         metadata = os.fstat(handle.fileno())
         require(stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1, 'invalid authorization record lock')
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        merge_row_and_record(path, identity, entry, row_file, original, result)
+        merge_record(path, identity, entry, row_file, original)
 
 
-def merge_row_and_record(path, identity, entry, row_file, original, result):
+def merge_record(path, identity, entry, row_file, original):
     rows = {}
     try:
         metadata = path.lstat()
@@ -288,22 +288,9 @@ def merge_row_and_record(path, identity, entry, row_file, original, result):
             rows = {(row['row_file'], row['row_id']): row for row in prior['rows']}
     rows[entry['row_file'], entry['row_id']] = entry
     data = (json.dumps({'schema': 1, **identity, 'rows': list(rows.values())}) + '\n').encode('utf-8')
-    with ExitStack() as stages:
-        if result != original:
-            mode = stat.S_IMODE(row_file.stat().st_mode)
-            edited = stages.enter_context(staged_bytes(row_file, result, mode))
-            # Prepare rollback before replacing the row so it needs no write allocation.
-            backup = stages.enter_context(staged_bytes(row_file, original, mode))
-        record_stage = stages.enter_context(staged_bytes(path, data, 0o600))
+    with staged_bytes(path, data, 0o600) as record_stage:
         require(row_file.read_bytes() == original, 'row file changed during staged write')
-        if result != original:
-            os.replace(edited, row_file)
-        try:
-            os.replace(record_stage, path)
-        except BaseException:
-            if result != original:
-                os.replace(backup, row_file)
-            raise
+        os.replace(record_stage, path)
 
 
 def run(args):
@@ -399,10 +386,18 @@ def run(args):
              'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements),
              'base_lines': base_extent, 'lines': edited_extent, **restoration_fields}
     identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
-    write_row_and_record(record, identity, entry, row_file, original, result)
+    if replacements:
+        mode = stat.S_IMODE(row_file.stat().st_mode)
+        with staged_bytes(row_file, result, mode) as stage:
+            require(row_file.read_bytes() == original, 'row file changed during staged write')
+            os.replace(stage, row_file)
+        record_output = 'none'
+    else:
+        write_record(record, identity, entry, row_file, original)
+        record_output = str(record)
     print('PASS')
     for key, value in {'schema': 1, **identity, **entry, 'base_span_lines': len(lines(base_values['old'])),
-                       'head_span_lines': len(lines(old)), 'tomllib': 'PASS', 'record': str(record)}.items():
+                       'head_span_lines': len(lines(old)), 'tomllib': 'PASS', 'record': record_output}.items():
         print(key + '=' + (value if isinstance(value, str) and value.isprintable() else json.dumps(value)))
 
 

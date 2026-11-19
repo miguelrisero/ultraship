@@ -1,6 +1,6 @@
 """Synthetic re-anchor and exact-command admission guarantees."""
 from argparse import Namespace
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import fcntl
 import importlib.util
@@ -115,6 +115,8 @@ class ToolTests(unittest.TestCase):
 
     def test_record_schema_path_and_permissions_in_linked_worktree(self):
         self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
         original_record = self.record_path()
         linked = self.root / 'linked'
         self.git('worktree', 'add', '-qb', 'linked-lane', str(linked), self.head_sha)
@@ -130,12 +132,14 @@ class ToolTests(unittest.TestCase):
             'schema': 1, 'lane': 'linked-lane', 'base': self.base, 'head': self.head_sha,
             'rows': [{'row_file': 'rows.toml', 'row_id': 'target', 'subject': 'subject.txt',
                       'expected_count': 1, 'head_old_count': 1, 'hunk_count': 2,
-                      'mutant_unchanged': True, 'changed_statements': 2,
+                      'mutant_unchanged': True, 'changed_statements': 0,
                       'base_lines': [4, 10], 'lines': [4, 10]}],
         })
 
     def test_printed_fields_match_the_record_entry(self):
         self.setup_pair(literal=True, extra='[row.mutant]\noperator = "replace"\n')
+        self.invoke()
+        self.head_sha = self.commit()
         _, output = self.invoke()
         record = self.record_path()
         data = json.loads(record.read_bytes())
@@ -146,8 +150,29 @@ class ToolTests(unittest.TestCase):
         for key, value in {**data, **entry, 'record': str(record)}.items():
             self.assertEqual(fields[key], value if isinstance(value, str) else json.dumps(value))
 
+    def test_edit_does_not_create_or_change_a_record(self):
+        self.setup_pair()
+        record = self.record_path()
+        prior = b'{"schema": 1, "lane": "expired", "rows": []}'
+        for exists in (False, True):
+            with self.subTest(existing_record=exists):
+                if exists:
+                    record.parent.mkdir()
+                    record.write_bytes(prior)
+                before, output = self.invoke()
+                self.assertEqual(output.splitlines()[-1], 'record=none')
+                self.assertIn('changed_statements=2', output.splitlines())
+                self.assertNotEqual(self.row.read_bytes(), before)
+                if exists:
+                    self.assertEqual(record.read_bytes(), prior)
+                else:
+                    self.assertFalse(record.parent.exists())
+                self.row.write_bytes(before)
+
     def test_record_expires_on_new_head_and_rerun_changes_zero_statements(self):
         self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
         self.invoke()
         record = self.record_path()
         old_record = json.loads(record.read_bytes())
@@ -191,6 +216,10 @@ class ToolTests(unittest.TestCase):
         self.git('add', '--', other_row.name)
         self.base = self.commit()
         self.subject.write_bytes(head_subject)
+        self.head_sha = self.commit()
+        self.invoke()
+        self.invoke(**{'row-file': str(other_row), 'row-id': 'other'})
+        self.git('add', '--', other_row.name)
         self.head_sha = self.commit()
         with ThreadPoolExecutor(max_workers=2) as writers:
             first = writers.submit(self.invoke)
@@ -356,6 +385,8 @@ class ToolTests(unittest.TestCase):
 
     def test_record_write_waits_for_exclusive_lock(self):
         self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
         record = self.record_path()
         record.parent.mkdir(mode=0o700)
         prior = json.dumps({'schema': 1, 'lane': self.git('branch', '--show-current'),
@@ -363,11 +394,14 @@ class ToolTests(unittest.TestCase):
         record.write_bytes(prior)
         args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
                          base=self.base, head=self.head_sha)
-        attempted = Event()
+        lock_checked_or_done = Event()
         flock = fcntl.flock
 
         def observe_lock(descriptor, operation):
-            attempted.set()
+            self.assertEqual(operation, fcntl.LOCK_EX)
+            with self.assertRaises(BlockingIOError):
+                flock(descriptor, operation | fcntl.LOCK_NB)
+            lock_checked_or_done.set()
             return flock(descriptor, operation)
 
         env = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
@@ -376,12 +410,16 @@ class ToolTests(unittest.TestCase):
             with record.with_suffix('.lock').open('a+b') as lock:
                 flock(lock.fileno(), fcntl.LOCK_EX)
                 with patch.object(reanchor.fcntl, 'flock', side_effect=observe_lock):
+                    deadline = time.monotonic() + 5
                     result = writer.submit(reanchor.run, args)
-                    self.assertTrue(attempted.wait(timeout=5), 'tool did not attempt to acquire the lock')
-                    with self.assertRaises(TimeoutError):
-                        result.result(timeout=0.1)
+                    result.add_done_callback(lambda _: lock_checked_or_done.set())
+                    self.assertTrue(lock_checked_or_done.wait(deadline - time.monotonic()),
+                                    'tool did not attempt to acquire the lock')
+                    if result.done():
+                        result.result()
+                        self.fail('tool finished while the record lock was held')
                     self.assertEqual(record.read_bytes(), prior)
-            result.result(timeout=5)
+            result.result(timeout=deadline - time.monotonic())
         entry, = json.loads(record.read_bytes())['rows']
         self.assertEqual((entry['row_file'], entry['row_id']), ('rows.toml', 'target'))
 
@@ -534,8 +572,10 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(self.row.read_bytes(), original)
         self.assertEqual(list(self.root.glob('.row-reanchor-*')), [])
 
-    def test_record_replace_failure_restores_original_row_and_keeps_prior_record(self):
+    def test_record_replace_failure_preserves_original_row_and_prior_record(self):
         self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
         record = self.record_path()
         record.parent.mkdir(mode=0o700)
         prior = b'{"schema": 1, "lane": "expired", "rows": []}'
@@ -547,7 +587,7 @@ class ToolTests(unittest.TestCase):
 
         def fail_record_replace(source, target):
             if target == record:
-                self.assertNotEqual(self.row.read_bytes(), original)
+                self.assertEqual(self.row.read_bytes(), original)
                 raise OSError(SENTINEL)
             replace(source, target)
 
