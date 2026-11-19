@@ -6,7 +6,7 @@ set -euo pipefail
 pr="${1:?usage: threads.sh <PR number> [author-login]}"
 author="${2:-}"
 repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
-query='query($owner:String!,$name:String!,$pr:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}nodes{id isResolved path line comments(first:1){nodes{author{login}body}}}}}}}'
+query='query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{id isResolved path line comments(first:1){nodes{author{login}body}}}}}}}'
 
 gh api graphql --paginate -F owner="${repo%/*}" -F name="${repo#*/}" -F pr="$pr" -f query="$query" \
   --jq '.data.repository.pullRequest.reviewThreads.nodes[]

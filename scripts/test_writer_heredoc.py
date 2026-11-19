@@ -710,6 +710,7 @@ class WriterHeredocTests(unittest.TestCase):
     def test_read_only_argument_words_with_interpreter_names_are_admitted(self):
         """Catch false refusals of literal read-only paths and patterns containing interpreter names."""
         for command in (
+            r'''git -C /x grep foo /x/python*/a''',
             r'''cd /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-video && rg -n 'TIMEOUT|DEADLINE|timeout|CHUNK' backend/api/adapters/integrations/recall.py backend/api/tools/native/inspect_video.py backend/api/adapters/chat/attachment*.py && rg -n 'class AsyncFileStreamReader|async def __aexit__|async def aclose|async def __anext__' /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-intent/backend/api/.venv/lib/python3.13/site-packages/e2b/filesystem/* && rg -n '^Version:' /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-intent/backend/api/.venv/lib/python3.13/site-packages/e2b-2.30.0.dist-info/METADATA''',
             r'''rg -n 'class AsyncFileStreamReader|async def __aexit__|async def aclose|async def __anext__' /home/miguel/.vk-worktrees/.bettercoding-workspaces/8baf-pati-demo-13-nov/wt-meeting-intent/backend/api/.venv/lib/python3.13/site-packages/e2b/filesystem/*''',
             r'''grep -n -e SLOT -e slot_gate -e SHA -e gate_child /home/miguel/.claude/plugins/marketplaces/better-plugin/plugins/chief-of-chiefs/skills/run/scripts/* | head -60''',
@@ -779,7 +780,12 @@ class WriterHeredocTests(unittest.TestCase):
             (r'''git grep --no-index foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git grep -f /x/p foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git -c core.pager=less grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
-            (r'''git -C /x grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C /x grep -O/x/pyth* foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C /x -c core.pager=less grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C /x --no-pager grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C /a -C /x grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C/x grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
+            (r'''git -C '/x' grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git --no-pager grep foo /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git log /x/python*/a''', 'inline interpreter code rule (unresolved command word)'),
             (r'''git grep foo /x/python*/a; perl -e 1''', 'inline interpreter code rule (unresolved command word)'),
@@ -807,7 +813,7 @@ class WriterHeredocTests(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'), reason)
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'), reason)
 
     def test_double_quoted_substitutions_scan_interpreter_bodies(self):
         """Catch split interpreter names inside double-quoted substitution bodies."""
@@ -1204,7 +1210,7 @@ class WriterHeredocTests(unittest.TestCase):
             for command in commands:
                 with self.subTest(command=command):
                     self.assertTrue(self.denied(command), self.reason)
-                    self.assertEqual(self.reason.rsplit('Rule: ', 1)[-1].removesuffix('.'), reason)
+                    self.assertEqual(self.reason.split('\n', 1)[0].rsplit('Rule: ', 1)[-1].removesuffix('.'), reason)
 
     SUBSCRIPT_NAMES = (
         "'a[$(no\"\"de -\"\"e \"process.exit(42)\")]'",
@@ -2967,7 +2973,7 @@ TAIL
         self.assertTrue(self.denied("python3 - <<'PY'\nimport subprocess\n"
                                     "subprocess.run(['sh', 'x.sh'])\nPY\ngit status\n"))
 
-    def test_nonpublication_classifier_refusals_grant_zero_replay_or_driver_handoff(self):
+    def test_nonpublication_classifier_refusals_name_retry_and_driver_permission(self):
         from unittest.mock import patch
 
         cases = (
@@ -2992,8 +2998,8 @@ TAIL
                     self.assertTrue(self.denied(command))
                 self.assertIn('Rule: ' + rule, self.reason)
                 self.assertRegex(self.reason, r'(?i)(?:operation|scope).*denied')
-                self.assertRegex(self.reason, r'(?i)zero.*(?:alternate|alternative).*(?:form|actor)')
-                self.assertRegex(self.reason, r'(?i)cause.*resolution.*fresh.*disposition')
+                self.assertIn('Retry in another form when the refusal reason is fixed or the new form meets the rule below', self.reason)
+                self.assertIn('ask for permission; the driver may grant it or run the step itself.', self.reason)
                 self.assertNotIn('Return this step to your driver', self.reason)
                 self.assertNotIn('the driver may run it', self.reason)
 

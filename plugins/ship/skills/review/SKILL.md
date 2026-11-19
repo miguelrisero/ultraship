@@ -43,12 +43,12 @@ Require this field and these sentences verbatim in every brief:
 
 ```text
 Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
-A hook refusal is final: report it and stop.
+After a hook refusal, retry in another form when the refusal reason is fixed or the new form meets the rule the refusal names. You may always ask your superior for permission to run the refused command.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 ```
-The stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.
-The formatting, coordination and method-only routes in [Loaded instructions and refusals](../ship/references/owner-decisions.md#loaded-instructions-and-refusals) stay.
+A reviewer reports a refused call as blocked scope and continues other permitted scope.
+[Loaded instructions and refusals](../ship/references/owner-decisions.md#loaded-instructions-and-refusals) sets the retry rule and the ask-your-superior rule.
 
 Scope every search call to the permitted paths.
 Exclude `tests/mutation/`, generated and vendored content, and any other brief exclusions.
@@ -56,12 +56,13 @@ Reviewers use Grep, Glob, and Read with exact absolute paths.
 An exact absolute path has no `~`, `.` or `..` segment, repeated or trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form.
 A directory path has no trailing `/`: `/abs/repo/backend/api/services`, not `/abs/repo/backend/api/services/`.
 When a hook refusal says to report the blocked scope, reviewers report that call as blocked scope in the verdict.
-Reviewers never resend that call in another form, including the path the refusal names; the coordinator decides a new brief.
+Reviewers may retry that call in another form when the new form meets the rule the refusal names, or ask the coordinator for permission or a new brief.
 Reviewers use LSP hover and documentSymbol on one file only.
 Reviewers use no MCP (`mcp__`) tools.
 Reviewers search only directories that contain no `tests/mutation/` directory.
 Report a failed or empty scoped search to the coordinator; never widen the search scope.
 An explicit repository-root path does not authorize broader discovery.
+Send named protected rows through the separate [lane-owned row review](../../agents/reviewer--sol.md#lane-owned-row-review) with reviewer admission.
 
 - For broad discovery, use `ship:researcher--luna`.
 - Split the diff into bounded slices. Give each slice to a `ship:reviewer--opus` seat with the scope, SHA, evidence, reference path, and read-only boundary. Cover every applicable lens; combine related lenses.

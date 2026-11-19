@@ -21,12 +21,20 @@ Batch actionable and terminal reports; keep unchanged routine reports silent and
 Copy the routing and model-independent output contracts into every timer, recovery, driver, writer, reviewer, and child brief, including retries and replacements.
 Act by default: use the authority the owner and the CoC already granted in the same turn, and never ask for it again.
 Stop a step only for a hook denial, a failed check, a hard rule, an owner refusal, a special-run GO, or an owner-only item.
+After a hook denial, a lane may retry in another form that meets the rule the denial names, or ask for permission: a driver asks the chief, and the chief asks the CoC.
+Grant a lane request, or run the refused command yourself, when you consider it appropriate; record the grant or the run in the lane state file.
+Relay the lane's quoted refusal and defect to the CoC and the corrected decision to the lane under ship's decision-defect rule.
 Owner-only items: product, billing, security policy or tenant isolation, big architecture, customer-data deletion, new recurring spend, flag flips or deploy changes, public output in the owner's name, and credentials only the owner holds.
 An unverified detail that no rule names is not a stop: name it in one line and continue. A rule that names a missing receipt or evidence still stops its step.
-Each check moves at least one lane forward: a dispatch, a ruling, a merge, or a sent result. A board edit alone is not progress.
+Use each actionable check to advance a lane: dispatch it, make a ruling, merge it, or send a result. A board edit alone leaves lane work open.
 Only the CoC publishes canonical owner decisions and results in CoC workspace Inputs; chief-local Inputs never satisfy delivery.
-In a status message, never restate standing holds; send what changed, what it means, and the next action. Briefs still carry their required restrictions.
-Verify CoC liveness using its existing recorded identity; retry through existing scheduling with zero additional pollers or duplicate Inputs.
+Report status only on a transition or at a deadline.
+Report lane state changes, PR openings, CI turning red or green, merges, and verified deploys.
+Omit standing holds from routine status reports.
+State what changed, what it means, and the next action.
+Keep every required restriction in the brief.
+Verify CoC liveness using its existing recorded identity and the [process check](references/state.md#continuation-and-waits).
+Retry through existing scheduling with zero additional pollers or duplicate Inputs.
 Preserve actual owner Input event delivery and the canonical CoC Input ID → exact owner answer event → continuing driver → result Input receipt.
 
 ## Roles
@@ -84,7 +92,7 @@ Each driver brief has:
 - The board path and the chief run ID.
 - The granted commit, push, PR, merge, and production permissions.
 - The instruction to run `ship:ship light` inline, with this contract as its task.
-- The checkpoint to return: agent ID, head SHA, PR URL, ledger gaps, CI and review state, next action.
+- The report fields: agent ID, head SHA, PR URL, ledger gaps, CI and review state, next action.
 - This guard constraint, copied verbatim:
 
 ```text
@@ -134,9 +142,9 @@ There is no lane cap (owner, 2026-10-22, until new notice). Run as many lanes as
 
 Give every person a realistic ETA, and keep it (owner, 2026-10-28: "please REALISTIC TIMELINE, stop scamming people with your timelines, always super optimistic, learn as a rule that you cannot fail on your promises"). Build each ETA from the real path: CI, review rounds, the gate wait, the merge-queue depth, the deploy, and the live check. Quote the time you are sure of. Say "earlier if it goes well" as a separate sentence. When a promise is at risk, tell the person before it passes, with the new realistic time and the cause.
 
-Use native completion notifications. Persist the awaited run identity and next action for external CI and deploy waits. Check state before you resume a lane. Continue other eligible work during a model outage or an owner blocker.
+Use native completion notifications. Persist the awaited run identity and next action for external CI and deploy waits. Check the board and the agent's process state before you resume a lane. Continue other eligible work during a model outage or an owner blocker.
 
-At each checkpoint, inspect the lane's commit stack and upstream state. Retain all existing tracking checks. A missing upstream alone establishes neither publication nor unpushed work. Within existing read permission, verify the intended feature destination's repository identity and exact `refs/heads/<feature-branch>` remote head OID against the lane's current HEAD. Apply the ship pipeline's credential-safe gate before capturing any resolved URL or remote evidence. Require fresh evidence from that verified destination with an OID equal to HEAD to establish current-head publication. Arbitrary remote containment of HEAD supplies insufficient evidence. Treat absent, stale, unavailable, or inconclusive destination evidence as unknown and hold dependent actions. Preserve pushed history; use a revert for a published mistake.
+Before you advance a lane or report its status, inspect the lane's commit stack and upstream state. Retain all existing tracking checks. A missing upstream alone establishes neither publication nor unpushed work. Within existing read permission, verify the intended feature destination's repository identity. Compare its exact `refs/heads/<feature-branch>` remote head OID with the lane's current HEAD. Apply the ship pipeline's credential-safe gate before capturing any resolved URL or remote evidence. Require fresh evidence from that verified destination with an OID equal to HEAD to establish current-head publication. Arbitrary remote containment of HEAD supplies insufficient evidence. Treat absent, stale, unavailable, or inconclusive destination evidence as unknown and hold dependent actions. Preserve pushed history; use a revert for a published mistake.
 
 ## Execution and publication safeguards
 
@@ -166,4 +174,4 @@ bash "${CLAUDE_SKILL_DIR}/scripts/lane-teardown.sh" "<absolute lane worktree>"
 
 Use `--abandoned` only for an explicitly closed abandoned lane. Record `REMOVED` or the full `KEPT` reason. Keep ready-for-review worktrees until merge. The script's remote-reachability guard supplements the chief's verified MERGED check.
 
-Finish with a cross-lane check: the goal, combined behavior, remaining decisions, direct PR URLs, verification evidence, and worktree ownership. Keep a concrete external blocker visible with the exact action needed. Continue until the agreed endpoint holds; a draft implementation alone does not satisfy delivery.
+Finish with a cross-lane check: the goal, combined behavior, remaining decisions, direct PR URLs, verification evidence, and worktree ownership. Keep each external blocker and its exact next action on the board. Continue until the agreed endpoint holds; a draft implementation alone does not satisfy delivery.

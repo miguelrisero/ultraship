@@ -921,7 +921,7 @@ class ReviewerSearchTests(unittest.TestCase):
                 printed.assert_called_once()
                 decision = json.loads(output.getvalue())['hookSpecificOutput']
                 self.assertEqual(decision['permissionDecision'], 'deny')
-                self.assertEqual(decision['permissionDecisionReason'],
+                self.assertEqual(decision['permissionDecisionReason'].split('\n', 1)[0],
                                  'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
                                  'Report the blocked scope to the driver.')
 
@@ -946,8 +946,9 @@ class ReviewerSearchTests(unittest.TestCase):
     def test_a_trailing_slash_refusal_ends_with_the_report_line_and_matches_reviewer_guidance(self):
         decision = self.decision('Grep', {'path': self.root + '/src/', 'pattern': 'identifier'})
         self.assertEqual(decision.get('permissionDecision'), 'deny')
-        reason = decision['permissionDecisionReason']
+        reason, _, retry = decision['permissionDecisionReason'].partition('\n')
         self.assertTrue(reason.endswith('NFC form. Report the blocked scope to the coordinator.'), reason)
+        self.assertIn('Keep the work pending.', retry)
         rule = reason[reason.index('no `~`'):reason.index(' Report the blocked scope')]
         agents = LEDGER_AGENTS
         self.assertTrue(agents)
@@ -1080,16 +1081,13 @@ class ExecutionPolicyTests(unittest.TestCase):
             with self.subTest(path=name):
                 self.assertEqual(admission.splitlines().count(requirement), 1)
 
-    def test_each_writer_requires_plain_checks_and_preserves_retirement_heredocs(self):
+    def test_each_writer_requires_plain_checks(self):
         for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
             text = read('plugins/ship/agents/' + name)
             admission = text.partition('### Execution admission and cleanup\n')[2].split('\n### ', 1)[0]
-            for requirement in (
-                'Run each check as its own plain command, with no inline interpreter code.',
-                'The named `python3 -I -` heredocs of the retirement routes stay as each route specifies.',
-            ):
-                with self.subTest(path=name, requirement=requirement):
-                    self.assertEqual(admission.splitlines().count(requirement), 1)
+            with self.subTest(path=name):
+                self.assertEqual(admission.splitlines().count(
+                    'Run each check as its own plain command, with no inline interpreter code.'), 1)
 
     def test_each_writer_distinguishes_ordinary_admission_from_special_gos(self):
         for name in ('writer--sol.md', 'writer--sonnet.md'):
@@ -1173,9 +1171,9 @@ class ExecutionPolicyTests(unittest.TestCase):
             ('Protected content retains its grants and review without added access', (
                 'protected content', 'exact existing grants', 'independent review', 'zero protected access',
             )),
-            ('An effective refusal blocks equivalent operations and substitute actors', (
-                'effective refusal', 'blocks equivalent native reads', 'native edits',
-                'alternate execution', 'substitute actors',
+            ('A refusal applies the retry rule and keeps protected rows on their route', (
+                'after a hook or permission refusal', 'retry rule',
+                'a protected row edit follows only its row route',
             )),
             ('The recipe requires verification of the exact brief scope', (
                 "verify the brief's exact file scope",
@@ -1183,8 +1181,8 @@ class ExecutionPolicyTests(unittest.TestCase):
             ('The recipe requires applicable operation authority', (
                 'applicable operation authority',
             )),
-            ('The ordinary recipe applies before effective holds', (
-                'before any effective refusal or hold',
+            ('The ordinary recipe applies before holds or as a rule-meeting retry', (
+                'before any refusal or hold, or as a retry that meets the rule a refusal names',
             )),
             ('Source delivery grants zero session adoption authority', (
                 'zero session adoption authority',
@@ -1202,10 +1200,10 @@ class ExecutionPolicyTests(unittest.TestCase):
                 sections.append(section)
                 self.assertIn(heading, text, f'{name}: requires the Native file edits section')
                 self.assertIn(
-                    'After a method-only denial, apply the owner-decisions method-only rule: '
-                    'one native Edit of the already-approved text, then a separate commit step.',
+                    'After a hook denies only the method of an ordinary-file edit, '
+                    'use native Edit for the approved text, then commit as a separate step.',
                     section,
-                    f'{name}: requires the complete method-only denial rule in the recipe',
+                    f'{name}: requires the method-denial retry in the recipe',
                 )
                 normalized = ' '.join(section.lower().replace('`', '').split())
                 for message, phrases in requirements:
