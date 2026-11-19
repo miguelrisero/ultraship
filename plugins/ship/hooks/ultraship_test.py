@@ -539,7 +539,7 @@ class ReceiptCustodyTests(unittest.TestCase):
 
     def test_account_custody_allows_commit_message_heredoc(self):
         self.assert_account_command_allowed(
-            'git commit -m "$(cat <<\'EOF\'\nfix: check the account\n\nThe account\'s label (reviewed).\nEOF\n)"\n',
+            'git commit -m "$(cat <<\'EOF\'\nfix: check the account\n\nThe ledger\'s label (reviewed).\nEOF\n)"\n',
             caller='ship:writer--sol')
 
     def test_account_custody_allows_a_long_quoted_argument(self):
@@ -598,6 +598,15 @@ class ReceiptCustodyTests(unittest.TestCase):
         (self.cwd / 'helper').symlink_to(cached)
         self.assert_account_custody_denial('echo ./helper account-auto')
 
+    def test_account_custody_recognizes_a_symlinked_installation(self):
+        os.environ.pop('CLAUDE_CONFIG_DIR', None)
+        cached = Path.home() / '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
+        cached.parent.mkdir(parents=True)
+        target = self.cwd / 'placeholder.py'
+        target.touch()
+        cached.symlink_to(target)
+        self.assert_account_custody_denial(f'echo {shlex.quote(str(cached))} accounting')
+
     def test_account_custody_denies_accounting_after_redirection(self):
         os.environ.pop('CLAUDE_CONFIG_DIR', None)
         cached = Path.home() / '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
@@ -608,6 +617,9 @@ class ReceiptCustodyTests(unittest.TestCase):
 
     def test_account_custody_checks_substitution_after_ledger_reference(self):
         self.assert_account_custody_denial(f'echo {shlex.quote(str(LEDGER))} `printf accounting`')
+
+    def test_account_custody_checks_opening_parenthesis_after_ledger_reference(self):
+        self.assert_account_custody_denial(f'echo {shlex.quote(str(LEDGER))} <(printf accounting)')
 
     def test_account_custody_stops_at_command_separator(self):
         self.assert_account_command_allowed(f'echo {shlex.quote(str(LEDGER))}; echo account')

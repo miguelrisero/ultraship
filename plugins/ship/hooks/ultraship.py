@@ -4841,10 +4841,15 @@ def receipt_custody(data, read_search=False):
                  for word in raw_words]
 
         def names_ledger():
+            def cached_ledger(path, root):
+                return (path.is_relative_to(root)
+                        and path.relative_to(root).parts[1:] == ('skills', 'ship', 'scripts', 'ledger.py'))
+
             try:
                 script = ledger_script().resolve()
                 config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
-                cache = (config / 'plugins/cache/ultraship/ship').resolve()
+                cache_path = (config / 'plugins/cache/ultraship/ship').absolute()
+                cache = cache_path.resolve()
                 cwd = Path(data.get('cwd') or os.getcwd())
                 pending, seen = [joined], set()
                 while pending:
@@ -4867,6 +4872,7 @@ def receipt_custody(data, read_search=False):
                             continue
                         word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
                         path = cwd / Path(word).expanduser()
+                        saw_ledger = saw_ledger or cached_ledger(path.absolute(), cache_path)
                         try:
                             path = path.resolve(strict=True)
                         except OSError as exc:
@@ -4874,9 +4880,7 @@ def receipt_custody(data, read_search=False):
                                     and exc.errno != errno.ENAMETOOLONG):
                                 raise
                             path = path.resolve()
-                        installed = (path.is_relative_to(cache)
-                                     and path.relative_to(cache).parts[1:] == ('skills', 'ship', 'scripts', 'ledger.py'))
-                        saw_ledger = saw_ledger or path == script or installed
+                        saw_ledger = saw_ledger or path == script or cached_ledger(path, cache)
                     pending.extend(token[1] for token in nested_shell_strings(tokens, text))
             except ValueError:
                 return 'ledger' in account_command

@@ -565,6 +565,22 @@ class LedgerDirTests(unittest.TestCase):
         self.assertTrue(owed.is_symlink())
         self.assertEqual([path.read_bytes() for path in paths], before)
 
+    def test_account_auto_reads_the_owed_file_once(self):
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])
+        home = self.resolve()
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, self.env, clear=True), \
+                mock.patch.object(ledger.os, 'open', wraps=os.open) as fd_open, \
+                mock.patch.object(Path, 'open', autospec=True, side_effect=Path.open) as path_open, \
+                mock.patch('sys.stdout', output):
+            ledger.account_auto(owed)
+        reads = [call for spy in (fd_open, path_open) for call in spy.call_args_list
+                 if call.args[0] == owed]
+        self.assertEqual(len(reads), 1)
+        self.assertIn('1 accounted, 0 pending\n', output.getvalue())
+        self.assertEqual(ledger.rows(home)[-1][1], 'account-result')
+
     def test_account_auto_uses_own_final_text_and_skips_existing_accounting(self):
         sha = 'ab' * 20
         owed, transcript, result, epoch = self.auto_owed([
