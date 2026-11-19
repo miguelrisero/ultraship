@@ -179,7 +179,7 @@ class BriefTests(unittest.TestCase):
             'Readable files: `<worktree path>`, `<plugin root>/skills/ship/references/owner-decisions.md`, '
             '`<decision file path>`, `<tool route decision path>`, '
             '`<denial record path>`, `<attempt record path>`; every other path is out of scope\n'
-            'A hook refusal is final: report it and stop.\n'
+            'Keep the row task pending after a hook refusal. Report the reason and ask the driver for a permitted route.\n'
             'Never print a key value; never post outside bettergroupinc and miguelrisero.\n'
             'Never chain a glob listing into a write command.'
         )
@@ -222,7 +222,7 @@ class BriefTests(unittest.TestCase):
             ("Record the run's outcome in the attempt record before any other step.", 'and its outcome after it'),
             ('- Attempt record:', "record each native Edit call and tool run on the row on the brief's attempt record"),
             ('- Worktree:', "with the brief's row file, row ID, subject, base and head"),
-            ('- On `REFUSED` or any denial, stop.', 'A tool refusal or hook denial ends the attempt.'),
+            ('- On `REFUSED` or any denial, keep the row pending and ask the driver for a permitted route.', 'Keep the row task pending after a refusal. Record the outcome and request a permitted route from the driver.'),
             ('run once, alone:', 'When the brief names the sanctioned row re-anchor tool, run it once'),
         )
         for field, rule in requirements:
@@ -266,7 +266,7 @@ class BriefTests(unittest.TestCase):
                 self.assertEqual(text.count('The tool run is its own single attempt'), 1)
                 route = text.split('#### Lane-derived route\n', 1)[1]
                 route = re.split(r'\n#{1,4} ', route, maxsplit=1)[0]
-                self.assertIn('A tool refusal or hook denial ends the attempt.', route)
+                self.assertIn('Keep the row task pending after a refusal. Record the outcome and request a permitted route from the driver.', route)
         self.assertIn('9. Send the exact scoped brief, built from the [row re-anchor tool brief]'
                       '(#row-re-anchor-tool-brief), with SendMessage.', self.reference)
         self.assertIn('The [row re-anchor tool brief](#row-re-anchor-tool-brief) lists the fields that supply this evidence; '

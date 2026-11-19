@@ -134,7 +134,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
                 self.assertIn(
                     "When the brief names the sanctioned row re-anchor tool, run it once in place of native Edit "
                     "with the brief's row file, row ID, subject, base and head; the tool derives and checks both "
-                    'fields and prints only results. A tool refusal or hook denial ends the attempt. '
+                    'fields and prints only results. Keep the row task pending after a refusal. Record the outcome and request a permitted route from the driver. '
                     'This tool is the only process form for a protected row edit.', route,
                 )
                 self.assertIn(
@@ -144,7 +144,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
         self.assertIn(
             "On the lane-derived route, when the brief names the sanctioned row re-anchor tool, run it once "
             "in place of native Edit with the brief's row file, row ID, subject, base and head; the tool derives "
-            'and checks both fields and prints only results. A tool refusal or hook denial ends the attempt. '
+            'and checks both fields and prints only results. Keep the row task pending after a refusal. Record the outcome and request a permitted route from the driver. '
             'This tool is the only process form for a protected row edit. '
             "The tool's statement scan and whole-file `tomllib` check print no row text and are the only "
             'exception to the no-whole-file-parse rule; the writer still reads no row lines.', self.refusals,

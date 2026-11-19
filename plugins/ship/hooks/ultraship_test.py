@@ -96,7 +96,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
                 ('mcp__fff__grep', {'query': {'text': str(receipt_store)}})):
             result = hook('pre', {**caller, 'tool_name': tool, 'tool_input': inputs}, env)
             assert denied(result), (caller, tool, inputs)
-            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+            assert result['hookSpecificOutput']['permissionDecisionReason'].split('\n', 1)[0] == custody
         for tool, inputs in (('Bash', {'command': 'git status --short'}),
                              ('Bash', {'command': 'git add plugins/ship/hooks/text_lint.py'}),
                              ('Bash', {'command': 'python3 -m unittest scripts.test_text_lint'}),
@@ -110,7 +110,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
                                  ('Bash', {'command': 'pwd'})):
                 result = hook('pre', {**caller, 'cwd': cwd, 'tool_name': tool, 'tool_input': inputs}, env)
                 assert denied(result), (caller, cwd, tool)
-                assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+                assert result['hookSpecificOutput']['permissionDecisionReason'].split('\n', 1)[0] == custody
     receipt_alias = Path(tmp) / 'ReceiptAlias'
     receipt_store.mkdir(parents=True)
     receipt_alias.symlink_to(receipt_store, target_is_directory=True)
@@ -119,7 +119,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
             result = hook('pre', {**caller, 'tool_name': tool,
                                   'tool_input': {'file_path': str(receipt_alias / 'key')}}, env)
             assert denied(result), (caller, tool)
-            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+            assert result['hookSpecificOutput']['permissionDecisionReason'].split('\n', 1)[0] == custody
         for command, state_root in (
                 ('cat ~/.local/sta[t]e/ultraship/*/key', str(Path(tmp) / '.local/state')),
                 ('cat $HOME/.local/sta[t]e/ultraship/*/key', str(Path(tmp) / '.local/state')),
@@ -129,7 +129,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
             result = hook('pre', {**caller, 'tool_name': 'Bash', 'tool_input': {'command': command}},
                           {**env, 'XDG_STATE_HOME': state_root})
             assert denied(result), (caller, command)
-            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+            assert result['hookSpecificOutput']['permissionDecisionReason'].split('\n', 1)[0] == custody
     assert denied(hook('pre', {'tool_name': 'Write', 'tool_input': {'file_path': str(receipt_store).upper()}}, env))
 
     assert denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol', 'model': 'opus'}}, env))
@@ -372,9 +372,13 @@ class PreInputTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     output = json.loads(result.stdout or '{}').get('hookSpecificOutput', {})
                     self.assertEqual(output.get('permissionDecision'), 'deny')
-                    self.assertEqual(output.get('permissionDecisionReason'), (
+                    reason, _, retry = output['permissionDecisionReason'].partition('\n')
+                    self.assertEqual(reason, (
                         'The ship hook could not read its input as a JSON object, so it denies this call. '
                         'Report the blocked scope to the driver.'))
+                    self.assertIn('Keep the work pending.', retry)
+                    self.assertIn('Retry only after you meet the rule above.', retry)
+                    self.assertIn('report the blocked step, the rule, and the next permitted action', retry)
 
 
 class ReceiptCustodyTests(unittest.TestCase):
@@ -395,7 +399,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assertEqual(exit.exception.code, 0)
         result = json.loads(output.getvalue())['hookSpecificOutput']
         self.assertEqual(result['permissionDecision'], 'deny')
-        self.assertEqual(result['permissionDecisionReason'], reason)
+        self.assertEqual(result['permissionDecisionReason'].split('\n', 1)[0], reason)
 
     def own_account_event(self):
         os.environ.pop('XDG_STATE_HOME', None)
@@ -685,7 +689,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                     self.assertEqual(exit.exception.code, 0)
                     result = json.loads(output.getvalue())['hookSpecificOutput']
                     self.assertEqual(result['permissionDecision'], 'deny')
-                    self.assertEqual(result['permissionDecisionReason'],
+                    self.assertEqual(result['permissionDecisionReason'].split('\n', 1)[0],
                                      'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
                                      'Report the blocked scope to the driver.')
                     self.assertIn('Traceback (most recent call last):', errors.getvalue())

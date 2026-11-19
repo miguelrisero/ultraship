@@ -68,7 +68,7 @@ The command must match its canonical protected row file and row ID.
 Only the driver and the main session write this folder through Write, Edit or NotebookEdit.
 The Bash custody check matches `ultraship/row-reanchor` as command text.
 The tool derives both fields from Git blobs, preserves the whole-file mutant hunks, and prints only results.
-A tool refusal or hook denial ends the attempt.
+Keep the row task pending after a refusal. Record the outcome and request a permitted route from the driver.
 See [Row re-anchor tool admission record](skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
 
 The hook sees these tools: `Agent`, `Task`, `Bash`, `Edit`, `Write`, `NotebookEdit`, `WebSearch`, `Read`, `Grep`, `Glob`, `LSP`, `WebFetch`, `mcp__fff__*`, and the three `mcp__bettercoding__` Input tools (`create_input`, `update_input`, `set_input_status`). Reviewer, triage and verifier agents list no MCP tools, so no other `mcp__` tool reaches these agents.

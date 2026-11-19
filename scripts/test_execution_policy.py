@@ -921,7 +921,7 @@ class ReviewerSearchTests(unittest.TestCase):
                 printed.assert_called_once()
                 decision = json.loads(output.getvalue())['hookSpecificOutput']
                 self.assertEqual(decision['permissionDecision'], 'deny')
-                self.assertEqual(decision['permissionDecisionReason'],
+                self.assertEqual(decision['permissionDecisionReason'].split('\n', 1)[0],
                                  'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
                                  'Report the blocked scope to the driver.')
 
@@ -946,8 +946,9 @@ class ReviewerSearchTests(unittest.TestCase):
     def test_a_trailing_slash_refusal_ends_with_the_report_line_and_matches_reviewer_guidance(self):
         decision = self.decision('Grep', {'path': self.root + '/src/', 'pattern': 'identifier'})
         self.assertEqual(decision.get('permissionDecision'), 'deny')
-        reason = decision['permissionDecisionReason']
+        reason, _, retry = decision['permissionDecisionReason'].partition('\n')
         self.assertTrue(reason.endswith('NFC form. Report the blocked scope to the coordinator.'), reason)
+        self.assertIn('Keep the work pending.', retry)
         rule = reason[reason.index('no `~`'):reason.index(' Report the blocked scope')]
         agents = LEDGER_AGENTS
         self.assertTrue(agents)
