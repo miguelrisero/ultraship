@@ -2533,8 +2533,8 @@ class WriterHeredocTests(unittest.TestCase):
         root = Path(temporary.name)
         for directory in ('frontend', 'backend', 'x'):
             (root / directory).mkdir()
-        for command in ('cd frontend && bun test', 'cd frontend && bun install', 'cd frontend && bun run lint',
-                        'pushd frontend && bun test', 'cd x && deno test', 'cd backend && python3 scripts/x.py'):
+        for command in (f'cd {root}/frontend && bun test', f'cd {root}/frontend && bun install', f'cd {root}/frontend && bun run lint',
+                        f'pushd {root}/frontend && bun test', f'cd {root}/x && deno test', f'cd {root}/backend && python3 scripts/x.py'):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command, cwd=str(root)))
 
