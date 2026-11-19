@@ -819,7 +819,8 @@ class WorkspaceRowAdmissionTests(unittest.TestCase):
                                             'tool_input': {'path': str(self.row), 'pattern': 'id'}}, self.env)))
 
     def test_missing_record_without_workspace_names_scratch_requirement(self):
-        with patch.object(ultraship, 'STATE', self.root / 'state'):
+        with (patch.object(ultraship, 'STATE', self.root / 'state'),
+              patch.object(ultraship.Path, 'is_dir', return_value=False)):
             fields, reason = ultraship.row_record({**self.payload, 'cwd': '/'}, 'row-review', workspace_fallback=True)
         self.assertIsNone(fields)
         self.assertIn('needs a `.scratch` folder', reason)

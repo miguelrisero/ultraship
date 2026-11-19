@@ -91,7 +91,7 @@ The workspace record's parent must belong to the hook user and have zero symlink
 The record holds `pr`, `agent_id`, `row_files`, and `expires_at` (UTC, at most 4 hours ahead).
 The hook user must own the file. The file must deny group and world writes.
 The hook denies Write, Edit, and NotebookEdit in both folders for every agent except the driver and the main session.
-For Bash, the hook only checks the command text for `ultraship/row-review`, so a path built from pieces passes.
+For Bash, the hook only checks the command text for `ultraship/row-review`, so a path built from pieces passes this check.
 
 A re-anchor admission record lives at `row-reanchor/<agent ID>.json` in the hook state folder.
 It holds `pr`, `agent_id`, `row_file`, `row_id` and `expires_at` (UTC, at most 4 hours ahead).
