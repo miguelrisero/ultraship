@@ -287,7 +287,13 @@ A script file, another interpreter, a module flag or a wrapper command is anothe
 Keep the work pending after a hook refusal.
 Ask the driver for permission to run the refused command at any time.
 The driver may grant it or run the command within its authority.
-Push, merge and protected-write refusals stay final; a retry in another form never bypasses them.
+A refusal never ends the work.
+After a refusal, find the cause and retry in a compliant form, or ask your superior how to proceed.
+A writer asks its driver, a driver asks its chief, and a chief asks the CoC.
+The ask never blocks your other work.
+Only the CoC decides whether an owner-only item becomes an owner Input; agents never ask the owner.
+The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items still need a compliant form or the authority they lacked.
+A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
 Checks that the brief names stay permitted when the hook admits them.
 
 Return the changed files, the test commands with their results or `tests not run (brief)`, the head SHA, and any blocker with evidence. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.
