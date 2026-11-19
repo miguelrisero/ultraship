@@ -2054,7 +2054,7 @@ def parameter_quote_mode(text, start):
     return 'other'
 
 
-def shell_substitution_bodies(text, arithmetic_quotes=False, *, closed_substitutions=None):
+def shell_substitution_bodies(text, arithmetic_quotes=False):
     """Keep substitution quote state separate from the surrounding shell word."""
     frames, quote, cursor, word_start = [], '', 0, True
     while cursor < len(text):
@@ -2129,8 +2129,6 @@ def shell_substitution_bodies(text, arithmetic_quotes=False, *, closed_substitut
                 if depth == 1:
                     frames.pop()
                     if closing == ')':
-                        if closed_substitutions is not None:
-                            closed_substitutions.append((start, cursor))
                         yield text[start:cursor]
                     quote = outer_quote
                     cursor += len(closing)
@@ -4462,25 +4460,12 @@ LITERAL_GIT_GREP_ANCHOR = re.compile(
     r"(?:[ \t]+(?!-)[\w./-]+)*(?:[ \t]+--(?:[ \t]+[\w./-]+)*)?[ \t]*\n?")
 
 
-LITERAL_GIT_COUNT_PIPELINE = re.compile(
-    r"[ \t]*git[ \t]+ls-tree[ \t]+-r[ \t]+--name-only"
-    r"[ \t]+(?:[A-Za-z0-9_][A-Za-z0-9_./-]*|\$[A-Za-z_][A-Za-z0-9_]*)"
-    r"[ \t]+--[ \t]+[A-Za-z0-9_./-]+[ \t]*\|[ \t]*grep[ \t]+-c"
-    r"[ \t]+'(?!-)[^'\x00\r\n]*\$(?P<quote>')[ \t]*")
-
-
-def thread_ansi_quote(command):
-    """Keep the fallback unless each candidate ends a pattern in a proven count pipeline."""
-    if re.search(r"[\x00#`]|<<|\\\n|[<>=]\(|\$[{\[]|\(\(", command):
-        return True
-    substitutions = []
-    try:
-        list(shell_substitution_bodies(command, closed_substitutions=substitutions))
-    except ValueError:
-        return True
-    anchors = {match.start('quote') for start, end in substitutions
-               if (match := LITERAL_GIT_COUNT_PIPELINE.fullmatch(command, start, end))}
-    return any(match.end() - 1 not in anchors for match in re.finditer(r"\$'", command))
+# Match the wrapper as well as the pipeline so incomplete shell syntax keeps the fallback.
+LITERAL_GIT_COUNT_COMMAND = re.compile(
+    r'[ \t]*(?:cd[ \t]+(?!-)[A-Za-z0-9_./-]+[ \t]+&&[ \t]+)?'
+    r'echo[ \t]+"(?:[A-Za-z0-9_ .-]+:[ \t]+)?\$\([ \t]*git[ \t]+ls-tree[ \t]+-r[ \t]+--name-only'
+    r'[ \t]+[A-Za-z0-9_][A-Za-z0-9_./-]*[ \t]+--[ \t]+[A-Za-z0-9_./-]+'
+    r'''[ \t]*\|[ \t]*grep[ \t]+-c[ \t]+'(?!-)(?:[A-Za-z0-9_./-]|\\\.)+\$'[ \t]*\)"[ \t]*\n?''')
 
 
 def pr_comment_body_removed(command):
@@ -4874,7 +4859,7 @@ def pre(data):
                                               or re.search(r'\b(?:gh|api)\b', normalized))
                           and not LITERAL_GIT_GREP_ANCHOR.fullmatch(command)
                           and "$'" in writer_quoted_grep_data(command)
-                          and thread_ansi_quote(command))):
+                          and not LITERAL_GIT_COUNT_COMMAND.fullmatch(command))):
                     reason = 'git config from the command line'
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__

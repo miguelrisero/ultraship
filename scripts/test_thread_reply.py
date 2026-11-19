@@ -1334,7 +1334,7 @@ class HookTests(unittest.TestCase):
                     self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
 
     def test_git_count_pipeline_treats_grep_anchor_as_data(self):
-        command = r'''cd /work/example && B=abc123; echo "files: $(git ls-tree -r --name-only $B -- src/api/ | grep -c '\.toml$')"; git grep -h -m1 -E '^id = ' $B -- 'src/api/*.toml' | head -2; for i in demo-1 demo-2; do echo "$i $(git grep -h -x -F "id = \"$i\"" $B -- 'src/api/*.toml' | wc -l)"; done'''
+        command = r'''echo "files: $(git ls-tree -r --name-only abc123 -- src/api/ | grep -c '\.toml$')"'''
         refused = (
             ('GIT_CONFIG_COUNT=2; ' + command, 'git config from the command line'),
             (command + "; printf '%s' $'api'", 'git config from the command line'),
@@ -1343,6 +1343,7 @@ class HookTests(unittest.TestCase):
         )
         for caller in ('', 'ship:driver'):
             self.assertEqual(self.decision(command, caller), {})
+            self.assertEqual(self.decision('cd /work/example && ' + command, caller), {})
             for shell, rule in refused:
                 with self.subTest(caller=caller, rule=rule):
                     result = self.decision(shell, caller)
@@ -1351,17 +1352,23 @@ class HookTests(unittest.TestCase):
 
     def test_git_count_pipeline_requires_a_complete_literal_pipeline(self):
         command = r'''echo "$(git ls-tree -r --name-only abc123 -- src/api/ | grep -c '\.toml$')"'''
-        self.assertFalse(ultraship.thread_ansi_quote(command))
         other_shapes = (
             command.replace(' | ', ' >| '),
             command.replace(' | ', ' || '),
-            command.replace('git ls-tree -r --name-only abc123 -- src/api/', 'printf sample'),
+            command.replace('abc123', '$TREE'),
+            command.replace('git ls-tree -r --name-only abc123 -- src/api/', 'printf api'),
             command.replace("')", "' example.txt)"),
             command.replace('$(', r'\$('),
+            'echo $(' + command,
+            command.removesuffix('"'),
         )
-        for shell in other_shapes:
-            with self.subTest(shell=shell):
-                self.assertTrue(ultraship.thread_ansi_quote(shell))
+        for caller in ('', 'ship:driver'):
+            self.assertEqual(self.decision(command, caller), {})
+            for shell in other_shapes:
+                with self.subTest(caller=caller, shell=shell):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
 
     def test_graphql_read_route_refuses_other_documents_and_options(self):
         documents = ('mutation{createIssue{ id }}', 'subscription{events{id}}',
