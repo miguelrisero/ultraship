@@ -497,7 +497,8 @@ class LedgerDirTests(unittest.TestCase):
 
     def auto_owed(self, entries):
         owed = self.base / 'state/ultraship/owed/s1.tsv'
-        transcript = self.base / 'review.jsonl'
+        transcript = self.base / 's1/subagents/agent-reviewer.jsonl'
+        transcript.parent.mkdir(parents=True, exist_ok=True)
         self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='reviewer',
                   **({'agent_transcript_path': str(transcript)} if entries is not None else {}))
         epoch, _, _, raw = owed.read_text().splitlines()[-1].split('\t')
@@ -544,6 +545,90 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(self.cli('account-auto', str(owed)).stdout, expected)
         self.assertEqual(home.read_bytes(), saved)
 
+    def test_account_auto_requires_own_canonical_transcript_path(self):
+        sha = 'ab' * 20
+        for case, relative in (
+            ('wrong agent', 's1/subagents/agent-other.jsonl'),
+            ('wrong directory', 's1/reviews/agent-reviewer.jsonl'),
+            ('wrong session', 's2/subagents/agent-reviewer.jsonl'),
+            ('relative', None),
+            ('symlink', None),
+        ):
+            with self.subTest(case=case):
+                owed, transcript, result, _ = self.auto_owed([
+                    (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {sha}')])
+                if relative:
+                    source = self.base / relative
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    source.write_bytes(transcript.read_bytes())
+                elif case == 'relative':
+                    source = Path(os.path.relpath(transcript, self.checkout))
+                else:
+                    source = transcript
+                    target = transcript.with_name('target.jsonl')
+                    transcript.replace(target)
+                    transcript.symlink_to(target)
+                fields = owed.read_text().rstrip('\n').split('\t')
+                fields[-1] = json.dumps({**result, 'agent_transcript_path': str(source)})
+                owed.write_text('\t'.join(fields) + '\n')
+                auto = self.cli('account-auto', str(owed))
+                owed.write_text('')
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                self.assertEqual(auto.stdout.splitlines(), [
+                    f"pending {result['id']} transcript path does not match the recorded agent and session",
+                    '0 accounted, 1 pending'])
+
+    def test_final_turn_text_refuses_a_transcript_symlink(self):
+        _, transcript, _, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', 'Verdict: PASS ' + 'ab' * 20)])
+        target = transcript.with_name('target.jsonl')
+        transcript.replace(target)
+        transcript.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, 'transcript unavailable'):
+            ledger.final_turn_text(transcript, epoch, {})
+
+    def test_account_auto_excludes_turn_after_image_prompt_in_grace_second(self):
+        sha = 'ab' * 20
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', 'No result yet.'),
+            (0.5, 'user', [{'type': 'image'}]), (1, 'assistant', f'Verdict: PASS {sha}'),
+        ])
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout.splitlines(), [f"pending {result['id']} no final turn text",
+                                                   '0 accounted, 1 pending'])
+
+    def test_account_auto_checks_the_first_verdict_word_and_rejects_negated_pass(self):
+        sha = 'ab' * 20
+        for label, verdict in (
+            ('Verdict: did not pass', None),
+            ('OVERALL: not pass', None),
+            ('Verdict: checks PASS', None),
+            ('Verdict: PASS but not complete', None),
+            ('Verdict: PASS, no evidence', None),
+            ('Verdict: PASS, never verified', None),
+            ('Verdict: PASS without evidence', None),
+            ("Verdict: PASS but didn't verify", None),
+            ('Verdict: PASS but wasn’t verified', None),
+            ('Verdict: PASS, PASS', None),
+            ('OVERALL: FAIL and pass', None),
+            ('**OVERALL:** PASS', 'pass'),
+            ('Verdict: `_PASS_`', 'pass'),
+            ('OVERALL: FAIL', 'fail'),
+        ):
+            with self.subTest(label=label):
+                owed, _, result, _ = self.auto_owed([
+                    (-2, 'user', 'Review.'), (-1, 'assistant', f'{label} {sha}')])
+                auto = self.cli('account-auto', str(owed))
+                owed.write_text('')
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                if verdict:
+                    expected = [f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} {verdict}",
+                                '1 accounted, 0 pending']
+                else:
+                    expected = [f"pending {result['id']} expected one verdict", '0 accounted, 1 pending']
+                self.assertEqual(auto.stdout.splitlines(), expected)
+
     def test_account_auto_normalizes_labeled_verdicts(self):
         sha = 'ab' * 20
         for label, verdict in (
@@ -551,7 +636,7 @@ class LedgerDirTests(unittest.TestCase):
             ('OVERALL: FAIL', 'fail'),
             ('verdict: findings', 'findings'),
             ('verdict: pass', 'pass'),
-            ('Verdict: checks PASS', 'pass'),
+            ('Verdict: PASS checks', 'pass'),
             ('Verdict: failed', 'fail'),
             ('Verdict: fails', 'fail'),
             ('Verdict: Failing', 'fail'),
@@ -645,6 +730,75 @@ class LedgerDirTests(unittest.TestCase):
         auto = self.cli('account-auto', str(owed))
         self.assertEqual(auto.returncode, 0, auto.stderr)
         self.assertIn(f"pending {result['id']} transcript scan limit reached", auto.stdout)
+
+    def test_account_auto_shortcuts_require_the_recorded_run_start(self):
+        owed, _, result, _ = self.auto_owed(None)
+        pending = owed.read_bytes()
+        record = self.cli('account', str(owed), result['id'], 'review', 'ship:reviewer--sol',
+                          'ab' * 20, 'pass', 'Completed review')
+        self.assertEqual(record.returncode, 0, record.stderr)
+        self.assertEqual(self.hook('stop'), '')
+        owed.write_bytes(pending)
+        home = self.resolve()
+        home.write_text(home.read_text().replace('run-1 /board', 'different-run /board'))
+        receipts = owed.parent.parent / 'accounted.json'
+        for shortcut in ('receipt', 'account-result'):
+            with self.subTest(shortcut=shortcut):
+                auto = self.cli('account-auto', str(owed))
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                self.assertEqual(auto.stdout.splitlines(), [
+                    f"pending {result['id']} recorded run is missing or differs", '0 accounted, 1 pending'])
+            receipts.unlink(missing_ok=True)
+
+    def test_account_auto_requires_the_receipts_ledger_and_run_to_match(self):
+        owed, _, result, _ = self.auto_owed(None)
+        pending = owed.read_bytes()
+        record = self.cli('account', str(owed), result['id'], 'review', 'ship:reviewer--sol',
+                          'ab' * 20, 'pass', 'Completed review')
+        self.assertEqual(record.returncode, 0, record.stderr)
+        self.assertEqual(self.hook('stop'), '')
+        owed.write_bytes(pending)
+        receipts = owed.parent.parent / 'accounted.json'
+        saved = receipts.read_text()
+        other = self.base / 'other.tsv'
+        other.write_bytes(self.resolve().read_bytes())
+        for index, wrong in ((0, str(other)), (1, [0, 'other-run'])):
+            with self.subTest(field=index):
+                data = json.loads(saved)
+                next(iter(data.values()))[index] = wrong
+                receipts.write_text(json.dumps(data))
+                auto = self.cli('account-auto', str(owed))
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                self.assertEqual(auto.stdout.splitlines(), [
+                    f"pending {result['id']} Stop receipt names a different ledger or run", '0 accounted, 1 pending'])
+
+    def test_stop_publishes_no_receipt_when_a_receipted_row_changes(self):
+        agent = 'ship:reviewer--sol'
+        self.hook('subagent-stop', agent_type=agent, agent_id='reviewer')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        first = owed.read_bytes()
+        self.assertEqual(self.cli('append', 'deep-review', agent + '@reviewer', 'sha', 'pass').returncode, 0)
+        self.assertEqual(self.hook('stop'), '')
+        receipts = owed.parent.parent / 'accounted.json'
+        saved = receipts.read_bytes()
+        home = self.resolve()
+        home.write_text(home.read_text().replace('\tsha\tpass\t\n', '\tnew-sha\tpass\t\n'))
+        self.hook('subagent-stop', agent_type=agent, agent_id='reviewer')
+        pending = first + owed.read_bytes()
+        owed.write_bytes(pending)
+        blocked = json.loads(self.hook('stop'))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn('Accounting receipt row is missing or differs', blocked['reason'])
+        self.assertEqual(receipts.read_bytes(), saved)
+        self.assertEqual(owed.read_bytes(), pending)
+
+    def test_account_auto_skill_describes_evidence_requirements(self):
+        skill = (LEDGER.parent.parent / 'SKILL.md').read_text()
+        guidance = skill.split('Use the Stop diagnostic\'s `account-auto` command', 1)[1].split('`correct-binding`', 1)[0]
+        for phrase in ('`<session>/subagents/agent-<agent-id>.jsonl`', 'The first word must be a verdict word.',
+                       'exactly one `run-start` row', 'The receipt must name the same ledger and run.'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, guidance)
 
     def test_accounting_refuses_a_changed_bound_run(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')

@@ -256,7 +256,7 @@ def final_turn_text(path, epoch, budgets):
     after_tool = True
     newest = float('inf')
     try:
-        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), 'rb', buffering=0) as fh:
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW), 'rb', buffering=0) as fh:
             info = os.fstat(fh.fileno())
             if not stat.S_ISREG(info.st_mode):
                 raise OSError('transcript must be a regular file')
@@ -283,7 +283,7 @@ def final_turn_text(path, epoch, budgets):
                 if not isinstance(content, list):
                     raise TypeError('transcript content must have blocks')
                 if role == 'user':
-                    if any(block['type'] == 'text' and block['text'].strip() for block in content):
+                    if any(block['type'] != 'tool_result' for block in content):
                         # A prompt in the grace second makes turn ownership ambiguous.
                         return '\n'.join(reversed(texts)).strip() if when <= epoch else ''
                 elif any(block['type'] in ('tool_use', 'server_tool_use') for block in content):
@@ -322,26 +322,45 @@ def account_auto(pending):
             result = json.loads(raw)
             identifier = result['id']
             key = json.dumps([str(pending), cwd, identifier])
+            home = Path(result['ledger'])
+            if not home.is_absolute() or home.resolve() != home:
+                raise ValueError('recorded ledger must be an absolute path without symlinks')
+            run = result['run']
+            history = rows(home)
+            starts = [i for i, r in enumerate(history) if r[1] == 'run-start' and run_identity(i, r) == run]
+            if len(starts) != 1:
+                raise ValueError('recorded run is missing or differs')
             if key in receipts:
-                home, _, identity = receipts[key]
+                saved_home, saved_run, identity = receipts[key]
+                if saved_home != result['ledger'] or saved_run != run:
+                    raise ValueError('Stop receipt names a different ledger or run')
                 index = identity[0]
-                row = rows(Path(home))[index]
-                if run_identity(index, row) != identity:
+                if not 0 <= index < len(history) or run_identity(index, history[index]) != identity:
                     raise ValueError('Stop receipt row is missing or differs')
+                row = history[index]
             else:
-                home = Path(result['ledger'])
-                if not home.is_absolute() or home.resolve() != home:
-                    raise ValueError('recorded ledger must be an absolute path without symlinks')
-                row = next((r for r in rows(home) if accounting_row(r, key, result['run'])), None)
+                row = next((r for r in history if accounting_row(r, key, run)), None)
             if row is not None:
                 named, sha, verdict = row[2:5]
             else:
                 source = result.get('agent_transcript_path')
                 if not source:
                     raise ValueError('no transcript')
+                path = Path(source)
+                agent_id = result.get('agent_id')
+                if (not isinstance(agent_id, str) or not agent_id or not path.is_absolute()
+                        or path.name != f'agent-{agent_id}.jsonl' or path.parent.name != 'subagents'
+                        or path.parent.parent.name != pending.stem):
+                    raise ValueError('transcript path does not match the recorded agent and session')
+                try:
+                    canonical = path.resolve() == path
+                except (OSError, RuntimeError):
+                    canonical = False
+                if not canonical:
+                    raise ValueError('transcript path does not match the recorded agent and session')
                 epoch = int(epoch)
                 when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
-                text = final_turn_text(source, epoch, budgets)
+                text = final_turn_text(path, epoch, budgets)
                 if not text:
                     raise ValueError('no final turn text')
                 commits = re.finditer(r'\b[0-9a-fA-F]{40}\b', text)
@@ -354,10 +373,16 @@ def account_auto(pending):
                 label = next(labels, None)
                 if label is None or next(labels, None) is not None:
                     raise ValueError('expected one verdict')
-                tokens = set(re.findall(r'\b(?:pass|fail|failed|fails|failing|failure|findings)\b', label.lower()))
-                if not tokens or ('pass' in tokens and len(tokens) > 1):
+                words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower())
+                         if (word := token.strip('_'))]
+                verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
+                if not words or words[0] not in verdict_words:
                     raise ValueError('expected one verdict')
-                verdict = 'pass' if 'pass' in tokens else 'findings' if 'findings' in tokens else 'fail'
+                if 'pass' in words and (words[0] != 'pass' or any(
+                        word in verdict_words or word in ('not', 'no', 'never', 'without')
+                        or word.endswith(("n't", 'n’t')) for word in words[1:])):
+                    raise ValueError('expected one verdict')
+                verdict = 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
                 account(pending, identifier, 'review', agent, sha, verdict, f'{source} at {when}: {verdict}')
                 named = f'{agent}@{result["agent_id"]}' if result.get('agent_id') else agent
         except (json.JSONDecodeError, UnicodeError, OverflowError, RecursionError):

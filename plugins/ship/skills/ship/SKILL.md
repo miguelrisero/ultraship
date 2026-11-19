@@ -105,9 +105,11 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto "<pending.tsv>"
 
 Run the command alone on one line. Start exactly one line in the review result with `Verdict:` or `OVERALL:`. The label permits leading whitespace and Markdown markers, as in `**OVERALL:** PASS`. The command matches labels and whole verdict words without regard to case.
 
-The command reads only the words after the label on that line. It recognizes `pass` as positive. It recognizes `fail`, `failed`, `fails`, `failing`, `failure`, and `findings` as negative. It records `pass` for a positive verdict. For a negative verdict, it records `findings` if that word appears, or `fail` otherwise.
+The command reads the transcript at an absolute path without symlinks, ending in `<session>/subagents/agent-<agent-id>.jsonl`. The session matches the pending file's stem. The agent ID matches the recorded result.
 
-The result stays pending if the label is missing or repeats. It also stays pending if the value has no verdict word or mixes positive and negative words. Run Stop to publish the receipts.
+The command strips Markdown markers and whitespace from the value on the label line. The first word must be a verdict word. The command recognizes `pass` as positive and `fail`, `failed`, `fails`, `failing`, `failure`, and `findings` as negative. A `pass` value permits only one verdict word and excludes negations: `not`, `no`, `never`, `without`, and words ending in `n't`. The command records `findings` for a negative value that contains `findings`, or `fail` for other negative values.
+
+The command requires exactly one `run-start` row that matches the recorded run before it accepts a receipt or an `account-result` row. The receipt must name the same ledger and run. The result stays pending if any required evidence is missing or differs. It also stays pending if the verdict label repeats or the verdict value mixes positive and negative words. Run Stop to publish the receipts.
 
 When an accounted result is bound to another result's row, move its credit with:
 

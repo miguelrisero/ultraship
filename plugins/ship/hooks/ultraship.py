@@ -4608,6 +4608,7 @@ def receipt_custody(data, read_search=False):
             return False
 
         if (receipt_text(raw)
+                or ('ledger.py' in command and 'account-auto' in command and not own_account_call(data, raw))
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
                 or (('.local/state' in command or 'xdg_state_home' in command)
@@ -5111,6 +5112,10 @@ def owed_result(owed, session, occurrences):
     return {'id': 'legacy:' + hashlib.sha256(json.dumps([session, line, ordinal]).encode()).hexdigest()}
 
 
+class ReceiptIntegrityError(ValueError):
+    pass
+
+
 def account(ledger, notifications, receipts, session):
     histories, occurrences = {}, {}
     used = {json.dumps(value) for value in receipts.values()}
@@ -5120,6 +5125,8 @@ def account(ledger, notifications, receipts, session):
         try:
             result = owed_result(owed, session, occurrences)
             account_one(ledger, owed, result, receipts, session, histories, used)
+        except ReceiptIntegrityError:
+            raise
         except Exception as exc:
             failures.append((owed, result, exc))
     return failures
@@ -5157,12 +5164,12 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
     if result_id in receipts:
         saved = receipts[result_id]
         if saved[0] != str(home) or saved[1] != run:
-            raise ValueError('Accounting receipt names a different ledger or run')
+            raise ReceiptIntegrityError('Accounting receipt names a different ledger or run')
         index = saved[2][0]
         if not 0 <= index < len(history) or saved[2] != run_identity(index, history[index]):
-            raise ValueError('Accounting receipt row is missing or differs; restore the ledger evidence')
-        if not start < index < end and not ledger.accounting_row(history[index], result_id, result['run']):
-            raise ValueError('Accounting receipt row belongs to another run')
+            raise ReceiptIntegrityError('Accounting receipt row is missing or differs; restore the ledger evidence')
+        if not start < index < end and not ledger.accounting_row(history[index], result_id, run):
+            raise ReceiptIntegrityError('Accounting receipt row belongs to another run')
         return
     # Reserve an exact-result record before consuming an interchangeable ordinary review row.
     candidates = sorted(range(start + 1, len(history)), key=lambda i:
@@ -5238,10 +5245,7 @@ def stop(data):
                 # if concurrent Stop throughput matters. This never locks a legacy home.
                 with (STATE / 'accounted.lock').open('a') as lock:
                     fcntl.flock(lock, fcntl.LOCK_EX)
-                    try:
-                        receipts = json.loads(receipt_path.read_text())
-                    except FileNotFoundError:
-                        receipts = {}
+                    receipts = ledger.load_receipts(receipt_path)
                     before = receipts.copy()
                     pending_failures = account(ledger, owed, receipts, str(path))
                     if not pending_failures or receipts != before:

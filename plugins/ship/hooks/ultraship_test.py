@@ -474,6 +474,20 @@ class ReceiptCustodyTests(unittest.TestCase):
                     self.assert_custody_denial({**event, 'tool_input': {'command': invalid}})
             self.assert_custody_denial({**event, 'agent_type': 'ship:writer--sol', 'tool_input': {'command': auto}})
 
+    def test_plain_account_auto_requires_own_driver_call(self):
+        event = self.own_account_event()
+        event['session_id'] = 's1'
+        command = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+        driver = {**event, 'agent_type': 'ship:driver--sol', 'tool_input': {'command': command}}
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            self.assertIsNone(ultraship.guarded_pre({'cwd': str(self.cwd), **driver}))
+        self.assertEqual(output.getvalue(), '')
+        with self.subTest('writer'):
+            self.assert_custody_denial({**driver, 'agent_type': 'ship:writer--sol'})
+        with self.subTest('sibling'):
+            sibling = command.replace('s1.tsv', 'sibling.tsv')
+            self.assert_custody_denial({**driver, 'tool_input': {'command': sibling}})
+
     def test_own_account_call_denies_other_commands_and_callers(self):
         event = self.own_account_event()
         command = event['tool_input']['command']
