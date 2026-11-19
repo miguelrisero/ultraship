@@ -44,6 +44,7 @@ class EnvDirectoryTests(unittest.TestCase):
             ('printf sample | python3 -', 'inline interpreter code rule (program from a pipe)'),
             ('printf x | python3 --version', 'inline interpreter code rule (program from a pipe)'),
             ('printf x | xargs python3 --version', 'inline interpreter code rule (program from a pipe)'),
+            ('printf x | xargs node --version', 'inline interpreter code rule (program from a pipe)'),
             ('printf x | env python3 --version', 'inline interpreter code rule (program from a pipe)'),
             ('printf x | cat; env python3 --version', 'inline interpreter code rule (program from a pipe)'),
             ("printf x | sh -c 'python3 --version'", 'inline interpreter code rule (program from a pipe)'),
@@ -64,6 +65,14 @@ class EnvDirectoryTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
                 self.assertEqual(self.reason.splitlines()[0].split('Rule: ', 1)[1], rule + '.')
+
+    def test_python_version_after_path_change_is_denied(self):
+        self.assertTrue(self.denied('PATH=/usr/bin; printf sample | cat; python3 --version'))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
+
+    def test_python_version_in_piped_case_is_denied(self):
+        self.assertTrue(self.denied('printf sample | (case x in x) python3 --version;; esac)'))
+        self.assertIn('inline interpreter code rule (program from a pipe)', self.reason)
 
     def test_env_directory_admits_verbatim_repository_script(self):
         command = 'env -C /home/miguel/.vk-worktrees/.bettercoding-workspaces/188e-pati-pr-backlog/lanes/pr-7890/backend/api API_ENVIRONMENT=testing uv run --frozen python scripts/integration_shards.py --refresh'

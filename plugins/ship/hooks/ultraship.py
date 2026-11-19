@@ -2913,6 +2913,8 @@ def inline_interpreter_denial(command, cwd=None):
             if subscript_reason is None:
                 subscript_reason = 'array subscript evaluation rule (parse error)'
         command_positions = shell_command_positions(tokens)
+        # A case pattern can end with a parenthesis that does not close a pipe group.
+        has_case = any(raw == 'case' and start in command_positions for raw, _, start, _ in tokens)
         limit = (test_operand_limit(tokens, groups)
                  if top_level and not TEST_SHAPE_REDEFINE.search(command) else 0)
         segments, words, piped, pipe_groups = [], [], False, []
@@ -3034,8 +3036,8 @@ def inline_interpreter_denial(command, cwd=None):
                 if redirected or any(word[0] == '<' for word in words) or re.search(r'[<>][ \t]*\(|=\(', text[end:]):
                     return 'inline interpreter code rule (program from a pipe)'
                 # An independent pipeline does not feed this segment.
-                if (index == 0 and start in command_positions and not reads_pipe and not runtime_paths
-                        and re.fullmatch(r'[\w./-]+[ \t]+--version', segment_text)):
+                if (index == 0 and start in command_positions and not reads_pipe and not paths_changed
+                        and not has_case and re.fullmatch(r'[\w./-]+[ \t]+--version', segment_text)):
                     continue
                 if not arguments and not piped:
                     if piped_input or any(token[0] in {'<', '|', '('} or token[0] == '{'
