@@ -4775,8 +4775,8 @@ def receipt_custody(data, read_search=False):
         if (receipt_text(raw)
                 or ('account-auto' in account_command and 'claude_code_session_id' in account_command)
                 or (('ledger.py' in account_command and 'account-auto' in account_command
-                     or 'account' in account_command and any(char in joined for char in '$`'))
-                    and names_ledger() and not own_account_call(data, raw))
+                     or 'account' in account_command and any(char in joined for char in '$`') and names_ledger())
+                    and not own_account_call(data, raw))
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
                 or (('.local/state' in command or 'xdg_state_home' in command)

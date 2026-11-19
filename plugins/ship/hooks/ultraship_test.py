@@ -502,17 +502,11 @@ class ReceiptCustodyTests(unittest.TestCase):
                 with self.subTest(token=before + after, caller=caller):
                     self.assert_custody_denial({**event, 'agent_type': caller, 'tool_input': {'command': split}})
 
-    def test_writer_can_search_unrelated_ledger_words(self):
-        (self.cwd / 'ledger.py').touch()
-        for command in ('echo ledger.py account-auto', 'grep account-auto ./ledger.py'):
-            with self.subTest(command=command), redirect_stdout(io.StringIO()) as output, \
-                    redirect_stderr(io.StringIO()):
-                try:
-                    ultraship.guarded_pre({'cwd': str(self.cwd), 'agent_type': 'ship:writer--sol',
-                                           'tool_name': 'Bash', 'tool_input': {'command': command}})
-                except SystemExit:
-                    self.fail(output.getvalue())
-                self.assertEqual(output.getvalue(), '')
+    def test_account_auto_denies_a_copy_of_the_ledger(self):
+        copy = self.cwd / 'copied-ledger.py'
+        copy.write_bytes(LEDGER.read_bytes())
+        self.assert_custody_denial({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
+                                   'tool_input': {'command': 'python3 ./copied-ledger.py account-auto pending.tsv'}})
 
     def test_writer_cannot_account_with_current_or_cached_ledger(self):
         relative = '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
