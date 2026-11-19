@@ -155,7 +155,8 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
 5. Authorization record: each tool run that changes zero statements writes a generated record in the Git directory.
    The record names the lane, base, head, row IDs, base and head line ranges, expected counts and the unchanged mutant check.
    The tool prints the record path and every record field as `key=value` lines, with no row text.
-   The record expires on any head change. Rerun the tool at the frozen head before review; that run changes zero statements.
+   The record expires on any head change. Rerun the tool at the frozen head for each re-anchored row; that run changes zero statements.
+   A CoC-approved row change gets no tool run. Its decision file and the review in step 7 cover it.
    A run that changes statements writes no record entry and unfreezes the head. The writer commits the edit and reruns the tool.
    The driver copies the printed fields of the frozen-head run into the reviewer brief. The reviewer reads no file under `.git`.
 6. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
