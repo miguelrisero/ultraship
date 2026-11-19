@@ -77,9 +77,12 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             route = section((SHIP / name).read_text(), '### Lane-owned row route')
             for requirement in (
                 'Restore: a lane may restore rows that only its own unmerged commits changed, back to their merge-base bytes.',
-                'The writer runs a plain `git revert` of those lane commits and uses no Edit on protected files.',
-                'Then the writer runs the re-anchor tool on each restored row. Its record binds the exact line ranges.',
-                'The proof is a record entry with `base_equal` true: the row ranges have an empty diff against the merge base.',
+                'When a lane commit changed only those rows, the writer runs a plain `git revert` of that commit.',
+                'When it also changed other lines, the writer restores only each complete row range with native Edit and keeps the other edits.',
+                'The writer commits the restoration alone, then runs the re-anchor tool on each restored row.',
+                "The record binds the merge base, the starting head (the restoration commit's parent), the paths, the row IDs and the exact line ranges.",
+                'Each restored range must have an empty diff against the merge base; its record entry shows `base_equal` true.',
+                'Outside those ranges, the restoration commit must show no change against its starting head.',
                 'Any byte difference from the merge base leaves the restore route. That row follows the re-anchor route or goes to the CoC.',
             ):
                 with self.subTest(path=name, requirement=requirement):
@@ -103,6 +106,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.',
                 "For each restored row, confirm that only the lane's own unmerged commits changed it, and that its record entry shows `base_equal` true.",
                 'Check independently that each authorized restored range has an empty diff against the merge base.',
+                'Check that the restoration commit shows no change outside those ranges against its starting head.',
+                'Confirm that each restored row ID is unique and that each range covers its complete row.',
                 'For each added row, confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.',
                 'Return a blocking finding for a changed claim, a changed mutant, a changed test or a weaker row. The CoC decides those rows.',
                 'Report only paths, row IDs, fields and content-free findings. Quote no row text.',

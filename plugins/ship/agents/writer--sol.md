@@ -148,9 +148,12 @@ Scope: each row that the PR's failing anchor CI names, when the recorded base/he
    The script appends one `[[retired]]` table per row with the row ID, the reason and the `replacement` row ID.
    The replacement row guards the new code. The anchor guard fails a removed row without a `[[retired]]` entry.
 4. Restore: a lane may restore rows that only its own unmerged commits changed, back to their merge-base bytes.
-   The writer runs a plain `git revert` of those lane commits and uses no Edit on protected files.
-   Then the writer runs the re-anchor tool on each restored row. Its record binds the exact line ranges.
-   The proof is a record entry with `base_equal` true: the row ranges have an empty diff against the merge base.
+   When a lane commit changed only those rows, the writer runs a plain `git revert` of that commit.
+   When it also changed other lines, the writer restores only each complete row range with native Edit and keeps the other edits.
+   The writer commits the restoration alone, then runs the re-anchor tool on each restored row.
+   The record binds the merge base, the starting head (the restoration commit's parent), the paths, the row IDs and the exact line ranges.
+   Each restored range must have an empty diff against the merge base; its record entry shows `base_equal` true.
+   Outside those ranges, the restoration commit must show no change against its starting head.
    Any byte difference from the merge base leaves the restore route. That row follows the re-anchor route or goes to the CoC.
 5. Add: the writer adds rows for the PR's own new code, each with a claim, a designated test, a subject and a mutant.
 6. Authorization record: each successful tool run writes a generated record in the Git directory and prints its path.

@@ -70,6 +70,8 @@ For each retired row, confirm that the PR deletes the guarded code and that its 
 Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.
 For each restored row, confirm that only the lane's own unmerged commits changed it, and that its record entry shows `base_equal` true.
 Check independently that each authorized restored range has an empty diff against the merge base.
+Check that the restoration commit shows no change outside those ranges against its starting head.
+Confirm that each restored row ID is unique and that each range covers its complete row.
 For each added row, confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
 Return a blocking finding for a changed claim, a changed mutant, a changed test or a weaker row. The CoC decides those rows.
 Report only paths, row IDs, fields and content-free findings. Quote no row text.
