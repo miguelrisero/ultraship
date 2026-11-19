@@ -83,8 +83,9 @@ When the brief records the verified base commit and a root-level `git ls-tree` r
 Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
 For a CoC-approved row change, match each applied value to the decision file that the brief names by path and SHA256.
 Use that file only when the brief records the driver's SHA256 and binding check at the frozen head.
+For a narrowed claim, confirm the same designated test and mutant at the base and the frozen head, that the claim keeps only part of the base claim, and that the test proves all of it.
 Confirm that no other field changed and that the row is not weaker.
 Return a blocking finding for an unapproved changed claim, mutant or test, or a weaker row. The CoC decides those rows.
-A changed claim also needs a current task-specific owner event, which the CoC obtains.
+A widened or otherwise changed claim also needs a current task-specific owner event, which the CoC obtains.
 Report only paths, row IDs, fields and content-free findings. Quote no row text.
 You keep zero edit, execution and publication authority.
