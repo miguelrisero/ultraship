@@ -1,4 +1,5 @@
 """Synthetic re-anchor and exact-command admission guarantees."""
+from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import importlib.util
 import io
@@ -93,8 +94,8 @@ class ToolTests(unittest.TestCase):
         self.assertIn('replacement,', row['new'])
         row['old'], row['new'] = parsed_before['row'][0]['old'], parsed_before['row'][0]['new']
         self.assertEqual(parsed_before, parsed_after)
-        _, before_fields = reanchor.row_statements(before.decode(), 'target')
-        _, after_fields = reanchor.row_statements(after.decode(), 'target')
+        _, before_fields, _ = reanchor.row_statements(before.decode(), 'target')
+        _, after_fields, _ = reanchor.row_statements(after.decode(), 'target')
         for key in ('old', 'new'):
             self.assertNotEqual(before_fields[key][2], after_fields[key][2])
         def without_pair(text, fields):
@@ -105,6 +106,101 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(without_pair(before.decode(), before_fields), without_pair(after.decode(), after_fields))
         self.assertIn('changed_statements=2', output)
         self.assertIn('tomllib=PASS', output)
+
+    def record_path(self):
+        return self.root / self.git('rev-parse', '--git-path', 'ship/row-auth.json')
+
+    def test_record_schema_path_and_permissions_in_linked_worktree(self):
+        self.setup_pair()
+        original_record = self.record_path()
+        linked = self.root / 'linked'
+        self.git('worktree', 'add', '-qb', 'linked-lane', str(linked), self.head_sha)
+        self.root, self.row = linked, linked / self.row.name
+        record = self.record_path()
+        _, output = self.invoke()
+        self.assertEqual(output.splitlines()[-1], f'record={record}')
+        self.assertTrue(record.is_absolute())
+        self.assertFalse(original_record.exists())
+        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(record.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(json.loads(record.read_bytes()), {
+            'schema': 1, 'lane': 'linked-lane', 'base': self.base, 'head': self.head_sha,
+            'rows': [{'row_file': 'rows.toml', 'row_id': 'target', 'subject': 'subject.txt',
+                      'expected_count': 1, 'head_old_count': 1, 'hunk_count': 2,
+                      'mutant_unchanged': True, 'changed_statements': 2, 'lines': [4, 10]}],
+        })
+
+    def test_printed_fields_match_the_record_entry(self):
+        self.setup_pair(literal=True, extra='[row.mutant]\noperator = "replace"\n')
+        _, output = self.invoke()
+        record = self.record_path()
+        data = json.loads(record.read_bytes())
+        entry, = data.pop('rows')
+        self.assertEqual(entry['lines'], [4, 12])
+        fields = dict(line.split('=', 1) for line in output.splitlines()[1:])
+        for key, value in {**data, **entry, 'record': str(record)}.items():
+            self.assertEqual(fields[key], value if isinstance(value, str) else json.dumps(value))
+
+    def test_record_expires_on_new_head_and_rerun_changes_zero_statements(self):
+        self.setup_pair()
+        self.invoke()
+        record = self.record_path()
+        old_record = json.loads(record.read_bytes())
+        target = old_record['rows'][0]
+        old_record['rows'].append({**target, 'row_id': 'other'})
+        record.write_text(json.dumps(old_record))
+        self.head_sha = self.commit()
+        before, output = self.invoke()
+        self.assertEqual(self.row.read_bytes(), before)
+        self.assertIn('changed_statements=0', output.splitlines())
+        self.assertEqual(json.loads(record.read_bytes()), {
+            **old_record, 'head': self.head_sha, 'rows': [{**target, 'changed_statements': 0}],
+        })
+
+    def test_same_head_replaces_one_entry_and_keeps_other_rows(self):
+        self.setup_pair('start\nend\n', 'start\ninserted\nend\n', 'start\nend\n', literal=True)
+        other_row = self.row.with_name('other.toml')
+        other_row.write_bytes(self.row.read_bytes())
+        self.git('add', '--', other_row.name)
+        self.base = self.head_sha = self.commit()
+        self.invoke()
+        self.invoke(**{'row-file': str(other_row)})
+        record = self.record_path()
+        before = json.loads(record.read_bytes())
+        self.assertEqual([(row['row_file'], row['row_id']) for row in before['rows']],
+                         [('rows.toml', 'target'), ('other.toml', 'target')])
+        expected = {**before, 'rows': [dict(row) for row in before['rows']]}
+        before['rows'][0]['changed_statements'] = 2
+        record.write_text(json.dumps(before))
+        original, output = self.invoke()
+        self.assertEqual(self.row.read_bytes(), original)
+        self.assertIn('changed_statements=0', output.splitlines())
+        self.assertEqual(json.loads(record.read_bytes()), expected)
+
+    def test_concurrent_tool_writers_keep_both_entries(self):
+        self.setup_pair()
+        other_row = self.row.with_name('other.toml')
+        other_row.write_bytes(self.row.read_bytes().replace(b'id = "target"', b'id = "other"'))
+        head_subject = self.subject.read_bytes()
+        self.subject.write_text(self.old)
+        self.git('add', '--', other_row.name)
+        self.base = self.commit()
+        self.subject.write_bytes(head_subject)
+        self.head_sha = self.commit()
+        with ThreadPoolExecutor(max_workers=2) as writers:
+            first = writers.submit(self.invoke)
+            second = writers.submit(self.invoke, **{'row-file': str(other_row), 'row-id': 'other'})
+            first.result()
+            second.result()
+        entries = json.loads(self.record_path().read_bytes())['rows']
+        self.assertCountEqual([(row['row_file'], row['row_id']) for row in entries],
+                              [('rows.toml', 'target'), ('other.toml', 'other')])
+
+    def test_detached_head_refuses_before_writing(self):
+        self.setup_pair()
+        self.git('checkout', '--detach', '-q', self.head_sha)
+        self.invoke(2, 'lane branch required')
+        self.assertFalse(self.record_path().parent.exists())
 
     def test_control_characters_quotes_backslashes_and_unicode_round_trip(self):
         old = 'unique_start\nremove_first()\n' + SENTINEL + ' "café" \\path\t\x01\x7f\u2028\nremove()\nend\n'
@@ -155,7 +251,7 @@ class ToolTests(unittest.TestCase):
 
     def test_base_old_count_must_equal_one(self):
         self.setup_pair()
-        self.git('checkout', '-q', self.base)
+        self.git('checkout', '-qb', 'duplicate-base', self.base)
         self.subject.write_text(self.old + self.old)
         self.base = self.commit()
         self.head_sha = self.base
@@ -207,6 +303,11 @@ class ToolTests(unittest.TestCase):
         self.invoke()
         self.assertEqual(tomllib.loads(self.row.read_text())['row'][0]['mutant'], {'operator': 'replace'})
 
+    def test_disjoint_child_table_refuses_without_recording_a_partial_range(self):
+        self.setup_pair(extra='[other]\nkey = "value"\n["row".mutant]\noperator = "replace"\n')
+        self.invoke(2, 'row table is not contiguous')
+        self.assertFalse(self.record_path().exists())
+
     def test_nested_statement_is_frozen(self):
         self.setup_pair(extra='[row.mutant]\noperator = "replace"\n')
         self.row.write_text(self.row.read_text().replace('operator =', 'operator  ='))
@@ -242,6 +343,34 @@ class ToolTests(unittest.TestCase):
             self.assertEqual(reanchor.main(), 2)
         self.assertEqual(output.getvalue(), 'REFUSED: OSError\n')
         self.assertEqual(self.row.read_bytes(), original)
+        self.assertEqual(list(self.root.glob('.row-reanchor-*')), [])
+
+    def test_record_replace_failure_restores_original_row_and_keeps_prior_record(self):
+        self.setup_pair()
+        record = self.record_path()
+        record.parent.mkdir(mode=0o700)
+        prior = b'{"schema": 1, "lane": "expired", "rows": []}'
+        record.write_bytes(prior)
+        original = self.row.read_bytes()
+        argv = [str(TOOL), '--row-file', str(self.row), '--row-id', 'target', '--subject', 'subject.txt',
+                '--base', self.base, '--head', self.head_sha]
+        replace = os.replace
+
+        def fail_record_replace(source, target):
+            if target == record:
+                self.assertNotEqual(self.row.read_bytes(), original)
+                raise OSError(SENTINEL)
+            replace(source, target)
+
+        output = io.StringIO()
+        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
+                patch('sys.argv', argv), patch.object(reanchor.os, 'replace', side_effect=fail_record_replace), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(reanchor.main(), 2)
+        self.assertEqual(output.getvalue(), 'REFUSED: OSError\n')
+        self.assertEqual(self.row.read_bytes(), original)
+        self.assertEqual(record.read_bytes(), prior)
+        self.assertCountEqual(record.parent.iterdir(), [record, record.with_suffix('.lock')])
         self.assertEqual(list(self.root.glob('.row-reanchor-*')), [])
 
 
