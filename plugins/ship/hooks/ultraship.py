@@ -18,6 +18,7 @@ import traceback
 import unicodedata
 import urllib.parse
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
@@ -4596,13 +4597,15 @@ def own_account_call(data, raw):
     if not re.fullmatch(word + r'(?:[ \t]+' + word + r')*', raw):
         return False
     words = shlex.split(raw)
-    if len(words) != 10:
+    if (len(words) < 4 or words[:2] != ['python3', str(ledger_script())]
+            or words[3] != str(owed_file(data))):
         return False
-    interpreter, script, command, pending, result, step, agent, sha, verdict, evidence = words
-    return (interpreter == 'python3'
-            and script == str(ledger_script())
-            and command == 'account' and pending == str(owed_file(data))
-            and bool(re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', result))
+    if words[2] == 'account-auto':
+        return len(words) == 4
+    if len(words) != 10 or words[2] != 'account':
+        return False
+    result, step, agent, sha, verdict, evidence = words[4:]
+    return (bool(re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', result))
             and bool(re.fullmatch(r'[a-z][a-z-]*', step))
             and bool(re.fullmatch(r'[\w:.-]+(@[\w-]+)?', agent))
             and bool(re.fullmatch(r'[0-9a-f]{7,40}', sha))
@@ -4668,6 +4671,7 @@ def receipt_custody(data, read_search=False):
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
         command = normalized(raw)
+        account_command = normalized(raw.replace('\\\n', ''))
         raw_words = [word.translate(str.maketrans('', '', "\"'\\"))
                      for word in re.split(r'[\s;&|<>()]+', raw) if word]
         words = [re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
@@ -4686,6 +4690,8 @@ def receipt_custody(data, read_search=False):
             return False
 
         if (receipt_text(raw)
+                or ('ledger.py' in account_command and 'account-auto' in account_command
+                    and not own_account_call(data, raw))
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
                 or (('.local/state' in command or 'xdg_state_home' in command)
@@ -5184,81 +5190,130 @@ def subagent_stop(data):
             fh.write(f"{int(time.time())}\t{data['agent_type']}\t{cwd}\t{json.dumps(result)}\n")
 
 
-def account(ledger, cwd, notifications, receipts, session):
+def owed_result(owed, session, occurrences):
+    if len(owed) == 4:
+        return json.loads(owed[3])
+    line = '\t'.join(owed)
+    ordinal = occurrences.get(line, 0)
+    occurrences[line] = ordinal + 1
+    return {'id': 'legacy:' + hashlib.sha256(json.dumps([session, line, ordinal]).encode()).hexdigest()}
+
+
+class ReceiptIntegrityError(ValueError):
+    pass
+
+
+def account(ledger, notifications, receipts, session):
     histories, occurrences = {}, {}
+    used = {json.dumps(value) for value in receipts.values()}
+    failures = []
     for owed in notifications:
-        epoch, agent, _ = owed[:3]
-        if len(owed) == 4:
-            result = json.loads(owed[3])
-        else:
-            line = '\t'.join(owed)
-            ordinal = occurrences.get(line, 0)
-            occurrences[line] = ordinal + 1
-            result = {'id': 'legacy:' + hashlib.sha256(
-                json.dumps([session, line, ordinal]).encode()).hexdigest()}
-        result_id = json.dumps([session, cwd, result['id']])
-        if 'ledger' in result and result['run'] is None:
-            continue
-        # Recorded results keep their ledger across branch changes. Only legacy results resolve the current branch.
-        home = Path(result['ledger']) if 'ledger' in result else ledger.ledger_path(cwd).resolve()
-        if not home.is_absolute() or home.resolve() != home:
-            raise ValueError('Recorded ledger must be an absolute path without symlinks')
-        if home not in histories:
-            histories[home] = ledger.rows(home)
-        history = histories[home]
-        starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
-        if 'ledger' in result:
-            candidates = [i for i in starts if run_identity(i, history[i]) == result['run']]
-        else:
-            # Legacy notifications have no run identity: accept only one time-containing run.
-            candidates = []
-            for pos, start in enumerate(starts):
-                end = starts[pos + 1] if pos + 1 < len(starts) else len(history)
-                closed = next((r for r in history[start + 1:end] if r[1] == 'run-end'), None)
-                if int(history[start][0]) <= int(epoch) and (closed is None or int(epoch) <= int(closed[0])):
-                    candidates.append(start)
-        if len(candidates) != 1:
-            raise ValueError(f'No unambiguous ship run in {cwd} for pending result {result["id"]}; restore the intended run')
-        start = candidates[0]
-        end = next((i for i in starts if i > start), len(history))
-        end = next((i for i in range(start + 1, end) if history[i][1] == 'run-end'), end)
-        if result_id in receipts:
-            saved = receipts[result_id]
-            if saved[0] != str(home) or saved[1] != run_identity(start, history[start]):
-                raise ValueError('Accounting receipt names a different ledger or run')
-            index = saved[2][0]
-            if not 0 <= index < len(history) or saved[2] != run_identity(index, history[index]):
-                raise ValueError('Accounting receipt row is missing or differs; restore the ledger evidence')
-            if not start < index < end and not ledger.accounting_row(history[index], result_id, result['run']):
-                raise ValueError('Accounting receipt row belongs to another run')
-            continue
-        used = {json.dumps(value) for value in receipts.values()}
-        # Reserve an exact-result record before consuming an interchangeable ordinary review row.
-        candidates = sorted(range(start + 1, len(history)), key=lambda i:
-                            not ledger.accounting_row(history[i], result_id, run_identity(start, history[start])))
-        for i in candidates:
-            row = history[i]
-            identity = [str(home), run_identity(start, history[start]), run_identity(i, row)]
-            explicit = ledger.accounting_row(row, result_id, run_identity(start, history[start]))
-            regular = i < end and row[1] not in ledger.MARKS
-            kind, ident = ledger.agent_key(row[2])
-            # A row binds only to the result whose agent ID it names. Records written before
-            # ID binding (no 'v') also accept a row without an ID, so in-flight runs still clear.
-            owner = (kind, ident) == (agent, result.get('agent_id')) or (
-                result.get('v') != 2 and kind == agent and ident is None)
-            if (((explicit and kind == agent) or (regular and owner))
-                    and row[4] != 'owed' and int(row[0]) >= int(epoch) - 5 and json.dumps(identity) not in used):
+        result = {}
+        try:
+            result = owed_result(owed, session, occurrences)
+            account_one(ledger, owed, result, receipts, session, histories, used)
+        except ReceiptIntegrityError:
+            raise
+        except Exception as exc:
+            failures.append((owed, result, exc))
+    return failures
+
+
+def account_one(ledger, owed, result, receipts, session, histories, used):
+    epoch, agent, cwd = owed[:3]
+    result_id = json.dumps([session, cwd, result['id']])
+    if 'ledger' in result and result['run'] is None:
+        return
+    # Recorded results keep their ledger across branch changes. Only legacy results resolve the current branch.
+    home = Path(result['ledger']) if 'ledger' in result else ledger.ledger_path(cwd).resolve()
+    if not home.is_absolute() or home.resolve() != home:
+        raise ValueError('Recorded ledger must be an absolute path without symlinks')
+    if home not in histories:
+        histories[home] = ledger.rows(home)
+    history = histories[home]
+    starts = [i for i, row in enumerate(history) if row[1] == 'run-start']
+    if 'ledger' in result:
+        candidates = [i for i in starts if run_identity(i, history[i]) == result['run']]
+    else:
+        # Legacy notifications have no run identity: accept only one time-containing run.
+        candidates = []
+        for pos, start in enumerate(starts):
+            end = starts[pos + 1] if pos + 1 < len(starts) else len(history)
+            closed = next((r for r in history[start + 1:end] if r[1] == 'run-end'), None)
+            if int(history[start][0]) <= int(epoch) and (closed is None or int(epoch) <= int(closed[0])):
+                candidates.append(start)
+    if len(candidates) != 1:
+        raise ValueError(f'No unambiguous ship run in {cwd} for pending result {result["id"]}; restore the intended run')
+    start = candidates[0]
+    run = run_identity(start, history[start])
+    end = next((i for i in starts if i > start), len(history))
+    end = next((i for i in range(start + 1, end) if history[i][1] == 'run-end'), end)
+    if result_id in receipts:
+        saved = receipts[result_id]
+        if (not isinstance(saved, list) or len(saved) != 3
+                or not isinstance(saved[2], list) or not saved[2] or type(saved[2][0]) is not int):
+            raise ReceiptIntegrityError('Accounting receipt has an invalid shape')
+        if saved[0] != str(home) or saved[1] != run:
+            raise ReceiptIntegrityError('Accounting receipt names a different ledger or run')
+        index = saved[2][0]
+        if not 0 <= index < len(history) or saved[2] != run_identity(index, history[index]):
+            raise ReceiptIntegrityError('Accounting receipt row is missing or differs; restore the ledger evidence')
+        if not start < index < end and not ledger.accounting_row(history[index], result_id, run):
+            raise ReceiptIntegrityError('Accounting receipt row belongs to another run')
+        return
+    # Reserve an exact-result record before consuming an interchangeable ordinary review row.
+    candidates = sorted(range(start + 1, len(history)), key=lambda i:
+                        not ledger.accounting_row(history[i], result_id, run))
+    for i in candidates:
+        row = history[i]
+        explicit = ledger.accounting_row(row, result_id, run)
+        regular = i < end and row[1] not in ledger.MARKS
+        kind, ident = ledger.agent_key(row[2])
+        # A row binds only to the result whose agent ID it names. Records written before
+        # ID binding (no 'v') also accept a row without an ID, so in-flight runs still clear.
+        owner = (kind, ident) == (agent, result.get('agent_id')) or (
+            result.get('v') != 2 and kind == agent and ident is None)
+        if ((explicit and kind == agent) or (regular and owner)) and row[4] != 'owed' and int(row[0]) >= int(epoch) - 5:
+            identity = [str(home), run, run_identity(i, row)]
+            token = json.dumps(identity)
+            if token not in used:
                 receipts[result_id] = identity
-                break
-        else:
-            named = agent + (f'@{result["agent_id"]}' if result.get('agent_id') else '')
-            raise ValueError(f'Review results have no unused ledger row for agent {named}; pending result {result["id"]}')
+                used.add(token)
+                return
+    named = agent + (f'@{result["agent_id"]}' if result.get('agent_id') else '')
+    raise ValueError(f'Review results have no unused ledger row for agent {named}; pending result {result["id"]}')
+
+
+def pending_summary(failures, session):
+    lines = []
+    occurrences = {}
+    for owed, result in failures[:20]:
+        if result is None:
+            try:
+                result = owed_result(owed, session, occurrences)
+            except ValueError:
+                result = {}
+        if not isinstance(result, dict):
+            result = {}
+        epoch, agent = (owed + ['unknown', 'unknown'])[:2]
+        identifier = result.get('id') or 'unknown'
+        if result.get('agent_id'):
+            agent += f'@{result["agent_id"]}'
+        try:
+            when = datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()
+        except (ValueError, OverflowError, OSError):
+            when = 'unknown time'
+        lines.append(f'{identifier} {agent} {when}')
+    if len(failures) > 20:
+        lines.append(f'{len(failures) - 20} more results ({len(failures)} total pending)')
+    return '\n'.join(lines)
 
 
 def stop(data):
     path = owed_file(data)
     if data.get('stop_hook_active'):
         return
+    listing = ''
     try:
         reminder = path.with_suffix('.stop-state')
         try:
@@ -5272,6 +5327,7 @@ def stop(data):
             if not owed:
                 reminder.unlink(missing_ok=True)
                 return
+            failures = [(row, None) for row in owed]
             try:
                 ledger = load_ledger()
                 receipt_path = STATE / 'accounted.json'
@@ -5279,18 +5335,21 @@ def stop(data):
                 # if concurrent Stop throughput matters. This never locks a legacy home.
                 with (STATE / 'accounted.lock').open('a') as lock:
                     fcntl.flock(lock, fcntl.LOCK_EX)
-                    try:
-                        receipts = json.loads(receipt_path.read_text())
-                    except FileNotFoundError:
-                        receipts = {}
-                    for cwd in {o[2] for o in owed}:
-                        account(ledger, cwd, [o for o in owed if o[2] == cwd], receipts, str(path))
-                    ledger.publish(receipt_path, receipts)
+                    receipts = ledger.load_receipts(receipt_path)
+                    before = receipts.copy()
+                    pending_failures = account(ledger, owed, receipts, str(path))
+                    if not pending_failures or receipts != before:
+                        ledger.publish(receipt_path, receipts)
+                    if pending_failures:
+                        failures = [(row, result) for row, result, _ in pending_failures]
+                        raise pending_failures[0][2]
             except Exception as accounting_error:
+                listing = '\n' + pending_summary(failures, str(path)) + '\n'
+                rows = [row for row, _ in failures]
                 try:
-                    canonical = [row[:3] + [json.loads(row[3])] if len(row) == 4 else row for row in owed]
+                    canonical = [row[:3] + [json.loads(row[3])] if len(row) == 4 else row for row in rows]
                 except ValueError:
-                    canonical = owed
+                    canonical = rows
                 fingerprint = hashlib.sha256(json.dumps(sorted(
                     json.dumps(row, sort_keys=True) for row in canonical)).encode()).hexdigest()
                 try:
@@ -5312,6 +5371,7 @@ def stop(data):
     except Exception as exc:
         print(json.dumps({'decision': 'block', 'reason':
               f'Pending review evidence retained at {path}: {exc}. '
+              f'{listing}'
               'Resolve ledger access (set SHIP_LEDGER_DIR to an absolute permitted directory if needed). '
               'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]` in its open run, '
               'Read every retained result and use its exact agent identity, including @agent_id when present. '
@@ -5319,7 +5379,9 @@ def stop(data):
               f'`python3 {shlex.quote(str(ledger_script()))} '
               f"account {shlex.quote(str(path))} <result-id> <step> <agent> <sha> <verdict> '<evidence>'`; "
               'this appends bookkeeping without reopening the run. '
-              'Run this command alone on one line with the evidence in single quotes. Never invent review evidence.'}))
+              'Run this command alone on one line with the evidence in single quotes. Never invent review evidence. '
+              f'For results with clear transcript evidence, run `python3 {shlex.quote(str(ledger_script()))} '
+              f'account-auto {shlex.quote(str(path))}` alone on one line.'}))
 
 
 def compact(data):

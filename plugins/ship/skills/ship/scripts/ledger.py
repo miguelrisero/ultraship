@@ -8,10 +8,13 @@ import fcntl
 import hashlib
 import json
 import os
+import re
+import stat
 import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 REQUIRED = {
@@ -23,6 +26,7 @@ USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py run-start <full|light> <run-id> [board-path]
        ledger.py append <step> <agent>[@<agent-id>] <sha> <verdict> [note]
        ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
+       ledger.py account-auto <pending.tsv>
        ledger.py correct-binding <result-id> <ledger-line> <reason>"""
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
 MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
@@ -216,6 +220,191 @@ def account(pending, identifier, step, agent, sha, verdict, evidence):
     return home
 
 
+TRANSCRIPT_SCAN_LIMIT = 64 * 1024 * 1024
+TRANSCRIPT_CHUNK = 64 * 1024
+
+
+class TranscriptLimit(Exception):
+    pass
+
+
+def reverse_lines(fh, budget):
+    position = fh.seek(0, os.SEEK_END)
+    fragments = []
+    while position:
+        size = min(position, TRANSCRIPT_CHUNK, budget[0])
+        if not size:
+            raise TranscriptLimit
+        position -= size
+        fh.seek(position)
+        data = fh.read(size)
+        budget[0] -= size
+        if len(data) != size:
+            raise OSError('transcript read incomplete')
+        first, *lines = data.split(b'\n')
+        if not lines:
+            fragments.append(first)
+            continue
+        yield b''.join([lines.pop(), *reversed(fragments)])
+        yield from reversed(lines)
+        fragments = [first]
+    yield b''.join(reversed(fragments))
+
+
+def final_turn_text(path, epoch, budgets):
+    texts = []
+    after_tool = True
+    newest = float('inf')
+    try:
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW), 'rb', buffering=0) as fh:
+            info = os.fstat(fh.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise OSError('transcript must be a regular file')
+            budget = budgets.setdefault((info.st_dev, info.st_ino), [TRANSCRIPT_SCAN_LIMIT])
+            for line in reverse_lines(fh, budget):
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                role = entry['type']
+                if role not in ('user', 'assistant'):
+                    continue
+                stamp = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
+                if stamp.tzinfo is None:
+                    raise TypeError('transcript timestamp has no time zone')
+                when = stamp.timestamp()
+                if when > newest:
+                    raise ValueError('transcript timestamps out of order')
+                newest = when
+                if when > epoch + 1:
+                    continue
+                content = entry['message']['content']
+                if isinstance(content, str) and role == 'user':
+                    content = [{'type': 'text', 'text': content}]
+                if not isinstance(content, list):
+                    raise TypeError('transcript content must have blocks')
+                if role == 'user':
+                    if any(block['type'] != 'tool_result' for block in content):
+                        # A prompt in the grace second makes turn ownership ambiguous.
+                        return '\n'.join(reversed(texts)).strip() if when <= epoch else ''
+                elif any(block['type'] in ('tool_use', 'server_tool_use') for block in content):
+                    after_tool = False
+                elif after_tool:
+                    texts.extend(block['text'] for block in reversed(content) if block['type'] == 'text')
+    except TranscriptLimit:
+        raise ValueError('transcript scan limit reached') from None
+    except FileNotFoundError:
+        raise ValueError('no transcript') from None
+    except OSError:
+        raise ValueError('transcript unavailable') from None
+    except (AttributeError, KeyError, TypeError, OverflowError, RecursionError, ValueError):
+        raise ValueError('transcript parse error') from None
+    return ''
+
+
+def load_receipts(path):
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
+
+
+def account_auto(pending):
+    pending = Path(pending).absolute()
+    receipts = load_receipts(STATE / 'accounted.json')
+    budgets = {}
+    accounted = remaining = 0
+    for fields in (line.split('\t') for line in pending.read_text().splitlines() if line):
+        identifier = 'unknown'
+        try:
+            if len(fields) != 4:
+                raise ValueError('no recorded transcript')
+            epoch, agent, cwd, raw = fields
+            result = json.loads(raw)
+            identifier = result['id']
+            key = json.dumps([str(pending), cwd, identifier])
+            home = Path(result['ledger'])
+            if not home.is_absolute() or home.resolve() != home:
+                raise ValueError('recorded ledger must be an absolute path without symlinks')
+            run = result['run']
+            history = rows(home)
+            starts = [i for i, r in enumerate(history) if r[1] == 'run-start' and run_identity(i, r) == run]
+            if len(starts) != 1:
+                raise ValueError('recorded run is missing or differs')
+            if key in receipts:
+                saved_home, saved_run, identity = receipts[key]
+                if saved_home != result['ledger'] or saved_run != run:
+                    raise ValueError('Stop receipt names a different ledger or run')
+                index = identity[0]
+                if not 0 <= index < len(history) or run_identity(index, history[index]) != identity:
+                    raise ValueError('Stop receipt row is missing or differs')
+                row = history[index]
+                start = starts[0]
+                end = next((i for i in range(start + 1, len(history))
+                            if history[i][1] in ('run-start', 'run-end')), len(history))
+                if not start < index < end and not accounting_row(row, key, run):
+                    raise ValueError('Stop receipt row belongs to another run')
+            else:
+                row = next((r for r in history if accounting_row(r, key, run)), None)
+            if row is not None:
+                named, sha, verdict = row[2:5]
+            else:
+                source = result.get('agent_transcript_path')
+                if not source:
+                    raise ValueError('no transcript')
+                path = Path(source)
+                agent_id = result.get('agent_id')
+                if (not isinstance(agent_id, str) or not agent_id or not path.is_absolute()
+                        or path.name != f'agent-{agent_id}.jsonl' or path.parent.name != 'subagents'
+                        or path.parent.parent.name != pending.stem):
+                    raise ValueError('transcript path does not match the recorded agent and session')
+                try:
+                    canonical = source == str(path) == os.path.realpath(source)
+                except (OSError, RuntimeError):
+                    canonical = False
+                if not canonical:
+                    raise ValueError('transcript path does not match the recorded agent and session')
+                epoch = int(epoch)
+                when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+                text = final_turn_text(path, epoch, budgets)
+                if not text:
+                    raise ValueError('no final turn text')
+                commits = re.finditer(r'(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])', text)
+                first = next(commits, None)
+                if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
+                    raise ValueError('expected one commit')
+                sha = first[0].lower()
+                label_pattern = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
+                labels = (match[1] for line in text.splitlines() if (match := label_pattern.match(line)))
+                label = next(labels, None)
+                if label is None or next(labels, None) is not None:
+                    raise ValueError('expected one verdict')
+                words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower())
+                         if (word := token.strip('_'))]
+                verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
+                if not words or words[0] not in verdict_words:
+                    raise ValueError('expected one verdict')
+                if 'pass' in words and (words[0] != 'pass' or any(
+                        word in verdict_words or word in ('not', 'no', 'never', 'without')
+                        or word.endswith(("n't", 'n’t')) for word in words[1:])):
+                    raise ValueError('expected one verdict')
+                verdict = 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
+                account(pending, identifier, 'review', agent, sha, verdict, f'{source} at {when}: {verdict}')
+                named = f'{agent}@{result["agent_id"]}' if result.get('agent_id') else agent
+        except (json.JSONDecodeError, UnicodeError, OverflowError, RecursionError):
+            reason = 'transcript or accounting parse error'
+        except (OSError, KeyError, IndexError, TypeError):
+            reason = 'accounting data missing or invalid'
+        except ValueError as exc:
+            reason = str(exc)
+        else:
+            print(f'accounted {identifier} {named} {sha} {verdict}')
+            accounted += 1
+            continue
+        print(f'pending {identifier} {reason}')
+        remaining += 1
+    print(f'{accounted} accounted, {remaining} pending')
+
+
 def publish(path, value):
     with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, prefix=path.name + '.', delete=False) as saved:
         json.dump(value, saved)
@@ -237,10 +426,18 @@ def correct_binding(identifier, line, reason):
     if not reason.strip() or '\t' in reason or '\n' in reason:
         raise ValueError('correction needs a single-line reason')
     receipt_path = STATE / 'accounted.json'
-    with (STATE / 'accounted.lock').open('a') as lock:
+    missing = ('result ID must match exactly one accounted result: this result has no Stop receipt. '
+               'Account the retained result if needed, then run Stop to publish its receipt.')
+    try:
+        lock = (STATE / 'accounted.lock').open('a')
+    except FileNotFoundError:
+        raise ValueError(missing) from None
+    with lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        receipts = json.loads(receipt_path.read_text())
+        receipts = load_receipts(receipt_path)
         keys = [k for k in receipts if json.loads(k)[2] == identifier]
+        if not keys:
+            raise ValueError(missing)
         if len(keys) != 1:
             raise ValueError('result ID must match exactly one accounted result')
         key = keys[0]
@@ -268,7 +465,9 @@ def correct_binding(identifier, line, reason):
             def fits(i, receipt):
                 # A bound row names its result's agent ID, because Stop binds only on a matching ID.
                 return agent_key(history[i][2]) == agent_key(history[receipt[2][0]][2])
-            if not review(index) or not fits(index, saved):
+            own_record = (0 <= index < len(history) and history[index][4] != 'owed'
+                          and accounting_row(history[index], key, run))
+            if not (review(index) or own_record) or not fits(index, saved):
                 raise ValueError("target line must be a completed review row of this result's run and agent")
             new = run_identity(index, history[index])
             if new == old:
@@ -305,6 +504,11 @@ def main(argv):
         if len(args) != 7:
             sys.exit(USAGE)
         print(account(*args))
+        return
+    if cmd == 'account-auto':
+        if len(args) != 1:
+            sys.exit(USAGE)
+        account_auto(*args)
         return
     if cmd == 'correct-binding':
         if len(args) != 3:
