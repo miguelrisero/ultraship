@@ -60,7 +60,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Keep row TOML text and pair bytes out of messages, briefs and PR bodies. Name each edit by path, row ID and field.',
                 'The driver applies zero protected edits. Writers keep zero publication authority.',
                 "Send these rows to the CoC: a new or changed mutant on an existing row, a changed designated test, a retirement without a replacement, and a row that the PR's own diff does not break.",
-                'Send a changed claim to the CoC too. The CoC approves it only with a current task-specific owner event.',
+                'A lane may narrow the claim of a row that its own PR breaks, under a CoC decision file named by absolute path and SHA256.',
+                'It claims less than the old claim and nothing that the test does not prove.',
+                'Send a widened or otherwise changed claim to the CoC. The CoC approves it only with a current task-specific owner event.',
                 'A CoC approval is a frozen decision file named by absolute path and SHA256.',
                 'It binds the row ID, the source commit, the fields and their replacement values.',
                 "The writer verifies its SHA256 and bindings before the edit. The driver verifies them again at the frozen head and records the result in the reviewer brief.",
@@ -106,6 +108,24 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     copy = section((SHIP / name).read_text(), heading).rstrip('\n')
                     self.assertEqual(canonical, copy.replace('](../skills/ship/references/', '](references/'))
 
+    def test_narrowed_claim_keeps_designated_test_and_mutant_in_every_copy(self):
+        for name in ROUTE_CARRIERS:
+            with self.subTest(path=name):
+                route = section((SHIP / name).read_text(), '### Lane-owned row route')
+                self.assertIn(
+                    'A narrowed claim keeps the same designated test and the same mutant. '
+                    'It claims less than the old claim and nothing that the test does not prove.',
+                    route.splitlines(),
+                )
+        for name in REVIEWERS:
+            with self.subTest(path=name):
+                review = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
+                self.assertIn(
+                    'For a narrowed claim, confirm the same designated test and mutant at the base and the frozen head, '
+                    'and that the test proves the whole narrowed claim.',
+                    review.splitlines(),
+                )
+
     def test_lane_owned_review_pins_independence_scope_and_all_row_verdicts(self):
         for name in REVIEWERS:
             text = (SHIP / 'agents' / name).read_text()
@@ -131,7 +151,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 "Use that file only when the brief records the driver's SHA256 and binding check at the frozen head.",
                 'Confirm that no other field changed and that the row is not weaker.',
                 'Return a blocking finding for an unapproved changed claim, mutant or test, or a weaker row. The CoC decides those rows.',
-                'A changed claim also needs a current task-specific owner event, which the CoC obtains.',
+                'and that the test proves the whole narrowed claim.',
+                'A widened or otherwise changed claim also needs a current task-specific owner event, which the CoC obtains.',
                 'Report only paths, row IDs, fields and content-free findings. Quote no row text.',
                 'You keep zero edit, execution and publication authority.',
             ):
