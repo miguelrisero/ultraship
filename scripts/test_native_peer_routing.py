@@ -110,6 +110,9 @@ class NativePeerRoutingTests(unittest.TestCase):
                             'across handoff and restart before closure'):
             self.assertIn(requirement, text)
         self.assertNotIn('Chief reuses a lane driver\'s Input', text)
+        register = text.split('## Register and continue\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('- With a CoC, decisions reach the owner through the CoC. '
+                      'In a standalone run, an owner-only item becomes a standalone Input.', register)
         state = (ROOT / 'plugins/chief/skills/run/references/state.md').read_text()
         self.assertIn('pending native handoff', state)
         self.assertIn('continuing driver and acceptance', state)

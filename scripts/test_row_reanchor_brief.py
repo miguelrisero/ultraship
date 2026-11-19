@@ -139,6 +139,8 @@ class BriefTests(unittest.TestCase):
             'Admission record: `<admission record path>`, expires at `<expiry time>`.',
             'Read the standing grant directly.',
             'Verify each binding before running the tool.',
+            'A hook denial before the tool starts counts as zero runs.',
+            'After that denial, the writer may retry once in a compliant form; the driver re-dispatches it.',
             'Commit only the row file on success.',
             'Keep the row pending on a refusal.',
             'Report the refusal to the driver.',
