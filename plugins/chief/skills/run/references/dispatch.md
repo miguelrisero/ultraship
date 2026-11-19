@@ -6,7 +6,7 @@ Answer all five questions before each dispatch. A "no" means fix the brief first
 2. **Contract.** Does the brief state the goal, the files in scope, the readable files, and a check that proves done?
 3. **Base.** Does the brief name the worktree, branch, and base SHA, based on current remote main?
 4. **Authority.** Does the brief state which of commit, push, PR, merge, and production actions are granted?
-5. **Return.** Does the brief name the checkpoint fields the agent must return?
+5. **Return.** Does the brief name when the agent reports and what the report contains?
 
 ## Native peer routing contract
 
@@ -67,10 +67,10 @@ Task: <frozen goal, one paragraph>
 Repository: <owner/repo>   Worktree: <absolute path>   Branch: <name>   Base SHA: <sha>
 In scope: <files or areas>   Out of scope: <files or areas owned by other lanes>
 Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
-A hook refusal is final: report it and stop.
+After a hook refusal, retry in another form when the refusal reason is fixed or the new form meets the rule the refusal names. You may always ask your superior for permission to run the refused command.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
-The stop covers the refused call; the loaded formatting, coordination and method-only resend routes stay.
+The ship plugin's Loaded instructions and refusals section sets the retry rule and the ask-your-superior rule.
 Depends on: <lanes or none>
 Done when: <acceptance checks and permitted test commands>
 Mutation boundary: Execute mutation checks, anchor checks, and selectors only in the admitted battery STATIC part at the frozen head after GO; keep execution commands out of this brief.
@@ -84,6 +84,7 @@ Mode: /ship:ship light
 Routing: <copy the Native peer routing contract above verbatim into this brief and every timer, recovery, driver, writer, reviewer, and child brief, including retries and replacements>
 Output: <copy the Model-independent output contract above verbatim; preserve it in every inherited brief>
 Owner custody: canonical CoC Input ID/version, exact owner answer event, continuing driver and acceptance, result Input receipt; preserve pending handoff and critical holds when CoC is unavailable.
+Report on a transition or at a deadline. Report a blocked lane once with evidence and again only when the blocker changes.
 Return: agent ID, head SHA, PR URL, ledger gaps, CI and review state, next action, blockers with evidence
 Guard: <the guard constraint block, verbatim>
 ```

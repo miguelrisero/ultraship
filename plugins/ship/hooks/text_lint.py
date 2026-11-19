@@ -23,15 +23,11 @@ HOLD_WORDS = re.compile(r'\b(preserv\w*|holds?|custody|custodian|admission|admit
 # The harness addresses an in-session subagent by its agent ID and a background subagent's parent as `main`.
 SUBAGENT = re.compile(r'main|a[0-9a-f]{16}')
 RECEIPT_MARKER = re.compile(r'<!-- ultraship-receipt:[0-9a-f]{32} -->')
-PEER_TEMPLATE = """<Outcome in one sentence, and what it means for the recipient.>
-Facts
-- <Verified fact with its source: PR number, run ID or UTC time.>
-Decision
-- <The action you take or ask for, within existing authority.>
-Next
-- <Accountable owner> will <action> by <YYYY-MM-DDTHH:MMZ>.
-<Every line: one point per sentence, at most 25 words each, with a space between words.>
-<Put the receipt marker exactly once; a second marker or marker name makes the refusal final.>"""
+PEER_TEMPLATE = 'Lead with the outcome and its meaning. Separate words with spaces.'
+CLASSIFICATION_RETRY = ('Set exactly one output-kind meta tag to match the Input intent:\n'
+                        '<meta name="output-kind" content="decision"> or <meta name="output-kind" content="result">.\n'
+                        'Resend the same Input with its recipient, choices, and other fields unchanged.')
+UNICODE_RETRY = 'Replace surrogate code points with valid Unicode characters. Resend the same call.'
 INPUT_TEMPLATE = '''Use exactly one output-kind meta tag: decision or result.
 Decision:
 <meta name="output-kind" content="decision">
@@ -42,14 +38,14 @@ Decision:
 <h2>If no answer</h2><p>...</p>
 Result alternative:
 <meta name="output-kind" content="result"><p>...</p>
-Write at most 25 words per sentence.
-Put the receipt marker exactly once; a second marker or marker name makes the refusal final.'''
+Write at most 25 words per sentence.'''
 
 
 class FindingsError(ValueError):
-    def __init__(self, findings, formatting_only=False):
+    def __init__(self, findings, formatting_only=False, remedies=()):
         self.findings = findings
         self.formatting_only = formatting_only
+        self.remedies = remedies
         super().__init__(' '.join(findings))
 
 
@@ -77,9 +73,11 @@ class VisibleText(HTMLParser):
             self.hidden.append(tag)
         if self.hidden:
             return
-        attrs = dict(attrs)
-        if tag == 'meta' and attrs.get('name') == 'output-kind':
-            self.kinds.append(attrs.get('content'))
+        if tag == 'meta':
+            names = [value for key, value in attrs if key == 'name']
+            if 'output-kind' in names:
+                contents = [value for key, value in attrs if key == 'content']
+                self.kinds.append(contents[0] if len(names) == len(contents) == 1 else None)
         if tag in self.BLOCKS:
             self.parts.append('\n')
         elif tag in ('td', 'th'):
@@ -110,41 +108,51 @@ def peer_text(text):
     return html.unescape(RECEIPT_MARKER.sub('', text))
 
 
+def lint_off():
+    return {name.strip() for name in os.environ.get('SHIP_LINT_OFF', '').split(',')}
+
+
 def hold_wall(text):
     """Six or more hold words in a status message restate standing holds; a brief carries its restrictions."""
-    if 'Owner helper request:' in text:
+    if lint_off() & {'all', 'hold'} or 'Owner helper request:' in text:
         return
     # Main's HTML view joins a word that a tag splits; the split view also reads text after a stray `<`.
     for view in (re.sub(r'[<>]', ' ', peer_text(text)), ''.join(VisibleText(text).parts)):
         prose = re.sub(r'`[^`]*`', '', view)
         words = ' '.join(t for t in prose.split() if not re.search(r'https?://|/', t))
         if len(HOLD_WORDS.findall(words)) >= 6:
-            raise ValueError('Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.')
+            raise FormatError(['Keep any new hold in one line, drop restated standing holds, and send what changed and the next action.'])
+
+
+def check_unicode(text):
+    if re.search(r'[\ud800-\udfff]', text) and not lint_off() & {'all', 'unicode'}:
+        raise FindingsError(['Use valid Unicode in the message or Input.'], remedies=(UNICODE_RETRY,))
 
 
 def check(text, kind='result'):
+    check_unicode(text)
+    off = lint_off()
     visible = ''.join(VisibleText(text).parts)
-    plain = peer_text(text) if kind == 'peer' else visible
-    # A peer reads plain text; main's HTML view of the raw text keeps every word and sentence refusal main made.
-    views = (plain, visible) if kind == 'peer' else (plain,)
-    shorthand = long_sentence = False
-    for index, view in enumerate(views):
-        prose = re.sub(r'`[^`]*`', '', view)
-        token_prose = re.sub(r'[<>]', ' ', prose) if kind == 'peer' and index == 0 else prose
-        tokens = [t for t in token_prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
-        long = [t for t in tokens if len(t) >= 22]
-        shorthand |= len(long) >= 3 or bool(tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2
-        long_sentence |= any(len(s.split()) > 25 for s in re.split(r'(?<=[.!?])\s+|\n+', prose))
     errors = []
-    if shorthand:
-        errors.append('Separate glued words with spaces; remove compressed shorthand.')
-    if long_sentence:
-        errors.append('Write at most 25 words per sentence.')
-    sections = ('Facts', 'Decision', 'Next') if kind == 'peer' else (
-        ('What is wrong', 'Why now', 'Options', 'Recommendation', 'If no answer') if kind == 'decision' else ())
-    for section in sections:
-        if not re.search(r'^\s*(?:#{1,6}\s*)?' + re.escape(section) + r'\b', plain, re.M | re.I):
-            errors.append('Missing section: ' + section)
+    if not off & {'all', 'glued'}:
+        # HTML can join fragments of a glued word that the plain view separates.
+        views = (peer_text(text), visible) if kind == 'peer' else (visible,)
+        for index, view in enumerate(views):
+            prose = re.sub(r'`[^`]*`', '', view)
+            token_prose = re.sub(r'[<>]', ' ', prose) if kind == 'peer' and index == 0 else prose
+            tokens = [t for t in token_prose.split() if not re.search(r'https?://|/|`|^[0-9a-f]{12,}$', t)]
+            long = [t for t in tokens if len(t) >= 22]
+            if len(long) >= 3 or (tokens and len(long) / len(tokens) >= 0.08) or len(glued(tokens)) >= 2:
+                errors.append('Separate glued words with spaces; remove compressed shorthand.')
+                break
+    if kind in ('decision', 'result') and not off & {'all', 'sentence'}:
+        prose = re.sub(r'`[^`]*`', '', visible)
+        if any(len(s.split()) > 25 for s in re.split(r'(?<=[.!?])\s+|\n+', prose)):
+            errors.append('Write at most 25 words per sentence.')
+    if kind == 'decision' and not off & {'all', 'sections'}:
+        for section in ('What is wrong', 'Why now', 'Options', 'Recommendation', 'If no answer'):
+            if not re.search(r'^\s*(?:#{1,6}\s*)?' + re.escape(section) + r'\b', visible, re.M | re.I):
+                errors.append('Missing section: ' + section)
     if errors:
         raise FormatError(errors)
 
@@ -154,21 +162,27 @@ def sendmessage_body(args):
 
 
 def outgoing(event):
-    findings, formatting_only = [], True
+    findings, remedies, formatting_only = [], [], True
 
     def collect(function, *args):
         nonlocal formatting_only
         try:
             function(*args)
-        except FormatError as exc:
-            findings.extend(exc.findings)
+        except FindingsError as exc:
+            findings.extend(finding for finding in exc.findings if finding not in findings)
+            remedies.extend(remedy for remedy in exc.remedies if remedy not in remedies)
+            formatting_only &= exc.formatting_only
         except Exception as exc:
             findings.append(str(exc))
             formatting_only = False
 
     def inspect():
+        nonlocal formatting_only
         tool, args = event.get('tool_name', ''), event.get('tool_input') or {}
         if tool == 'SendMessage':
+            for field in ('message', 'content', 'summary'):
+                if args.get(field) is not None:
+                    collect(check_unicode, args[field])
             text = sendmessage_body(args)
             if text:  # Native subscriptions and lifecycle controls can have no prose body.
                 collect(check, text, 'peer')
@@ -185,6 +199,8 @@ def outgoing(event):
             valid_kind = len(kinds) == 1 and kinds[0] in ('decision', 'result')
             if not valid_kind:
                 findings.append('Input HTML requires one explicit output-kind classification: decision or result.')
+                remedies.append(CLASSIFICATION_RETRY)
+                formatting_only = False
             collect(check, content.get('title', ''))
             collect(check, body, kinds[0] if valid_kind else 'result')
 
@@ -192,7 +208,7 @@ def outgoing(event):
     if findings:
         if formatting_only:
             raise FormatError(findings)
-        raise FindingsError(findings)
+        raise FindingsError(findings, remedies=remedies)
 
 
 def now():
@@ -276,38 +292,6 @@ def signature(receipt, key):
     return hmac.new(key, canonical({k: v for k, v in receipt.items() if k != 'mac'}), hashlib.sha256).hexdigest()
 
 
-def pending_path(identity):
-    fields = [identity.get(field) for field in ('session_id', 'agent_id', 'tool_name', 'recipient')]
-    if isinstance(identity.get('tool_name'), str) and identity['tool_name'].endswith('create_input'):
-        fields.append(identity.get('input_key'))
-    key = hashlib.sha256(canonical(fields)).hexdigest()
-    return store_dir() / 'pending' / key
-
-
-def clear_pending(receipt, event):
-    identity = dict(receipt)
-    create_input = isinstance(identity.get('tool_name'), str) and identity['tool_name'].endswith('create_input')
-    if create_input:
-        identity['input_key'] = input_identity(event)['input_key']
-    paths = {pending_path(identity)}
-    if create_input:
-        # Ship releases before this change keep create_input entries at the four-field path.
-        fields = [identity.get(field) for field in ('session_id', 'agent_id', 'tool_name', 'recipient')]
-        paths.add(store_dir() / 'pending' / hashlib.sha256(canonical(fields)).hexdigest())
-    for path in paths:
-        try:
-            entry = json.loads(path.read_text())
-            same = entry['id'] == receipt['id']
-            if not same and entry['state'] == 'open':
-                sibling = read_receipt(entry['id'])
-                same = (sibling.get('input_sha256') == receipt.get('input_sha256')
-                        and sibling.get('tool_use_id') == receipt.get('tool_use_id'))
-            if same:
-                path.unlink(missing_ok=True)
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-
-
 def prune_receipts(directory):
     timestamp = now().timestamp()
     receipts = []
@@ -327,6 +311,7 @@ def prune_receipts(directory):
             path.unlink(missing_ok=True)
             path.with_suffix('.consumed').unlink(missing_ok=True)
             remaining -= 1
+    # Releases before 1.11.0 wrote these entries; they expire here.
     for name in ('pending', 'citation-refused'):
         for path in (store_dir() / name).glob('*'):
             try:
@@ -335,34 +320,6 @@ def prune_receipts(directory):
             except OSError:
                 pass
     return young
-
-
-def pending_entry(identity):
-    paths = [pending_path(identity)]
-    if isinstance(identity.get('tool_name'), str) and identity['tool_name'].endswith('create_input'):
-        # Ship releases before this change keep create_input entries at the four-field path.
-        fields = [identity.get(field) for field in ('session_id', 'agent_id', 'tool_name', 'recipient')]
-        paths.append(store_dir() / 'pending' / hashlib.sha256(canonical(fields)).hexdigest())
-    for index, path in enumerate(paths):
-        try:
-            entry = json.loads(path.read_text())
-            receipt_id = entry['id']
-            if entry['state'] not in ('open', 'spent') or not re.fullmatch(r'[0-9a-f]{32}', receipt_id):
-                raise ValueError('Invalid pending receipt entry.')
-            receipt_path = store_dir() / 'receipts' / (receipt_id + '.json')
-            receipt = json.loads(receipt_path.read_bytes())
-            created = datetime.fromisoformat(receipt['created_at'].replace('Z', '+00:00'))
-            if timedelta(0) <= now() - created < timedelta(hours=24):
-                if index and ('input_key' in receipt
-                              or receipt.get('fields_sha256') != identity.get('fields_sha256')):
-                    return None
-                if receipt_path.with_suffix('.consumed').exists():
-                    entry['state'] = 'spent'
-                return entry
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-        path.unlink(missing_ok=True)
-    return None
 
 
 def mark_consumed(receipt_id):
@@ -375,37 +332,7 @@ def mark_consumed(receipt_id):
     return True
 
 
-def check_pending(event):
-    args = event.get('tool_input') or {}
-    tool = event.get('tool_name', '')
-    if tool == 'SendMessage':
-        prose = sendmessage_body(args)
-    elif tool.endswith(('create_input', 'update_input')):
-        content = args.get('content') or {}
-        if isinstance(content, str):
-            content = json.loads(content)
-        prose = content.get('html') or content.get('title')
-    else:
-        return
-    session = event.get('session_id')
-    if not prose or not isinstance(session, str) or not session:
-        return
-    entry = pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **input_identity(event)})
-    if entry and entry['state'] == 'open':
-        receipt_id = entry['id']
-        pending_message = ('A formatting-only refusal to this recipient is pending. Cite its receipt `'
-                           + receipt_id + '` with `<!-- ultraship-receipt:' + receipt_id + ' -->` in this message.')
-        try:
-            if not mark_consumed(receipt_id):
-                return
-        except OSError:
-            raise ValueError(pending_message) from None
-        raise ValueError('Receipt `' + receipt_id + '` is now spent. '
-                         'The message refused under receipt `' + receipt_id + '` stays refused. '
-                         'Later messages need no citation.')
-
-
-def write_receipt(event, findings, formatting_only, parent, resend_refused=False):
+def write_receipt(event, findings, formatting_only, parent):
     key = receipt_key()
     directory = store_dir() / 'receipts'
     directory.mkdir(mode=0o700, exist_ok=True)
@@ -413,8 +340,6 @@ def write_receipt(event, findings, formatting_only, parent, resend_refused=False
         raise OSError('Receipt store contains 2000 receipts younger than 24 hours.')
     session = event.get('session_id')
     identity = input_identity(event)
-    entry = None if resend_refused else pending_entry({'session_id': session, 'agent_id': event.get('agent_id'), **identity})
-    spent = entry is not None and entry['state'] == 'spent'
     receipt = {
         'id': uuid.uuid4().hex,
         'session_id': event.get('session_id'),
@@ -423,7 +348,7 @@ def write_receipt(event, findings, formatting_only, parent, resend_refused=False
         **identity,
         'findings': [finding[:500] for finding in findings],
         'formatting_only': formatting_only,
-        'resend_allowed': formatting_only and parent is None and not spent and isinstance(session, str) and bool(session),
+        'resend_allowed': formatting_only and isinstance(session, str) and bool(session),
         'parent': parent,
         'created_at': now().isoformat().replace('+00:00', 'Z'),
     }
@@ -438,16 +363,6 @@ def write_receipt(event, findings, formatting_only, parent, resend_refused=False
         os.replace(temporary, directory / (receipt['id'] + '.json'))
     finally:
         Path(temporary).unlink(missing_ok=True)
-    if receipt['resend_allowed'] or resend_refused:
-        pending = pending_path(receipt)
-        pending.parent.mkdir(mode=0o700, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(dir=pending.parent)
-        try:
-            with os.fdopen(fd, 'w') as output:
-                json.dump({'id': receipt['id'], 'state': 'spent' if resend_refused else 'open'}, output)
-            os.replace(temporary, pending)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
     prune_receipts(directory)
     return receipt
 
@@ -518,19 +433,6 @@ def consume_receipt(receipt_id, event, receipt):
             raise ValueError('Receipt expires after 24 hours.')
         if created > now():
             raise ValueError('Receipt creation is in the future.')
-        try:
-            fd = os.open(citation_refusal_path(receipt), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        except FileNotFoundError:
-            pass
-        else:
-            with os.fdopen(fd, 'rb') as source:
-                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                    raise ValueError('Citation refusal marker is not a regular file.')
-                refused_at = datetime.fromisoformat(source.read(64).decode().replace('Z', '+00:00'))
-            if refused_at.tzinfo is None:
-                raise ValueError('Citation refusal marker requires a UTC time.')
-            if created <= refused_at:
-                raise ValueError('A final citation refusal spent this receipt.')
         if not mark_consumed(receipt_id):
             raise ValueError('Receipt is consumed.')
         return receipt
@@ -538,55 +440,8 @@ def consume_receipt(receipt_id, event, receipt):
         raise ValueError('Invalid receipt citation: ' + str(exc)) from None
 
 
-def citation_refusal_path(identity):
-    fields = [identity.get(field) for field in
-              ('session_id', 'agent_id', 'tool_name', 'recipient', 'fields_sha256')]
-    return store_dir() / 'citation-refused' / hashlib.sha256(canonical(fields)).hexdigest()
-
-
-def write_citation_refusal(event):
-    session = event.get('session_id')
-    if not isinstance(session, str) or not session:
-        return
-    temporary = None
-    try:
-        path = citation_refusal_path({'session_id': session, 'agent_id': event.get('agent_id'),
-                                     **input_identity(event)})
-        store_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
-        path.parent.mkdir(mode=0o700, exist_ok=True)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
-            fcntl.flock(directory, fcntl.LOCK_EX)
-            refused_at = now()
-            try:
-                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-                with os.fdopen(fd, 'rb') as source:
-                    if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                        raise ValueError('Citation refusal marker is not a regular file.')
-                    current = datetime.fromisoformat(source.read(64).decode().replace('Z', '+00:00'))
-                if current.tzinfo is None:
-                    raise ValueError('Citation refusal marker requires a UTC time.')
-                refused_at = max(refused_at, current)
-            except (OSError, ValueError):
-                pass
-            fd, temporary = tempfile.mkstemp(dir=path.parent)
-            with os.fdopen(fd, 'w') as output:
-                output.write(refused_at.isoformat().replace('+00:00', 'Z'))
-            os.replace(temporary, path)
-        finally:
-            os.close(directory)
-    except OSError:
-        pass
-    finally:
-        if temporary is not None:
-            try:
-                Path(temporary).unlink(missing_ok=True)
-            except OSError:
-                pass
-
-
 def hook(event, parse_error=None):
-    parent, consumed = None, None
+    parent, retry = None, ''
     try:
         if parse_error is not None:
             raise parse_error
@@ -599,50 +454,39 @@ def hook(event, parse_error=None):
                         and owner == input_identity(event)['recipient'] and owner != event.get('agent_id')):
                     parent = None
                 else:
-                    consumed = consume_receipt(parent, event, receipt)
+                    consume_receipt(parent, event, receipt)
         except ValueError:
-            write_citation_refusal(event)
+            retry = ' Remove the receipt marker and resend with the same action, recipient and scope.'
             raise
         if event.get('tool_name') not in ('Agent', 'Task'):
-            if not parent:
-                check_pending(event)
             outgoing(event)
-        if consumed:
-            clear_pending(consumed, event)
         return
+    except FormatError as exc:
+        template = PEER_TEMPLATE if event.get('tool_name') == 'SendMessage' else INPUT_TEMPLATE
+        output = {'additionalContext': 'Output contract warning: ' + str(exc)
+                  + ' This call proceeds. Follow this guidance next time:\n' + template}
     except Exception as exc:
-        findings = exc.findings if isinstance(exc, FindingsError) else [str(exc)]
-        formatting_only = isinstance(exc, FindingsError) and exc.formatting_only
-    reason = 'Output contract: ' + ' '.join(findings)
-    try:
-        receipt = write_receipt(event, findings, formatting_only, parent, resend_refused=consumed is not None)
-    except Exception:
-        reason += ' No receipt was written, so no resend of this message is allowed in any form.'
-    else:
-        if receipt['resend_allowed']:
-            template = INPUT_TEMPLATE
-            if event.get('tool_name') == 'SendMessage':
-                template = PEER_TEMPLATE
-            reason += (' You may resend once with the same action, recipient, scope and content, changed only in format.'
-                       + ' Resend with this shape:\n' + template)
-        else:
-            reason += ' This refusal is not formatting-only, so no resend of this message is allowed in any form.' if not formatting_only else ''
-            if parent:
-                reason += ' Its receipt is used and no further resend of this message is allowed.'
-            elif formatting_only and isinstance(event.get('session_id'), str) and event['session_id']:
-                reason += (' This refusal permits no resend, because a receipt to this recipient '
-                           'was spent within 24 hours.')
-        reason += ' Receipt: `' + receipt['id'] + '`.'
-        if receipt['resend_allowed']:
-            reason += ' To resend, put `<!-- ultraship-receipt:' + receipt['id'] + ' -->` in the resent prose.'
-    print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
-        'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))
+        if isinstance(exc, FindingsError) and exc.remedies:
+            retry = ' ' + ' '.join(exc.remedies)
+        if not retry:
+            retry = (' This refusal is not formatting-only. Resend after the content meets the rule above,'
+                     ' or ask your superior for permission.')
+            tool = event.get('tool_name', '')
+            if isinstance(tool, str) and tool.endswith(('create_input', 'update_input')):
+                retry += ' Use this shape:\n' + INPUT_TEMPLATE
+        reason = 'Output contract: ' + str(exc) + ' Keep the work pending.' + retry
+        try:
+            reason += ' Receipt: `' + write_receipt(event, [str(exc)], False, parent)['id'] + '`.'
+        except Exception:
+            pass
+        output = {'permissionDecision': 'deny', 'permissionDecisionReason': reason}
+    print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', **output}}))
 
 
 def self_test():
     peer = 'The review passes. The driver can continue.\nFacts: The checks pass.\nDecision: Continue.\nNext: The driver resumes at 2026-10-31T12:00:00Z.'
     decision = '<meta name="output-kind" content="decision"><h2>What is wrong</h2><p>The release waits.</p><h2>Why now</h2><p>The deadline approaches.</p><h2>Options A to C</h2><p>A: Hold. B: Release. C: Defer.</p><h2>Recommendation</h2><p>Choose A.</p><h2>If no answer</h2><p>Keep the hold.</p>'
-    check(peer, 'peer')
+    check(' '.join(['word'] * 26) + '.', 'peer')
     for tool in ('mcp__bettercoding__create_input', 'mcp__bettercoding__update_input'):
         outgoing({'tool_name': tool, 'tool_input': {'content': {'html': decision, 'contract': {'choices': [], 'allow_text': True}}}})
         outgoing({'tool_name': tool, 'tool_input': {'request_answer': True, 'content': {'html': '<meta name="output-kind" content="result"><p>The release completes.</p>', 'contract': {'choices': [{'id': 'ok', 'label': 'Useful'}], 'allow_text': True}}}})
@@ -668,7 +512,6 @@ def self_test():
                        ("Send the deadline2026 note by the by8November00's end.", 'result'),
                        (' '.join(['z' * 22] + ['word'] * 11), 'result'),
                        (' '.join(['word'] * 26) + '.', 'result'),
-                       (peer.replace('Facts:', 'Evidence:'), 'peer'),
                        (decision.replace('Recommendation', 'Advice'), 'decision')]:
         try:
             check(text, kind)
@@ -690,4 +533,9 @@ if __name__ == '__main__':
         else:
             hook(event)
     else:
-        check(sys.stdin.read(), sys.argv[1] if len(sys.argv) > 1 else 'result')
+        try:
+            check(sys.stdin.read(), sys.argv[1] if len(sys.argv) > 1 else 'result')
+        except FormatError as exc:
+            print('Output contract warning: ' + str(exc), file=sys.stderr)
+        except FindingsError as exc:
+            sys.exit(str(exc) + ' ' + ' '.join(exc.remedies))

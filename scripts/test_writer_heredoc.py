@@ -813,7 +813,7 @@ class WriterHeredocTests(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
-                self.assertEqual(self.reason.split('Rule: ', 1)[1].removesuffix('.'), reason)
+                self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'), reason)
 
     def test_double_quoted_substitutions_scan_interpreter_bodies(self):
         """Catch split interpreter names inside double-quoted substitution bodies."""
@@ -1210,7 +1210,7 @@ class WriterHeredocTests(unittest.TestCase):
             for command in commands:
                 with self.subTest(command=command):
                     self.assertTrue(self.denied(command), self.reason)
-                    self.assertEqual(self.reason.rsplit('Rule: ', 1)[-1].removesuffix('.'), reason)
+                    self.assertEqual(self.reason.split('\n', 1)[0].rsplit('Rule: ', 1)[-1].removesuffix('.'), reason)
 
     SUBSCRIPT_NAMES = (
         "'a[$(no\"\"de -\"\"e \"process.exit(42)\")]'",
@@ -2973,7 +2973,7 @@ TAIL
         self.assertTrue(self.denied("python3 - <<'PY'\nimport subprocess\n"
                                     "subprocess.run(['sh', 'x.sh'])\nPY\ngit status\n"))
 
-    def test_nonpublication_classifier_refusals_grant_zero_replay_or_driver_handoff(self):
+    def test_nonpublication_classifier_refusals_name_retry_and_driver_permission(self):
         from unittest.mock import patch
 
         cases = (
@@ -2998,8 +2998,8 @@ TAIL
                     self.assertTrue(self.denied(command))
                 self.assertIn('Rule: ' + rule, self.reason)
                 self.assertRegex(self.reason, r'(?i)(?:operation|scope).*denied')
-                self.assertRegex(self.reason, r'(?i)zero.*(?:alternate|alternative).*(?:form|actor)')
-                self.assertRegex(self.reason, r'(?i)cause.*resolution.*fresh.*disposition')
+                self.assertIn('Retry in another form when the refusal reason is fixed or the new form meets the rule below', self.reason)
+                self.assertIn('ask for permission; the driver may grant it or run the step itself.', self.reason)
                 self.assertNotIn('Return this step to your driver', self.reason)
                 self.assertNotIn('the driver may run it', self.reason)
 

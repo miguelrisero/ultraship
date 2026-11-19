@@ -96,7 +96,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
                 ('mcp__fff__grep', {'query': {'text': str(receipt_store)}})):
             result = hook('pre', {**caller, 'tool_name': tool, 'tool_input': inputs}, env)
             assert denied(result), (caller, tool, inputs)
-            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+            assert result['hookSpecificOutput']['permissionDecisionReason'].split('\n', 1)[0] == custody
         for tool, inputs in (('Bash', {'command': 'git status --short'}),
                              ('Bash', {'command': 'git add plugins/ship/hooks/text_lint.py'}),
                              ('Bash', {'command': 'python3 -m unittest scripts.test_text_lint'}),
@@ -110,7 +110,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
                                  ('Bash', {'command': 'pwd'})):
                 result = hook('pre', {**caller, 'cwd': cwd, 'tool_name': tool, 'tool_input': inputs}, env)
                 assert denied(result), (caller, cwd, tool)
-                assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+                assert result['hookSpecificOutput']['permissionDecisionReason'].split('\n', 1)[0] == custody
     receipt_alias = Path(tmp) / 'ReceiptAlias'
     receipt_store.mkdir(parents=True)
     receipt_alias.symlink_to(receipt_store, target_is_directory=True)
@@ -119,7 +119,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
             result = hook('pre', {**caller, 'tool_name': tool,
                                   'tool_input': {'file_path': str(receipt_alias / 'key')}}, env)
             assert denied(result), (caller, tool)
-            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+            assert result['hookSpecificOutput']['permissionDecisionReason'].split('\n', 1)[0] == custody
         for command, state_root in (
                 ('cat ~/.local/sta[t]e/ultraship/*/key', str(Path(tmp) / '.local/state')),
                 ('cat $HOME/.local/sta[t]e/ultraship/*/key', str(Path(tmp) / '.local/state')),
@@ -129,7 +129,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
             result = hook('pre', {**caller, 'tool_name': 'Bash', 'tool_input': {'command': command}},
                           {**env, 'XDG_STATE_HOME': state_root})
             assert denied(result), (caller, command)
-            assert result['hookSpecificOutput']['permissionDecisionReason'] == custody
+            assert result['hookSpecificOutput']['permissionDecisionReason'].split('\n', 1)[0] == custody
     assert denied(hook('pre', {'tool_name': 'Write', 'tool_input': {'file_path': str(receipt_store).upper()}}, env))
 
     assert denied(hook('pre', {'tool_name': 'Agent', 'tool_input': {'subagent_type': 'ship:reviewer--sol', 'model': 'opus'}}, env))
@@ -372,9 +372,13 @@ class PreInputTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     output = json.loads(result.stdout or '{}').get('hookSpecificOutput', {})
                     self.assertEqual(output.get('permissionDecision'), 'deny')
-                    self.assertEqual(output.get('permissionDecisionReason'), (
+                    reason, _, retry = output['permissionDecisionReason'].partition('\n')
+                    self.assertEqual(reason, (
                         'The ship hook could not read its input as a JSON object, so it denies this call. '
                         'Report the blocked scope to the driver.'))
+                    self.assertIn('Keep the work pending.', retry)
+                    self.assertIn('Retry only after you meet the rule above.', retry)
+                    self.assertIn('report the blocked step, the rule, and the next permitted action', retry)
 
 
 class ReceiptCustodyTests(unittest.TestCase):
@@ -395,7 +399,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assertEqual(exit.exception.code, 0)
         result = json.loads(output.getvalue())['hookSpecificOutput']
         self.assertEqual(result['permissionDecision'], 'deny')
-        self.assertEqual(result['permissionDecisionReason'], reason)
+        self.assertEqual(result['permissionDecisionReason'].split('\n', 1)[0], reason)
 
     def own_account_event(self):
         os.environ.pop('XDG_STATE_HOME', None)
@@ -685,7 +689,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                     self.assertEqual(exit.exception.code, 0)
                     result = json.loads(output.getvalue())['hookSpecificOutput']
                     self.assertEqual(result['permissionDecision'], 'deny')
-                    self.assertEqual(result['permissionDecisionReason'],
+                    self.assertEqual(result['permissionDecisionReason'].split('\n', 1)[0],
                                      'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
                                      'Report the blocked scope to the driver.')
                     self.assertIn('Traceback (most recent call last):', errors.getvalue())
@@ -1526,6 +1530,104 @@ class WriterGitHubGuardTests(unittest.TestCase):
         self.assertEqual(ultraship.writer_git_file_denial('echo {a/b,c}', str(self.repo)),
                          'git control path brace slash rule')
         self.assertIsNone(ultraship.writer_git_file_denial('echo {a,b}/c', str(self.repo)))
+
+
+class ReviewThreadReadTests(unittest.TestCase):
+    def test_literal_graphql_reads_with_pagination_and_variables(self):
+        # These shell commands are classifier inputs only.
+        watcher = HOOK.parents[1] / 'skills/babysit/scripts/threads.sh'
+        query = next(line.removeprefix('query=') for line in watcher.read_text().splitlines()
+                     if line.startswith('query='))
+        watcher_read = ("gh api graphql --paginate -F owner=example-org -F name=example-repo -F pr=456 "
+                        f"-f query={query} --jq '.data.repository.pullRequest.reviewThreads.nodes[]'")
+        reads = (
+            'gh pr view https://github.com/example-org/example-repo/pull/123 '
+            "--json headRefOid,statusCheckRollup,body --jq '{head:.headRefOid,body,checks:[.statusCheckRollup[]"
+            '|select((.conclusion == "FAILURE") or (.name|test("[Ii]ntegration|Merge Queue|create-preview")))'
+            "|{name,status,conclusion,detailsUrl}]}'; gh api graphql --paginate -f query='query($endCursor:String)"
+            '{ repository(owner:"example-org",name:"example-repo"){ pullRequest(number:123)'
+            '{ reviewThreads(first:50,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{id isResolved '
+            "isOutdated path line comments(first:15){nodes{id databaseId body url author{login}}}}}}}}' "
+            "--jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not)'",
+            "gh api graphql --paginate -f query='query($endCursor:String)"
+            '{repository(owner:"example-org",name:"example-repo"){pullRequest(number:456){headRefOid '
+            'reviewThreads(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{id isResolved '
+            "isOutdated path comments(last:3){nodes{body url databaseId author{login}}}}}}}}' "
+            "--jq '.data.repository.pullRequest | {headRefOid,total:(.reviewThreads.nodes|length),"
+            "unresolved:[.reviewThreads.nodes[] | select(.isResolved|not)]}'",
+            watcher_read,
+        )
+        self.assertIn('after:$endCursor', query)
+        for command in reads:
+            with self.subTest(command=command):
+                self.assertIsNone(ultraship.review_thread_denial(command))
+        for command in (
+            watcher_read + ' -F owner=another-org',
+            watcher_read + ' -F undeclared=x',
+            watcher_read.replace(',$endCursor:String', ''),
+            watcher_read.replace('pageInfo{hasNextPage endCursor}', ''),
+            watcher_read.replace('pageInfo{hasNextPage endCursor}', 'pageInfo{hasNextPage}'),
+            watcher_read.replace('pageInfo{hasNextPage endCursor}nodes{id',
+                                 'nodes{id pageInfo{hasNextPage endCursor}'),
+            watcher_read.replace('-f query=', '-f= query='),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(ultraship.review_thread_denial(command), 'gh api write outside the helper')
+
+    def test_paginated_graphql_read_refuses_two_cursor_bound_connections(self):
+        threads = 'reviewThreads(first:20,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{id}}'
+        command = ("gh api graphql --paginate -f query='query($endCursor:String)"
+                   '{repository(owner:"example-org",name:"example-repo"){'
+                   f'firstPr:pullRequest(number:1){{{threads}}}'
+                   f'secondPr:pullRequest(number:2){{{threads}}}'
+                   "}}'")
+        self.assertEqual(ultraship.review_thread_denial(command), 'gh api write outside the helper')
+
+    def test_paginated_graphql_read_refuses_connection_under_pull_request_list(self):
+        command = ("gh api graphql --paginate -f query='query($endCursor:String)"
+                   '{repository(owner:"example-org",name:"example-repo"){pullRequests(first:2){nodes{'
+                   'reviewThreads(first:20,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{id}}'
+                   "}}}}'")
+        self.assertEqual(ultraship.review_thread_denial(command), 'gh api write outside the helper')
+
+    def test_paginated_graphql_read_requires_one_page_info_response_key(self):
+        query = ("gh api graphql --paginate -f query='query($endCursor:String)"
+                 '{repository(owner:"example-org",name:"example-repo"){pullRequest(number:456){'
+                 'reviewThreads(first:20,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{id}}'
+                 'comments(first:5){%s}'
+                 "}}}'")
+        denied = 'gh api write outside the helper'
+        for sibling, reason in (
+            ('pageInfo{hasNextPage endCursor}', denied),
+            ('pageInfo:nodes{id}', denied),
+            ('metadata:pageInfo{hasNextPage endCursor}', None),
+        ):
+            with self.subTest(sibling=sibling):
+                self.assertEqual(ultraship.review_thread_denial(query % sibling), reason)
+
+    def test_graphql_read_exception_excludes_writes_and_unproven_fields(self):
+        query = ("-f query='query($owner:String!,$endCursor:String)"
+                 '{repository(owner:$owner,name:"example-repo"){pullRequest(number:456)'
+                 '{reviewThreads(first:20,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{id}}}}}\'')
+        owner = '-F owner=example-org'
+        read = f'gh api graphql --paginate {query} {owner}'
+        self.assertIsNone(ultraship.review_thread_denial(read))
+        write = 'gh api write outside the helper'
+        for command, reason in (
+            ("gh api graphql --paginate -f query='mutation { example { id } }'", write),
+            ('gh api repos/o/r/issues -X POST -f title=example', write),
+            (f'{read} {query}', write),
+            (read.replace(owner, '-F owner=@example.txt'), write),
+            (read.replace(owner, '-F owner="{owner}"'), write),
+            (read.replace(owner, '-F owner="$OWNER"'), write),
+            (f'{read} -X PATCH', write),
+            (read.replace('api graphql', 'api graphql/'), write),
+            (read.replace('-f query=', '-f= query='), write),
+            (f'{read} --input example.json', 'opaque GraphQL query'),
+            ('gh api graphql --paginate -f query="$QUERY"', 'opaque GraphQL query'),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(ultraship.review_thread_denial(command), reason)
 
 
 if __name__ == '__main__':

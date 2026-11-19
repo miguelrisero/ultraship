@@ -15,13 +15,20 @@ Reviewers use Grep, Glob, and Read with exact absolute paths.
 An exact absolute path has no `~`, `.` or `..` segment, repeated or trailing `/`, symlink, surrounding whitespace, or Unicode that is not in NFC form.
 A directory path has no trailing `/`: `/abs/repo/backend/api/services`, not `/abs/repo/backend/api/services/`.
 When a hook refusal says to report the blocked scope, reviewers report that call as blocked scope in the verdict.
-Reviewers never resend that call in another form, including the path the refusal names; the coordinator decides a new brief.
+Reviewers may retry that call in another form when the new form meets the rule the refusal names, or ask the coordinator for permission or a new brief.
 Reviewers use LSP hover and documentSymbol on one file only.
 Reviewers use no MCP (`mcp__`) tools.
 Reviewers search only directories that contain no `tests/mutation/` directory.
 Report a failed or empty scoped search to the coordinator; never widen the search scope.
 Triage and verifier briefs follow these reviewer search rules.
 An explicit repository-root path does not authorize broader discovery.
+
+For the [lane-owned row route](../SKILL.md#lane-owned-row-route), dispatch a separate admitted reviewer for the named rows at the frozen head.
+Require its independent verdict before publication.
+For [standalone main-row repair](owner-decisions.md#standalone-main-row-repair), except the default row path exclusion only for the separately admitted reviewer and approved row extents.
+Keep ordinary review briefs free of protected paths and row hunks. Keep pair bytes and row TOML text out of every brief.
+Require the matching frozen review receipt before publication, even when step 9 would otherwise permit it.
+Preserve execution admission and the reviewer MCP ban under both [scoped decision routes](owner-decisions.md#scoped-owner-event-verification).
 
 | # | Step | Ledger step | Agents |
 |---|---|---|---|
