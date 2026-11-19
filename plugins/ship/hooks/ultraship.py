@@ -4204,7 +4204,9 @@ REVIEW_THREAD_PREFLIGHT = re.compile(
     r'''(?P<repo>[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+)\.git)" \{n\+\+\} END\{exit !\(n==1 && NR==1\)\}'; '''
     r'url=\$\(GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -c http\.(?P=url)\.followRedirects=false -c credential\.helper= '
     r"ls-remote --get-url '(?P=url)'\); test \"\$url\" = '(?P=url)'; "
-    r'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -c http\.(?P=url)\.followRedirects=false -c credential\.helper= '
+    r'GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ALLOW_PROTOCOL=https '
+    r'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -C / -c http\.sslVerify=true '
+    r'-c http\.(?P=url)\.followRedirects=false -c credential\.helper= '
     r"ls-remote --symref '(?P=url)' HEAD \| "
     r'''awk 'NR==1 && NF==3 && \$1=="ref:" && \$2=="refs/heads/(?P<default>[A-Za-z0-9_./-]+)" && \$3=="HEAD" \{n\+\+\} '''
     r'''NR==2 && NF==2 && \$1 ~ /\^\[0-9a-f\]\+\$/ && length\(\$1\)==40 && \$2=="HEAD" \{n\+\+\} '''
@@ -4217,13 +4219,20 @@ REVIEW_THREAD_PREFLIGHT = re.compile(
     rf"python3 -I -c '{re.escape(REVIEW_THREAD_QUEUE_CHECK)}' (?P<pr>[1-9][0-9]{{0,9}})")
 
 
-def review_thread_preflight_denial(command, normalized, data_mode, reason):
+def approved_review_thread_preflight(command):
     if not REVIEW_THREAD_PREFLIGHT_TARGETS or len(command) > 4096 or '"$(gh repo view ' not in command:
-        return reason
+        return None
     match = REVIEW_THREAD_PREFLIGHT.match(command)
-    if not match or match['branch'] == match['default']:
-        return reason
+    if not match or match['branch'] in ('main', match['default']):
+        return None
     if (match['host'], match['repo'], match['queue'], int(match['pr'])) not in REVIEW_THREAD_PREFLIGHT_TARGETS:
+        return None
+    return match
+
+
+def review_thread_preflight_denial(command, normalized, data_mode, reason):
+    match = approved_review_thread_preflight(command)
+    if not match:
         return reason
     tail = command[match.end():].strip(' \t')
     if tail not in ('', ';'):
@@ -4913,6 +4922,8 @@ def pre(data):
             command = pr_comment_body_removed(tin.get('command', ''))
             reason = review_thread_denial(command)
             if reason is None:
+                preflight = approved_review_thread_preflight(command)
+                exact_preflight = preflight and command[preflight.end():].strip(' \t') in ('', ';')
                 separated = re.sub(r'''['"\\]''', ' ', command).casefold()
                 normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()
                 if re.search(r'\bgh\b', separated) and not re.search(r'\bgh\b', normalized):
@@ -4920,7 +4931,7 @@ def pre(data):
                 elif (re.search(r'(?<!<)<<(?!<)', command) and '\\\n' in command
                       and (re.search(r'\bgh\b', separated) or re.search(r'\bgh\b', normalized))):
                     reason = 'heredoc with line continuation'
-                elif (thread_command_config(command) or '--config-env' in command
+                elif ((not exact_preflight and thread_command_config(command)) or '--config-env' in command
                       or ("$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
                                               or re.search(r'\b(?:gh|api)\b', normalized))
                           and not LITERAL_GIT_GREP_ANCHOR.fullmatch(command)

@@ -1683,6 +1683,15 @@ class HookTests(unittest.TestCase):
                 self.assertEqual(self.decision(command, caller), {})
 
     PREFLIGHT_TARGET = ('git.example.invalid', 'o/r', 'https://queue.example.invalid/mq/queue?limit=100', 71)
+    PREFLIGHT_GET_URL = (
+        'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git '
+        '-c http.https://git.example.invalid/o/r.git.followRedirects=false -c credential.helper= ls-remote'
+    )
+    PREFLIGHT_PROBE = (
+        'GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ALLOW_PROTOCOL=https '
+        'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -C / -c http.sslVerify=true '
+        '-c http.https://git.example.invalid/o/r.git.followRedirects=false -c credential.helper= ls-remote'
+    )
 
     def preflight_decision(self, command, caller):
         with patch.object(ultraship, 'REVIEW_THREAD_PREFLIGHT_TARGETS', frozenset({self.PREFLIGHT_TARGET})):
@@ -1699,13 +1708,9 @@ class HookTests(unittest.TestCase):
             r'''test "$upstream" = "refs/remotes/origin/$branch"; '''
             r'''git remote get-url --push --all origin | awk '$0=="https://git.example.invalid/o/r.git" '''
             r'''{n++} END{exit !(n==1 && NR==1)}'; '''
-            r'''url=$(GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git '''
-            r'''-c http.https://git.example.invalid/o/r.git.followRedirects=false -c credential.helper= '''
-            r'''ls-remote --get-url 'https://git.example.invalid/o/r.git'); '''
+            f'''url=$({self.PREFLIGHT_GET_URL} --get-url 'https://git.example.invalid/o/r.git'); '''
             r'''test "$url" = 'https://git.example.invalid/o/r.git'; '''
-            r'''GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git '''
-            r'''-c http.https://git.example.invalid/o/r.git.followRedirects=false -c credential.helper= '''
-            r'''ls-remote --symref 'https://git.example.invalid/o/r.git' HEAD | '''
+            f'''{self.PREFLIGHT_PROBE} --symref 'https://git.example.invalid/o/r.git' HEAD | '''
             r'''awk 'NR==1 && NF==3 && $1=="ref:" && $2=="refs/heads/trunk" && $3=="HEAD" {n++} '''
             r'''NR==2 && NF==2 && $1 ~ /^[0-9a-f]+$/ && length($1)==40 && $2=="HEAD" {n++} '''
             r'''END{exit !(n==2 && NR==2)}'; '''
@@ -1753,8 +1758,6 @@ class HookTests(unittest.TestCase):
             (command.replace(".defaultBranchRef.name')", ".defaultBranchRef.name'", 1),
              'unparsed shell syntax rule: No closing quotation'),
             (command.replace('; ', ';\n', 1), 'unparsed shell syntax rule: No closing quotation'),
-            (command + '; gh api -X POST repos/o/r/pulls/7/comments -f body=x',
-             'REST review-comment write or opaque endpoint'),
         )
         for shell, rule in cases:
             for caller in ('', 'ship:driver'):
@@ -1807,10 +1810,7 @@ class HookTests(unittest.TestCase):
                                   result['permissionDecisionReason'])
 
     def replace_preflight_ls_remote(self, command, replacement):
-        prefix = ('GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git '
-                  '-c http.https://git.example.invalid/o/r.git.followRedirects=false '
-                  '-c credential.helper= ls-remote')
-        shell = command.replace(prefix, replacement)
+        shell = command.replace(self.PREFLIGHT_GET_URL, replacement).replace(self.PREFLIGHT_PROBE, replacement)
         self.assertNotEqual(shell, command)
         return shell
 
@@ -1840,18 +1840,15 @@ class HookTests(unittest.TestCase):
     def test_preflight_disables_git_prompts(self):
         command = self.preflight_command()
         prompts = 'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 '
-        git = ('git -c http.https://git.example.invalid/o/r.git.followRedirects=false '
-               '-c credential.helper= ls-remote')
         variants = (
             'GIT_TERMINAL_PROMPT=0 ',
             'GIT_ASKPASS= ',
             'GIT_ASKPASS= GIT_TERMINAL_PROMPT=1 ',
             'GIT_ASKPASS=/work/example/askpass GIT_TERMINAL_PROMPT=0 ',
         )
-        for flag in ('--get-url', '--symref'):
-            suffix = f'{git} {flag}'
+        for flag, prefix in (('--get-url', self.PREFLIGHT_GET_URL), ('--symref', self.PREFLIGHT_PROBE)):
             for variant in variants:
-                shell = command.replace(prompts + suffix, variant + suffix, 1)
+                shell = command.replace(prefix, prefix.replace(prompts, variant, 1), 1)
                 for caller in ('', 'ship:driver'):
                     with self.subTest(flag=flag, prompts=variant, caller=caller):
                         result = self.preflight_decision(shell, caller)
@@ -1891,6 +1888,60 @@ class HookTests(unittest.TestCase):
             for case, shell in cases:
                 with self.subTest(case=case, caller=caller):
                     self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_refuses_main_and_remote_default(self):
+        command = self.preflight_command()
+        main = command.replace('lane/example', 'main', 1)
+        legacy = main.replace(self.PREFLIGHT_PROBE, self.PREFLIGHT_GET_URL, 1)
+        self.assertNotEqual(legacy, main)
+        cases = (
+            ('main', main),
+            ('trunk', command.replace('lane/example', 'trunk', 1)),
+            ('main with checkout probe', legacy),
+        )
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(command.replace('lane/example', 'lane/main', 1), caller), {})
+            for case, shell in cases:
+                with self.subTest(case=case, caller=caller):
+                    self.assertEqual(self.preflight_decision(shell, caller).get('permissionDecision'), 'deny')
+
+    def test_preflight_isolates_probe_git_config(self):
+        command = self.preflight_command()
+        probe = self.PREFLIGHT_PROBE
+        legacy = command.replace(probe, self.PREFLIGHT_GET_URL, 1)
+        self.assertNotEqual(legacy, command)
+        cases = [
+            ('checkout probe', legacy, None),
+            ('standalone config', 'GIT_CONFIG_GLOBAL=/dev/null git status', 'git config from the command line'),
+            ('API tail', command + '; gh api -X POST repos/o/r/pulls/7/comments -f body=x',
+             'REST review-comment write or opaque endpoint'),
+        ]
+        for old, new in (
+            ('GIT_CONFIG_NOSYSTEM=1 ', ''),
+            ('GIT_CONFIG_GLOBAL=/dev/null ', ''),
+            ('GIT_ALLOW_PROTOCOL=https ', ''),
+            ('GIT_ASKPASS= ', ''),
+            ('GIT_TERMINAL_PROMPT=0 ', ''),
+            ('GIT_CONFIG_GLOBAL=/dev/null ', 'GIT_CONFIG_GLOBAL=/work/example/gitconfig '),
+            ('GIT_ALLOW_PROTOCOL=https ', 'GIT_ALLOW_PROTOCOL=https:ext '),
+            ('-C / ', ''),
+            ('-C / ', '-C /work/example/repo '),
+            ('-c http.sslVerify=true ', ''),
+            ('-c http.sslVerify=true ', '-c http.sslVerify=false '),
+        ):
+            shell = command.replace(probe, probe.replace(old, new, 1), 1)
+            self.assertNotEqual(shell, command)
+            cases.append(((old, new), shell, None))
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.preflight_decision(command, caller), {})
+            for case, shell, rule in cases:
+                with self.subTest(case=case, caller=caller):
+                    result = self.preflight_decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    if rule:
+                        self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
 
     def test_preflight_queue_check_validates_counts_and_exact_pr(self):
         clean = dict(truncated=False, total=1, returned=1, limit=100, entries=[{'pr_number': 711, 'label': '71'}])
