@@ -330,7 +330,12 @@ else:
         tree, *fields = merge.stdout.split(b'\0')
         boundary = fields.index(b'')
         self.assertEqual(fields[:boundary], [b'generated.txt'])
-        self.assertTrue(any(field.startswith(b'CONFLICT (directory rename split)') for field in fields[boundary + 1:]))
+        records = iter(fields[boundary + 1:-1])
+        kinds = {}
+        for count in records:
+            names = tuple(next(records) for _ in range(int(count)))
+            kinds[names], _ = next(records), next(records)
+        self.assertTrue(kinds[(b'old',)].startswith(b'CONFLICT'), kinds)
         self.git('read-tree', '--reset', '-u', tree.decode('ascii'))
         self.commit({'generated.txt': 'regenerated output\n'})
         squash = self.git('rev-parse', 'HEAD')
