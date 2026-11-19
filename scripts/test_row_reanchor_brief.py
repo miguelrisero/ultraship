@@ -36,6 +36,11 @@ def documented_command(reference, plugin_root, row, row_id, subject, base, head)
 
 class BriefTests(unittest.TestCase):
     def setUp(self):
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop('SHIP_LINT_OFF', None)
+
         self.reference = REFERENCE.read_text()
         section = self.reference.split('## Row re-anchor tool brief\n', 1)[1].split('\n## ', 1)[0]
         self.template = section.split('```text\n', 1)[1].split('\n```', 1)[0]
