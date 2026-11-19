@@ -5531,20 +5531,24 @@ def non_git_receipt_shape(value):
                     and type(token[0]) is int and isinstance(token[1], str) for token in value[1:]))
 
 
-def non_git_replay(ledger, workspace, saved, epoch):
+def non_git_replay(ledger, workspace, saved, epoch, agent, agent_id):
     if not non_git_receipt_shape(saved):
         raise ReceiptIntegrityError('Accounting receipt has an invalid shape')
     home, run, token = saved
     try:
+        epoch = int(epoch)
         path = next((path for path in non_git_ledger_files(workspace) if str(path) == home), None)
         if path is None:
             raise ValueError('ledger is outside the workspace inventory')
         history = non_git_rows(path, ledger)
         start, index = run[0], token[0]
-        if (not non_git_run_contains(history, start, index, int(epoch))
+        if (not non_git_run_contains(history, start, index, epoch)
                 or history[index][1] in ledger.MARKS
                 or run != run_identity(start, history[start]) or token != run_identity(index, history[index])):
             raise ValueError('run or row evidence differs')
+        row = history[index]
+        if ledger.agent_key(row[2]) != (agent, agent_id) or row[4] == 'owed' or int(row[0]) < epoch - 5:
+            raise ValueError('saved row is not eligible for this result')
     except (OSError, RuntimeError, ValueError) as exc:
         raise ReceiptIntegrityError(f'Invalid accounting receipt: {exc}') from exc
 
@@ -5558,7 +5562,7 @@ def non_git_account(ledger, cwd, epoch, agent, agent_id, saved, replay, used):
     else:
         return ['git', None]
     if replay:
-        non_git_replay(ledger, workspace, saved, epoch)
+        non_git_replay(ledger, workspace, saved, epoch, agent, agent_id)
         return ['receipt', None]
     epoch = int(epoch)
     count = 0
@@ -5622,11 +5626,13 @@ def reap_non_git_child(pid):
             os.waitpid(pid, os.WNOHANG)
 
 
-def bounded_non_git_account(git_error, ledger, cwd, epoch, agent, agent_id, saved, replay, used):
-    deadline = time.monotonic() + NON_GIT_LOOKUP_SECONDS
+def bounded_non_git_account(git_error, ledger, cwd, epoch, agent, agent_id, saved, replay, used, *, pass_deadline):
+    deadline = min(pass_deadline, time.monotonic() + NON_GIT_LOOKUP_SECONDS)
     read_fd, write_fd = os.pipe()
     pid = 0
     try:
+        if time.monotonic() >= deadline:
+            raise NonGitTimeout('Workspace ledger lookup timed out')
         pid = os.fork()
         if pid == 0:
             non_git_child(write_fd, (ledger, cwd, epoch, agent, agent_id, saved, replay, used))
@@ -5672,7 +5678,7 @@ def bounded_non_git_account(git_error, ledger, cwd, epoch, agent, agent_id, save
         if kind == 'git' and value is None:
             raise git_error
         if isinstance(value, str):
-            if kind == 'integrity':
+            if kind == 'integrity' and replay:
                 raise ReceiptIntegrityError(value)
             if kind == 'error':
                 raise ValueError(value)
@@ -5681,25 +5687,46 @@ def bounded_non_git_account(git_error, ledger, cwd, epoch, agent, agent_id, save
 
 def account(ledger, notifications, receipts, session):
     histories, occurrences = {}, {}
-    fallback_timed_out = False
     used = {json.dumps(value) for value in receipts.values()}
-    failures = []
-    for owed in notifications:
+    failures, deferred = {}, []
+    for position, owed in enumerate(notifications):
         result = {}
         try:
             result = owed_result(owed, session, occurrences)
-            account_one(ledger, owed, result, receipts, session, histories, used, fallback_timed_out)
-        except NonGitTimeout as exc:
-            fallback_timed_out = True
-            failures.append((owed, result, exc))
+            fallback = account_one(ledger, owed, result, receipts, session, histories, used)
+            if fallback is not None:
+                deferred.append((position, owed, result, *fallback))
         except ReceiptIntegrityError:
             raise
         except Exception as exc:
-            failures.append((owed, result, exc))
-    return failures
+            failures[position] = (owed, result, exc)
+
+    deadline = None
+    timed_out = False
+    for position, owed, result, git_error, result_id in deferred:
+        epoch, agent, cwd = owed[:3]
+        replay = result_id in receipts
+        if deadline is None:
+            deadline = time.monotonic() + NON_GIT_LOOKUP_SECONDS
+        try:
+            if timed_out or time.monotonic() >= deadline:
+                raise NonGitTimeout('Workspace ledger lookup timed out during this Stop')
+            receipt = bounded_non_git_account(git_error, ledger, cwd, epoch, agent, result['agent_id'],
+                                              receipts.get(result_id), replay, used, pass_deadline=deadline)
+            if receipt is not None:
+                receipts[result_id] = receipt
+                used.add(json.dumps(receipt))
+        except ReceiptIntegrityError:
+            raise
+        except Exception as exc:
+            if replay:
+                raise ReceiptIntegrityError(f'Unverified workspace ledger replay: {exc}') from exc
+            timed_out = timed_out or isinstance(exc, NonGitTimeout)
+            failures[position] = (owed, result, exc)
+    return [failures[position] for position in sorted(failures)]
 
 
-def account_one(ledger, owed, result, receipts, session, histories, used, fallback_timed_out=False):
+def account_one(ledger, owed, result, receipts, session, histories, used):
     epoch, agent, cwd = owed[:3]
     result_id = json.dumps([session, cwd, result['id']])
     if 'ledger' in result and result['run'] is None:
@@ -5714,14 +5741,7 @@ def account_one(ledger, owed, result, receipts, session, histories, used, fallba
                 or exc.returncode != 128 or exc.cmd != ['git', '-C', str(cwd), 'rev-parse', '--abbrev-ref', 'HEAD']
                 or not isinstance(exc.stderr, str) or not exc.stderr.startswith('fatal: not a git repository')):
             raise
-        if fallback_timed_out:
-            raise ValueError('A workspace ledger lookup already timed out during this Stop') from exc
-        receipt = bounded_non_git_account(exc, ledger, cwd, epoch, agent, agent_id,
-                                          receipts.get(result_id), result_id in receipts, used)
-        if receipt is not None:
-            receipts[result_id] = receipt
-            used.add(json.dumps(receipt))
-        return
+        return exc, result_id
     if not home.is_absolute() or home.resolve() != home:
         raise ValueError('Recorded ledger must be an absolute path without symlinks')
     if home not in histories:

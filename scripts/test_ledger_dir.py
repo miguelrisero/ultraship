@@ -265,11 +265,17 @@ class LedgerDirTests(unittest.TestCase):
                     (self.workspace / '.git').mkdir()
                 output = self.hook('stop')
                 if mode == 'broken':
-                    block = json.loads(output)
-                    self.assertEqual(block['decision'], 'block')
-                    self.assertIn("'--abbrev-ref', 'HEAD']' returned non-zero exit status 128", block['reason'])
-                    self.assertEqual(owed.read_bytes(), line.encode())
-                    self.assertFalse(receipts.exists())
+                    state = owed.with_suffix('.stop-state')
+                    observed = (output, owed.read_bytes(), state.read_bytes(), receipts.exists())
+                    state.unlink()
+                    hook = self.fallback_hook(owed)
+                    baseline = io.StringIO()
+                    with mock.patch.dict(os.environ, self.env, clear=True), redirect_stdout(baseline):
+                        with self.assertRaises(subprocess.CalledProcessError) as original:
+                            ledger.ledger_path(cwd)
+                        with mock.patch.object(hook, 'account_one', side_effect=original.exception):
+                            hook.stop({'session_id': 's1'})
+                    self.assertEqual(observed, (baseline.getvalue(), line.encode(), state.read_bytes(), False))
                     continue
                 self.assertEqual(output, '')
                 self.assertEqual(owed.read_bytes(), b'')
@@ -349,7 +355,9 @@ class LedgerDirTests(unittest.TestCase):
         with mock.patch.object(os, 'open', side_effect=vanish):
             blocked()
         bad.unlink()
-        for make in (lambda: bad.symlink_to(home), lambda: os.mkfifo(bad),
+        unrelated = self.base / 'unrelated.tsv'
+        unrelated.write_bytes(self.history)
+        for make in (lambda: bad.symlink_to(unrelated), lambda: os.mkfifo(bad),
                      lambda: bad.write_text('bad\trow\n'), lambda: bad.write_bytes(b' ' * (1024 * 1024 + 1))):
             make()
             blocked()
@@ -431,6 +439,130 @@ class LedgerDirTests(unittest.TestCase):
                 self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
                 self.assertEqual(receipts.read_bytes(), evidence)
                 self.assertEqual(owed.read_bytes(), batch)
+
+    def fallback_line(self, pending, **data):
+        fields = pending.decode().rstrip('\n').split('\t')
+        fields[3] = json.dumps({**json.loads(fields[3]), **data})
+        return ('\t'.join(fields) + '\n').encode()
+
+    def test_stop_non_git_reserves_main_rows_first(self):
+        owed, pending, _ = self.fallback_fixture()
+        home = self.resolve()
+        home.write_bytes(self.history + b'10\tdeep-review\tship:reviewer--sol@reviewer\tsha\tpass\t\n')
+        history = ledger.rows(home)
+        run = ledger.run_identity(0, history[0])
+        recorded = self.fallback_line(pending, id='recorded', ledger=str(home), run=run)
+        key = json.dumps([str(owed), str(self.workspace), 'recorded'])
+        receipts = owed.parent.parent / 'accounted.json'
+        for batch in (recorded + pending, pending + recorded):
+            with self.subTest(recorded_first=batch.startswith(recorded)):
+                receipts.unlink(missing_ok=True)
+                owed.with_suffix('.stop-state').unlink(missing_ok=True)
+                owed.write_bytes(batch)
+                block = json.loads(self.hook('stop'))
+                self.assertEqual(block['decision'], 'block')
+                self.assertEqual(owed.read_bytes(), batch)
+                self.assertEqual(json.loads(receipts.read_bytes()), {key: [str(home), run,
+                    ledger.run_identity(3, history[3])]})
+
+    def test_stop_non_git_pass_deadline_stops_later_forks(self):
+        owed, pending, _ = self.fallback_fixture()
+        hook = self.fallback_hook(owed)
+        home = self.resolve()
+        row = b'10\tdeep-review\tship:reviewer--sol@%s\tsha\tpass\t\n'
+        home.write_bytes(self.history + b''.join(row % name for name in (b'one', b'two', b'three')))
+        batch = b''.join(self.fallback_line(pending, id=name, agent_id=name) for name in ('one', 'two', 'three'))
+        owed.write_bytes(batch)
+        lookup, monotonic, fork = hook.bounded_non_git_account, time.monotonic, os.fork
+        elapsed = 0
+        forks = []
+
+        def lookup_with_elapsed_time(*args, **kwargs):
+            nonlocal elapsed
+            reply = lookup(*args, **kwargs)
+            elapsed += 3
+            return reply
+
+        def track_fork():
+            pid = fork()
+            if pid:
+                forks.append(pid)
+            return pid
+
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, self.env, clear=True), redirect_stdout(output), \
+                mock.patch.object(time, 'monotonic', side_effect=lambda: monotonic() + elapsed), \
+                mock.patch.object(os, 'fork', side_effect=track_fork), \
+                mock.patch.object(hook, 'bounded_non_git_account', side_effect=lookup_with_elapsed_time):
+            hook.stop({'session_id': 's1'})
+        self.assertEqual(len(forks), 2)
+        self.assertEqual(json.loads(output.getvalue())['decision'], 'block')
+        self.assertEqual(owed.read_bytes(), batch)
+        receipts = json.loads((owed.parent.parent / 'accounted.json').read_bytes())
+        self.assertEqual({json.loads(key)[2] for key in receipts}, {'one', 'two'})
+
+    def test_stop_non_git_unverified_replay_aborts_publication(self):
+        owed, pending, key = self.fallback_fixture()
+        hook = self.fallback_hook(owed)
+        home = self.resolve()
+        row = b'10\tdeep-review\tship:reviewer--sol@%s\tsha\tpass\t\n'
+        home.write_bytes(self.history + row % b'reviewer' + row % b'main')
+        self.assertEqual(self.hook('stop'), '')
+        receipts = owed.parent.parent / 'accounted.json'
+        saved = receipts.read_bytes()
+        run = ledger.run_identity(0, ledger.rows(home)[0])
+        recorded = self.fallback_line(pending, id='recorded', agent_id='main', ledger=str(home), run=run)
+        fresh = self.fallback_line(pending, id='fresh', agent_id='fresh')
+        lookup = hook.non_git_account
+        bounded = hook.bounded_non_git_account
+
+        def expire_fresh(*args, **kwargs):
+            if args[5] == 'fresh':
+                raise hook.NonGitTimeout('Workspace ledger lookup timed out')
+            return bounded(*args, **kwargs)
+
+        def fail_child(*args):
+            if args[4] == 'reviewer':
+                raise OSError('child error')
+            return lookup(*args)
+
+        for error in ('timeout', 'child error'):
+            with self.subTest(error=error):
+                batch = (fresh if error == 'timeout' else b'') + pending + recorded
+                owed.write_bytes(batch)
+                receipts.write_bytes(saved)
+                owed.with_suffix('.stop-state').unlink(missing_ok=True)
+                output = io.StringIO()
+
+                target, effect = (('bounded_non_git_account', expire_fresh) if error == 'timeout'
+                                  else ('non_git_account', fail_child))
+                with mock.patch.dict(os.environ, self.env, clear=True), redirect_stdout(output), \
+                        mock.patch.object(hook, target, side_effect=effect):
+                    hook.stop({'session_id': 's1'})
+                block = json.loads(output.getvalue())
+                self.assertEqual(block['decision'], 'block')
+                self.assertIn('timed out' if error == 'timeout' else 'child error', block['reason'])
+                self.assertEqual(owed.read_bytes(), batch)
+                self.assertEqual(receipts.read_bytes(), saved)
+                self.assertEqual(list(json.loads(saved)), [key])
+
+    def test_stop_non_git_replay_requires_eligible_row(self):
+        owed, pending, key = self.fallback_fixture()
+        home = self.resolve()
+        receipts = owed.parent.parent / 'accounted.json'
+        for epoch, name, verdict in ((10, 'reviewer', 'owed'), (4, 'reviewer', 'pass'), (10, 'other', 'pass')):
+            with self.subTest(epoch=epoch, name=name, verdict=verdict):
+                row = f'{epoch}\tdeep-review\tship:reviewer--sol@{name}\tsha\t{verdict}\t\n'
+                home.write_bytes(self.history + row.encode())
+                history = ledger.rows(home)
+                saved = json.dumps({key: [str(home), ledger.run_identity(0, history[0]),
+                                          ledger.run_identity(3, history[3])]}).encode()
+                receipts.write_bytes(saved)
+                owed.write_bytes(pending)
+                owed.with_suffix('.stop-state').unlink(missing_ok=True)
+                self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+                self.assertEqual(owed.read_bytes(), pending)
+                self.assertEqual(receipts.read_bytes(), saved)
 
     def test_stop_accounts_closed_run_and_refuses_next_run_evidence(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
