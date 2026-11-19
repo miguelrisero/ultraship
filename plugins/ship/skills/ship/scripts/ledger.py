@@ -310,6 +310,10 @@ def load_receipts(path):
 
 def account_auto(pending):
     pending = Path(pending).absolute()
+    # shortcut: the caller controls this variable; upgrade to isolated per-session state access.
+    session = os.environ.get('CLAUDE_CODE_SESSION_ID')
+    if not session or re.sub(r'[^\w.-]', '_', session) != pending.stem:
+        sys.exit('account-auto requires CLAUDE_CODE_SESSION_ID to match the owed file session.')
     receipts = load_receipts(STATE / 'accounted.json')
     budgets = {}
     accounted = remaining = 0

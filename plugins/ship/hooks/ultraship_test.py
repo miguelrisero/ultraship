@@ -502,6 +502,76 @@ class ReceiptCustodyTests(unittest.TestCase):
                 with self.subTest(token=before + after, caller=caller):
                     self.assert_custody_denial({**event, 'agent_type': caller, 'tool_input': {'command': split}})
 
+    def test_writer_can_search_unrelated_ledger_words(self):
+        (self.cwd / 'ledger.py').touch()
+        for command in ('echo ledger.py account-auto', 'grep account-auto ./ledger.py'):
+            with self.subTest(command=command), redirect_stdout(io.StringIO()) as output, \
+                    redirect_stderr(io.StringIO()):
+                try:
+                    ultraship.guarded_pre({'cwd': str(self.cwd), 'agent_type': 'ship:writer--sol',
+                                           'tool_name': 'Bash', 'tool_input': {'command': command}})
+                except SystemExit:
+                    self.fail(output.getvalue())
+                self.assertEqual(output.getvalue(), '')
+
+    def test_writer_cannot_account_with_current_or_cached_ledger(self):
+        relative = '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
+        cached = Path.home() / relative
+        cached.parent.mkdir(parents=True)
+        cached.touch()
+        (self.cwd / 'ledger.py').symlink_to(LEDGER)
+        paths = (shlex.quote(str(LEDGER)), './ledger.py', f'"$HOME/{relative}"',
+                 f'"${{HOME}}/{relative}"', f'~/{relative}')
+        commands = [f'python3 {script} account-auto pending.tsv' for script in paths]
+        commands.append('bash -c ' + shlex.quote(commands[2]))
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_custody_denial({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
+                                           'tool_input': {'command': command}})
+
+    def test_account_auto_denies_ledger_path_resolution_error(self):
+        (self.cwd / 'ledger.py').symlink_to('ledger.py')
+        self.assert_custody_denial({'agent_type': 'ship:writer--sol', 'tool_name': 'Bash',
+                                   'tool_input': {'command': 'python3 ./ledger.py account-auto pending.tsv'}})
+
+    def test_account_auto_denies_commands_that_name_the_session_variable(self):
+        event = self.own_account_event()
+        own = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+        for command in (
+            f'CLAUDE_CODE_SESSION_ID=session-context {own}',
+            'export CLAUDE_CODE_SESSION_ID=session-context; echo account-auto',
+            'env CLAUDE_CODE_SESSION_ID=session-context echo account-auto',
+            'env -u CLAUDE_CODE_SESSION_ID echo account-auto',
+            'unset CLAUDE_CODE_SESSION_ID; echo account-auto ./missing/ledger.py',
+            'echo account-auto claude_code_session_id',
+        ):
+            with self.subTest(command=command):
+                self.assert_custody_denial({**event, 'agent_type': 'ship:driver--sol',
+                                           'tool_input': {'command': command}})
+
+    def assert_ledger_expansion_denied(self, command):
+        for caller in ('ship:driver--sol', 'ship:writer--sol'):
+            with self.subTest(caller=caller):
+                self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                           'tool_input': {'command': command}})
+
+    def test_ledger_custody_blocks_variable_expansion(self):
+        self.assert_ledger_expansion_denied(f'word=account; echo {shlex.quote(str(LEDGER))} "$word-sample"')
+
+    def test_ledger_custody_blocks_ansi_c_quoting(self):
+        self.assert_ledger_expansion_denied(f"echo {shlex.quote(str(LEDGER))} $'account\\x2dsample'")
+
+    def test_ledger_custody_blocks_command_substitution(self):
+        self.assert_ledger_expansion_denied(f'echo {shlex.quote(str(LEDGER))} "$(printf account)"')
+
+    def test_ledger_append_allows_commit_substitution(self):
+        event = self.own_account_event()
+        command = f'python3 {shlex.quote(str(LEDGER))} append slices driver "$(git rev-parse HEAD)" pass'
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            ultraship.guarded_pre({'cwd': str(self.cwd), **event, 'agent_type': 'ship:driver--sol',
+                                   'tool_input': {'command': command}})
+        self.assertEqual(output.getvalue(), '')
+
     def test_own_account_call_denies_other_commands_and_callers(self):
         event = self.own_account_event()
         command = event['tool_input']['command']

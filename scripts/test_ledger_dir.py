@@ -27,7 +27,7 @@ class LedgerDirTests(unittest.TestCase):
         scratch.mkdir(exist_ok=True)
         self.base = Path(tempfile.mkdtemp(prefix='ship-ledger-regression-', dir=scratch))
         self.addCleanup(shutil.rmtree, self.base)
-        self.env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1',
+        self.env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'CLAUDE_CODE_SESSION_ID': 's1',
                     'XDG_STATE_HOME': str(self.base / 'state'), 'HOME': str(self.base)}
         self.env.pop('SHIP_LEDGER_DIR', None)
         self.common = self.base / 'external'
@@ -513,6 +513,40 @@ class LedgerDirTests(unittest.TestCase):
                                          'message': {'content': content}}))
             transcript.write_text(''.join(line + '\n' for line in lines))
         return owed, transcript, result, int(epoch)
+
+    def assert_account_auto_refuses_session(self, session):
+        sha = 'ab' * 20
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {sha}')])
+        home = self.resolve()
+        receipts = self.base / 'state/ultraship/accounted.json'
+        receipts.write_bytes(b'{}\n')
+        paths = (home, receipts, owed)
+        before = [path.read_bytes() for path in paths]
+        env = self.env.copy()
+        if session is None:
+            del env['CLAUDE_CODE_SESSION_ID']
+        else:
+            env['CLAUDE_CODE_SESSION_ID'] = session
+        refused = self.cli('account-auto', str(owed), env=env)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertEqual(refused.stdout, '')
+        self.assertEqual(refused.stderr.splitlines(), [
+            'account-auto requires CLAUDE_CODE_SESSION_ID to match the owed file session.'])
+        self.assertEqual([path.read_bytes() for path in paths], before)
+        allowed = self.cli('account-auto', str(owed))
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertIn('1 accounted, 0 pending\n', allowed.stdout)
+        self.assertNotEqual(home.read_bytes(), before[0])
+
+    def test_account_auto_refuses_foreign_session(self):
+        self.assert_account_auto_refuses_session('s2')
+
+    def test_account_auto_refuses_missing_session(self):
+        self.assert_account_auto_refuses_session(None)
+
+    def test_account_auto_refuses_empty_session(self):
+        self.assert_account_auto_refuses_session('')
 
     def test_account_auto_uses_own_final_text_and_skips_existing_accounting(self):
         sha = 'ab' * 20

@@ -4671,16 +4671,51 @@ def receipt_custody(data, read_search=False):
         return
     if tool in ('Edit', 'Write', 'NotebookEdit') and receipt_path(tin.get('file_path') or tin.get('notebook_path')):
         deny(RECEIPT_CUSTODY)
-    # shortcut: runtime path construction and rebuilt shell expansion escape Bash checks; upgrade to isolated state access.
+    # shortcut: runtime expansion can hide the entire subcommand or script path.
+    # ledger.py checks the session for account-auto; upgrade to isolated per-session state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
         command = normalized(raw)
-        account_command = normalized(raw.replace('\\\n', ''))
+        joined = raw.replace('\\\n', '')
+        account_command = normalized(joined)
         raw_words = [word.translate(str.maketrans('', '', "\"'\\"))
                      for word in re.split(r'[\s;&|<>()]+', raw) if word]
         words = [re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
                         lambda match: os.environ.get(match[1] or match[2], ''), word)
                  for word in raw_words]
+
+        def names_ledger():
+            try:
+                script = ledger_script().resolve()
+                config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+                cache = (config / 'plugins/cache/ultraship/ship').resolve()
+                cwd = Path(data.get('cwd') or os.getcwd())
+                pending, seen = [joined], set()
+                while pending:
+                    text = pending.pop()
+                    if text in seen:
+                        continue
+                    seen.add(text)
+                    tokens = shell_raw_words(text)
+                    if nested_work_exceeded(tokens, seen):
+                        return True
+                    for _, word, _, _ in tokens:
+                        word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
+                        path = cwd / Path(word).expanduser()
+                        try:
+                            path = path.resolve(strict=True)
+                        except FileNotFoundError:
+                            path = path.resolve()
+                        if path == script:
+                            return True
+                        if path.is_relative_to(cache):
+                            parts = path.relative_to(cache).parts
+                            if parts[1:] == ('skills', 'ship', 'scripts', 'ledger.py'):
+                                return True
+                    pending.extend(token[1] for token in nested_shell_strings(tokens, text))
+            except (OSError, ValueError, RuntimeError):
+                return True
+            return False
 
         def glob_prefix(word):
             for pattern in resolved(word):
@@ -4694,8 +4729,10 @@ def receipt_custody(data, read_search=False):
             return False
 
         if (receipt_text(raw)
-                or ('ledger.py' in account_command and 'account-auto' in account_command
-                    and not own_account_call(data, raw))
+                or ('account-auto' in account_command and 'claude_code_session_id' in account_command)
+                or (('ledger.py' in account_command and 'account-auto' in account_command
+                     or 'account' in account_command and any(char in joined for char in '$`'))
+                    and names_ledger() and not own_account_call(data, raw))
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
                 or (('.local/state' in command or 'xdg_state_home' in command)
