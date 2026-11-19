@@ -144,8 +144,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             '   A restored row needs no failing CI report, so a row that the starting head deletes stays in scope.\n'
             '   Its evidence is the merge-base diff and the tool fields `starting_lines`, `base_lines` and `restoration_lines`.\n'
             '   When a lane commit changed only those rows, the writer runs a plain `git revert` of that commit.\n'
-            '   When it also changed other lines, the writer restores each complete row with native Edit and keeps the other edits.\n'
-            '   The writer puts a deleted row back at its merge-base position, between the neighbor lines that held it there.\n'
+            '   When it also changed other lines, the writer uses native Edit only for rows that exist at the starting head, and keeps the other edits.\n'
+            '   A row that such a mixed lane commit deleted leaves the restore route.\n'
+            '   That row follows the re-anchor route or goes to the CoC.\n'
             '   The writer commits the restoration alone. Then it runs the re-anchor tool on each restored row.\n'
             '   That run passes the merge base as `--base` and the restoration commit as `--restoration`.\n'
             '   The tool binds the restoration commit and its own parent, the starting head. A later commit never moves that parent.\n'
@@ -154,6 +155,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             '   It also refuses a row ID that is not unique, and it prints both results and `insert_after` as `key=value` lines.\n'
             '   Any byte difference leaves the restore route. That row follows the re-anchor route or goes to the CoC.\n'
             '   The driver copies the lane commits that changed each row file after the merge base into the reviewer brief.\n'
+            "   The driver names the verified merge base in the reviewer brief. The reviewer refuses unless the record's base equals it.\n"
+            '   The reviewer matches every restored row ID in the record to the approved scope before publication.\n'
             '6. Authorization record:'
         )
         for name in ROUTE_CARRIERS:
@@ -174,6 +177,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             'Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.\n'
             'For each restored row, confirm from the copied record fields `restoration_base_equal=true`, `restoration_outside_equal=true` and `changed_statements=0`.\n'
             'Confirm that `restoration` and `restoration_parent` match the brief, and that `starting_lines` is `null` for a row that the starting head deletes.\n'
+            "Refuse unless the record's base equals the verified merge base that the brief names.\n"
+            'Match every restored row ID in the record to the approved scope, and confirm that restored_rows equals their count.\n'
+            'Refuse a restored row outside that scope.\n'
             "Confirm from the brief's commit list that only the lane's own unmerged commits changed the row file after the merge base.\n"
             'Read the row lines at the merge base and the frozen head. Confirm that they are equal, or that only a re-anchor changed the paired fields.\n'
         )

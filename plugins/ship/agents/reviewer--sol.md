@@ -71,6 +71,9 @@ For each retired row, confirm that the PR deletes the guarded code and that its 
 Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.
 For each restored row, confirm from the copied record fields `restoration_base_equal=true`, `restoration_outside_equal=true` and `changed_statements=0`.
 Confirm that `restoration` and `restoration_parent` match the brief, and that `starting_lines` is `null` for a row that the starting head deletes.
+Refuse unless the record's base equals the verified merge base that the brief names.
+Match every restored row ID in the record to the approved scope, and confirm that restored_rows equals their count.
+Refuse a restored row outside that scope.
 Confirm from the brief's commit list that only the lane's own unmerged commits changed the row file after the merge base.
 Read the row lines at the merge base and the frozen head. Confirm that they are equal, or that only a re-anchor changed the paired fields.
 Read each row in the base checkout and the frozen-head checkout that the admission record lists, at the base and head line ranges.

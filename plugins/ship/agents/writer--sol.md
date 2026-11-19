@@ -159,8 +159,9 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    A restored row needs no failing CI report, so a row that the starting head deletes stays in scope.
    Its evidence is the merge-base diff and the tool fields `starting_lines`, `base_lines` and `restoration_lines`.
    When a lane commit changed only those rows, the writer runs a plain `git revert` of that commit.
-   When it also changed other lines, the writer restores each complete row with native Edit and keeps the other edits.
-   The writer puts a deleted row back at its merge-base position, between the neighbor lines that held it there.
+   When it also changed other lines, the writer uses native Edit only for rows that exist at the starting head, and keeps the other edits.
+   A row that such a mixed lane commit deleted leaves the restore route.
+   That row follows the re-anchor route or goes to the CoC.
    The writer commits the restoration alone. Then it runs the re-anchor tool on each restored row.
    That run passes the merge base as `--base` and the restoration commit as `--restoration`.
    The tool binds the restoration commit and its own parent, the starting head. A later commit never moves that parent.
@@ -169,6 +170,8 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    It also refuses a row ID that is not unique, and it prints both results and `insert_after` as `key=value` lines.
    Any byte difference leaves the restore route. That row follows the re-anchor route or goes to the CoC.
    The driver copies the lane commits that changed each row file after the merge base into the reviewer brief.
+   The driver names the verified merge base in the reviewer brief. The reviewer refuses unless the record's base equals it.
+   The reviewer matches every restored row ID in the record to the approved scope before publication.
 6. Authorization record: each tool run that changes zero statements writes a generated record in the Git directory.
    The record names the lane, base, head, row IDs, base and head line ranges, expected counts and the unchanged mutant check.
    A restore entry also names the restoration commit, its parent, the three row ranges and `insert_after`.
