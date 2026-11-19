@@ -184,7 +184,7 @@ class LedgerDirTests(unittest.TestCase):
         for pending in (self.non_git_notice(agent_id=' '), self.non_git_notice(agent_id=5), self.non_git_notice(run=None),
                         self.non_git_notice(v=1), fallback.rsplit(b'\t', 1)[0] + b'\n'):
             self.non_git_stop_block(owed, pending, 'returned non-zero exit status 128')
-        self.non_git_stop_block(owed, self.non_git_notice(cwd=f'{self.workspace}/.'), 'absolute canonical cwd')
+        self.non_git_stop_block(owed, self.non_git_notice(cwd=f'{self.workspace}/.'), error)
 
         token = [str(home), run, ledger.run_identity(3, ledger.rows(home)[3])]
         for first, leftover, winner, loser in ((recorded, fallback, 'recorded', 'fallback'),
@@ -319,6 +319,84 @@ class LedgerDirTests(unittest.TestCase):
         other.write_bytes(history)
         self.non_git_stop_block(owed, pending, 'Accounting receipt names a different ledger or run')
         self.assertEqual((receipts.read_bytes(), home.read_bytes(), other.read_bytes()), (saved, history, history))
+
+    def test_stop_non_git_refuses_hard_link_to_recorded_row(self):
+        owed, receipts = self.non_git_fixture()
+        home = self.resolve()
+        history = self.history + b'20\treview\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        self.legacy.write_bytes(history)
+        home.unlink()
+        os.link(self.legacy, home)
+        rows = ledger.rows(self.legacy)
+        run = ledger.run_identity(0, rows[0])
+        recorded = self.non_git_notice(identifier='recorded', ledger=str(self.legacy), run=run)
+        pending = self.non_git_notice() + recorded
+        self.non_git_stop_block(owed, pending, 'needs exactly one hard link')
+        key = json.dumps([str(owed), str(self.workspace), 'recorded'])
+        self.assertEqual(json.loads(receipts.read_bytes()), {key: [str(self.legacy), run, ledger.run_identity(3, rows[3])]})
+        self.assertEqual((home.read_bytes(), self.legacy.read_bytes()), (history, history))
+
+    def test_stop_non_git_refuses_malformed_marker_identities(self):
+        owed, receipts = self.non_git_fixture()
+        home = self.resolve()
+        review = b'20\treview\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        identity = ledger.run_identity(3, review.decode().splitlines()[0].split('\t'))
+        pending = self.non_git_notice()
+        for step, fields in (('account-result', {'run': None}),
+                             ('correct-binding', {'from': [True, 'bad'], 'to': identity}),
+                             ('correct-binding', {'from': identity, 'to': [3]})):
+            with self.subTest(step=step, fields=fields):
+                note = json.dumps({'result': 'unrelated', **fields})
+                marker = f'21\t{step}\tother\tsha\tpass\t{note}\n'.encode()
+                history = self.history + review + marker
+                home.write_bytes(history)
+                self.non_git_stop_block(owed, pending, 'Malformed workspace ledger marker')
+                self.assertFalse(receipts.exists())
+                self.assertEqual(home.read_bytes(), history)
+
+    def test_stop_non_git_preserves_git_error_for_noncanonical_broken_cwd(self):
+        owed, receipts = self.non_git_fixture()
+        home = self.resolve()
+        history = self.history + b'20\treview\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        home.write_bytes(history)
+        (self.workspace / '.git').mkdir()
+        pending = self.non_git_notice(cwd=f'{self.workspace}/.')
+        reminder = owed.with_suffix('.stop-state')
+        error = 'returned non-zero exit status 128'
+        env = {**self.env, 'SHIP_LEDGER_DIR': str(home.parent)}
+        baseline = self.non_git_stop_block(owed, pending, error, env=env)
+        state = (owed.read_bytes(), reminder.read_bytes(), home.read_bytes(), receipts.exists())
+        self.assertEqual(self.non_git_stop_block(owed, pending, error), baseline)
+        self.assertEqual((owed.read_bytes(), reminder.read_bytes(), home.read_bytes(), receipts.exists()), state)
+        self.assertFalse(receipts.exists())
+
+    def test_stop_non_git_replay_failure_allows_unrelated_receipt(self):
+        owed, receipts = self.non_git_fixture()
+        fallback = self.non_git_notice()
+        home = self.resolve()
+        review = b'20\treview\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        home.write_bytes(self.history + review)
+        owed.write_bytes(fallback)
+        self.assertEqual(self.hook('stop'), '')
+        saved = json.loads(receipts.read_bytes())
+        other = home.with_name('other.tsv')
+        home.rename(other)
+        unrelated = review.replace(b'@reviewer', b'@other')
+        home.write_bytes(self.history + unrelated)
+        rows = ledger.rows(home)
+        run = ledger.run_identity(0, rows[0])
+        recorded = self.non_git_notice(identifier='recorded', agent_id='other', ledger=str(home), run=run)
+        pending = fallback + recorded
+        key = json.dumps([str(owed), str(self.workspace), 'recorded'])
+        expected = json.dumps({**saved, key: [str(home), run, ledger.run_identity(3, rows[3])]}).encode()
+        env = {**self.env, 'SHIP_LEDGER_DIR': str(home.parent)}
+        self.non_git_stop_block(owed, pending, 'returned non-zero exit status 128', env=env)
+        self.assertEqual(receipts.read_bytes(), expected)
+        receipts.write_text(json.dumps(saved))
+        reason = self.non_git_stop_block(owed, pending, 'Accounting receipt names a different ledger or run')
+        self.assertIn('\nfallback ship:reviewer--sol@reviewer ', reason)
+        self.assertNotIn('\nrecorded ship:reviewer--sol@other ', reason)
+        self.assertEqual(receipts.read_bytes(), expected)
 
     def test_import_and_open_run_continue_locally_once(self):
         local = self.resolve()

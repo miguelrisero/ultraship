@@ -5496,10 +5496,16 @@ def non_git_ledger_files(workspace):
 
 
 def non_git_rows(path, ledger, result_id):
+    def identity(value):
+        return (isinstance(value, list) and len(value) == 2
+                and type(value[0]) is int and isinstance(value[1], str))
+
     with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
         info = os.fstat(source.fileno())
         if not stat.S_ISREG(info.st_mode):
             raise ValueError(f'Workspace ledger needs a regular file: {path}')
+        if info.st_nlink != 1:
+            raise ValueError(f'Workspace ledger needs exactly one hard link: {path}')
         if info.st_size > NON_GIT_LEDGER_BYTES:
             raise ValueError(f'Workspace ledger exceeds its byte limit: {path}')
         data = source.read(NON_GIT_LEDGER_BYTES + 1)
@@ -5514,8 +5520,9 @@ def non_git_rows(path, ledger, result_id):
         int(row[0])
         if row[1] in ('account-result', 'correct-binding'):
             marker = json.loads(row[5])
+            identities = ('run',) if row[1] == 'account-result' else ('from', 'to')
             if (not isinstance(marker, dict) or not isinstance(marker.get('result'), str)
-                    or (row[1] == 'account-result' and 'run' not in marker)):
+                    or not all(identity(marker.get(field)) for field in identities)):
                 raise ValueError(f'Malformed workspace ledger marker: {path}')
             explicit |= marker['result'] == result_id
     return history, explicit
@@ -5523,13 +5530,18 @@ def non_git_rows(path, ledger, result_id):
 
 def non_git_ledger_home(ledger, cwd, epoch, owner, result_id, git_error):
     workspace = Path(cwd)
-    if not workspace.is_absolute() or str(workspace) != cwd or workspace.resolve(strict=True) != workspace:
-        raise ValueError('Workspace ledger lookup needs an absolute canonical cwd')
     try:
-        (workspace / '.git').lstat()
-    except FileNotFoundError:
-        pass
-    else:
+        canonical = workspace.is_absolute() and str(workspace) == cwd and workspace.resolve(strict=True) == workspace
+        if canonical:
+            try:
+                (workspace / '.git').lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                canonical = False
+    except (OSError, RuntimeError, ValueError):
+        canonical = False
+    if not canonical:
         raise git_error
 
     # shortcut: lookup requires quiescent writers and has no I/O deadline; add a deadline for stalled filesystems.
@@ -5574,8 +5586,12 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
             home, history, run = non_git_ledger_home(ledger, cwd, epoch, (agent, ident), result_id, exc)
         except (OSError, RuntimeError, RecursionError) as error:
             raise ValueError(f'Workspace ledger lookup failed: {error}') from error
-        histories = {home: history}
-        result = {**result, 'ledger': str(home), 'run': run}
+        bound = {**result, 'ledger': str(home), 'run': run}
+        try:
+            return account_one(ledger, owed, bound, receipts, session, {home: history}, used)
+        except ReceiptIntegrityError as error:
+            # Main's non-git lookup failure leaves other receipts eligible for publication.
+            raise ValueError(str(error)) from error
     if not home.is_absolute() or home.resolve() != home:
         raise ValueError('Recorded ledger must be an absolute path without symlinks')
     if home not in histories:
