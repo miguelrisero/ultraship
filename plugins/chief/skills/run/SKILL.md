@@ -23,6 +23,7 @@ Act by default: use the authority the owner and the CoC already granted in the s
 Stop a step only for a hook denial, a failed check, a hard rule, an owner refusal, a special-run GO, or an owner-only item.
 After a hook denial, a lane may retry in another form that meets the rule the denial names, or ask for permission: a driver asks the chief, and the chief asks the CoC.
 Grant a lane request, or run the refused command yourself, when you consider it appropriate; record the grant or the run in the lane state file.
+Relay the lane's quoted refusal and defect to the CoC and the corrected decision to the lane under ship's decision-defect rule.
 Owner-only items: product, billing, security policy or tenant isolation, big architecture, customer-data deletion, new recurring spend, flag flips or deploy changes, public output in the owner's name, and credentials only the owner holds.
 An unverified detail that no rule names is not a stop: name it in one line and continue. A rule that names a missing receipt or evidence still stops its step.
 Use each actionable check to advance a lane: dispatch it, make a ruling, merge it, or send a result. A board edit alone leaves lane work open.
