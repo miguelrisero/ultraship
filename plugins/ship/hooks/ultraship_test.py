@@ -545,9 +545,13 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_account_custody_allows_a_long_quoted_argument(self):
         self.assert_account_command_allowed(f'echo "{"a" * 300}" account')
 
-    def test_account_custody_allows_commit_message_with_session_variable(self):
-        self.assert_account_command_allowed("git commit -m 'Explain account-auto and CLAUDE_CODE_SESSION_ID'",
-                                            caller='ship:writer--sol')
+    def test_account_custody_denies_commit_message_with_session_variable(self):
+        self.assert_account_custody_denial("git commit -m 'Explain account-auto and CLAUDE_CODE_SESSION_ID'",
+                                           caller='ship:writer--sol')
+
+    def test_account_custody_denies_session_override_without_ledger_name(self):
+        (self.cwd / 'helper.py').write_bytes(LEDGER.read_bytes())
+        self.assert_account_custody_denial('CLAUDE_CODE_SESSION_ID=s1 echo ./helper.py account-auto ./s1.tsv')
 
     def test_account_custody_allows_own_stop_command_with_session_variable_in_path(self):
         event = self.own_account_event()
@@ -594,6 +598,17 @@ class ReceiptCustodyTests(unittest.TestCase):
         (self.cwd / 'helper').symlink_to(cached)
         self.assert_account_custody_denial('echo ./helper account-auto')
 
+    def test_account_custody_denies_accounting_after_redirection(self):
+        os.environ.pop('CLAUDE_CONFIG_DIR', None)
+        cached = Path.home() / '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
+        cached.parent.mkdir(parents=True)
+        cached.touch()
+        (self.cwd / 'helper').symlink_to(cached)
+        self.assert_account_custody_denial('echo ./helper 2>/dev/null account-auto ./other.tsv')
+
+    def test_account_custody_stops_at_command_separator(self):
+        self.assert_account_command_allowed(f'echo {shlex.quote(str(LEDGER))}; echo account')
+
     def test_account_custody_denies_parse_error_with_ledger(self):
         self.assert_account_custody_denial("echo ledger 'account")
 
@@ -601,9 +616,9 @@ class ReceiptCustodyTests(unittest.TestCase):
         (self.cwd / 'loop').symlink_to('loop')
         self.assert_account_custody_denial('echo ./loop account')
 
-    def test_ledger_append_allows_commit_substitution(self):
-        command = (f'python3 {shlex.quote(str(LEDGER))} append slices driver "$(git rev-parse HEAD)"'
-                   " pass 'accounting reviewed'")
+    def test_ledger_append_allows_account_in_a_literal_note(self):
+        command = (f'python3 {shlex.quote(str(LEDGER))} append slices driver {"a" * 40}'
+                   " pass 'Review of the account completed'")
         self.assert_account_command_allowed(command)
 
     def test_ledger_run_start_allows_account_in_board_path(self):

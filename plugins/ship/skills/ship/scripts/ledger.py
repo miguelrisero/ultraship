@@ -4,6 +4,7 @@
 Row: epoch<TAB>step<TAB>agent<TAB>sha<TAB>verdict<TAB>note
 A reviewer row names its agent as <agent-type>@<agent-id>; a result binds only to rows with its own agent ID.
 """
+import errno
 import fcntl
 import hashlib
 import json
@@ -314,12 +315,18 @@ def account_auto(pending):
     session = os.environ.get('CLAUDE_CODE_SESSION_ID')
     if not session or re.sub(r'[^\w.-]', '_', session) != pending.stem:
         sys.exit('account-auto requires CLAUDE_CODE_SESSION_ID to match the owed file session.')
-    if pending.is_symlink():
-        sys.exit('account-auto refuses a symlinked owed file.')
+    try:
+        fd = os.open(pending, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            sys.exit('account-auto refuses a symlinked owed file.')
+        raise
+    with os.fdopen(fd) as source:
+        entries = source.read().splitlines()
     receipts = load_receipts(STATE / 'accounted.json')
     budgets = {}
     accounted = remaining = 0
-    for fields in (line.split('\t') for line in pending.read_text().splitlines() if line):
+    for fields in (line.split('\t') for line in entries if line):
         identifier = 'unknown'
         try:
             if len(fields) != 4:

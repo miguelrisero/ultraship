@@ -4855,7 +4855,13 @@ def receipt_custody(data, read_search=False):
                     tokens = shell_raw_words(text)
                     if nested_work_exceeded(tokens, seen):
                         return 'ledger' in account_command
-                    for index, (_, word, _, _) in enumerate(tokens):
+                    saw_ledger = False
+                    for raw_word, word, _, _ in shell_without_redirections(tokens):
+                        if raw_word in {';', '&', '|', '(', ')', '`', '\n'}:
+                            saw_ledger = False
+                            continue
+                        if saw_ledger and (word.casefold().startswith('account') or unresolved_shell_word(raw_word)):
+                            return True
                         word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
                         path = cwd / Path(word).expanduser()
                         try:
@@ -4867,10 +4873,7 @@ def receipt_custody(data, read_search=False):
                             path = path.resolve()
                         installed = (path.is_relative_to(cache)
                                      and path.relative_to(cache).parts[1:] == ('skills', 'ship', 'scripts', 'ledger.py'))
-                        if (path == script or installed) and index + 1 < len(tokens):
-                            raw_subcommand, subcommand = tokens[index + 1][:2]
-                            if subcommand.casefold().startswith('account') or unresolved_shell_word(raw_subcommand):
-                                return True
+                        saw_ledger = saw_ledger or path == script or installed
                     pending.extend(token[1] for token in nested_shell_strings(tokens, text))
             except ValueError:
                 return 'ledger' in account_command
@@ -4910,10 +4913,9 @@ def receipt_custody(data, read_search=False):
                          ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
                 or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
             deny(RECEIPT_CUSTODY)
-        if 'account' in account_command and not own_account_call(data, raw):
-            if (('account-auto' in account_command and 'claude_code_session_id' in account_command
-                 and 'ledger' in account_command) or names_ledger()):
-                deny(ACCOUNT_CUSTODY)
+        if ('account' in account_command and not own_account_call(data, raw)
+                and ('claude_code_session_id' in account_command or names_ledger())):
+            deny(ACCOUNT_CUSTODY)
 
 
 def canonical_row_path(value):
