@@ -1149,6 +1149,16 @@ class HookTests(unittest.TestCase):
                             'Ship replies to and resolves review threads only through '))
                         self.assertIn(' Rule: ', result['permissionDecisionReason'])
 
+    def test_compound_discovery_denial_has_independent_read_steps(self):
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                denied = self.decision('find . -name x && gh pr view 7', caller)
+                self.assertEqual(denied.get('permissionDecision'), 'deny')
+                for step in ('find . -name x', 'gh pr view https://github.com/o/r/pull/7 --json state',
+                             'date -u +%FT%TZ', "printf '%s\\n' '2026-11-19T07:00:00Z Review stays open.'"):
+                    with self.subTest(step=step):
+                        self.assertEqual(self.decision(step, caller), {})
+
     def test_admit_forms_for_main_and_driver(self):
         for agent_type in ('', 'ship:driver'):
             for command in ADMIT:
