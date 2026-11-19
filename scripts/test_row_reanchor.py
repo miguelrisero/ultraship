@@ -215,8 +215,9 @@ class ToolTests(unittest.TestCase):
         restoration = self.commit_rows(prefix + table + suffix)
         before, output = self.invoke(restoration=restoration)
         self.assertEqual(self.row.read_bytes(), before)
+        # The restored hunk includes the separator before the row.
         fields = {'restoration': restoration, 'restoration_parent': starting, 'base_lines': [4, 12],
-                  'restoration_lines': [4, 12], 'starting_lines': None, 'insert_after': 3,
+                  'restoration_lines': [4, 12], 'starting_lines': None, 'insert_after': 2,
                   'restored_rows': 1, 'restoration_base_equal': True, 'restoration_outside_equal': True,
                   'changed_statements': 0}
         record = self.record_path()
