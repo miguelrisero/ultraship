@@ -21,7 +21,13 @@ Batch actionable and terminal reports; keep unchanged routine reports silent and
 Copy the routing and model-independent output contracts into every timer, recovery, driver, writer, reviewer, and child brief, including retries and replacements.
 Act by default: use the authority the owner and the CoC already granted in the same turn, and never ask for it again.
 Stop a step only for a hook denial, a failed check, a hard rule, an owner refusal, a special-run GO, or an owner-only item.
-After a hook denial, a lane may retry in another form that meets the rule the denial names, or ask for permission: a driver asks the chief, and the chief asks the CoC.
+A refusal never ends the work.
+After a refusal, find the cause and retry in a compliant form, or ask your superior how to proceed.
+A writer asks its driver, a driver asks its chief, and a chief asks the CoC.
+The ask never blocks your other work.
+Only the CoC decides whether an owner-only item becomes an owner Input; agents never ask the owner.
+The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items still need a compliant form or the authority they lacked.
+A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
 Grant a lane request, or run the refused command yourself, when you consider it appropriate; record the grant or the run in the lane state file.
 Relay the lane's quoted refusal and defect to the CoC and the corrected decision to the lane under ship's decision-defect rule.
 Owner-only items: product, billing, security policy or tenant isolation, big architecture, customer-data deletion, new recurring spend, flag flips or deploy changes, public output in the owner's name, and credentials only the owner holds.
