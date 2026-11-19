@@ -4873,6 +4873,7 @@ def receipt_custody(data, read_search=False):
                         word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
                         path = cwd / Path(word).expanduser()
                         saw_ledger = saw_ledger or cached_ledger(path.absolute(), cache_path)
+                        saw_ledger = saw_ledger or cached_ledger(path.parent.resolve() / path.name, cache)
                         try:
                             path = path.resolve(strict=True)
                         except OSError as exc:

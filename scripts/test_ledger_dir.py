@@ -571,6 +571,7 @@ class LedgerDirTests(unittest.TestCase):
         home = self.resolve()
         output = io.StringIO()
         with mock.patch.dict(os.environ, self.env, clear=True), \
+                mock.patch.object(ledger, 'STATE', self.base / 'state/ultraship'), \
                 mock.patch.object(ledger.os, 'open', wraps=os.open) as fd_open, \
                 mock.patch.object(Path, 'open', autospec=True, side_effect=Path.open) as path_open, \
                 mock.patch('sys.stdout', output):

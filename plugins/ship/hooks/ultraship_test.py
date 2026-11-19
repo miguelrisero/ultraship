@@ -607,6 +607,16 @@ class ReceiptCustodyTests(unittest.TestCase):
         cached.symlink_to(target)
         self.assert_account_custody_denial(f'echo {shlex.quote(str(cached))} accounting')
 
+    def test_account_custody_recognizes_a_symlinked_installation_with_parent_segment(self):
+        os.environ.pop('CLAUDE_CONFIG_DIR', None)
+        cached = Path.home() / '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
+        cached.parent.mkdir(parents=True)
+        target = self.cwd / 'placeholder.py'
+        target.touch()
+        cached.symlink_to(target)
+        path = cached.parent / '..' / 'scripts' / cached.name
+        self.assert_account_custody_denial(f'echo {shlex.quote(str(path))} account')
+
     def test_account_custody_denies_accounting_after_redirection(self):
         os.environ.pop('CLAUDE_CONFIG_DIR', None)
         cached = Path.home() / '.claude/plugins/cache/ultraship/ship/1.11.7/skills/ship/scripts/ledger.py'
@@ -619,7 +629,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assert_account_custody_denial(f'echo {shlex.quote(str(LEDGER))} `printf accounting`')
 
     def test_account_custody_checks_opening_parenthesis_after_ledger_reference(self):
-        self.assert_account_custody_denial(f'echo {shlex.quote(str(LEDGER))} <(printf accounting)')
+        self.assert_account_custody_denial(f'echo account {shlex.quote(str(LEDGER))} <(printf sample)')
 
     def test_account_custody_stops_at_command_separator(self):
         self.assert_account_command_allowed(f'echo {shlex.quote(str(LEDGER))}; echo account')
