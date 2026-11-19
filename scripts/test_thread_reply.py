@@ -1250,6 +1250,27 @@ class HookTests(unittest.TestCase):
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn(' Rule: shell runner names gh.', result['permissionDecisionReason'])
 
+    def test_literal_git_grep_end_anchor_is_data(self):
+        command = "git -C /work/example grep -n -E '^.{121,}$' abc123 -- src/example.py"
+        for search in (command, command.replace('src/example.py', 'src/api/example.py')):
+            for caller in ('', 'ship:driver', 'ship:writer--sol'):
+                with self.subTest(search=search, caller=caller):
+                    self.assertEqual(self.decision(search, caller), {})
+
+    def test_git_grep_end_anchor_keeps_config_and_ansi_quote_refusals(self):
+        search = "git -C /work/example grep -n -E '^.{121,}$' abc123 -- src/api/example.py"
+        commands = (
+            'GIT_CONFIG_COUNT=2 ' + search,
+            search.replace(' grep ', ' --config-env=core.pager=PAGER grep '),
+            search + "; printf '%s' $'api'",
+        )
+        for command in commands:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(command=command, caller=caller):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
+
     def test_actual_ansi_quotes_keep_the_caller_refusal(self):
         commands = (
             "printf '%s' $'api'",
@@ -1629,6 +1650,21 @@ class HookTests(unittest.TestCase):
                 self.assertEqual(result.get('permissionDecision'), 'deny')
                 self.assertIn('literal PR body stdin form', result['permissionDecisionReason'])
                 self.assertEqual(self.decision(inert, caller), {})
+
+    def test_pr_create_admits_quoted_heredoc_text_in_title(self):
+        command = "gh pr create --title 'docs: describe <<BODY' --body-file body.md"
+        for caller in ('', 'ship:driver'):
+            with self.subTest(caller=caller):
+                self.assertEqual(self.decision(command, caller), {})
+
+    def test_pr_create_and_new_refuse_stdin_with_an_interleaved_redirect(self):
+        for verb in ('create', 'new'):
+            command = self.pr_create.replace('gh pr create', f'gh 2>/dev/null pr {verb}', 1) + self.pr_body
+            for caller in ('', 'ship:driver'):
+                with self.subTest(caller=caller, verb=verb):
+                    result = self.decision(command, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn('literal PR body stdin form', result['permissionDecisionReason'])
 
     def test_pr_create_refuses_shell_written_body_files(self):
         with tempfile.TemporaryDirectory() as root:

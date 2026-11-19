@@ -4471,6 +4471,59 @@ def review_thread_denial(command, data_mode=False):
     return None
 
 
+def pr_create_uses_shell_stdin(command):
+    """Detect PR body input outside the exact literal admission."""
+    raw = re.sub(r'''['"\\]''', '', command.replace('\\\n', ''))
+    if (not re.search(r'\bgh\b', raw) or not re.search(r'\b(?:create|new)\b', raw)
+            or not re.search(r'--body-file|-[A-Za-z]*F', raw)):
+        return False
+
+    shell = shell_line_continuations(shell_without_heredoc_bodies(command))
+    token_lists = [shell_raw_words(shell)]
+    token_lists.extend(shell_raw_words(shell_without_heredoc_bodies(body))
+                       for body in shell_substitution_bodies(shell))
+    # A heredoc or here-string in an earlier command can write the PR body file.
+    here_input = any(left[0] == right[0] == '<' and left[3] == right[2]
+                     for tokens in token_lists for left, right in zip(tokens, tokens[1:]))
+
+    def next_pr_word(arguments):
+        word = next(arguments, '')
+        if word in {'-R', '--repo'}:
+            next(arguments, '')
+        elif not word.startswith(('-R=', '--repo=')):
+            return word
+        return next(arguments, '')
+
+    separators = {';', '&', '|', '(', ')', '`', '\n'}
+    body_option = re.compile(r'--body-file(?:=|$)|-[A-Za-z]*F=?')
+    for tokens in token_lists:
+        words = []
+        for raw, value, _, _ in [*shell_without_redirections(tokens), ('\n', '\n', 0, 0)]:
+            if raw not in separators:
+                words.append(value)
+                continue
+            for index, word in enumerate(words):
+                if os.path.basename(word) != 'gh':
+                    continue
+                arguments = iter(words[index + 1:])
+                if next_pr_word(arguments) != 'pr' or next_pr_word(arguments) not in {'create', 'new'}:
+                    continue
+                options = list(arguments)
+                for option, following in zip(options, options[1:] + ['']):
+                    if match := body_option.match(option):
+                        if here_input or (option[match.end():] or following) == '-':
+                            return True
+            words.clear()
+    return False
+
+
+# In this literal Git read, the only dollar signs belong to the single-quoted pattern.
+LITERAL_GIT_GREP_ANCHOR = re.compile(
+    r"[ \t]*git(?:[ \t]+-C[ \t]+(?!-)[\w./-]+)*[ \t]+grep"
+    r"(?:[ \t]+-[nilwEFvz]+)*[ \t]+'(?!-)[^'\x00\r\n]*\$'"
+    r"(?:[ \t]+(?!-)[\w./-]+)*(?:[ \t]+--(?:[ \t]+[\w./-]+)*)?[ \t]*\n?")
+
+
 def thread_command_config(command):
     normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', ''))
     for match in re.finditer(r'[^\s;&|(){}]+', normalized):
@@ -4836,17 +4889,8 @@ def pre(data):
         try:
             command = pr_body_command or tin.get('command', '')
             reason = review_thread_denial(command)
-            if reason is None and pr_body_command is None:
-                repo_option = r'(?:[ \t]+(?:-R|--repo)(?:[ \t]+|=)[^ \t\n;&|()<>]+)?'
-                create = rf'\bgh{repo_option}[ \t]+pr{repo_option}[ \t]+(?:create|new)\b'
-                raw = re.sub(r'''['"\\]''', '', command.replace('\\\n', ''))
-                body_option = r'(?:^|[ \t])(?:--body-file\b|-[A-Za-z]*F)'
-                stdin_option = body_option + r'[ \t=]*-(?=$|[ \t\n;&|()<>])'
-                if re.search(create, raw) and ('<<' in command or re.search(stdin_option, raw)):
-                    shell = shell_without_heredoc_bodies(command)
-                    shell = re.sub(r'''['"\\]''', '', shell.replace('\\\n', ''))
-                    if re.search(create, shell) and re.search(body_option, shell):
-                        reason = 'Shell heredocs and stdin for PR creation require the literal PR body stdin form'
+            if reason is None and pr_body_command is None and pr_create_uses_shell_stdin(command):
+                reason = 'Shell heredocs and stdin for PR creation require the literal PR body stdin form'
             if reason is None:
                 separated = re.sub(r'''['"\\]''', ' ', command).casefold()
                 normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()
@@ -4858,6 +4902,7 @@ def pre(data):
                 elif (thread_command_config(command) or '--config-env' in command
                       or ("$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
                                               or re.search(r'\b(?:gh|api)\b', normalized))
+                          and not LITERAL_GIT_GREP_ANCHOR.fullmatch(command)
                           and "$'" in writer_quoted_grep_data(command))):
                     reason = 'git config from the command line'
         except Exception as error:
