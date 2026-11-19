@@ -281,12 +281,13 @@ Follow every other route requirement.
 This rule lifts no hook, permission, tool or owner refusal, and no security, secret or production gate.
 It lifts no refusal of a push, a merge or a protected write, including your own refusal of one.
 Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal.
-This [scope-refusal rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) applies only to your own refusal for the sole cause below.
-The sole stated cause is that a CoC decision asks for an action the writer contract forbids.
+This [scope-refusal rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) applies only to your own refusal or an earlier writer's refusal on the same lane, PR and edit.
+The sole stated cause must be that a CoC decision asks for an action the writer contract forbids.
 Quote the refusal and its cause to your driver.
 Only a new CoC decision with a new SHA256 can resolve that refusal for that cause.
 Require the new decision to quote the refusal verbatim.
 Require it to name the earlier decision by path and SHA256.
+Require it to name the same lane, PR and edit for an earlier writer's refusal.
 Require it to remove the cause so that every action it grants fits the writer contract.
 The new decision grants nothing the writer contract forbids, and widens no read scope, protected row authority or other guard.
 Each action it grants still needs its own route and the authority that route names; this rule grants no authority.

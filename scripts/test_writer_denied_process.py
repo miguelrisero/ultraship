@@ -110,11 +110,13 @@ class WriterDeniedProcessTests(unittest.TestCase):
         self.check(WRITER_FILES, (f'\n{writer}\n',))
 
     def test_scope_refusal_rule_limits_refusal_resolution(self):
-        cause = 'The sole stated cause is that a CoC decision asks for an action the writer contract forbids.'
+        eligible = "or an earlier writer's refusal on the same lane, PR and edit."
+        cause = 'The sole stated cause must be that a CoC decision asks for an action the writer contract forbids.'
         resolution = (
             'Only a new CoC decision with a new SHA256 can resolve that refusal for that cause.',
             'Require the new decision to quote the refusal verbatim.',
             'Require it to name the earlier decision by path and SHA256.',
+            "Require it to name the same lane, PR and edit for an earlier writer's refusal.",
             'Require it to remove the cause so that every action it grants fits the writer contract.',
             'The new decision grants nothing the writer contract forbids, '
             'and widens no read scope, protected row authority or other guard.',
@@ -129,14 +131,14 @@ class WriterDeniedProcessTests(unittest.TestCase):
             'It lifts no refusal of a push or a merge, and an explicit owner refusal still needs applicable owner authority.',
         )
         reference = ' '.join((
-            "Scope-refusal rule: it applies only to an agent's own refusal for the sole cause below.",
+            f"Scope-refusal rule: it applies only to an agent's own refusal {eligible}",
             cause,
             'Quote the refusal and its cause to your superior, who relays them up the superior chain to the CoC.',
             *resolution,
         ))
         writer = '\n'.join((
             'This [scope-refusal rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) '
-            'applies only to your own refusal for the sole cause below.',
+            f'applies only to your own refusal {eligible}',
             cause,
             'Quote the refusal and its cause to your driver.',
             *resolution,
