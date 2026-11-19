@@ -2054,7 +2054,7 @@ def parameter_quote_mode(text, start):
     return 'other'
 
 
-def shell_substitution_bodies(text, arithmetic_quotes=False):
+def shell_substitution_bodies(text, arithmetic_quotes=False, *, substitution_quote_ends=None):
     """Keep substitution quote state separate from the surrounding shell word."""
     frames, quote, cursor, word_start = [], '', 0, True
     while cursor < len(text):
@@ -2089,6 +2089,8 @@ def shell_substitution_bodies(text, arithmetic_quotes=False):
             continue
         if quote == "'":
             if char == quote:
+                if substitution_quote_ends is not None and context == ')':
+                    substitution_quote_ends.add(cursor)
                 quote = ''
         elif char == '`' and context == '`':
             _, start, quote, _ = frames.pop()
@@ -4460,6 +4462,21 @@ LITERAL_GIT_GREP_ANCHOR = re.compile(
     r"(?:[ \t]+(?!-)[\w./-]+)*(?:[ \t]+--(?:[ \t]+[\w./-]+)*)?[ \t]*\n?")
 
 
+def thread_ansi_quote(command):
+    """Keep the strict fallback unless each candidate closes a literal count pattern."""
+    if re.search(r"[\x00#`]|<<|\\\n|[<>=]\(|\$[{\[]|\(\(", command):
+        return True
+    quote_ends = set()
+    try:
+        list(shell_substitution_bodies(command, substitution_quote_ends=quote_ends))
+    except ValueError:
+        return True
+    anchors = {match.end() - 1 for match in re.finditer(
+        r"(?<![\\|])\|[ \t]+grep[ \t]+-c[ \t]+'(?!-)[^'\n]*\$'(?=[ \t]*\))", command)}
+    return any(match.end() - 1 not in quote_ends or match.end() - 1 not in anchors
+               for match in re.finditer(r"\$'", command))
+
+
 def pr_comment_body_removed(command):
     """Mask the quoted body of one complete top-level PR comment for the thread guard."""
     # shortcut: omit escaped apostrophes in ANSI-C quotes until the shell dialect is known.
@@ -4850,7 +4867,8 @@ def pre(data):
                       or ("$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
                                               or re.search(r'\b(?:gh|api)\b', normalized))
                           and not LITERAL_GIT_GREP_ANCHOR.fullmatch(command)
-                          and "$'" in writer_quoted_grep_data(command))):
+                          and "$'" in writer_quoted_grep_data(command)
+                          and thread_ansi_quote(command))):
                     reason = 'git config from the command line'
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__

@@ -1333,6 +1333,21 @@ class HookTests(unittest.TestCase):
                     self.assertEqual(result.get('permissionDecision'), 'deny')
                     self.assertIn(' Rule: git config from the command line.', result['permissionDecisionReason'])
 
+    def test_git_count_pipeline_treats_grep_anchor_as_data(self):
+        command = r'''cd /work/example && B=abc123; echo "files: $(git ls-tree -r --name-only $B -- src/api/ | grep -c '\.toml$')"; git grep -h -m1 -E '^id = ' $B -- 'src/api/*.toml' | head -2; for i in demo-1 demo-2; do echo "$i $(git grep -h -x -F "id = \"$i\"" $B -- 'src/api/*.toml' | wc -l)"; done'''
+        refused = (
+            (command + "; printf '%s' $'api'", 'git config from the command line'),
+            (command + '; echo "$(printf \'%s\' $\'api\')"', 'git config from the command line'),
+            (command + '; echo "$(gh api repos/o/r/pulls/7/comments -f body=x)"', 'REST review-comment write'),
+        )
+        for caller in ('', 'ship:driver'):
+            self.assertEqual(self.decision(command, caller), {})
+            for shell, rule in refused:
+                with self.subTest(caller=caller, rule=rule):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(rule, result['permissionDecisionReason'])
+
     def test_graphql_read_route_refuses_other_documents_and_options(self):
         documents = ('mutation{createIssue{ id }}', 'subscription{events{id}}',
                      'fragment F on User {login}', 'query{viewer{login}} query{viewer{id}}',
