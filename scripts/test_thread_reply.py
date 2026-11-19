@@ -1155,6 +1155,53 @@ class HookTests(unittest.TestCase):
                 with self.subTest(agent_type=agent_type, command=command):
                     self.assertEqual(self.decision(command, agent_type), {})
 
+    def test_literal_pr_comment_body_is_data_for_main_and_driver(self):
+        bodies = (
+            r"$'§9 summary for `example`\n\nThe sample text names GIT_CONFIG_COUNT and --config-env.'",
+            "'Summary\nExample: gh pr view 7\nA literal \" mark'",
+            '"Summary\nA literal \\" mark"',
+        )
+        for body in bodies:
+            command = f'gh pr comment {PR} --body {body}'
+            for caller in ('', 'ship:driver', 'ship:writer--sol'):
+                with self.subTest(body=body, caller=caller):
+                    result = self.decision(command, caller)
+                    if caller == 'ship:writer--sol':
+                        self.assertEqual(result.get('permissionDecision'), 'deny')
+                    else:
+                        self.assertEqual(result, {})
+
+    def test_pr_comment_mask_requires_one_complete_literal_invocation(self):
+        prefix = f'gh pr comment {PR} --body '
+        commands = (
+            prefix + '"$BODY"',
+            prefix + "$'unfinished",
+            prefix + "'first'$'second'",
+            prefix + "$'\\n'",
+            prefix + "'Summary' > output.txt",
+            prefix + "'Summary' --edit-last",
+            'env ' + prefix + "'Summary'",
+            prefix.replace(PR, '$PR') + "'Summary'",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(ultraship.pr_comment_body_removed(command), command)
+
+    def test_pr_comment_preserves_config_and_thread_denials(self):
+        command = f"gh pr comment {PR} --body 'Summary'"
+        cases = (
+            ('GIT_CONFIG_COUNT=2 ' + command, 'git config from the command line'),
+            (command + '\ngit --config-env=core.pager=PAGER status', 'git config from the command line'),
+            (command + ' && gh api repos/o/r/pulls/7/comments/123/replies -f body=sample',
+             'raw review-thread mutation'),
+        )
+        for shell, rule in cases:
+            for caller in ('', 'ship:driver'):
+                with self.subTest(shell=shell, caller=caller):
+                    result = self.decision(shell, caller)
+                    self.assertEqual(result.get('permissionDecision'), 'deny')
+                    self.assertIn(f' Rule: {rule}.', result['permissionDecisionReason'])
+
     def test_quoted_gh_api_read_counts_once(self):
         commands = QUOTED_READ_PUSHES + ('test "$(gh api repos/o/r/branches/main --jq .commit.sha)" = abc',)
         for command in commands:

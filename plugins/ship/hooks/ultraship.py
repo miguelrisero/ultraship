@@ -4577,6 +4577,24 @@ LITERAL_GIT_GREP_ANCHOR = re.compile(
     r"(?:[ \t]+(?!-)[\w./-]+)*(?:[ \t]+--(?:[ \t]+[\w./-]+)*)?[ \t]*\n?")
 
 
+def pr_comment_body_removed(command):
+    """Mask the quoted body of one complete top-level PR comment for the thread guard."""
+    # shortcut: omit escaped apostrophes in ANSI-C quotes until the shell dialect is known.
+    match = re.fullmatch(
+        r'([ \t]*gh[ \t]+pr[ \t]+comment[ \t]+'
+        r'(?:https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/)?[1-9][0-9]*[ \t]+--body[ \t]+)'
+        r'''(\$'(?:[^'\\\x00]|\\[\\nrt])*'|'[^'\x00]*'|"(?:[^"$`\\!\x00]|\\["$`\\])*")[ \t]*\n?''',
+        command)
+    if not match:
+        return command
+    # A blank body can lead to interactive input.
+    literal = match[2]
+    body = literal.removeprefix('$')[1:-1]
+    if literal.startswith('$'):
+        body = re.sub(r'\\[nrt]', '', body)
+    return match[1] + "'body'" if body.strip() else command
+
+
 def thread_command_config(command):
     normalized = re.sub(r'''['"\\]''', '', command.replace('\\\n', ''))
     for match in re.finditer(r'[^\s;&|(){}]+', normalized):
@@ -4940,7 +4958,7 @@ def pre(data):
                 deny('Writers do not edit GitHub CLI configuration.')
     if tool == 'Bash':
         try:
-            command = pr_body_command or tin.get('command', '')
+            command = pr_comment_body_removed(pr_body_command or tin.get('command', ''))
             reason = review_thread_denial(command)
             if reason is None and pr_body_command is None and pr_create_uses_shell_stdin(command):
                 reason = 'Shell heredocs and stdin for PR creation require the literal PR body stdin form'
