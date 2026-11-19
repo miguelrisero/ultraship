@@ -157,7 +157,6 @@ class ToolTests(unittest.TestCase):
         for exists in (False, True):
             with self.subTest(existing_record=exists):
                 if exists:
-                    record.parent.mkdir()
                     record.write_bytes(prior)
                 before, output = self.invoke()
                 self.assertEqual(output.splitlines()[-1], 'record=none')
@@ -166,7 +165,7 @@ class ToolTests(unittest.TestCase):
                 if exists:
                     self.assertEqual(record.read_bytes(), prior)
                 else:
-                    self.assertFalse(record.parent.exists())
+                    self.assertFalse(record.exists())
                 self.row.write_bytes(before)
 
     def test_record_expires_on_new_head_and_rerun_changes_zero_statements(self):
@@ -230,15 +229,10 @@ class ToolTests(unittest.TestCase):
         self.assertCountEqual([(row['row_file'], row['row_id']) for row in entries],
                               [('rows.toml', 'target'), ('other.toml', 'other')])
 
-    def test_record_write_waits_for_exclusive_lock(self):
-        self.setup_pair()
-        self.invoke()
-        self.head_sha = self.commit()
+    def run_with_lock_held(self, while_locked):
         record = self.record_path()
-        record.parent.mkdir(mode=0o700)
-        prior = json.dumps({'schema': 1, 'lane': self.git('branch', '--show-current'),
-                            'base': self.base, 'head': self.head_sha, 'rows': []}).encode()
-        record.write_bytes(prior)
+        record.parent.mkdir(mode=0o700, exist_ok=True)
+        output = io.StringIO()
         args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
                          base=self.base, head=self.head_sha)
         lock_checked_or_done = Event()
@@ -252,7 +246,7 @@ class ToolTests(unittest.TestCase):
             return flock(descriptor, operation)
 
         env = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
-        with patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()), \
+        with patch.dict(os.environ, env), contextlib.redirect_stdout(output), \
                 ThreadPoolExecutor(max_workers=1) as writer:
             with record.with_suffix('.lock').open('a+b') as lock:
                 flock(lock.fileno(), fcntl.LOCK_EX)
@@ -265,10 +259,52 @@ class ToolTests(unittest.TestCase):
                     if result.done():
                         result.result()
                         self.fail('tool finished while the record lock was held')
-                    self.assertEqual(record.read_bytes(), prior)
+                    while_locked()
             result.result(timeout=deadline - time.monotonic())
+        return output.getvalue()
+
+    def test_record_write_waits_for_exclusive_lock(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        record = self.record_path()
+        prior = json.dumps({'schema': 1, 'lane': self.git('branch', '--show-current'),
+                            'base': self.base, 'head': self.head_sha, 'rows': []}).encode()
+        record.write_bytes(prior)
+        self.run_with_lock_held(lambda: self.assertEqual(record.read_bytes(), prior))
         entry, = json.loads(record.read_bytes())['rows']
         self.assertEqual((entry['row_file'], entry['row_id']), ('rows.toml', 'target'))
+
+    def test_row_edit_waits_for_exclusive_lock_before_checking_bytes(self):
+        self.setup_pair()
+        original = self.row.read_bytes()
+        read_bytes = Path.read_bytes
+        replace = os.replace
+        flock = fcntl.flock
+        row_reads = []
+        lock_path = self.record_path().with_suffix('.lock')
+
+        def observe_read(path):
+            if path == self.row:
+                row_reads.append(path)
+            return read_bytes(path)
+
+        def observe_replace(source, target):
+            if target == self.row:
+                with lock_path.open('r+b') as lock, self.assertRaises(BlockingIOError):
+                    flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            replace(source, target)
+
+        def check_waiting_edit():
+            self.assertEqual(row_reads, [self.row])
+            self.assertEqual(read_bytes(self.row), original)
+
+        with patch.object(Path, 'read_bytes', observe_read), patch.object(os, 'replace', observe_replace):
+            output = self.run_with_lock_held(check_waiting_edit)
+        row, = tomllib.loads(self.row.read_text())['row']
+        self.assertEqual(row['old'], self.head)
+        self.assertIn('record=none', output.splitlines())
+        self.assertFalse(self.record_path().exists())
 
     def test_detached_head_refuses_before_writing(self):
         self.setup_pair()
@@ -424,7 +460,6 @@ class ToolTests(unittest.TestCase):
         self.invoke()
         self.head_sha = self.commit()
         record = self.record_path()
-        record.parent.mkdir(mode=0o700)
         prior = b'{"schema": 1, "lane": "expired", "rows": []}'
         record.write_bytes(prior)
         original = self.row.read_bytes()
