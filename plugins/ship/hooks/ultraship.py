@@ -1278,6 +1278,43 @@ def read_only_argument_word(command, tokens, words, index, *, literal_grep_ancho
     return True
 
 
+def literal_search_patterns(words):
+    """Recognize literal search arguments and complete -e operands."""
+    name, *args = (word[0] for word in words)
+    plain = r'[\w./][\w./=-]*'
+    if name == 'git':
+        if args[:1] == ['-C']:
+            if len(args) < 2 or not re.fullmatch(plain, args[1]):
+                return False
+            args = args[2:]
+        if args[:1] != ['grep']:
+            return False
+        args = args[1:]
+    elif name == 'rg':
+        if args[:1] != ['--no-config']:
+            return False
+        args = args[1:]
+    elif name != 'grep':
+        return False
+
+    args = iter(args)
+    for raw in args:
+        if re.fullmatch(plain, raw) or raw == '--' and name == 'git':
+            return all(re.fullmatch(plain, word) for word in args)
+        if not re.fullmatch(r'[\w./=-]+', raw) or not re.fullmatch(READ_ONLY_OPTIONS[name], raw):
+            return False
+        if raw == '-e':
+            if not re.fullmatch(rf"{plain}|'(?!-)[^'\r\n]*'", next(args, '')):
+                return False
+        elif raw in {'-A', '-B', '-C'}:
+            if not re.fullmatch(r'[0-9]+', next(args, '')):
+                return False
+        elif name == 'rg' and raw in {'-E', '-g', '-r', '-t', '--glob'}:
+            if not re.fullmatch(plain, next(args, '')):
+                return False
+    return True
+
+
 def grep_data_token(tokens, index):
     start = index
     while start and tokens[start - 1][0] not in {';', '&', '|', '(', ')', '`', '\n'}:
@@ -2915,6 +2952,7 @@ def inline_interpreter_denial(command, cwd=None):
         command_positions = shell_command_positions(tokens)
         test_shape = top_level and not TEST_SHAPE_REDEFINE.search(command)
         limit = test_operand_limit(tokens, groups) if test_shape else 0
+        literal_search_context = test_shape and not any(token[0] in {'<', '>'} for token in tokens)
         segments, words, piped, pipe_groups = [], [], False, []
         runtime_paths = inherited_paths or nested_paths or shell_defines_function(tokens, command_positions) or any(
             token[1] in {'while', 'until', 'for', 'select'} and token[2] in command_positions for token in tokens)
@@ -2993,15 +3031,8 @@ def inline_interpreter_denial(command, cwd=None):
                     and unresolved_shell_word(first[0])):
                 return 'inline interpreter code rule (unresolved command word)'
             test_operands, test_commands, closing = set(), set(), None
-            # Only a leading --no-config proves rg cannot load options from its config file.
-            rg_no_config = len(words) > 1 and words[0][0] == 'rg' and words[1][0] == '--no-config'
-            literal_ready = (bool(words) and (words[0][0] in {'grep', 'git'} or rg_no_config)
-                             and test_shape and prefix_end == 0
-                             and all(not word[1].startswith('-') or re.fullmatch(READ_ONLY_OPTIONS[words[0][0]], word[1])
-                                     for word in words[2 if rg_no_config else 1:])
-                             and all(re.fullmatch(r"'(?!-)[^']*'", word[0]) or (
-                                 not unresolved_shell_word(word[0]) and '~' not in literal_quotes_removed(word[0]))
-                                     for word in words)
+            literal_ready = (literal_search_context and bool(words) and prefix_end == 0
+                             and literal_search_patterns(words)
                              and not any(limit <= token[2] < words[0][2] and token[0] not in {';', '&', '|', '\n'}
                                          for token in tokens))
             if words and words[-1][3] <= limit:

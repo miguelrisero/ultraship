@@ -716,15 +716,23 @@ class WriterHeredocTests(unittest.TestCase):
             "cd /work/lane && git grep -n -e '$(shell' -e 'include ' -- Makefile && git status --short -- a.py",
             "grep -C 2 -e '$(shell' -e y f",
             "grep -e '`x`' -e code f",
-            "grep -e '$X' -e y '~'/file",
+            "grep -e '$X' -e '~' f",
         ):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
         reason = 'inline interpreter code rule (unresolved command word)'
         for command in (
             "rg -n -e '$(shell' -e 'include ' Makefile",
-            "rg -g '--no-config' -e '$X' -e y f",
+            "rg -g --no-config -e '$X' -e y f",
+            "rg --no-config -r -e '$X' -e y f",
+            "rg --no-config -E -e '$X' -e y f",
             "git grep '--open-files-in-pager=/bin/false' -e '$X' -e y",
+            "grep -e '$X' -e y ^file",
+            "F=Makefile; grep -e '$X' -e y $F",
+            "grep -F x '$X' run",
+            "grep -e -e '$X' -e y f",
+            "grep -e '$X' -e y f > out",
+            "grep -e '$X' -e y '~'/file",
             "grep -e '$X' -e y ~/file",
             "grep -F 'python$' f",
             "grep '$(python3 -c code)' -e y f",
@@ -777,6 +785,14 @@ class WriterHeredocTests(unittest.TestCase):
         self.assertTrue(self.denied('grep -e "$(python3 -c code)" -e y f'))
         reason = 'process-capable python -c rule'
         self.assertEqual(self.reason.split('\n', 1)[0].split('Rule: ', 1)[1].removesuffix('.'), reason)
+
+    def test_literal_search_exception_refuses_rg_config_and_preprocessor_options(self):
+        for command in (
+            "rg -n --no-config -e '$X' -e y f",
+            "rg --no-config --pre=/bin/false -e '$X' -e y f",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(ultraship.literal_search_patterns(ultraship.shell_raw_words(command)))
 
     def test_read_only_argument_words_with_interpreter_names_are_admitted(self):
         """Catch false refusals of literal read-only paths and patterns containing interpreter names."""
