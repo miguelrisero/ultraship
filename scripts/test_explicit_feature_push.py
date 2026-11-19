@@ -72,16 +72,16 @@ class ExplicitFeaturePushTests(unittest.TestCase):
         self.assertLess(gate, push.index(PREFLIGHT))
         self.assertLess(push.index('block if its workload lacks admission'), push.index(PREFLIGHT))
 
-    def test_chief_checkpoint_requires_exact_intended_destination_evidence(self):
+    def test_chief_requires_exact_intended_destination_evidence(self):
         text = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text()
-        checkpoint = text.split('At each checkpoint,', 1)[1].split('\n\n', 1)[0]
+        tracking = text.split('Before you advance a lane or report its status,', 1)[1].split('\n\n', 1)[0]
         for requirement in (
             "inspect the lane's commit stack and upstream state",
             'Retain all existing tracking checks',
             'A missing upstream alone establishes neither publication nor unpushed work',
             'Within existing read permission',
             "intended feature destination's repository identity",
-            'exact `refs/heads/<feature-branch>` remote head OID',
+            "Compare its exact `refs/heads/<feature-branch>` remote head OID with the lane's current HEAD.",
             "credential-safe gate before capturing any resolved URL or remote evidence",
             'fresh evidence from that verified destination with an OID equal to HEAD',
             'Arbitrary remote containment of HEAD supplies insufficient evidence',
@@ -89,7 +89,7 @@ class ExplicitFeaturePushTests(unittest.TestCase):
             'Preserve pushed history; use a revert for a published mistake',
         ):
             with self.subTest(requirement=requirement):
-                self.assertIn(requirement, checkpoint)
+                self.assertIn(requirement, tracking)
         self.assertNotIn('A missing upstream counts as unpushed work', text)
 
     def test_standalone_babysit_covers_every_push_with_the_shared_preflight(self):
