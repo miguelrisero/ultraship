@@ -173,7 +173,7 @@ A CoC decision receipt is the disposition only when the breaking change is not t
 The receipt states that it is the disposition and names the row ID, the breaking commit and the paired-field re-anchor.
 The receipt also records the evidence that no landed disposition exists for the row in every commit from the breaking commit through the bound main commit.
 It names that range by the full breaking commit SHA and the full bound main SHA.
-Before publication, recheck that range through the current main. A disposition that landed after the bound main commit invalidates the receipt.
+Before publication, recheck that range through the current main SHA, and record that full SHA in the receipt. A disposition that landed after the bound main commit invalidates the receipt.
 Name the receipt by absolute path and SHA256. Verify the digest before any protected access.
 For a landed disposition, require the disposition record to cite the landed row change and its CoC decision.
 For a landed disposition, require a receipt for the independent not-weaker review of that disposition.
