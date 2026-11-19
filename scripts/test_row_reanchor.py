@@ -241,14 +241,14 @@ class ToolTests(unittest.TestCase):
         record.write_bytes(prior)
         args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
                          base=self.base, head=self.head_sha)
-        attempted = Event()
+        lock_checked_or_done = Event()
         flock = fcntl.flock
 
         def observe_lock(descriptor, operation):
             self.assertEqual(operation, fcntl.LOCK_EX)
             with self.assertRaises(BlockingIOError):
-                flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            attempted.set()
+                flock(descriptor, operation | fcntl.LOCK_NB)
+            lock_checked_or_done.set()
             return flock(descriptor, operation)
 
         env = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
@@ -257,11 +257,16 @@ class ToolTests(unittest.TestCase):
             with record.with_suffix('.lock').open('a+b') as lock:
                 flock(lock.fileno(), fcntl.LOCK_EX)
                 with patch.object(reanchor.fcntl, 'flock', side_effect=observe_lock):
+                    deadline = time.monotonic() + 5
                     result = writer.submit(reanchor.run, args)
-                    self.assertTrue(attempted.wait(timeout=5), 'tool did not attempt to acquire the lock')
-                    self.assertFalse(result.done())
+                    result.add_done_callback(lambda _: lock_checked_or_done.set())
+                    self.assertTrue(lock_checked_or_done.wait(deadline - time.monotonic()),
+                                    'tool did not attempt to acquire the lock')
+                    if result.done():
+                        result.result()
+                        self.fail('tool finished while the record lock was held')
                     self.assertEqual(record.read_bytes(), prior)
-            result.result(timeout=5)
+            result.result(timeout=deadline - time.monotonic())
         entry, = json.loads(record.read_bytes())['rows']
         self.assertEqual((entry['row_file'], entry['row_id']), ('rows.toml', 'target'))
 
