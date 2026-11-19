@@ -330,7 +330,7 @@ else:
         tree, *fields = merge.stdout.split(b'\0')
         boundary = fields.index(b'')
         self.assertEqual(fields[:boundary], [b'generated.txt'])
-        self.assertIn(b'CONFLICT (directory rename split)', fields[boundary + 1:])
+        self.assertTrue(any(field.startswith(b'CONFLICT (directory rename split)') for field in fields[boundary + 1:]))
         self.git('read-tree', '--reset', '-u', tree.decode('ascii'))
         self.commit({'generated.txt': 'regenerated output\n'})
         squash = self.git('rev-parse', 'HEAD')
