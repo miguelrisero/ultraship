@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Derive a row's paired fields while preserving its whole-file mutant hunks."""
 import argparse
+from contextlib import ExitStack, contextmanager
 import difflib
+import json
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -148,6 +150,63 @@ def derive(old, new, base, head):
     return head_old, head_new, len(edits)
 
 
+@contextmanager
+def staged_bytes(path, data, mode):
+    staged = path.with_name('.row-reanchor-' + uuid.uuid4().hex)
+    descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(descriptor, 'wb') as handle:
+            os.fchmod(handle.fileno(), mode)
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        require(staged.read_bytes() == data, 'staged write read-back differs')
+        yield staged
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def write_row_and_record(path, identity, entry, row_file, original, result):
+    try:
+        path.parent.mkdir(mode=0o700)
+    except FileExistsError:
+        require(path.parent.is_dir() and not path.parent.is_symlink(), 'invalid record directory')
+    else:
+        path.parent.chmod(0o700)
+
+    rows = {}
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        require(stat.S_ISREG(metadata.st_mode), 'invalid authorization record file')
+        prior = json.loads(path.read_bytes())
+        require(isinstance(prior, dict), 'invalid authorization record')
+        if all(prior.get(key) == value for key, value in identity.items()):
+            require(prior.get('schema') == 1 and isinstance(prior.get('rows'), list),
+                    'invalid authorization record')
+            rows = {(row['row_file'], row['row_id']): row for row in prior['rows']}
+    rows[entry['row_file'], entry['row_id']] = entry
+    data = (json.dumps({'schema': 1, **identity, 'rows': list(rows.values())}) + '\n').encode('utf-8')
+    with ExitStack() as stages:
+        if result != original:
+            mode = stat.S_IMODE(row_file.stat().st_mode)
+            edited = stages.enter_context(staged_bytes(row_file, result, mode))
+            # Prepare rollback before replacing the row so it needs no write allocation.
+            backup = stages.enter_context(staged_bytes(row_file, original, mode))
+        record_stage = stages.enter_context(staged_bytes(path, data, 0o600))
+        require(row_file.read_bytes() == original, 'row file changed during staged write')
+        if result != original:
+            os.replace(edited, row_file)
+        try:
+            os.replace(record_stage, path)
+        except BaseException:
+            if result != original:
+                os.replace(backup, row_file)
+            raise
+
+
 def run(args):
     row_file = Path(args.row_file)
     require(row_file.is_absolute() and stat.S_ISREG(row_file.lstat().st_mode)
@@ -162,9 +221,12 @@ def run(args):
     subject = PurePosixPath(args.subject)
     require(not subject.is_absolute() and args.subject == subject.as_posix()
             and '..' not in subject.parts and subject.parts, 'subject must be repository-relative')
+    lane = git('branch', '--show-current').decode().rstrip('\n')
+    require(lane, 'lane branch required')
     base_sha = git('rev-parse', '--verify', '--end-of-options', args.base + '^{commit}').decode().strip()
     head_sha = git('rev-parse', '--verify', '--end-of-options', args.head + '^{commit}').decode().strip()
     require(head_sha == git('rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
+    record = Path(git('rev-parse', '--path-format=absolute', '--git-path', 'ship/row-auth.json').decode().rstrip('\n'))
 
     def blob(sha, path):
         return git('cat-file', 'blob', sha + ':' + path)
@@ -189,6 +251,8 @@ def run(args):
         start, end, statement = head_fields[key]
         prefix = re.match(r'''[ \t]*(?:KEY|"KEY"|'KEY')[ \t]*=[ \t]*'''.replace('KEY', key), statement)
         require(prefix is not None, 'unsupported key prefix')
+        if head_values[key] == value:
+            continue
         ending = '\r\n' if statement.endswith('\r\n') else '\n' if statement.endswith('\n') else ''
         replacements.append((start, end, prefix[0] + basic(value) + ending))
     edited = source[:]
@@ -212,23 +276,11 @@ def run(args):
             'bytes outside paired statements differ')
     result = edited_text.encode('utf-8')
     require(row_file.read_bytes() == original, 'row file changed during derivation')
-    staged = row_file.with_name('.row-reanchor-' + uuid.uuid4().hex)
-    created = False
-    try:
-        descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(row_file.stat().st_mode))
-        created = True
-        with os.fdopen(descriptor, 'wb') as handle:
-            os.fchmod(handle.fileno(), stat.S_IMODE(row_file.stat().st_mode))
-            handle.write(result)
-            handle.flush()
-            os.fsync(handle.fileno())
-        require(staged.read_bytes() == result, 'staged write read-back differs')
-        require(row_file.read_bytes() == original, 'row file changed during staged write')
-        os.replace(staged, row_file)
-    except BaseException:
-        if created and staged.exists():
-            staged.unlink()
-        raise
+    entry = {'row_file': relative, 'row_id': args.row_id, 'subject': args.subject,
+             'expected_count': head_values.get('expect', 1), 'head_old_count': head.count(old),
+             'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements)}
+    identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
+    write_row_and_record(record, identity, entry, row_file, original, result)
     print('PASS')
     print('row_file=' + str(row_file))
     print('row_id=' + args.row_id)
@@ -237,11 +289,11 @@ def run(args):
     print('head=' + head_sha)
     print('base_span_lines=' + str(len(lines(base_values['old']))))
     print('head_span_lines=' + str(len(lines(old))))
-    print('head_old_count=' + str(head.count(old)))
+    print('head_old_count=' + str(entry['head_old_count']))
     print('hunk_count=' + str(count))
     print('tomllib=PASS')
-    print('changed_statements=' + str(sum(statement != head_fields[key][2]
-          for key, (_, _, statement) in zip(('old', 'new'), replacements))))
+    print('changed_statements=' + str(entry['changed_statements']))
+    print('record=' + str(record))
 
 
 class Parser(argparse.ArgumentParser):

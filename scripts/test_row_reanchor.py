@@ -106,6 +106,71 @@ class ToolTests(unittest.TestCase):
         self.assertIn('changed_statements=2', output)
         self.assertIn('tomllib=PASS', output)
 
+    def record_path(self):
+        return self.root / self.git('rev-parse', '--git-path', 'ship/row-auth.json')
+
+    def test_record_schema_path_and_permissions_in_linked_worktree(self):
+        self.setup_pair()
+        original_record = self.record_path()
+        linked = self.root / 'linked'
+        self.git('worktree', 'add', '-qb', 'linked-lane', str(linked), self.head_sha)
+        self.root, self.row = linked, linked / self.row.name
+        record = self.record_path()
+        _, output = self.invoke()
+        self.assertEqual(output.splitlines()[-1], f'record={record}')
+        self.assertTrue(record.is_absolute())
+        self.assertFalse(original_record.exists())
+        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(record.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(json.loads(record.read_bytes()), {
+            'schema': 1, 'lane': 'linked-lane', 'base': self.base, 'head': self.head_sha,
+            'rows': [{'row_file': 'rows.toml', 'row_id': 'target', 'subject': 'subject.txt',
+                      'expected_count': 1, 'head_old_count': 1, 'hunk_count': 2,
+                      'mutant_unchanged': True, 'changed_statements': 2}],
+        })
+
+    def test_record_expires_on_new_head_and_rerun_changes_zero_statements(self):
+        self.setup_pair()
+        self.invoke()
+        record = self.record_path()
+        old_record = json.loads(record.read_bytes())
+        target = old_record['rows'][0]
+        old_record['rows'].append({**target, 'row_id': 'other'})
+        record.write_text(json.dumps(old_record))
+        self.head_sha = self.commit()
+        before, output = self.invoke()
+        self.assertEqual(self.row.read_bytes(), before)
+        self.assertIn('changed_statements=0', output.splitlines())
+        self.assertEqual(json.loads(record.read_bytes()), {
+            **old_record, 'head': self.head_sha, 'rows': [{**target, 'changed_statements': 0}],
+        })
+
+    def test_same_head_replaces_one_entry_and_keeps_other_rows(self):
+        self.setup_pair('start\nend\n', 'start\ninserted\nend\n', 'start\nend\n', literal=True)
+        other_row = self.row.with_name('other.toml')
+        other_row.write_bytes(self.row.read_bytes())
+        self.git('add', '--', other_row.name)
+        self.base = self.head_sha = self.commit()
+        self.invoke()
+        self.invoke(**{'row-file': str(other_row)})
+        record = self.record_path()
+        before = json.loads(record.read_bytes())
+        self.assertEqual([(row['row_file'], row['row_id']) for row in before['rows']],
+                         [('rows.toml', 'target'), ('other.toml', 'target')])
+        expected = {**before, 'rows': [dict(row) for row in before['rows']]}
+        before['rows'][0]['changed_statements'] = 2
+        record.write_text(json.dumps(before))
+        original, output = self.invoke()
+        self.assertEqual(self.row.read_bytes(), original)
+        self.assertIn('changed_statements=0', output.splitlines())
+        self.assertEqual(json.loads(record.read_bytes()), expected)
+
+    def test_detached_head_refuses_before_writing(self):
+        self.setup_pair()
+        self.git('checkout', '--detach', '-q', self.head_sha)
+        self.invoke(2, 'lane branch required')
+        self.assertFalse(self.record_path().parent.exists())
+
     def test_control_characters_quotes_backslashes_and_unicode_round_trip(self):
         old = 'unique_start\nremove_first()\n' + SENTINEL + ' "café" \\path\t\x01\x7f\u2028\nremove()\nend\n'
         new = old.replace('remove_first()\n', '').replace('remove()', 'replace()')
@@ -155,7 +220,7 @@ class ToolTests(unittest.TestCase):
 
     def test_base_old_count_must_equal_one(self):
         self.setup_pair()
-        self.git('checkout', '-q', self.base)
+        self.git('checkout', '-qb', 'duplicate-base', self.base)
         self.subject.write_text(self.old + self.old)
         self.base = self.commit()
         self.head_sha = self.base
@@ -242,6 +307,34 @@ class ToolTests(unittest.TestCase):
             self.assertEqual(reanchor.main(), 2)
         self.assertEqual(output.getvalue(), 'REFUSED: OSError\n')
         self.assertEqual(self.row.read_bytes(), original)
+        self.assertEqual(list(self.root.glob('.row-reanchor-*')), [])
+
+    def test_record_replace_failure_restores_original_row_and_keeps_prior_record(self):
+        self.setup_pair()
+        record = self.record_path()
+        record.parent.mkdir(mode=0o700)
+        prior = b'{"schema": 1, "lane": "expired", "rows": []}'
+        record.write_bytes(prior)
+        original = self.row.read_bytes()
+        argv = [str(TOOL), '--row-file', str(self.row), '--row-id', 'target', '--subject', 'subject.txt',
+                '--base', self.base, '--head', self.head_sha]
+        replace = os.replace
+
+        def fail_record_replace(source, target):
+            if target == record:
+                self.assertNotEqual(self.row.read_bytes(), original)
+                raise OSError(SENTINEL)
+            replace(source, target)
+
+        output = io.StringIO()
+        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
+                patch('sys.argv', argv), patch.object(reanchor.os, 'replace', side_effect=fail_record_replace), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(reanchor.main(), 2)
+        self.assertEqual(output.getvalue(), 'REFUSED: OSError\n')
+        self.assertEqual(self.row.read_bytes(), original)
+        self.assertEqual(record.read_bytes(), prior)
+        self.assertEqual(list(record.parent.iterdir()), [record])
         self.assertEqual(list(self.root.glob('.row-reanchor-*')), [])
 
 
