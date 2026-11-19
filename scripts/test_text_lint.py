@@ -84,7 +84,8 @@ class TextLintTests(unittest.TestCase):
         receipt_id = match[1]
         receipt = json.loads((self.state / 'receipts' / (receipt_id + '.json')).read_text())
         suffix = ' Receipt: `' + receipt_id + '`.'
-        if not reason.endswith(self.NO_RESEND + suffix):
+        self.assertIn('Keep the work pending.', reason)
+        if self.NO_RESEND not in reason:
             self.assertIn('Remove the receipt marker and resend', reason)
         self.assertTrue(reason.endswith(suffix), reason)
         self.last_receipt = receipt
@@ -367,6 +368,8 @@ class TextLintTests(unittest.TestCase):
                          'tool_input': {'content': {'html': '<p>The release waits.</p>'}}}
                 reason = self.hook_refusal(event)
                 self.assertIn('Input HTML requires one explicit output-kind classification: decision or result.', reason)
+                self.assertIn('Keep the work pending.', reason)
+                self.assertIn('Use this shape:\nUse exactly one output-kind meta tag:', reason)
                 event['tool_input']['content']['html'] = '<meta name="output-kind" content="result"><p>The release waits.</p>'
                 self.assertIsNone(self.hook_output(event))
 
