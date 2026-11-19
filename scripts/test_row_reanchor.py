@@ -196,6 +196,122 @@ class ToolTests(unittest.TestCase):
         self.assertCountEqual([(row['row_file'], row['row_id']) for row in entries],
                               [('rows.toml', 'target'), ('other.toml', 'other')])
 
+    def restoration_fixture(self):
+        old = SENTINEL + '\nstart\nend\n'
+        self.setup_pair(old, old.replace('end', 'inserted\nend'), old,
+                        extra='[row.mutant]\noperator = "replace"\n')
+        prefix, header, tail = self.row.read_text().partition('[[row]]\n')
+        table, next_header, suffix = tail.partition('[[hand_run]]\n')
+        return prefix, header + table, next_header + suffix
+
+    def commit_rows(self, text):
+        self.row.write_text(text)
+        self.head_sha = self.commit()
+        return self.head_sha
+
+    def test_restoration_inserts_deleted_row_at_base_position(self):
+        prefix, table, suffix = self.restoration_fixture()
+        starting = self.commit_rows(prefix + suffix)
+        restoration = self.commit_rows(prefix + table + suffix)
+        before, output = self.invoke(restoration=restoration)
+        self.assertEqual(self.row.read_bytes(), before)
+        fields = {'restoration': restoration, 'restoration_parent': starting, 'base_lines': [4, 12],
+                  'restoration_lines': [4, 12], 'starting_lines': None, 'insert_after': 3,
+                  'restored_rows': 1, 'restoration_base_equal': True, 'restoration_outside_equal': True,
+                  'changed_statements': 0}
+        record = self.record_path()
+        entry, = json.loads(record.read_bytes())['rows']
+        for key, value in fields.items():
+            self.assertEqual(entry[key], value)
+            printed = value if isinstance(value, str) else json.dumps(value)
+            self.assertIn(f'{key}={printed}', output.splitlines())
+        self.assertEqual(output.splitlines()[-1], f'record={record}')
+
+    def test_restoration_accepts_plain_revert_and_preserves_unrelated_edit(self):
+        prefix, table, suffix = self.restoration_fixture()
+        deletion = self.commit_rows(prefix + suffix)
+        edited_suffix = suffix.replace('id = "retired"', 'id = "lane-retired"')
+        starting = self.commit_rows(prefix + edited_suffix)
+        self.git('revert', '--no-edit', deletion)
+        self.head_sha = self.git('rev-parse', 'HEAD')
+        self.assertEqual(self.row.read_text(), prefix + table + edited_suffix)
+        _, output = self.invoke(restoration=self.head_sha)
+        self.assertEqual(self.row.read_text(), prefix + table + edited_suffix)
+        self.assertIn(f'restoration_parent={starting}', output.splitlines())
+        self.assertIn('restoration_outside_equal=true', output.splitlines())
+
+    def test_restoration_rerun_at_later_head_uses_restoration_parent(self):
+        prefix, table, suffix = self.restoration_fixture()
+        starting = self.commit_rows(prefix + table.replace('claim =', 'claim  =') + suffix)
+        restoration = self.commit_rows(prefix + table + suffix)
+        self.invoke(restoration=restoration)
+        self.head_sha = self.commit()
+        _, output = self.invoke(restoration=restoration)
+        record = json.loads(self.record_path().read_bytes())
+        entry, = record['rows']
+        self.assertEqual(record['head'], self.head_sha)
+        self.assertEqual(entry['restoration'], restoration)
+        self.assertEqual(entry['restoration_parent'], starting)
+        self.assertEqual(entry['starting_lines'], [4, 12])
+        self.assertIn('changed_statements=0', output.splitlines())
+
+    def test_restoration_refuses_one_changed_row_byte(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.commit_rows(prefix + suffix)
+        restoration = self.commit_rows(prefix + table.replace('"replace"', '"replacE"') + suffix)
+        self.invoke(2, 'restored row differs from the merge base', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_outside_edit_and_misplaced_row(self):
+        prefix, table, suffix = self.restoration_fixture()
+        starting = self.commit_rows(prefix + suffix)
+        for case, restored in (
+            ('outside edit', prefix + table + suffix.replace('id = "retired"', 'id = "retireD"')),
+            ('misplaced row', prefix + suffix + '\n' + table),
+        ):
+            with self.subTest(case=case):
+                self.git('checkout', '-qb', case.replace(' ', '-'), starting)
+                restoration = self.commit_rows(restored)
+                self.invoke(2, 'restoration changed bytes outside restored rows', restoration=restoration)
+                self.assertFalse(self.record_path().exists())
+
+    def test_restoration_records_both_rows_from_one_commit(self):
+        prefix, table, suffix = self.restoration_fixture()
+        other = table.replace('id = "target"', 'id = "second"')
+        original = prefix + table + other + suffix
+        self.base = self.commit_rows(original)
+        self.commit_rows(prefix + suffix)
+        restoration = self.commit_rows(original)
+        for row_id in ('target', 'second'):
+            _, output = self.invoke(restoration=restoration, **{'row-id': row_id})
+            self.assertIn('restored_rows=2', output.splitlines())
+        entries = json.loads(self.record_path().read_bytes())['rows']
+        self.assertEqual([(entry['row_id'], entry['restored_rows']) for entry in entries],
+                         [('target', 2), ('second', 2)])
+        self.assertEqual(self.row.read_text(), original)
+
+    def test_restoration_refuses_unchanged_row(self):
+        self.restoration_fixture()
+        self.invoke(2, 'restoration commit leaves the row unchanged', restoration=self.head_sha)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_commit_outside_head_history(self):
+        prefix, table, suffix = self.restoration_fixture()
+        starting = self.commit_rows(prefix + suffix)
+        restoration = self.commit_rows(prefix + table + suffix)
+        self.git('checkout', '-qb', 'different-lane', starting)
+        self.head_sha = self.commit()
+        self.invoke(2, 'restoration must be HEAD or an ancestor of HEAD', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
+    def test_restoration_refuses_duplicate_row_id(self):
+        prefix, table, suffix = self.restoration_fixture()
+        self.commit_rows(prefix + suffix)
+        restoration = self.commit_rows(prefix + table + table + suffix)
+        self.head_sha = self.commit_rows(prefix + table + suffix)
+        self.invoke(2, 'row ID must match exactly once', restoration=restoration)
+        self.assertFalse(self.record_path().exists())
+
     def test_detached_head_refuses_before_writing(self):
         self.setup_pair()
         self.git('checkout', '--detach', '-q', self.head_sha)
@@ -412,6 +528,17 @@ class HookTests(unittest.TestCase):
 
     def test_exact_writer_form(self):
         self.assertFalse(self.denied(), self.reason)
+
+    def test_exact_restoration_suffix(self):
+        sha = 'a' * 40
+        suffix = f' --restoration {sha}'
+        self.assertFalse(self.denied(self.command + suffix), self.reason)
+        for command in (self.command + ' --restoration', self.command + suffix * 2,
+                        self.command + f' --restoration "{sha}"',
+                        self.command.replace(' --head', suffix + ' --head')):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command), self.reason)
+                self.assertIn('[--restoration <commit>]', self.reason)
 
     def test_record_conditions(self):
         for condition in ('missing', 'wrong_id', 'wrong_file', 'expired', 'group_write', 'future', 'link', 'array'):

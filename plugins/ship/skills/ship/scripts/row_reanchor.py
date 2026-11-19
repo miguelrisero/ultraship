@@ -37,7 +37,7 @@ def basic(value):
     return encoded
 
 
-def row_statements(text, row_id):
+def scan_rows(text):
     """Scan complete statements so string contents never become table headers."""
     source = lines(text)
     rows, split_rows, current, index, nested = [], set(), None, 0, False
@@ -72,6 +72,11 @@ def row_statements(text, row_id):
                 current = None
         elif current is not None:
             current.append((start, index, statement, {} if nested else parsed))
+    return rows, split_rows
+
+
+def row_statements(text, row_id):
+    rows, split_rows = scan_rows(text)
     matching = [(start, row) for start, row in rows if any(item[3].get('id') == row_id for item in row)]
     require(len(matching) == 1, 'row ID must match exactly once')
     first, selected = matching[0]
@@ -93,8 +98,58 @@ def row_statements(text, row_id):
     return values, fields, (first + 1, selected[-1][1])
 
 
+def row_extents(text):
+    rows, split_rows = scan_rows(text)
+    extents = {}
+    for start, row in rows:
+        for _, _, _, parsed in row:
+            if 'id' in parsed:
+                row_id = parsed['id']
+                require(row_id not in extents, 'row ID must match exactly once')
+                require(start not in split_rows, 'row table is not contiguous')
+                extents[row_id] = (start, row[-1][1])
+    return extents
+
+
 def opcodes(a, b):
     return difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+
+
+def restoration_check(base_text, start_text, restored_text, row_id):
+    b, h, f = map(lines, (base_text, start_text, restored_text))
+    eb, eh, ef = map(row_extents, (base_text, start_text, restored_text))
+
+    def row_lines(source, extents, key):
+        return source[slice(*extents[key])] if key in extents else None
+
+    require(row_id in eb, 'row missing at the merge base')
+    require(row_id in ef, 'row missing at the restoration commit')
+    restored = row_lines(f, ef, row_id)
+    require(restored == row_lines(b, eb, row_id), 'restored row differs from the merge base')
+    require(restored != row_lines(h, eh, row_id), 'restoration commit leaves the row unchanged')
+
+    restored_extents = [eb[key] for key in ef if key in eb
+                        and row_lines(f, ef, key) == row_lines(b, eb, key)
+                        and row_lines(f, ef, key) != row_lines(h, eh, key)]
+    expected, from_head = [], []
+    for tag, i1, i2, j1, j2 in opcodes(b, h):
+        # For insertions, i1 == i2, so both bounds must be strict.
+        use_base = tag != 'equal' and any(i1 < end and start < i2 for start, end in restored_extents)
+        chunk = b[i1:i2] if use_base else h[j1:j2]
+        expected.extend(chunk)
+        from_head.extend([not use_base] * len(chunk))
+    require(expected == f, 'restoration changed bytes outside restored rows')
+
+    def line_range(extents):
+        if row_id in extents:
+            start, end = extents[row_id]
+            return [start + 1, end]
+        return None
+
+    return {'base_lines': line_range(eb), 'restoration_lines': line_range(ef),
+            'starting_lines': line_range(eh), 'insert_after': sum(from_head[:ef[row_id][0]]),
+            'restored_rows': len(restored_extents), 'restoration_base_equal': True,
+            'restoration_outside_equal': True}
 
 
 def hunks(before, after):
@@ -253,7 +308,25 @@ def run(args):
     original = row_file.read_bytes()
     require(original == blob(head_sha, relative), 'working row file differs from head')
     text = original.decode('utf-8')
-    base_values, base_fields, _ = row_statements(blob(base_sha, relative).decode('utf-8'), args.row_id)
+    base_text = blob(base_sha, relative).decode('utf-8')
+    restoration_fields = {}
+    if args.restoration is not None:
+        restoration = git('rev-parse', '--verify', '--end-of-options', args.restoration + '^{commit}').decode().strip()
+        try:
+            git('merge-base', '--is-ancestor', restoration, head_sha)
+        except subprocess.CalledProcessError:
+            raise Refused('restoration must be HEAD or an ancestor of HEAD') from None
+        try:
+            git('merge-base', '--is-ancestor', base_sha, restoration)
+        except subprocess.CalledProcessError:
+            raise Refused('merge base must be an ancestor of the restoration') from None
+        parents = git('rev-list', '--parents', '-n', '1', restoration).decode().split()
+        require(len(parents) > 1, 'restoration parent required')
+        restoration_parent = parents[1]
+        restoration_fields = {'restoration': restoration, 'restoration_parent': restoration_parent,
+                              **restoration_check(base_text, blob(restoration_parent, relative).decode('utf-8'),
+                                                  blob(restoration, relative).decode('utf-8'), args.row_id)}
+    base_values, base_fields, _ = row_statements(base_text, args.row_id)
     head_values, head_fields, _ = row_statements(text, args.row_id)
     require(base_values['file'] == head_values['file'] == args.subject, 'subject mismatch')
     require([field[2] for key, field in base_fields.items() if key not in ('old', 'new')]
@@ -298,7 +371,7 @@ def run(args):
     entry = {'row_file': relative, 'row_id': args.row_id, 'subject': args.subject,
              'expected_count': head_values.get('expect', 1), 'head_old_count': head.count(old),
              'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements),
-             'lines': edited_extent}
+             'lines': edited_extent, **restoration_fields}
     identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
     write_row_and_record(record, identity, entry, row_file, original, result)
     print('PASS')
@@ -317,6 +390,7 @@ def main():
         parser = Parser(allow_abbrev=False, add_help=False)
         for name in ('row-file', 'row-id', 'subject', 'base', 'head'):
             parser.add_argument('--' + name, required=True)
+        parser.add_argument('--restoration')
         run(parser.parse_args())
         return 0
     except Refused as error:
