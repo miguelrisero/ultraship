@@ -169,7 +169,7 @@ def outgoing(event):
         try:
             function(*args)
         except FindingsError as exc:
-            findings.extend(exc.findings)
+            findings.extend(finding for finding in exc.findings if finding not in findings)
             remedies.extend(remedy for remedy in exc.remedies if remedy not in remedies)
             formatting_only &= exc.formatting_only
         except Exception as exc:
@@ -197,7 +197,7 @@ def outgoing(event):
             body = content.get('html', '')
             kinds = VisibleText(body).kinds
             valid_kind = len(kinds) == 1 and kinds[0] in ('decision', 'result')
-            if not valid_kind and not lint_off() & {'all', 'classification'}:
+            if not valid_kind:
                 findings.append('Input HTML requires one explicit output-kind classification: decision or result.')
                 remedies.append(CLASSIFICATION_RETRY)
                 formatting_only = False

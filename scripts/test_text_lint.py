@@ -315,6 +315,18 @@ class TextLintTests(unittest.TestCase):
                 event['tool_input']['content']['html'] = '<meta name="output-kind" content="result"><p>The release waits.</p>'
                 self.assertIsNone(self.hook_output(event))
 
+    def test_lint_off_keeps_input_classification_required(self):
+        for setting in ('all', 'classification'):
+            for tool in ('create_input', 'update_input'):
+                with self.subTest(setting=setting, tool=tool), patch.dict(os.environ, {'SHIP_LINT_OFF': setting}):
+                    event = self.input_event('input')
+                    event['tool_name'] = 'mcp__bettercoding__' + tool
+                    reason = self.hook_refusal(event)
+                    self.assertEqual(reason, 'Output contract: Input HTML requires one explicit output-kind '
+                                     'classification: decision or result. Keep the work pending. '
+                                     + self.CLASSIFICATION_RETRY)
+                    self.assertFalse(self.last_receipt['resend_allowed'])
+
     def test_each_lint_switch_skips_its_rule(self):
         long_result = '<meta name="output-kind" content="result"><p>' + 'word ' * 26 + '.</p>'
         decision = '<meta name="output-kind" content="decision"><p>Please decide.</p>'
@@ -325,7 +337,6 @@ class TextLintTests(unittest.TestCase):
             ('sections', self.input_event('decision', decision), 'Missing section: Recommendation'),
             ('hold', self.event(wall), 'Keep any new hold in one line'),
             ('unicode', self.event(summary='\ud800'), 'Use valid Unicode in the message or Input.'),
-            ('classification', self.input_event('input'), 'Input HTML requires one explicit output-kind classification:'),
         )
         for rule, event, finding in cases:
             with self.subTest(rule=rule):
@@ -834,6 +845,11 @@ class TextLintTests(unittest.TestCase):
         self.assertEqual(result.get('permissionDecision'), 'deny')
         self.assertIn('Use valid Unicode in the message or Input. Keep the work pending. '
                       + self.UNICODE_RETRY, result['permissionDecisionReason'])
+
+    def test_invalid_unicode_finding_and_remedy_appear_once(self):
+        reason = self.hook_refusal(self.event('\ud800', content='\ud801', summary='\ud802'))
+        self.assertEqual(reason, 'Output contract: Use valid Unicode in the message or Input. '
+                         'Keep the work pending. ' + self.UNICODE_RETRY)
 
     def test_conflicting_classification_attributes_keep_input_denied(self):
         for tool in ('create_input', 'update_input'):

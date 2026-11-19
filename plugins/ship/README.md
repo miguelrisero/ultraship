@@ -62,7 +62,8 @@ Decision Inputs need the five decision sections. Result Inputs can use free-form
 `Agent` and `Task` prompts get receipt checks only.
 
 Set `SHIP_LINT_OFF` to a comma-separated list of rule names, such as `glued,sentence`.
-Use `all` to disable every rule in this list. The switch leaves safety and receipt checks active.
+Use `all` to disable every rule in this list.
+Input classification, safety, and receipt checks stay active.
 
 | Rule | Check |
 |---|---|
@@ -71,10 +72,10 @@ Use `all` to disable every rule in this list. The switch leaves safety and recei
 | `sections` | Missing sections in decision text |
 | `hold` | Repeated standing holds in peer status messages |
 | `unicode` | Invalid Unicode in message and Input fields |
-| `classification` | Missing, invalid, or conflicting output-kind markers in Input HTML |
 
 The first four rules warn and let the call proceed.
-The `unicode` and `classification` rules give an exact remedy for a resend.
+Input HTML requires exactly one `output-kind` marker with the value `decision` or `result`.
+Invalid Unicode and classification findings give an exact remedy for a resend.
 Keep the action, recipient, and non-prose fields the same on a resend.
 
 The review-thread guard scans command text. It admits one static, single-quoted GraphQL query through a narrow `gh api graphql` read route. The data argument rule applies only when every command is plain `printf`, `echo`, safe-option `grep`, `ps` or a literal assignment. A command substitution keeps the full runner check. Script files run by path, `gh` aliases and extensions, and command words built from variables or globs escape its checks. It also misses opaque URLs in other clients and files written by Write or Edit then run. Interpreter scripts such as `python3 -c` or `node -e` can run `gh` outside this check. Shell runners can also build `gh` from escapes or expansions. The upgrade path is a GitHub token that the driver cannot use for review-thread writes.
