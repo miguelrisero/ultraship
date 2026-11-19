@@ -432,7 +432,7 @@ EXPECTED_DISPOSITION_BOUNDARY = [
     'Source delivery grants zero runtime-adoption authority.',
     'Source delivery grants zero retry authority.',
     'Native Edit grants zero alternate form for an existing or recorded denied operation.',
-    'Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.',
+    'Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.',
     'Preserve every effective refusal, tool and hook denial, and affected-session hold.',
     'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.',
     'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.',
@@ -510,7 +510,7 @@ EXPECTED_NEW_ROW_BOUNDARY = [
     'Source delivery grants zero installation authority.',
     'Source delivery grants zero publication authority.',
     'Preserve every existing refusal, tool and hook denial, and affected-session hold.',
-    'Never replay a denied command, equivalent operation or substitute actor while its refusal remains effective.',
+    'Retry a refused command in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.',
     'Require actual cause resolution and fresh applicable disposition before any affected-session attempt.',
     'Source delivery, installation, version, cache, restart, executor and tool changes alone resolve zero existing denial.',
     *EXPECTED_CONTRACT_GAP_RULE,
@@ -1016,7 +1016,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         ):
             self.assertIn(phrase, boundary)
         for pattern in (r'future briefs.*verified runtime adoption', r'Native Edit.*zero.*alternate.*denied',
-                        r'actual cause.*fresh applicable disposition', r'(?:never|zero).*replay.*(?:equivalent|actor)',
+                        r'actual cause.*fresh applicable disposition', r'Retry.*another form only when.*refusal reason is fixed',
                         r'product-limit.*cost.*zero.*(?:protected|subject)',
                         r'literal.*(?:worktree|path).*allowlist', r'fsmonitor.*(?:external diff|text conversion)',
                         r'(?:inconsistent|changed).*checkpoint.*(?:invalid|block)|invalid.*(?:inconsistent|changed).*checkpoint',
@@ -1744,6 +1744,120 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertIn(phrase, general)
             with self.subTest(skill_contract='general_clause_count', phrase=phrase):
                 self.assertEqual(text.count(phrase), 1)
+
+
+class ScopedDecisionRouteTests(unittest.TestCase):
+    ship = ROOT / 'plugins/ship'
+    reference = ship / 'skills/ship/references/owner-decisions.md'
+    lanes = ('driver.md', 'driver--sol.md', 'writer--sol.md', 'writer--sonnet.md',
+             'writer--fable52.md')
+    reviewers = ('reviewer--sol.md', 'reviewer--opus.md')
+    skill = ship / 'skills/ship/SKILL.md'
+
+    def check_route(self, heading, clauses):
+        marker = f'## {heading}\n'
+        text = self.reference.read_text()
+        self.assertEqual(text.count(marker), 1)
+        section = text.split(marker, 1)[1].split('\n## ', 1)[0]
+        for clause in clauses:
+            with self.subTest(clause=clause):
+                self.assertIn(clause, section)
+
+    def test_main_row_repair_requires_exact_causal_scope_and_separate_gates(self):
+        self.check_route('Standalone main-row repair', (
+            'only to future briefs after verified runtime adoption',
+            'Require a repair-only lane',
+            'read `~/.claude/CLAUDE.md` directly under `CoC decisions (standing grant)`',
+            'clause for adapting rows when a PR makes the stored mutant impossible to apply',
+            'follow-up row for new code and independent not-weaker review',
+            'frozen CoC decision to identify this repair as the follow-up for the named breaking PR under that grant',
+            'accept zero relay and require zero per-row owner events',
+            'CoC-frozen decision file by absolute path and SHA256',
+            'exact repair lane and branch, and repair PR URL when assigned',
+            'full main and pre-edit commit and tree identities',
+            'earlier breaking PR, full merged commit SHA, and pre-merge main SHA',
+            'each exact stored row ID, canonical row file, subject file, and approved line extent',
+            'only whole-line grep for the exact stored `id = "<ID>"` line',
+            'Read only the approved row extent, from its `[[` header to the line before the next table',
+            'met its expected count before the breaking commit',
+            'counts zero at that commit and on the bound main',
+            'source evidence that the named merge caused the zero count',
+            'bound pre-merge main and merged commit to show that the breaking PR changed the guarded code itself',
+            'positive evidence that this code change made the stored mutant impossible to apply at the guarded site',
+            'frozen decision to bind this evidence to the follow-up under the owner standing grant',
+            'A zero count alone supplies zero repair authority',
+            'A hook refusal ends the step',
+            'Change only `old` and `new`',
+            'Preserve the identical mutant operation',
+            'reviewer who differs from the PR author and the applying writer',
+            'before any reviewer row read',
+            'the same guarantee for every row',
+            'Require a CoC-approved frozen review receipt before publication',
+            'Bind its path and SHA256 to the decision file path and SHA256',
+            'Recheck those bindings and the publication head before publishing',
+            'separate applicable execution admission',
+            'Preserve all other routes, higher-priority instructions, effective refusals, hook and tool denials',
+        ))
+        for path in (self.skill, *(self.ship / 'agents' / name for name in self.lanes + self.reviewers)):
+            with self.subTest(path=path):
+                self.assertIn('owner-decisions.md#standalone-main-row-repair', path.read_text())
+        for name in self.reviewers:
+            with self.subTest(reviewer=name):
+                text = (self.ship / 'agents' / name).read_text()
+                self.assertIn('in place of the default Lane-derived row review only for its exact frozen scope', text)
+                self.assertIn('Require protected row admission separately from the CoC decision', text)
+        astra = (self.ship / 'agents/reviewer--astra.md').read_text()
+        self.assertNotIn('owner-decisions.md#standalone-main-row-repair', astra)
+
+    def test_main_row_repair_routes_retired_rows_to_separate_creation(self):
+        self.check_route('Standalone main-row repair', (
+            'Require an active row at the bound main commit.',
+            'Refuse an existing `[[retired]]` row on this same-row route.',
+            'Preserve the retirement record.',
+            'Use the [new lane-owned row review route](#new-lane-owned-row-review-route) for its replacement row.',
+            'Require a new row ID and separate creation authority for the replacement.',
+        ))
+        self.check_route('New lane-owned row review route', (
+            'Apply this route only to future briefs after verified runtime adoption.',
+            'Preserve every existing refusal, tool and hook denial, and affected-session hold.',
+        ))
+
+    def test_main_row_repair_requires_proof_of_earlier_reviewed_disposition_before_edit(self):
+        self.check_route('Standalone main-row repair', (
+            'Require recorded evidence of a landed designated-test change or mutant adaptation under that grant.',
+            'Require the disposition record to cite the landed row change and its CoC decision.',
+            'Require a receipt for the independent not-weaker review of that disposition.',
+            'Require that reviewer to differ from the breaking PR author and the person who applied the disposition.',
+            'Bind the receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.',
+            'Verify that the reviewed disposition is the one that landed for the named row.',
+            'Record both items and their verifiable evidence references in the frozen edit decision.',
+            'Bind both items to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.',
+            'Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched record or review.',
+            'A zero count alone supplies zero repair authority. A disposition label supplies zero proof.',
+            'accept zero relay and require zero per-row owner events',
+        ))
+
+    def test_scoped_owner_event_verification_preserves_all_other_input_bans(self):
+        self.check_route('Scoped owner event verification', (
+            'Confirm that your loaded role or skill implements this exception',
+            "named lane's brief to select it and cite a CoC-frozen decision file by absolute path and SHA256",
+            'Verify the digest and exact scope before any call',
+            'exact lane, its repository and task or PR scope, and the owner events to verify',
+            'the permitted tool for each exact Input and workspace UUID',
+            'Permit only `get_input` or `get_input_events` for those exact IDs, solely to verify the named owner events',
+            'supplies zero owner consent or action authority',
+            "only to the named lane's brief-level ban on Input calls",
+            'Keep every other Input call under the ban',
+            'Preserve reviewer MCP denials, all independent hook and tool restrictions, and every effective refusal',
+        ))
+        for path in (self.skill, *(self.ship / 'agents' / name for name in self.lanes)):
+            with self.subTest(path=path):
+                self.assertIn('owner-decisions.md#scoped-owner-event-verification', path.read_text())
+        for path in (self.ship / 'agents').glob('reviewer--*.md'):
+            with self.subTest(reviewer=path.name):
+                text = path.read_text()
+                self.assertNotIn('owner-decisions.md#scoped-owner-event-verification', text)
+                self.assertIn('tools: Read, Grep, Glob, LSP, WebFetch, WebSearch\n', text)
 
 
 if __name__ == '__main__':

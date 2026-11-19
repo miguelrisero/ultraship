@@ -1151,9 +1151,15 @@ SHELL_INTERPRETERS = {'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh',
 STRING_WRAPPERS = SHELL_INTERPRETERS | {'env', 'eval', 'watch', 'script', 'flock', 'su', 'trap'}
 
 
-def read_only_argument_word(command, tokens, words, index):
+def read_only_argument_word(command, tokens, words, index, *, literal_grep_anchor=False):
     # These commands never run an argument word within read-only pipelines after a literal directory change.
-    if not index or any(char in command for char in '$`<~'):
+    if not index:
+        return False
+    checked = command
+    raw, _, _, end = words[index]
+    if literal_grep_anchor and words[0][0] == 'grep' and re.fullmatch(r"'[^'\r\n]*\$'", raw):
+        checked = command[:end - 2] + command[end - 1:]
+    if any(char in checked for char in '$`<~'):
         return False
     try:
         original = shell_raw_words(command)
@@ -3604,9 +3610,33 @@ def writer_repository_selector(option, value):
     return option == '--work-tree' and value == '.'
 
 
+def writer_quoted_grep_data(command):
+    if "'" not in command or '"' not in command:
+        return command
+    try:
+        tokens = shell_raw_words(command)
+    except ValueError:
+        return command
+    words, spans = [], []
+    for token in [*tokens, (';', '', 0, 0)]:
+        if token[0] not in {';', '&', '|', '(', ')', '`', '\n'}:
+            words.append(token)
+            continue
+        if words and words[0][0] == 'grep' and literal_search_shell(' '.join(word[0] for word in words)):
+            for index, (raw, value, start, end) in enumerate(words[1:], 1):
+                if (raw.startswith("'") and '"' in value and re.search(r'\bgh\b', value)
+                        and not hidden_gh_api_calls(value.replace('"', '').replace('\\', ''))
+                        and read_only_argument_word(command, tokens, words, index, literal_grep_anchor=True)):
+                    spans.append((start, end))
+        words = []
+    for start, end in reversed(spans):
+        command = command[:start] + "'pattern'" + command[end:]
+    return command
+
+
 def writer_gh_denial_main(command, depth=0):
     if depth == 0:
-        command = commit_message_removed(command)
+        command = writer_quoted_grep_data(commit_message_removed(command))
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = re.sub(r'''['"\\]''', '', command)
     if not re.search(r'\bgh\b', unquoted):
@@ -3711,7 +3741,7 @@ def writer_gh_denial_main(command, depth=0):
 
 def writer_gh_denial(command, depth=0):
     if depth == 0:
-        command = commit_message_removed(command)
+        command = writer_quoted_grep_data(commit_message_removed(command))
     command = cat_heredoc_data(command).replace('\\\n', '')
     unquoted = writer_trigger_text(command)
     if not re.search(r'\bgh\b|GIT_|\b(?:EDITOR|VISUAL|PAGER)\b|\bgit\b|ext::|-[iv0]*S|--s', unquoted):
@@ -3822,7 +3852,11 @@ def writer_gh_denial(command, depth=0):
                 return 'hidden gh word-part rule'
             if git_value:
                 if git_value == '-c' and tuple(word.split('=', 1)) not in WRITER_VALUE_ALLOWLIST:
-                    return 'git config value rule'
+                    commit_prefix = re.match(r'[ \t]*git[ \t]+(?:-C[ \t]+/[\w./-]+[ \t]+)?'
+                                             r'-c[ \t]+core\.abbrev=40[ \t]+commit(?=[ \t]|$)', command)
+                    if not (depth == 0 and words is segments[0] and commit_prefix
+                            and words[:index + 2] == commit_prefix[0].split()):
+                        return 'git config value rule'
                 if git_value in {'--git-dir', '--work-tree'} and not writer_repository_selector(git_value, word):
                     return 'git repository selector rule'
                 git_value = None
@@ -3951,7 +3985,7 @@ def writer_gh_denial(command, depth=0):
 GRAPHQL_TOKEN = re.compile(r'''(?P<ignored>[ \t\r\n,''' + chr(0xFEFF) + r''']+|\#[^\x00-\x08\x0a-\x1f]*)|(?P<block>"""(?:\\"""|(?!"""|\\""")[^\x00-\x08\x0b\x0c\x0e-\x1f])*""")|(?P<string>(?!""")"(?:[^"\\\x00-\x08\x0a-\x1f]|\\(?:["\\/bfnrt]|u[0-9A-Fa-f]{4}))*")|(?P<name>[_A-Za-z][_0-9A-Za-z]*)|(?P<number>-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?(?![._0-9A-Za-z]))|(?P<punct>\.\.\.|[!$&():=@\[\]{|}])''')
 
 
-def graphql_read_document(document):
+def graphql_read_document(document, required_variables=(), paginate=False):
     tokens, cursor = [], 0
     while cursor < len(document):
         match = GRAPHQL_TOKEN.match(document, cursor)
@@ -3983,14 +4017,25 @@ def graphql_read_document(document):
             return group(position, '(')
         return position
 
-    cursor = 0
+    cursor, declared = 0, set()
     if tokens and tokens[0] == ('name', 'query'):
         cursor = 1
         if cursor < len(tokens) and tokens[cursor][0] == 'name':
             cursor += 1
+        position = cursor + 1
         cursor = optional_arguments(cursor)
         if cursor is None:
             return False
+        while position < cursor - 1:
+            kind, value = tokens[position]
+            if kind == 'punct' and value in '([{':
+                position = group(position, value)
+                continue
+            if (kind == 'punct' and value == '$' and position + 3 < cursor - 1
+                    and tokens[position + 1][0] == 'name' and tokens[position + 2] == ('punct', ':')
+                    and (tokens[position + 3][0] == 'name' or tokens[position + 3] == ('punct', '['))):
+                declared.add(tokens[position + 1][1])
+            position += 1
         while cursor < len(tokens) and tokens[cursor] == ('punct', '@'):
             cursor += 1
             if cursor >= len(tokens) or tokens[cursor][0] != 'name':
@@ -3999,7 +4044,79 @@ def graphql_read_document(document):
             if cursor is None:
                 return False
     end = group(cursor, '{')
-    return end == len(tokens) and end > cursor + 2
+    if end != len(tokens) or end <= cursor + 2 or not declared.issuperset(required_variables):
+        return False
+    if not paginate:
+        return True
+
+    # Skip nested groups so metadata must belong to the connection that uses the cursor.
+    def direct_items(start, stop):
+        position = start + 1
+        while position < stop - 1:
+            yield position
+            kind, value = tokens[position]
+            position = group(position, value) if kind == 'punct' and value in '([{' else position + 1
+
+    def page_info_key(item):
+        return (tokens[item] == ('name', 'pageInfo')
+                and tokens[item - 1] not in (('punct', ':'), ('punct', '@'), ('punct', '...'))
+                and tokens[item - 2:item] != [('punct', '...'), ('name', 'on')])
+
+    cursor_argument = [('name', 'after'), ('punct', ':'), ('punct', '$'), ('name', 'endCursor')]
+    singular_parents = ['repository', 'pullRequest']
+    selection_names, parents = {}, []
+    page_info, bound_page_info, position = None, None, cursor + 1
+    while position < end - 1:
+        # gh looks up the response key across the whole result.
+        if page_info_key(position):
+            if page_info is not None:
+                return False
+            page_info = position
+        if tokens[position] == ('punct', '{'):
+            parents.append(selection_names.get(position))
+        elif tokens[position] == ('punct', '}'):
+            parents.pop()
+        if tokens[position] != ('punct', '('):
+            position += 1
+            continue
+        arguments = position
+        position = group(arguments, '(')
+        kind, field = tokens[arguments - 1]
+        if kind != 'name' or tokens[arguments - 2] == ('punct', '@'):
+            continue
+        cursor_count = sum(tokens[item:item + 4] == cursor_argument for item in direct_items(arguments, position))
+        # A single selection under a list can return several cursors.
+        if cursor_count and (cursor_count != 1 or bound_page_info is not None
+                             or parents != singular_parents or field != 'reviewThreads'):
+            return False
+        if not cursor_count and field not in singular_parents:
+            continue
+        selection = position
+        while tokens[selection] == ('punct', '@'):
+            if tokens[selection + 1][0] != 'name':
+                return False
+            selection = optional_arguments(selection + 2)
+        if not cursor_count:
+            if tokens[selection] == ('punct', '{'):
+                selection_names[selection] = field
+            continue
+        selection_end = group(selection, '{')
+        if selection_end is None:
+            return False
+        for item in direct_items(selection, selection_end):
+            if not page_info_key(item) or tokens[item + 1] != ('punct', '{'):
+                continue
+            fields = {tokens[field][1] for field in direct_items(item + 1, group(item + 1, '{'))
+                      if tokens[field][0] == 'name' and tokens[field - 1] not in (
+                          ('punct', ':'), ('punct', '@'), ('punct', '...'))
+                      and (tokens[field + 1][0] == 'name' or tokens[field + 1] in (
+                          ('punct', '}'), ('punct', '...')))}
+            if {'hasNextPage', 'endCursor'} <= fields:
+                bound_page_info = item
+                break
+        else:
+            return False
+    return bound_page_info is not None and page_info == bound_page_info
 
 
 def review_data_segment(words):
@@ -4071,9 +4188,16 @@ def review_thread_denial(command, data_mode=False):
     normalized = re.sub(r'''['"\\]''', '', command).casefold()
     if re.search(r'\bgh\b', normalized) and '`' in outside_single_quotes(command):
         return 'review-thread guard parse failure'
-    if (any(name in normalized for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
-                                            'resolvereviewthread'))
-            or re.search(r'comments/\S*/replies', normalized)):
+    # shortcut: mask only the first literal PR body path; use shell token offsets if later segments need it.
+    body_file = re.match(r'[ \t]*gh[ \t]+pr[ \t]+edit[ \t]+[1-9][0-9]*[ \t]+--body-file[ \t]+'
+                         r'''([\w./-]+|'[\w./-]+'|"[\w./-]+")(?=[ \t\n;&|]|$)''', command)
+    mutation_text = normalized
+    if body_file:
+        masked = command[:body_file.start(1)] + '_' + command[body_file.end(1):]
+        mutation_text = re.sub(r'''['"\\]''', '', masked).casefold()
+    if (any(name in mutation_text for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
+                                               'resolvereviewthread'))
+            or re.search(r'comments/\S*/replies', mutation_text)):
         return 'raw review-thread mutation'
     command = cat_heredoc_data(command)
     try:
@@ -4136,8 +4260,15 @@ def review_thread_denial(command, data_mode=False):
                 continue
             text = re.sub(r'''['"\\]''', '', value)
             if any(gh_word(token) for token in re.split(r'[\s;&|()<>`]+', text)):
-                argument_data = data_command and position > 0 and not hidden_gh_api_calls(text)
+                api_calls = hidden_gh_api_calls(text)
+                argument_data = data_command and position > 0 and not api_calls
                 reason = review_thread_denial(text if argument_data else value, data_mode=argument_data)
+                if reason == 'unparsed shell syntax rule: No closing quotation' and (
+                        position > 0 and words[0][1] == 'grep' and '"' in value and not api_calls
+                        and re.fullmatch(r"'[^']*'", raw)
+                        and literal_search_shell(' '.join(word for _, word in words))):
+                    # A literal grep pattern can contain an unmatched quote as regex data.
+                    continue
                 if reason:
                     return reason
         command_words, skip_target = [], False
@@ -4168,7 +4299,9 @@ def review_thread_denial(command, data_mode=False):
         calls = [index for index, (value, _) in enumerate(words)
                  if os.path.basename(value) == 'gh' and index + 1 < len(words) and words[index + 1][0] == 'api']
         text = re.sub(r'''['"\\]''', '', ' '.join(raw for _, raw in words))
-        if hidden_gh_api_calls(text) > len(calls):
+        # The recursive pass above already checked gh api calls inside quoted words.
+        nested = sum(hidden_gh_api_calls(re.sub(r'''['"\\]''', '', value)) for value, raw in words if value != raw)
+        if hidden_gh_api_calls(text) > len(calls) + nested:
             return 'review-thread guard parse failure'
         text = text.casefold()
         for index, (value, raw) in enumerate(words):
@@ -4199,6 +4332,7 @@ def review_thread_denial(command, data_mode=False):
                 return 'review-thread guard parse failure'
             cursor, parsed, options = 0, True, True
             static_read, field_count, document = True, 0, None
+            scalar_fields, paginate = set(), False
             expanded_values = set()
             value_options = {'-H', '-X', '-f', '-F', '-q', '-t', '-p', '--method', '--field', '--raw-field',
                              '--input', '--header', '--jq', '--template', '--hostname', '--cache', '--preview'}
@@ -4226,11 +4360,13 @@ def review_thread_denial(command, data_mode=False):
                             continue
                         option = '-' + value[letter]
                         prefix = value[:letter + 1]
-                        attached = value[letter + 1:].removeprefix('=') or None
+                        suffix = value[letter + 1:]
+                        static_read = static_read and suffix != '='
+                        attached = suffix.removeprefix('=') or None
                         break
                 if option in value_options:
-                    static_read = (static_read and option in ('-f', '--raw-field', '-q', '--jq', '-t', '--template')
-                                   and not (option in ('-f', '--raw-field') and attached is not None))
+                    static_read = static_read and option in (
+                        '-f', '--raw-field', '-F', '--field', '-q', '--jq', '-t', '--template')
                     if attached is not None:
                         option_value = attached
                         option_raw = raw.removeprefix(prefix) if raw.startswith(prefix) else raw
@@ -4247,15 +4383,24 @@ def review_thread_denial(command, data_mode=False):
                     elif option in ('-f', '-F', '--field', '--raw-field', '--input'):
                         field_count += 1
                         inputs = inputs or option == '--input'
+                        static_read = static_read and attached is None
                         if option_value.startswith('query='):
+                            static_read = static_read and query is None and option in ('-f', '--raw-field')
                             query_value = option_value[6:]
                             single = re.fullmatch(r"query='[^']*'|'query=[^']*'", option_raw) is not None
                             query = bool(query_value) and not query_value.startswith('@') and (
                                 single or not any(char in option_raw for char in '$`\\'))
                             if single:
                                 document = query_value
+                        else:
+                            name = option_value.split('=', 1)[0]
+                            # Typed fields also support file and placeholder expansion.
+                            static_read = (static_read and name not in scalar_fields and re.fullmatch(
+                                r'[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_./+=-]*', option_value) is not None)
+                            scalar_fields.add(name)
                 elif options and (value in switches or option is None and value.startswith('-i')):
-                    static_read = static_read and value in ('-i', '--include', '--silent')
+                    static_read = static_read and value in ('-i', '--include', '--silent', '--paginate')
+                    paginate = paginate or value == '--paginate'
                 elif options and value.startswith('-') or endpoint is not None:
                     parsed = False
                 else:
@@ -4297,13 +4442,48 @@ def review_thread_denial(command, data_mode=False):
             if write and (not visible or full_url and host != 'api.github.com'
                           or re.search(r'(?:^|/)pulls/[^/]+/comments(?:/|$)', route)):
                 return 'REST review-comment write or opaque endpoint'
-            if (static_read and endpoint == 'graphql' and field_count == 1 and document is not None
-                    and graphql_read_document(document)):
+            required_variables = scalar_fields | {'endCursor'} if paginate else scalar_fields
+            if (static_read and endpoint == 'graphql' and document is not None
+                    and not any('$' in outside_single_quotes(raw) for _, raw in arguments)
+                    and graphql_read_document(document, required_variables, paginate=paginate)):
                 continue
             method = methods[-1] if methods else ('POST' if field_count else 'GET')
             if method not in ('GET', 'HEAD'):
                 return 'gh api write outside the helper'
     return None
+
+
+# In this literal Git read, the only dollar signs belong to the single-quoted pattern.
+LITERAL_GIT_GREP_ANCHOR = re.compile(
+    r"[ \t]*git(?:[ \t]+-C[ \t]+(?!-)[\w./-]+)*[ \t]+grep"
+    r"(?:[ \t]+-[nilwEFvz]+)*[ \t]+'(?!-)[^'\x00\r\n]*\$'"
+    r"(?:[ \t]+(?!-)[\w./-]+)*(?:[ \t]+--(?:[ \t]+[\w./-]+)*)?[ \t]*\n?")
+
+
+# Match the wrapper as well as the pipeline so incomplete shell syntax keeps the fallback.
+LITERAL_GIT_COUNT_COMMAND = re.compile(
+    r'[ \t]*(?:cd[ \t]+(?!-)[A-Za-z0-9_./-]+[ \t]+&&[ \t]+)?'
+    r'echo[ \t]+"(?:[A-Za-z0-9_ .-]+:[ \t]+)?\$\([ \t]*git[ \t]+ls-tree[ \t]+-r[ \t]+--name-only'
+    r'[ \t]+[A-Za-z0-9_][A-Za-z0-9_./-]*[ \t]+--[ \t]+[A-Za-z0-9_./-]+'
+    r'''[ \t]*\|[ \t]*grep[ \t]+-c[ \t]+'(?!-)(?:[A-Za-z0-9_./-]|\\\.)+\$'[ \t]*\)"[ \t]*\n?''')
+
+
+def pr_comment_body_removed(command):
+    """Mask the quoted body of one complete top-level PR comment for the thread guard."""
+    # shortcut: omit escaped apostrophes in ANSI-C quotes until the shell dialect is known.
+    match = re.fullmatch(
+        r'([ \t]*gh[ \t]+pr[ \t]+comment[ \t]+'
+        r'(?:https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/)?[1-9][0-9]*[ \t]+--body[ \t]+)'
+        r'''(\$'(?:[^'\\\x00]|\\[\\nrt])*'|'[^'\x00]*'|"(?:[^"$`\\!\x00]|\\["$`\\])*")[ \t]*\n?''',
+        command)
+    if not match:
+        return command
+    # A blank body can lead to interactive input.
+    literal = match[2]
+    body = literal.removeprefix('$')[1:-1]
+    if literal.startswith('$'):
+        body = re.sub(r'\\[nrt]', '', body)
+    return match[1] + "'body'" if body.strip() else command
 
 
 def thread_command_config(command):
@@ -4585,10 +4765,9 @@ def pre(data):
             publication_reason = ('Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; '
                                   'commit grants permit local base-branch merges into their own lane branch. '
                                   'Return this step to your driver; the driver may run it.')
-            classifier_reason = ('This operation remains denied. Report the rule and blocked scope to the parent. '
-                                 'Native Edit grants zero alternate command form or actor for a denied operation. '
-                                 'Require actual cause resolution and fresh applicable disposition for affected sessions before any attempt. '
-                                 'Never replay a denied command, equivalent, or substitute actor.')
+            classifier_reason = ('This operation is denied. Retry in another form when the refusal reason is fixed or the new form meets the rule below, '
+                                 'or report the rule and blocked scope to your driver and ask for permission; '
+                                 'the driver may grant it or run the step itself.')
             try:
                 command = tin.get('command', '')
                 if any(char.isspace() and char not in ' \t\n' for char in command):
@@ -4665,7 +4844,7 @@ def pre(data):
                 deny('Writers do not edit GitHub CLI configuration.')
     if tool == 'Bash':
         try:
-            command = tin.get('command', '')
+            command = pr_comment_body_removed(tin.get('command', ''))
             reason = review_thread_denial(command)
             if reason is None:
                 separated = re.sub(r'''['"\\]''', ' ', command).casefold()
@@ -4676,11 +4855,14 @@ def pre(data):
                       and (re.search(r'\bgh\b', separated) or re.search(r'\bgh\b', normalized))):
                     reason = 'heredoc with line continuation'
                 elif (thread_command_config(command) or '--config-env' in command
-                      or "$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
-                                             or re.search(r'\b(?:gh|api)\b', normalized))):
+                      or ("$'" in command and (re.search(r'\b(?:gh|api)\b', separated)
+                                              or re.search(r'\b(?:gh|api)\b', normalized))
+                          and not LITERAL_GIT_GREP_ANCHOR.fullmatch(command)
+                          and "$'" in writer_quoted_grep_data(command)
+                          and not LITERAL_GIT_COUNT_COMMAND.fullmatch(command))):
                     reason = 'git config from the command line'
-        except Exception:
-            reason = 'review-thread guard parse failure'
+        except Exception as error:
+            reason = 'review-thread guard exception: ' + type(error).__name__
         if reason:
             deny("Ship replies to and resolves review threads only through `skills/babysit/scripts/thread_reply.py`, "
                  "which first checks that the thread belongs to the PR's own repository and number. Rule: " + reason + '.')

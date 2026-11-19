@@ -16,13 +16,13 @@ Require this field and these sentences verbatim in every brief:
 
 ```text
 Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>
-A hook refusal is final: report it and stop.
+After a hook refusal, retry in another form when the refusal reason is fixed or the new form meets the rule the refusal names. You may always ask your superior for permission to run the refused command.
 Never print a key value; never post outside bettergroupinc and miguelrisero.
 Never chain a glob listing into a write command.
 ```
-The stop covers the refused call; a reviewer reports it as blocked scope and continues other permitted scope.
+A reviewer reports a refused call as blocked scope and continues other permitted scope.
 Triage does the same. Its Readable files name only search directories that hold no `tests/mutation/` directory.
-The formatting, coordination and method-only routes in [Loaded instructions and refusals](../ship/references/owner-decisions.md#loaded-instructions-and-refusals) stay.
+[Loaded instructions and refusals](../ship/references/owner-decisions.md#loaded-instructions-and-refusals) sets the retry rule and the ask-your-superior rule.
 
 ## Push boundary
 
