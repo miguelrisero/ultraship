@@ -785,6 +785,88 @@ class LedgerDirTests(unittest.TestCase):
                 self.assertEqual((owed.read_bytes(), self.resolve().read_bytes()), before)
                 owed.write_text('')
 
+    def assert_auto_accounts_unparsed(self, owed, transcript, result, epoch, reason):
+        home = self.resolve()
+        before = ledger.rows(home)
+        auto = self.cli('account-auto', '--fail-unparsed', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        sha = '0' * 40
+        self.assertEqual(auto.stdout.splitlines(), [
+            f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} fail", '1 accounted, 0 pending'])
+        *history, row = ledger.rows(home)
+        self.assertEqual(history, before)
+        self.assertEqual(row[1:5], ['account-result', 'ship:reviewer--sol@reviewer', sha, 'fail'])
+        note = json.loads(row[5])
+        self.assertEqual(note['step'], 'review')
+        self.assertEqual(note['evidence'],
+                         f'{transcript} at {datetime.fromtimestamp(epoch, timezone.utc).isoformat()}: {reason}')
+
+    def test_fail_unparsed_accounts_a_missing_commit(self):
+        owed, transcript, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', 'Verdict: PASS abcd1234')])
+        self.assert_auto_accounts_unparsed(owed, transcript, result, epoch, 'expected one commit')
+
+    def test_fail_unparsed_accounts_conflicting_verdicts_as_fail(self):
+        owed, transcript, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'OVERALL: PASS\nVerdict: FAIL {"ab" * 20}')])
+        self.assert_auto_accounts_unparsed(owed, transcript, result, epoch, 'expected one verdict')
+
+    def test_fail_unparsed_accounts_a_transcript_parse_error(self):
+        owed, transcript, result, epoch = self.auto_owed([(-2, 'user', 'Review.')])
+        transcript.write_text('{bad json\n')
+        self.assert_auto_accounts_unparsed(owed, transcript, result, epoch, 'transcript parse error')
+
+    def test_account_auto_requires_opt_in_for_a_missing_commit(self):
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', 'Verdict: PASS abcd1234')])
+        before = self.resolve().read_bytes()
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout.splitlines(), [
+            f"pending {result['id']} expected one commit", '0 accounted, 1 pending'])
+        self.assertEqual(self.resolve().read_bytes(), before)
+
+    def test_fail_unparsed_leaves_a_missing_final_turn_pending(self):
+        owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.')])
+        before = self.resolve().read_bytes()
+        auto = self.cli('account-auto', '--fail-unparsed', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout.splitlines(), [
+            f"pending {result['id']} no final turn text", '0 accounted, 1 pending'])
+        self.assertEqual(self.resolve().read_bytes(), before)
+
+    def test_fail_unparsed_keeps_an_account_refusal_pending(self):
+        owed, transcript, result, _ = self.auto_owed([(-2, 'user', 'Review.')])
+        transcript.write_text('{bad json\n')
+        _, rest = owed.read_text().split('\t', 1)
+        owed.write_text('0\t' + rest)
+        before = self.resolve().read_bytes()
+        auto = self.cli('account-auto', '--fail-unparsed', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout.splitlines(), [
+            f"pending {result['id']} recorded run is missing or differs", '0 accounted, 1 pending'])
+        self.assertEqual(self.resolve().read_bytes(), before)
+
+    def test_fail_unparsed_preserves_a_clear_pass(self):
+        sha = 'ab' * 20
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {sha}')])
+        auto = self.cli('account-auto', '--fail-unparsed', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout.splitlines(), [
+            f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} pass", '1 accounted, 0 pending'])
+        self.assertEqual(ledger.rows(self.resolve())[-1][3:5], [sha, 'pass'])
+
+    def test_account_auto_rejects_invalid_flag_shapes(self):
+        for args in ((), ('--fail-unparsed',), ('--other', 'pending.tsv'),
+                     ('pending.tsv', '--fail-unparsed'), ('--fail-unparsed', '--fail-unparsed'),
+                     ('--fail-unparsed', 'pending.tsv', 'extra')):
+            with self.subTest(args=args):
+                auto = self.cli('account-auto', *args)
+                self.assertNotEqual(auto.returncode, 0)
+                self.assertEqual(auto.stdout, '')
+                self.assertTrue(auto.stderr.startswith('usage: ledger.py '), auto.stderr)
+
     def test_account_auto_counts_underscored_and_backticked_commits(self):
         sha, other = 'ab' * 20, 'cd' * 20
         owed, _, result, _ = self.auto_owed([

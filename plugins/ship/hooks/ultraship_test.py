@@ -492,6 +492,24 @@ class ReceiptCustodyTests(unittest.TestCase):
             sibling = command.replace('s1.tsv', 'sibling.tsv')
             self.assert_custody_denial({**driver, 'tool_input': {'command': sibling}})
 
+    def test_fail_unparsed_requires_exact_own_driver_call(self):
+        event = self.own_account_event()
+        driver = {**event, 'agent_type': 'ship:driver--sol'}
+        prefix = [*self.account_words[:2], 'account-auto']
+        owed = str(ultraship.owed_file(driver))
+        words = [*prefix, '--fail-unparsed', owed]
+        command = shlex.join(words)
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            self.assertIsNone(ultraship.guarded_pre(
+                {'cwd': str(self.cwd), **driver, 'tool_input': {'command': command}}))
+        self.assertEqual(output.getvalue(), '')
+        for invalid in ([*words[:-1], str(Path(owed).with_name('sibling.tsv'))],
+                        [*words, 'extra'], [*prefix, owed, '--fail-unparsed'],
+                        ['python3', str(self.cwd / 'ledger.py'), *words[2:]]):
+            with self.subTest(command=invalid):
+                self.assert_custody_denial({**driver, 'tool_input': {'command': shlex.join(invalid)}})
+        self.assert_custody_denial({**driver, 'agent_type': 'ship:writer--sol', 'tool_input': {'command': command}})
+
     def test_account_auto_line_continuations_require_raw_driver_call(self):
         event = self.own_account_event()
         event['session_id'] = 's1'
