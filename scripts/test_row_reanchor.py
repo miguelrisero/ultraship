@@ -1,6 +1,8 @@
 """Synthetic re-anchor and exact-command admission guarantees."""
-from concurrent.futures import ThreadPoolExecutor
+from argparse import Namespace
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import contextlib
+import fcntl
 import importlib.util
 import io
 import json
@@ -8,6 +10,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from threading import Event
 import time
 import tomllib
 import unittest
@@ -127,7 +130,8 @@ class ToolTests(unittest.TestCase):
             'schema': 1, 'lane': 'linked-lane', 'base': self.base, 'head': self.head_sha,
             'rows': [{'row_file': 'rows.toml', 'row_id': 'target', 'subject': 'subject.txt',
                       'expected_count': 1, 'head_old_count': 1, 'hunk_count': 2,
-                      'mutant_unchanged': True, 'changed_statements': 2, 'lines': [4, 10]}],
+                      'mutant_unchanged': True, 'changed_statements': 2,
+                      'base_lines': [4, 10], 'lines': [4, 10]}],
         })
 
     def test_printed_fields_match_the_record_entry(self):
@@ -136,6 +140,7 @@ class ToolTests(unittest.TestCase):
         record = self.record_path()
         data = json.loads(record.read_bytes())
         entry, = data.pop('rows')
+        self.assertEqual(entry['base_lines'], [4, 39])
         self.assertEqual(entry['lines'], [4, 12])
         fields = dict(line.split('=', 1) for line in output.splitlines()[1:])
         for key, value in {**data, **entry, 'record': str(record)}.items():
@@ -195,6 +200,37 @@ class ToolTests(unittest.TestCase):
         entries = json.loads(self.record_path().read_bytes())['rows']
         self.assertCountEqual([(row['row_file'], row['row_id']) for row in entries],
                               [('rows.toml', 'target'), ('other.toml', 'other')])
+
+    def test_record_write_waits_for_exclusive_lock(self):
+        self.setup_pair()
+        record = self.record_path()
+        record.parent.mkdir(mode=0o700)
+        prior = json.dumps({'schema': 1, 'lane': self.git('branch', '--show-current'),
+                            'base': self.base, 'head': self.head_sha, 'rows': []}).encode()
+        record.write_bytes(prior)
+        args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
+                         base=self.base, head=self.head_sha)
+        attempted = Event()
+        flock = fcntl.flock
+
+        def observe_lock(descriptor, operation):
+            attempted.set()
+            return flock(descriptor, operation)
+
+        env = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+        with patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()), \
+                ThreadPoolExecutor(max_workers=1) as writer:
+            with record.with_suffix('.lock').open('a+b') as lock:
+                flock(lock.fileno(), fcntl.LOCK_EX)
+                with patch.object(reanchor.fcntl, 'flock', side_effect=observe_lock):
+                    result = writer.submit(reanchor.run, args)
+                    self.assertTrue(attempted.wait(timeout=5), 'tool did not attempt to acquire the lock')
+                    with self.assertRaises(TimeoutError):
+                        result.result(timeout=0.1)
+                    self.assertEqual(record.read_bytes(), prior)
+            result.result(timeout=5)
+        entry, = json.loads(record.read_bytes())['rows']
+        self.assertEqual((entry['row_file'], entry['row_id']), ('rows.toml', 'target'))
 
     def test_detached_head_refuses_before_writing(self):
         self.setup_pair()
