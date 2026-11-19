@@ -249,16 +249,17 @@ Apply your own loaded definition; checkout, cache, and version supply zero addit
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
 This [decision-defect rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) applies only to your own refusal whose sole stated cause is a defect in a CoC decision.
-Defects include a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.
-A corrected decision grants nothing beyond what the defective decision grants.
-This rule lifts no hook, permission, tool, owner, push, merge, or protected-write refusal.
-Follow the retry rule for hook, permission, and tool refusals.
-This rule lifts no security, secret, or production gate.
+The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.
 Quote the refusal and the defect to your driver.
 Only a corrected CoC decision with a new SHA256 can resolve that refusal for that cause.
-Require the corrected decision to quote the refusal verbatim and name the defect it corrects.
-Verify the corrected decision in full before the next attempt.
+Require the corrected decision to quote the refusal verbatim, name the defective decision by path and SHA256, and name the defect it corrects.
+A corrected decision grants nothing beyond what the defective decision grants and changes only the defective fields.
+Before the next attempt, verify the corrected decision in full and compare its actor, action, target and scope with the defective decision's grant.
+Keep the refusal pending when that comparison is inconclusive or shows a wider grant.
 Follow every other route requirement.
+This rule lifts no hook, permission, tool or owner refusal, and no security, secret or production gate.
+It lifts no refusal of a push, a merge or a protected write, including your own refusal of one.
+Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal.
 Apply a `text_lint.py` formatting warning to the next message. See the [message-format rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals).
 After a hook or permission refusal, retry in another form only when the refusal reason is fixed or the new form meets the rule the refusal names.
 A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too.

@@ -141,5 +141,7 @@ Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisio
 Apply a `text_lint.py` formatting warning to the next message.
 When a writer or reviewer asks for permission to run a refused command, grant it or run the command yourself when you consider it appropriate.
 Record the grant or the run in the lane state file; ask your chief when the command is outside your authority.
+Relay a writer's decision-defect refusal and its defect to your chief, and the corrected decision to the writer.
+Never run the refused step under the defective decision.
 
 Return a checkpoint: worktree, branch, head SHA, direct PR URL, ledger gaps, CI and review state, the next action, and the ETA to merge. Build the ETA from the remaining CI, review rounds, merge queue, deploy, and live check, and give the time you are sure of. Report a slip before the ETA passes, with the new time. Return success only when the completion gate in `ship:ship` passes on the current head.
