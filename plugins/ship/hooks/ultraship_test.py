@@ -818,6 +818,12 @@ class WorkspaceRowAdmissionTests(unittest.TestCase):
         self.assertFalse(denied(hook('pre', {**self.payload, 'tool_name': 'Grep',
                                             'tool_input': {'path': str(self.row), 'pattern': 'id'}}, self.env)))
 
+    def test_missing_record_without_workspace_names_scratch_requirement(self):
+        with patch.object(ultraship, 'STATE', self.root / 'state'):
+            fields, reason = ultraship.row_record({**self.payload, 'cwd': '/'}, 'row-review', workspace_fallback=True)
+        self.assertIsNone(fields)
+        self.assertIn('needs a `.scratch` folder', reason)
+
     def test_valid_workspace_record_uses_nearest_workspace(self):
         self.write_record(self.root / '.scratch/ultraship/row-review/r1.json')
         self.assertTrue(denied(hook('pre', self.payload, self.env)))
