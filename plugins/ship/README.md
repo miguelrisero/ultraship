@@ -82,7 +82,16 @@ The review-thread guard scans command text. It admits one static, single-quoted 
 
 This boundary checks names and paths. It cannot see a copy of a protected row kept under another name, such as a scratch file. GitHub addresses content by ID, such as a blob or a `.diff`, with no path, so the hook denies `WebFetch` for these agents when the raw or decoded URL names `github.com`, `githubusercontent.com` or a subdomain after Unicode normalization, and denies any host that stays non-ASCII. A URL on another code host that addresses content by ID carries no path, so the hook cannot check it.
 
-An admission record is the file `row-review/<agent ID>.json` in the hook state folder. It holds `pr`, `agent_id`, `row_files`, and `expires_at` (UTC, at most 4 hours ahead). The file must belong to the hook user and must not allow group or world writes. The hook reads no other record. The hook denies Write, Edit, and NotebookEdit to that folder for every agent except the driver and the main session. For Bash it only checks the command text for `ultraship/row-review`, so a path built from pieces passes.
+An admission record lives at `row-review/<agent ID>.json` in the hook state folder or at `<workspace>/.scratch/ultraship/row-review/<agent ID>.json`.
+The hook starts at the real path of the reviewer's working directory.
+It uses the first directory with a `.scratch` folder as the workspace, checking that path and then its parents.
+When the shared record path exists, the hook reads only that record.
+The hook checks the workspace path only when the shared path is absent.
+The workspace record's parent must belong to the hook user and have zero symlink components.
+The record holds `pr`, `agent_id`, `row_files`, and `expires_at` (UTC, at most 4 hours ahead).
+The hook user must own the file. The file must deny group and world writes.
+The hook denies Write, Edit, and NotebookEdit in both folders for every agent except the driver and the main session.
+For Bash, the hook only checks the command text for `ultraship/row-review`, so a path built from pieces passes this check.
 
 A re-anchor admission record lives at `row-reanchor/<agent ID>.json` in the hook state folder.
 It holds `pr`, `agent_id`, `row_file`, `row_id` and `expires_at` (UTC, at most 4 hours ahead).

@@ -222,7 +222,13 @@ Use this record for lane-owned row review and standalone main-row repair review.
 1. Dispatch `ship:reviewer--sol`, `ship:reviewer--opus`, or, for lane-owned row review only, `ship:reviewer--astra`.
    Ask the reviewer to return `ready` and read nothing.
 2. Take the agent ID from the Agent tool result.
-3. Write `${XDG_STATE_HOME:-~/.local/state}/ultraship/row-review/<agent ID>.json` with native Write, with the full record as its content. In the file name, replace each character outside letters, digits, `_`, `.` and `-` with `_`.
+3. Write the full record with native Write to `<workspace>/.scratch/ultraship/row-review/<agent ID>.json` or `${XDG_STATE_HOME:-~/.local/state}/ultraship/row-review/<agent ID>.json`.
+   Start at the real path of the reviewer's working directory.
+   Use the first directory with a `.scratch` folder as `<workspace>`, checking that path and then its parents.
+   When the shared record path exists, the hook reads only that record.
+   The hook checks the workspace path only when the shared path is absent.
+   If the record is missing, the refusal names each path the hook checked.
+   In the file name, replace each character outside letters, digits, `_`, `.` and `-` with `_`.
 4. The record has four fields: `pr` (the PR URL), `agent_id` (the agent ID), `row_files` (the exact canonical absolute row-file paths) and `expires_at` (`YYYY-MM-DDTHH:MM:SSZ`, UTC, at most 4 hours ahead).
 5. Run `chmod 600` on the file. The hook refuses a file that the group or others can write.
 6. Send the review brief to the reviewer with SendMessage.
@@ -238,7 +244,7 @@ The hook refuses a Bash command that names the state folder together with any of
 The hook admits Read of one listed file, and Grep with one listed file as `path` and no `glob` or `type`.
 Glob, LSP, and every other read under `tests/mutation` stay denied.
 The reviewer reads only the named row lines.
-The hook denies Write, Edit, and NotebookEdit to the record folder for every agent except the driver and the main session. For Bash it only checks the command text.
+The hook denies Write, Edit, and NotebookEdit to both record folders for every agent except the driver and the main session. For Bash it only checks the command text.
 
 ## Row re-anchor tool admission record
 
