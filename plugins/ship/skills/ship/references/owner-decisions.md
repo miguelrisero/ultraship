@@ -168,15 +168,26 @@ Require scoped source evidence that the named merge caused the zero count and th
 Use the bound pre-merge main and merged commit to show that the breaking PR changed the guarded code itself.
 Require positive evidence that this code change made the stored mutant impossible to apply at the guarded site.
 Require the frozen decision to bind this evidence to the follow-up under the owner standing grant before authorizing the edit.
-Require recorded evidence of a landed designated-test change or mutant adaptation under that grant.
-Require the disposition record to cite the landed row change and its CoC decision.
-Require a receipt for the independent not-weaker review of that disposition.
-Require that reviewer to differ from the breaking PR author and the person who applied the disposition.
-Bind the receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.
-Verify that the reviewed disposition is the one that landed for the named row.
-Record both items and their verifiable evidence references in the frozen edit decision.
-Bind both items to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.
-Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched record or review.
+Require one disposition for each row: a landed designated-test change or mutant adaptation under that grant, or a CoC decision receipt.
+A CoC decision receipt is the disposition only when the breaking change is not the repair lane's own diff and no landed disposition exists.
+The receipt states that it is the disposition and names the row ID, the breaking commit and the paired-field re-anchor.
+The receipt also records the evidence that no landed disposition exists for the row in every commit from the breaking commit through the bound main commit.
+It names that range by the full breaking commit SHA and the full bound main SHA.
+Before publication, recheck that range through the current main SHA. Record that SHA and the result in a separate note beside the frozen receipt digest. A disposition that landed after the bound main commit invalidates the receipt.
+The receipt itself stays unchanged.
+Name the receipt by absolute path and SHA256. Verify the digest before any protected access.
+For a landed disposition, require the disposition record to cite the landed row change and its CoC decision.
+For a landed disposition, require a receipt for the independent not-weaker review of that disposition.
+For a landed disposition, require that reviewer to differ from the breaking PR author and the person who applied the disposition.
+For a landed disposition, bind the review receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.
+For a landed disposition, verify that the reviewed disposition is the one that landed for the named row.
+A CoC decision receipt needs no landed disposition and no prior disposition review.
+For a CoC decision receipt, the independent repair review below is the one not-weaker review.
+That reviewer also differs from the breaking PR author.
+Record the disposition and its evidence references in the frozen edit decision, with the receipt path and SHA256 for a CoC receipt.
+Bind them to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.
+Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or landed-disposition review.
+For a CoC decision receipt, require the independent repair review below before publication.
 A zero count alone supplies zero repair authority. A disposition label supplies zero proof.
 Before editing, confirm that the lane head equals the bound pre-edit commit and that the named rows and subjects match bound main.
 Use one native Edit per row with `replace_all=false` and a unique `old_string` within the approved extent that includes the row ID.
@@ -255,6 +266,7 @@ The record grants zero protected access or edit authority by itself.
 Keep the route's authority, independent review, execution admission and publication rules.
 
 Use exactly `python3 -I <plugin root>/skills/ship/scripts/row_reanchor.py --row-file <absolute path> --row-id <id> --subject <repository-relative path> --base <ref> --head <ref>`.
+On the restore route, append ` --restoration <commit>` with the full restoration commit SHA.
 Use single spaces and unquoted arguments, with nothing before or after the command.
 The hook accepts only its own plugin's tool path for a writer with a matching record.
 
@@ -289,6 +301,7 @@ Decision:
 Next:
 - Return the tool output, the generated authorization record path and the commit SHA to `<driver>` by `<return time UTC>`.
 ```
+On the restore route, write `none` for the CI run, count and expected values when the starting head deletes the row.
 
 ## Future ordinary-file identity checkpoints
 

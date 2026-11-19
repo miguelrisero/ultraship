@@ -30,14 +30,14 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             for requirement in (
                 'No CoC decision file is required.',
                 'Authority: the owner\'s global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.',
-                "Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, and each new row that step 4 admits.",
+                "Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.",
                 'Admit the writer with the [row re-anchor tool admission record]',
                 'Authorization record: each tool run that changes zero statements writes a generated record in the Git directory.',
                 'The record names the lane, base, head, row IDs, base and head line ranges, expected counts and the unchanged mutant check.',
                 'The tool prints the record path and every record field as `key=value` lines, with no row text.',
                 'The driver copies the printed fields of the frozen-head run into the reviewer brief. The reviewer reads no file under `.git`.',
                 'The record expires on any head change. Rerun the tool at the frozen head for each re-anchored row; that run changes zero statements.',
-                'A CoC-approved row change gets no tool run. Its decision file and the review in step 7 cover it.',
+                'A CoC-approved row change gets no tool run. Its decision file and the review in step 8 cover it.',
                 'A run that changes statements writes no record entry and unfreezes the head. The writer commits the edit and reruns the tool.',
                 'the anchor guard requires each anchor count to equal the row\'s expected count, not only a nonzero count.',
                 'The mutation proof runs after merge, under its execution admission.',
@@ -68,7 +68,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'It binds the row ID, the source commit, the fields and their replacement values.',
                 "The writer verifies its SHA256 and bindings before the edit. The driver verifies them again at the frozen head and records the result in the reviewer brief.",
                 'The writer applies only those fields with native Edit and `replace_all=false`, then commits the row file alone.',
-                'Step 7 reviews that row, and a follow-up row guards any new code.',
+                'Step 8 reviews that row, and a follow-up row guards any new code.',
                 'The CoC audits a 10% sample of lane-owned row changes.',
             ):
                 with self.subTest(path=name, requirement=requirement):
@@ -86,8 +86,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.',
                 'The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.',
                 'Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.',
-                'The driver marks the draft ready only after the review in step 7 passes at the exact head.',
-                'one independent reviewer confirms that every changed, retired or added row is not weaker.',
+                'The driver marks the draft ready only after the review in step 8 passes at the exact head.',
+                'one independent reviewer confirms that every changed, retired, restored or added row is not weaker.',
                 'The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record]',
                 'The driver supplies read-only checkouts at the base and the frozen head. The admission record lists the row file in each checkout.',
                 'The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.',
@@ -141,6 +141,68 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             ):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, route)
+
+    def test_lane_owned_restore_contract(self):
+        restore = (
+            "5. Restore: the writer returns rows that only the lane's own unmerged commits changed to their bytes at the merge base.\n"
+            '   A restored row needs no failing CI report, so a row that the starting head deletes stays in scope.\n'
+            '   Its evidence is the merge-base diff and the tool fields `starting_lines`, `base_lines` and `restoration_lines`.\n'
+            '   When a lane commit changed only those rows, the writer runs a plain `git revert` of that commit.\n'
+            '   When it also changed other lines, the writer uses native Edit only for rows that exist at the starting head, and keeps the other edits.\n'
+            '   A row that such a mixed lane commit deleted leaves the restore route.\n'
+            '   That row follows the re-anchor route or goes to the CoC.\n'
+            '   The writer commits the restoration alone. Then it runs the re-anchor tool on each restored row.\n'
+            '   That run passes the merge base as `--base` and the restoration commit as `--restoration`.\n'
+            '   The tool binds the restoration commit and its own parent, the starting head. A later commit never moves that parent.\n'
+            '   The tool refuses unless each restored row equals the merge base byte for byte and the rest of the commit equals the starting head.\n'
+            '   Only blank separator lines between tables, outside every row, may return with a restored row. Every other byte stays exact.\n'
+            '   It also refuses a row ID that is not unique, and it prints both results and `insert_after` as `key=value` lines.\n'
+            '   Any byte difference leaves the restore route. That row follows the re-anchor route or goes to the CoC.\n'
+            '   The driver copies the lane commits that changed each row file after the merge base into the reviewer brief.\n'
+            "   The driver names the verified merge base in the reviewer brief. The reviewer refuses unless the record's base equals it.\n"
+            '   The reviewer matches every restored row ID in the record to the approved scope before publication.\n'
+            '6. Authorization record:'
+        )
+        for name in ROUTE_CARRIERS:
+            with self.subTest(path=name):
+                route = section((SHIP / name).read_text(), '### Lane-owned row route')
+                self.assertIn('\n' + restore, route)
+                self.assertIn(
+                    '   The record names the lane, base, head, row IDs, base and head line ranges, expected counts and the unchanged mutant check.\n'
+                    '   A restore entry also names the restoration commit, its parent, the three row ranges and `insert_after`.\n',
+                    route,
+                )
+                self.assertIn(
+                    '   The record expires on any head change. Rerun the tool at the frozen head for each re-anchored row; that run changes zero statements.\n'
+                    '   On the restore route, that rerun keeps `--restoration` and prints `changed_statements=0`.\n',
+                    route,
+                )
+        review = (
+            'Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.\n'
+            'For each restored row, confirm from the copied record fields `restoration_base_equal=true`, `restoration_outside_equal=true` and `changed_statements=0`.\n'
+            'Confirm that `restoration` and `restoration_parent` match the brief, and that `starting_lines` is `null` for a row that the starting head deletes.\n'
+            "Refuse unless the record's base equals the verified merge base that the brief names.\n"
+            'Group the restored rows by restoration commit and row file. Match every restored row ID to the approved scope.\n'
+            'Confirm that restored_rows in each entry equals the number of approved row IDs in its group.\n'
+            'Refuse a restored row outside that scope.\n'
+            "Confirm from the brief's commit list that only the lane's own unmerged commits changed the row file after the merge base.\n"
+            'Read the row lines at the merge base and the frozen head. Confirm that they are equal, or that only a re-anchor changed the paired fields.\n'
+        )
+        for name in REVIEWERS:
+            with self.subTest(path=name):
+                text = (SHIP / 'agents' / name).read_text()
+                self.assertIn(review, section(text, '## Lane-owned row review'))
+        decisions = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        admission = section(decisions, '## Row re-anchor tool admission record')
+        command = next(line for line in admission.splitlines() if line.startswith('Use exactly '))
+        self.assertIn(
+            command + '\nOn the restore route, append ` --restoration <commit>` with the full restoration commit SHA.\n',
+            admission,
+        )
+        self.assertIn(
+            '\n```\nOn the restore route, write `none` for the CI run, count and expected values when the starting head deletes the row.\n',
+            section(decisions, '## Row re-anchor tool brief'),
+        )
 
     def test_writers_require_verified_authority_and_preserve_controls(self):
         for name in ('writer--sol.md', 'writer--sonnet.md'):
@@ -338,17 +400,35 @@ class ScopedDecisionRouteTests(unittest.TestCase):
 
     def test_main_row_repair_requires_proof_of_earlier_reviewed_disposition_before_edit(self):
         self.check_route('Standalone main-row repair', (
-            'Require recorded evidence of a landed designated-test change or mutant adaptation under that grant.',
-            'Require the disposition record to cite the landed row change and its CoC decision.',
-            'Require a receipt for the independent not-weaker review of that disposition.',
-            'Require that reviewer to differ from the breaking PR author and the person who applied the disposition.',
-            'Bind the receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.',
-            'Verify that the reviewed disposition is the one that landed for the named row.',
-            'Record both items and their verifiable evidence references in the frozen edit decision.',
-            'Bind both items to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.',
-            'Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched record or review.',
+            'Require one disposition for each row: a landed designated-test change or mutant adaptation under that grant, or a CoC decision receipt.',
+            'For a landed disposition, require the disposition record to cite the landed row change and its CoC decision.',
+            'For a landed disposition, require a receipt for the independent not-weaker review of that disposition.',
+            'For a landed disposition, require that reviewer to differ from the breaking PR author and the person who applied the disposition.',
+            'For a landed disposition, bind the review receipt to the reviewer, approving verdict, exact disposition, and commit the reviewer checked.',
+            'For a landed disposition, verify that the reviewed disposition is the one that landed for the named row.',
+            'Record the disposition and its evidence references in the frozen edit decision, with the receipt path and SHA256 for a CoC receipt.',
+            'Bind them to the full breaking commit SHA, the exact stored row ID, and the exact follow-up edit.',
+            'Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or landed-disposition review.',
             'A zero count alone supplies zero repair authority. A disposition label supplies zero proof.',
             'accept zero relay and require zero per-row owner events',
+        ))
+
+    def test_main_row_repair_accepts_coc_receipt_as_disposition(self):
+        self.check_route('Standalone main-row repair', (
+            'Require one disposition for each row: a landed designated-test change or mutant adaptation under that grant, or a CoC decision receipt.',
+            "A CoC decision receipt is the disposition only when the breaking change is not the repair lane's own diff and no landed disposition exists.",
+            'The receipt states that it is the disposition and names the row ID, the breaking commit and the paired-field re-anchor.',
+            'The receipt also records the evidence that no landed disposition exists for the row in every commit from the breaking commit through the bound main commit.',
+            'It names that range by the full breaking commit SHA and the full bound main SHA.',
+            'Before publication, recheck that range through the current main SHA. Record that SHA and the result in a separate note beside the frozen receipt digest. A disposition that landed after the bound main commit invalidates the receipt.\n'
+            'The receipt itself stays unchanged.',
+            'Name the receipt by absolute path and SHA256. Verify the digest before any protected access.',
+            'A CoC decision receipt needs no landed disposition and no prior disposition review.',
+            'For a CoC decision receipt, the independent repair review below is the one not-weaker review.',
+            'That reviewer also differs from the breaking PR author.',
+            'For a CoC decision receipt, require the independent repair review below before publication.',
+            'Record the disposition and its evidence references in the frozen edit decision, with the receipt path and SHA256 for a CoC receipt.',
+            'Verify those bindings and the recorded evidence before the edit. Refuse a missing or mismatched disposition, receipt or landed-disposition review.',
         ))
 
     def test_ordinary_file_checkpoint_binds_literal_scope_and_unchanged_source(self):
