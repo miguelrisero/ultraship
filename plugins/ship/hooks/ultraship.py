@@ -4202,9 +4202,10 @@ REVIEW_THREAD_PREFLIGHT = re.compile(
     r'test "\$upstream" = "refs/remotes/origin/\$branch"; '
     r'''git remote get-url --push --all origin \| awk '\$0=="(?P<url>https://(?P<host>[A-Za-z0-9.-]+)/'''
     r'''(?P<repo>[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+)\.git)" \{n\+\+\} END\{exit !\(n==1 && NR==1\)\}'; '''
-    r'url=\$\(git -c http\.followRedirects=false -c credential\.helper= '
+    r'url=\$\(GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -c http\.(?P=url)\.followRedirects=false -c credential\.helper= '
     r"ls-remote --get-url '(?P=url)'\); test \"\$url\" = '(?P=url)'; "
-    r"git -c http\.followRedirects=false -c credential\.helper= ls-remote --symref '(?P=url)' HEAD \| "
+    r'GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 git -c http\.(?P=url)\.followRedirects=false -c credential\.helper= '
+    r"ls-remote --symref '(?P=url)' HEAD \| "
     r'''awk 'NR==1 && NF==3 && \$1=="ref:" && \$2=="refs/heads/(?P<default>[A-Za-z0-9_./-]+)" && \$3=="HEAD" \{n\+\+\} '''
     r'''NR==2 && NF==2 && \$1 ~ /\^\[0-9a-f\]\+\$/ && length\(\$1\)==40 && \$2=="HEAD" \{n\+\+\} '''
     r"END\{exit !\(n==2 && NR==2\)\}'; "
