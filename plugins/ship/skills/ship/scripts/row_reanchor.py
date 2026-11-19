@@ -39,7 +39,7 @@ def basic(value):
 def row_statements(text, row_id):
     """Scan complete statements so string contents never become table headers."""
     source = lines(text)
-    rows, current, index, nested = [], None, 0, False
+    rows, split_rows, current, index, nested = [], set(), None, 0, False
     while index < len(source):
         start = index
         if not source[index].strip() or source[index].lstrip().startswith('#'):
@@ -57,17 +57,24 @@ def row_statements(text, row_id):
         if stripped.startswith('['):
             if re.fullmatch(r'\[\[\s*row\s*\]\]\s*(?:#[^\n]*)?\n?', stripped):
                 current, nested = [], False
-                rows.append(current)
-            elif re.match(r'\[\[?\s*row\.', stripped) and current is not None:
-                nested = True
-                current.append((start, index, statement, {}))
+                rows.append((start, current))
+            elif parsed.get('row') == [{}]:
+                current = None
+                rows.append((start, []))
+            elif isinstance(parsed.get('row'), dict) and parsed['row']:
+                if current is not None:
+                    nested = True
+                    current.append((start, index, statement, {}))
+                elif rows:
+                    split_rows.add(rows[-1][0])
             else:
                 current = None
         elif current is not None:
             current.append((start, index, statement, {} if nested else parsed))
-    matching = [row for row in rows if any(item[3].get('id') == row_id for item in row)]
+    matching = [(start, row) for start, row in rows if any(item[3].get('id') == row_id for item in row)]
     require(len(matching) == 1, 'row ID must match exactly once')
-    selected = matching[0]
+    first, selected = matching[0]
+    require(first not in split_rows, 'row table is not contiguous')
     values, fields = {}, {}
     for start, end, statement, parsed in selected:
         if not parsed:
@@ -82,7 +89,7 @@ def row_statements(text, row_id):
     require(isinstance(values['old'], str) and isinstance(values['new'], str)
             and values['old'] and values['old'] != values['new'], 'invalid base pair')
     require(type(values.get('expect', 1)) is int and values.get('expect', 1) == 1, 'expect must be 1')
-    return values, fields
+    return values, fields, (first + 1, selected[-1][1])
 
 
 def opcodes(a, b):
@@ -234,8 +241,9 @@ def run(args):
     original = row_file.read_bytes()
     require(original == blob(head_sha, relative), 'working row file differs from head')
     text = original.decode('utf-8')
-    base_values, base_fields = row_statements(blob(base_sha, relative).decode('utf-8'), args.row_id)
-    head_values, head_fields = row_statements(text, args.row_id)
+    base_text = blob(base_sha, relative).decode('utf-8')
+    base_values, base_fields, base_extent = row_statements(base_text, args.row_id)
+    head_values, head_fields, _ = row_statements(text, args.row_id)
     require(base_values['file'] == head_values['file'] == args.subject, 'subject mismatch')
     require([field[2] for key, field in base_fields.items() if key not in ('old', 'new')]
             == [field[2] for key, field in head_fields.items() if key not in ('old', 'new')], 'frozen row statements differ')
@@ -264,7 +272,7 @@ def run(args):
     require(len(targets) == 1 and targets[0]['old'] == old and targets[0]['new'] == new, 'edited pair mismatch')
     targets[0]['old'], targets[0]['new'] = head_values['old'], head_values['new']
     require(before == after, 'other TOML values differ')
-    _, edited_fields = row_statements(edited_text, args.row_id)
+    _, edited_fields, edited_extent = row_statements(edited_text, args.row_id)
 
     def without_pair(value, fields):
         kept = lines(value)
@@ -276,9 +284,13 @@ def run(args):
             'bytes outside paired statements differ')
     result = edited_text.encode('utf-8')
     require(row_file.read_bytes() == original, 'row file changed during derivation')
+    base_start, base_end = base_extent
+    edited_start, edited_end = edited_extent
+    base_equal = lines(base_text)[base_start - 1:base_end] == lines(edited_text)[edited_start - 1:edited_end]
     entry = {'row_file': relative, 'row_id': args.row_id, 'subject': args.subject,
              'expected_count': head_values.get('expect', 1), 'head_old_count': head.count(old),
-             'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements)}
+             'hunk_count': count, 'mutant_unchanged': True, 'changed_statements': len(replacements),
+             'lines': edited_extent, 'base_lines': base_extent, 'base_equal': base_equal}
     identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
     write_row_and_record(record, identity, entry, row_file, original, result)
     print('PASS')

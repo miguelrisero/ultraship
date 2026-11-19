@@ -93,8 +93,8 @@ class ToolTests(unittest.TestCase):
         self.assertIn('replacement,', row['new'])
         row['old'], row['new'] = parsed_before['row'][0]['old'], parsed_before['row'][0]['new']
         self.assertEqual(parsed_before, parsed_after)
-        _, before_fields = reanchor.row_statements(before.decode(), 'target')
-        _, after_fields = reanchor.row_statements(after.decode(), 'target')
+        _, before_fields, _ = reanchor.row_statements(before.decode(), 'target')
+        _, after_fields, _ = reanchor.row_statements(after.decode(), 'target')
         for key in ('old', 'new'):
             self.assertNotEqual(before_fields[key][2], after_fields[key][2])
         def without_pair(text, fields):
@@ -126,8 +126,30 @@ class ToolTests(unittest.TestCase):
             'schema': 1, 'lane': 'linked-lane', 'base': self.base, 'head': self.head_sha,
             'rows': [{'row_file': 'rows.toml', 'row_id': 'target', 'subject': 'subject.txt',
                       'expected_count': 1, 'head_old_count': 1, 'hunk_count': 2,
-                      'mutant_unchanged': True, 'changed_statements': 2}],
+                      'mutant_unchanged': True, 'changed_statements': 2,
+                      'lines': [4, 10], 'base_lines': [4, 10], 'base_equal': False}],
         })
+
+    def test_ranges_include_child_tables_and_report_base_equality_after_revert(self):
+        self.setup_pair(literal=True, extra='[row.mutant]\noperator = "replace"\n')
+        subject_commit = self.head_sha
+        self.invoke()
+        entry = json.loads(self.record_path().read_bytes())['rows'][0]
+        self.assertEqual(entry['base_lines'], [4, 39])
+        self.assertEqual(entry['lines'], [4, 12])
+        self.assertIs(entry['base_equal'], False)
+
+        row_commit = self.commit()
+        self.git('revert', '--no-edit', row_commit, subject_commit)
+        self.row.write_bytes(b'\n' + self.row.read_bytes())
+        self.head_sha = self.commit()
+        before, output = self.invoke()
+        self.assertEqual(self.row.read_bytes(), before)
+        self.assertIn('changed_statements=0', output.splitlines())
+        entry = json.loads(self.record_path().read_bytes())['rows'][0]
+        self.assertEqual(entry['base_lines'], [4, 39])
+        self.assertEqual(entry['lines'], [5, 40])
+        self.assertIs(entry['base_equal'], True)
 
     def test_record_expires_on_new_head_and_rerun_changes_zero_statements(self):
         self.setup_pair()
@@ -271,6 +293,11 @@ class ToolTests(unittest.TestCase):
         self.setup_pair(extra='[row.mutant]\noperator = "replace"\n')
         self.invoke()
         self.assertEqual(tomllib.loads(self.row.read_text())['row'][0]['mutant'], {'operator': 'replace'})
+
+    def test_disjoint_child_table_refuses_without_recording_a_partial_range(self):
+        self.setup_pair(extra='[other]\nkey = "value"\n["row".mutant]\noperator = "replace"\n')
+        self.invoke(2, 'row table is not contiguous')
+        self.assertFalse(self.record_path().exists())
 
     def test_nested_statement_is_frozen(self):
         self.setup_pair(extra='[row.mutant]\noperator = "replace"\n')
