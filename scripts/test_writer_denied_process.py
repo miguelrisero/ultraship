@@ -78,31 +78,40 @@ class WriterDeniedProcessTests(unittest.TestCase):
                     self.assertIn('Ask your coordinator for permission at any time. ' + rule, joined)
 
     def test_decision_defect_rule_limits_refusal_resolution(self):
-        defect = 'The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.'
+        eligibility = (
+            'The sole stated cause must be a defect in a CoC decision.',
+            'The refusal must come before the refused action writes anything, with zero bytes written and zero commits.',
+            'For protected writes, this rule covers only row re-anchor tool attempts.',
+            "It covers your refusal before the run and the tool's refusal during the run.",
+            'The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.',
+            'A digest, extent or other binding without an exact definition in the decision counts as a missing field or an internal contradiction.',
+        )
         resolution = (
             'Only a corrected CoC decision with a new SHA256 can resolve that refusal for that cause.',
             'Require the corrected decision to quote the refusal verbatim, name the defective decision by path and SHA256, '
             'and name the defect it corrects.',
             'A corrected decision grants nothing beyond what the defective decision grants and changes only the defective fields.',
+            'Wait for the CoC to freeze the corrected decision.',
             'Before the next attempt, verify the corrected decision in full and compare its actor, action, target and scope '
             "with the defective decision's grant.",
             'Keep the refusal pending when that comparison is inconclusive or shows a wider grant.',
-            'Follow every other route requirement.',
-            'This rule lifts no hook, permission, tool or owner refusal, and no security, secret or production gate.',
-            'It lifts no refusal of a push, a merge or a protected write, including your own refusal of one.',
-            "Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal.",
+            'Then the refused row-tool attempt counts as zero runs, and the writer gets one new attempt under the corrected decision.',
+            'The driver re-dispatches that attempt with a fresh admission record.',
+            'Follow every other route requirement, including the independent review.',
+            'This rule lifts no hook, permission or owner refusal, and no security, secret or production gate.',
+            'It lifts no refusal of a push or a merge, no tool refusal with any other cause, and no protected write that already ran.',
+            "Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal with any other cause.",
         )
         reference = ' '.join((
-            "Decision-defect rule: it applies only to an agent's own refusal "
-            'whose sole stated cause is a defect in a CoC decision.',
-            defect,
+            "Decision-defect rule: it applies only to an agent's own refusal or a refusal from the row re-anchor tool.",
+            *eligibility,
             'Quote the refusal and the defect to your superior, who relays them up the superior chain to the CoC.',
             *resolution,
         ))
         writer = '\n'.join((
             'This [decision-defect rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) '
-            'applies only to your own refusal whose sole stated cause is a defect in a CoC decision.',
-            defect,
+            'applies only to your own refusal or a refusal from the row re-anchor tool.',
+            *eligibility,
             'Quote the refusal and the defect to your driver.',
             *resolution,
         ))
