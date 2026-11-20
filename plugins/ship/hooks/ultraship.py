@@ -4985,10 +4985,14 @@ def receipt_custody(data, read_search=False):
                 if len(literal) == 1:
                     return False
                 prefix = literal[0]
+                # Folder names inside the home, working or plugin path are not a hook name; only the text past them counts.
+                known = (home_prefix, normalized(os.path.abspath(data.get('cwd') or os.getcwd())).rstrip('/') + '/',
+                         normalized(str(hook.parent.parent)).rstrip('/') + '/')
+                leaf = min((prefix[os.path.commonprefix([prefix, path]).rfind('/') + 1:] for path in known), key=len)
                 return (bool(prefix) and any(path.startswith(home_prefix)
                                              and (installed_hook.startswith(path) or hook_folder.startswith(path))
                                              for path in resolved(prefix))
-                        or any('ultraship' in part or 'hooks' in part for part in literal))
+                        or any('ultraship' in part or 'hooks' in part for part in [leaf, *literal[1:]]))
 
             # Main admits running a value bound once to plain `git rev-parse` or `git status` output.
             # The shell sets `_`, `REPLY` and the zsh names `reply`, `argv`, `match`, `mbegin` and `mend` itself.

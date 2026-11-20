@@ -758,6 +758,23 @@ class ReceiptCustodyTests(unittest.TestCase):
         with patch.object(ultraship, '__file__', str(home / 'plugin/hooks/ultraship.py')):
             self.assert_account_command_allowed(command)
 
+    def test_grant_custody_allows_home_and_working_paths_that_hold_hook_folder_names(self):
+        home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve() / 'ultraship' / 'hooks' / 'home'
+        self.cwd = home / 'repo'
+        self.cwd.mkdir(parents=True)
+        self.enterContext(patch.dict(os.environ, {'HOME': str(home)}))
+        self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(home))))
+        self.enterContext(patch.object(ultraship, '__file__', str(home / 'plugin/hooks/ultraship.py')))
+        for command in ('PATH="${HOME}/.local/bin:${PATH}" make -r test', f'echo {shlex.quote(str(home.parent))}/$(date)',
+                        f'ls {shlex.quote(str(self.cwd))}/*.py'):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command)
+
+    def test_grant_custody_denies_hook_names_after_an_unresolved_path_segment(self):
+        for command in ('ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py', 'cat ./hoo$x/ultraship.py'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
     def test_grant_custody_allows_complete_brace_group_and_literal_shell_code(self):
         for command in ('{ echo a; echo b; }', "bash -c 'label=sample; echo \"$label\"'"):
             with self.subTest(command=command):
