@@ -342,9 +342,10 @@ class LedgerDirTests(unittest.TestCase):
         review = b'20\treview\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
         identity = ledger.run_identity(3, review.decode().splitlines()[0].split('\t'))
         pending = self.non_git_notice()
-        for step, fields in (('account-result', {'run': None}),
-                             ('correct-binding', {'from': [True, 'bad'], 'to': identity}),
-                             ('correct-binding', {'from': identity, 'to': [3]})):
+        correction = {'agent': 'other', 'swap': None, 'reason': 'review', 'from': identity, 'to': identity}
+        for step, fields in (('account-result', {'run': None, 'step': 'review', 'evidence': 'report'}),
+                             ('correct-binding', {**correction, 'from': [True, 'bad']}),
+                             ('correct-binding', {**correction, 'to': [3]})):
             with self.subTest(step=step, fields=fields):
                 note = json.dumps({'result': 'unrelated', **fields})
                 marker = f'21\t{step}\tother\tsha\tpass\t{note}\n'.encode()
@@ -353,6 +354,55 @@ class LedgerDirTests(unittest.TestCase):
                 self.non_git_stop_block(owed, pending, 'Malformed workspace ledger marker')
                 self.assertFalse(receipts.exists())
                 self.assertEqual(home.read_bytes(), history)
+
+    def test_stop_non_git_requires_marker_fields(self):
+        owed, receipts = self.non_git_fixture()
+        home = self.resolve()
+        review = b'20\treview\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        identity = ledger.run_identity(3, review.decode().splitlines()[0].split('\t'))
+        pending = self.non_git_notice()
+        account = {'result': 'unrelated', 'run': ledger.run_identity(0, ledger.rows(home)[0]),
+                   'step': 'review', 'evidence': 'report'}
+        correction = {'result': 'unrelated', 'agent': 'other', 'from': identity, 'to': identity,
+                      'swap': None, 'reason': 'review'}
+        for step, payload, field in (('account-result', account, 'evidence'),
+                                     ('correct-binding', correction, 'swap')):
+            with self.subTest(step=step):
+                fields = {key: value for key, value in payload.items() if key != field}
+                marker = f'21\t{step}\tother\tsha\tpass\t'
+                history = self.history + review + (marker + json.dumps(fields) + '\n').encode()
+                home.write_bytes(history)
+                self.non_git_stop_block(owed, pending, 'Malformed workspace ledger marker')
+                self.assertFalse(receipts.exists())
+                self.assertEqual(home.read_bytes(), history)
+                home.write_bytes(self.history + review + (marker + json.dumps({**payload, 'extra': 1}) + '\n').encode())
+                self.assertEqual(self.hook('stop'), '')
+                self.assertEqual(owed.read_bytes(), b'')
+                receipts.unlink()
+
+    def test_stop_non_git_preserves_broken_parent_git_pointer_error(self):
+        owed, receipts = self.non_git_fixture()
+        checkout = self.base / 'broken-checkout'
+        cwd = checkout / 'subdir'
+        home = cwd / 'child/.git/ship/ledger/main.tsv'
+        home.parent.mkdir(parents=True)
+        missing = checkout / 'missing-git-dir'
+        (checkout / '.git').write_text(f'gitdir: {missing}\n')
+        history = self.history + b'20\treview\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        home.write_bytes(history)
+        probe = subprocess.run(['git', '-C', str(cwd), 'rev-parse', '--abbrev-ref', 'HEAD'],
+                               env=self.env, capture_output=True, text=True)
+        self.assertEqual(probe.returncode, 128)
+        self.assertEqual(probe.stderr, f'fatal: not a git repository: {missing}\n')
+        pending = self.non_git_notice(cwd=cwd)
+        reminder = owed.with_suffix('.stop-state')
+        error = 'returned non-zero exit status 128'
+        env = {**self.env, 'SHIP_LEDGER_DIR': str(home.parent)}
+        baseline = self.non_git_stop_block(owed, pending, error, env=env)
+        state = (owed.read_bytes(), reminder.read_bytes(), home.read_bytes(), receipts.exists())
+        self.assertEqual(self.non_git_stop_block(owed, pending, error), baseline)
+        self.assertEqual((owed.read_bytes(), reminder.read_bytes(), home.read_bytes(), receipts.exists()), state)
+        self.assertFalse(receipts.exists())
 
     def test_stop_non_git_preserves_git_error_for_noncanonical_broken_cwd(self):
         owed, receipts = self.non_git_fixture()

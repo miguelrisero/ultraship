@@ -5520,9 +5520,13 @@ def non_git_rows(path, ledger, result_id):
         int(row[0])
         if row[1] in ('account-result', 'correct-binding'):
             marker = json.loads(row[5])
-            identities = ('run',) if row[1] == 'account-result' else ('from', 'to')
-            if (not isinstance(marker, dict) or not isinstance(marker.get('result'), str)
-                    or not all(identity(marker.get(field)) for field in identities)):
+            accounting = row[1] == 'account-result'
+            strings = ('result', 'step', 'evidence') if accounting else ('result', 'agent', 'reason')
+            identities = ('run',) if accounting else ('from', 'to')
+            if (not isinstance(marker, dict) or not all(isinstance(marker.get(field), str) for field in strings)
+                    or not all(identity(marker.get(field)) for field in identities)
+                    or (not accounting and ('swap' not in marker
+                                            or not isinstance(marker['swap'], (str, type(None)))))):
                 raise ValueError(f'Malformed workspace ledger marker: {path}')
             explicit |= marker['result'] == result_id
     return history, explicit
@@ -5580,7 +5584,7 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
         if (result.get('v') != 2 or not isinstance(ident, str) or not ident.strip()
                 or 'ledger' in result or 'run' in result or 'SHIP_LEDGER_DIR' in os.environ
                 or exc.cmd != ['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD']
-                or exc.returncode != 128 or not exc.stderr.startswith('fatal: not a git repository')):
+                or exc.returncode != 128 or not exc.stderr.startswith('fatal: not a git repository (or any ')):
             raise
         try:
             home, history, run = non_git_ledger_home(ledger, cwd, epoch, (agent, ident), result_id, exc)
