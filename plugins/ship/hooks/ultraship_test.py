@@ -592,10 +592,15 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_grant_custody_denies_attached_ancestor_paths(self):
         ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
         for command in (f'tar -xf fixture.tar --directory={ancestor}',
-                        f'tar -xf fixture.tar -C{ancestor}',
+                        f'tar -xf fixture.tar -C{ancestor}', f'tar -xC{ancestor} -f fixture.tar',
                         f'VAR={ancestor} tar -tf fixture.tar'):
             with self.subTest(command=command):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_denies_gh_api_redirect_to_grant_store(self):
+        destination = shlex.quote(str(self.ledger.grant_store() / 'output'))
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': f'gh api user > {destination}'}})
 
     def test_grant_custody_denies_hook_execution_forms(self):
         installed = shlex.quote(str(HOOK))

@@ -4967,7 +4967,6 @@ def receipt_custody(data, read_search=False):
             hook_name = re.compile(r'(?<![\w-])ultraship\.py(?![\w.-])|\b(?:issue_account_grant|_issue_grant)\b')
             module_name = r'(?:\w+\.)*ultraship'
             module_reference = re.compile(rf"\b(?:import|from)\s+(?:\(\s*)?{module_name}\b|['\"]{module_name}['\"]")
-            interpreter_names = SHELL_INTERPRETERS | {'uv', 'uvx'}
             read_only = {'ls', 'cat', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'find', 'du', 'df',
                          'stat', 'wc', 'file', 'cd', 'pushd', 'popd', 'pwd', 'echo', 'printf', 'test', '[',
                          'true', 'false', 'realpath', 'readlink', 'basename', 'dirname', 'sort', 'uniq', 'cut', 'tr'}
@@ -4984,6 +4983,11 @@ def receipt_custody(data, read_search=False):
                                              for path in resolved(prefix))
                         or any('ultraship' in part or 'hooks' in part for part in literal))
 
+            def unresolved_program(raw_word, word, *, code=False):
+                if word in {'[', '[['} or not unresolved_shell_word(raw_word):
+                    return False
+                return code or any(char in os.path.basename(raw_word) for char in '$`*?[{')
+
             pending, seen = [joined], set()
             try:
                 while pending:
@@ -4996,40 +5000,62 @@ def receipt_custody(data, read_search=False):
                     if nested_work_exceeded(tokens, seen):
                         return True
                     positions = shell_command_positions(tokens)
-                    commands = {os.path.basename(word) for _, word, start, _ in tokens if start in positions}
-                    modifies_paths = (not commands <= read_only or any(raw_word == '>' for raw_word, _, _, _ in tokens)
+                    executable = list(shell_without_redirections(tokens))
+                    commands = {os.path.basename(word) for _, word, start, _ in executable if start in positions}
+                    modifies_paths = (any(raw_word == '>' for raw_word, _, _, _ in tokens)
+                                      or any(os.path.basename(word) not in read_only
+                                             and not (os.path.basename(word) == 'gh' and index + 1 < len(executable)
+                                                      and executable[index + 1][1] == 'api')
+                                             for index, (_, word, start, _) in enumerate(executable) if start in positions)
                                       or ('find' in commands and any(word in find_actions for _, word, _, _ in tokens)))
-                    unresolved = {start for raw_word, _, start, _ in tokens if unresolved_shell_word(raw_word)}
-                    if unresolved and (unresolved & positions or any(
-                            interpreter_name(word) or os.path.basename(word) in interpreter_names
-                            for _, word, _, _ in tokens)):
-                        # The exact accounting grammar treats the quoted evidence as literal text.
-                        if source != raw or not own_account_call(data, raw):
-                            return True
                     account_words = own_account_call(data, raw) if source == raw else False
+                    if not account_words and any(unresolved_program(raw_word, word)
+                                                 for raw_word, word, start, _ in executable if start in positions):
+                        return True
                     evidence_index = len(tokens) - 1 if account_words and account_words[2] != 'account-auto' else -1
                     name_source = source[:tokens[evidence_index][2]] if evidence_index >= 0 else source
-                    plain_source = plain_hook_source_command(source, tokens) if source == text else False
+                    plain_source = not modifies_paths or (source == text and plain_hook_source_command(source, tokens))
                     if not plain_source:
                         if hook_name.search(normalized(name_source)) or module_reference.search(name_source):
                             return True
-                        names = tokens if evidence_index < 0 else tokens[:evidence_index]
-                        words = [token[1] for token in shell_without_redirections(names)]
-                        for index, name in enumerate(words):
-                            if interpreter_name(name) not in {'python', 'pypy', 'pypy3'}:
+                        names = executable if evidence_index < 0 else executable[:evidence_index]
+                        for index, (_, name, _, _) in enumerate(names):
+                            interpreter = interpreter_name(name)
+                            base = os.path.basename(name)
+                            if not interpreter and base not in SHELL_INTERPRETERS | {'uv', 'uvx'}:
                                 continue
-                            arguments = words[index + 1:]
-                            kind, _, operand, offset = python_program(arguments)
-                            if (kind == 'm' and operand < len(arguments)
-                                    and re.fullmatch(module_name, arguments[operand][offset:])):
+                            arguments = names[index + 1:]
+                            if interpreter in {'python', 'pypy', 'pypy3'}:
+                                kind, _, operand, offset = python_program([token[1] for token in arguments])
+                            else:
+                                kind, operand, offset = 'script', 0, 0
+                                if base == 'uv' and arguments and arguments[0][1] == 'run':
+                                    operand = 1
+                                while operand < len(arguments) and arguments[operand][1].startswith('-'):
+                                    option = arguments[operand][1]
+                                    operand += 1
+                                    if option == '--':
+                                        break
+                                    if base in SHELL_INTERPRETERS and re.fullmatch(r'-[a-zA-Z]*c[a-zA-Z]*', option):
+                                        kind = 'c'
+                                        break
+                                    if interpreter and (code_option(option) or option in INLINE_INTERPRETERS[interpreter][1]):
+                                        kind = 'c'
+                                        break
+                            if operand >= len(arguments):
+                                continue
+                            arg_raw, arg, _, _ = arguments[operand]
+                            if kind == 'm' and re.fullmatch(module_name, arg[offset:]):
+                                return True
+                            if not account_words and unresolved_program(arg_raw, arg, code=kind == 'c'):
                                 return True
                     for index, (raw_word, word, _, end) in enumerate(tokens):
                         paths = [word]
                         attached = word.partition('=')[2]
                         if attached:
                             paths.append(attached)
-                        if re.match(r'^-[A-Za-z].', word, re.S):
-                            paths.append(word[2:])
+                        if word.startswith('-') and not word.startswith('--'):
+                            paths.extend(word[offset:] for offset in range(2, len(word)))
                         # The tokenizer separates an unquoted backtick from the preceding literal text.
                         backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
                         for path in paths:
