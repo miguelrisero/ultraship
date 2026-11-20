@@ -1208,20 +1208,18 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assert_account_command_allowed(
             f"echo {shlex.quote(ultraship.RECEIPT_CUSTODY)} >> .scratch/coc/state-owed.md", caller='')
 
-    def test_cache_search_with_custody_pattern(self):
+    def test_recursive_cache_search_keeps_its_refusal(self):
         (Path.home() / '.claude/plugins/cache/ultraship/ship/1.15.20/hooks').mkdir(parents=True)
-        self.assert_account_command_allowed(
-            f'grep -rl "{ultraship.RECEIPT_CUSTODY}" ~/.claude/plugins/cache/*/*/*/', caller='')
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': f'grep -rl "{ultraship.RECEIPT_CUSTODY}" ~/.claude/plugins/cache/*/*/*/'}})
 
-    def test_cache_globs_refuse_a_protected_alias(self):
+    def test_cache_listing_refuses_a_protected_alias(self):
         cache = Path.home() / '.claude/plugins/cache/ultraship/ship'
         cache.mkdir(parents=True)
         self.store.mkdir(parents=True)
         (cache / '1.15.20').symlink_to(self.store, target_is_directory=True)
-        for command in (f'grep -rl "{ultraship.RECEIPT_CUSTODY}" ~/.claude/plugins/cache/*/*/*/',
-                        'ls -d ~/.claude/plugins/cache/ultraship/ship/*'):
-            with self.subTest(command=command):
-                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': 'ls -d ~/.claude/plugins/cache/ultraship/ship/*'}})
 
     def test_printf_with_custody_message(self):
         self.assert_account_command_allowed(
@@ -1229,6 +1227,7 @@ class ReceiptCustodyTests(unittest.TestCase):
 
     def test_list_ship_cache_versions(self):
         installed = Path.home() / '.claude/plugins/cache/ultraship/ship/1.15.20/hooks/ultraship.py'
+        installed.parent.mkdir(parents=True)
         with patch.object(ultraship, '__file__', str(installed)):
             self.assert_account_command_allowed('ls -d ~/.claude/plugins/cache/ultraship/ship/*', caller='')
 
