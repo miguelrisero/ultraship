@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 import uuid
 import unittest
+from threading import Barrier, Thread
+from types import SimpleNamespace
 from unittest.mock import patch
 import shlex
 import sys
@@ -389,6 +391,9 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.cwd.mkdir()
         self.enterContext(patch.dict(os.environ, {'HOME': temporary, 'XDG_STATE_HOME': str(self.state)}))
         self.store = self.state / 'ultraship' / 'text-lint'
+        self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=temporary)))
+        self.ledger = ultraship.load_ledger()
+        self.enterContext(patch.object(ultraship, 'load_ledger', return_value=self.ledger))
 
     def assert_custody_denial(self, event, reason=(
             'Only the text_lint hook reads or writes refusal receipts (custody rule). '
@@ -401,10 +406,21 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assertEqual(result['permissionDecision'], 'deny')
         self.assertEqual(result['permissionDecisionReason'].split('\n', 1)[0], reason)
 
+    def prepare_owed(self, event):
+        pending = ultraship.owed_file(event)
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        pending.touch(exist_ok=True)
+        return pending
+
+    def consume(self, words):
+        with self.ledger.consume_grant(words[1], words[2:]):
+            pass
+
     def own_account_event(self):
         os.environ.pop('XDG_STATE_HOME', None)
         state = Path(os.environ['HOME']) / '.local/state/ultraship'
         self.enterContext(patch.object(ultraship, 'STATE', state))
+        self.prepare_owed({'session_id': 'session-context'})
         self.account_words = ['python3', str(LEDGER), 'account', str(state / 'owed/session-context.tsv'),
                               '12345678-1234-1234-1234-123456789abc', 'slice-review',
                               'ship:reviewer--sol@reviewer-a', 'abcdef1', 'pass', 'reviewed context, [P2] nit']
@@ -423,6 +439,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                             {'cwd': str(self.cwd), **event, 'agent_type': caller,
                              'tool_input': {'command': command}}))
                     self.assertEqual(output.getvalue(), '')
+                    self.consume(shlex.split(command))
 
         for evidence in ('"reviewed context, [P2] nit"', r"'Reviewer'\''s [P2] context'"):
             command = shlex.join(self.account_words[:-1]) + ' ' + evidence
@@ -432,19 +449,441 @@ class ReceiptCustodyTests(unittest.TestCase):
                     self.assertIsNone(ultraship.guarded_pre(
                         {'cwd': str(self.cwd), **event, 'tool_input': {'command': command}}))
                 self.assertEqual(output.getvalue(), '')
+                self.consume(shlex.split(command))
+
+    def test_own_account_call_allows_literal_hook_name_in_evidence(self):
+        event = self.own_account_event()
+        words = [*self.account_words[:-1], "Reviewer's finding in ultraship.py: $HOME/hooks/*"]
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        self.consume(words)
+
+    def test_grant_issuance_failure_removes_temporary_record(self):
+        event = self.own_account_event()
+        with patch.object(self.ledger.os, 'fsync', side_effect=OSError):
+            self.assert_custody_denial(event, 'The ship hook could not issue a fresh accounting grant. '
+                                     'Run the exact command again.')
+        self.assertFalse(any(self.ledger.grant_store().iterdir()))
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(self.account_words)
+
+    def test_grant_refuses_mismatch_expiry_replay_and_failed_consume(self):
+        event = self.own_account_event()
+        words = self.account_words
+        with patch.object(self.ledger.time, 'time_ns', return_value=10_000_000_000) as clock:
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+                self.consume([*words[:-1], 'different evidence'])
+            with patch.object(self.ledger.os, 'unlink', side_effect=PermissionError):
+                with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+                    self.consume(words)
+            clock.return_value += 899_999_999_999
+            self.consume(words)
+            with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+                self.consume(words)
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            clock.return_value += 900_000_000_000
+            with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+                self.consume(words)
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            self.consume(words)
+
+    def test_grant_refuses_replacement_and_second_claimant(self):
+        event = self.own_account_event()
+        words = self.account_words
+        refusal = 'The ship hook could not issue a fresh accounting grant. Run the exact command again.'
+        with patch.object(self.ledger.time, 'time_ns', return_value=10_000_000_000) as clock:
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            record, = self.ledger.grant_store().iterdir()
+            issued = record.read_bytes()
+            clock.return_value += 899_999_999_999
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            self.assertEqual(record.read_bytes(), issued)
+            self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(
+                [*words[:-1], 'different evidence'])}}, refusal)
+            barrier = Barrier(2, timeout=5)
+            outcomes = []
+
+            def claim():
+                barrier.wait()
+                try:
+                    self.consume(words)
+                    outcomes.append('consumed')
+                except ValueError:
+                    outcomes.append('refused')
+
+            claimants = [Thread(target=claim) for _ in range(2)]
+            for claimant in claimants:
+                claimant.start()
+            for claimant in claimants:
+                claimant.join()
+            self.assertEqual(sorted(outcomes), ['consumed', 'refused'])
+            with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+                self.consume(words)
+
+    def test_grant_refuses_malformed_and_linked_records(self):
+        event = self.own_account_event()
+        words = self.account_words
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        record, = self.ledger.grant_store().iterdir()
+        retained = record.with_suffix('.retained')
+        os.link(record, retained)
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(words)
+        record.unlink()
+        record.symlink_to(retained)
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(words)
+        record.unlink()
+        retained.rename(record)
+        record.write_bytes(b'{broken')
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(words)
+
+    def test_grant_refuses_a_symlinked_store_component(self):
+        event = self.own_account_event()
+        words = self.account_words
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        store = self.ledger.grant_store()
+        retained = store.rename(store.with_name('retained'))
+        store.symlink_to(retained, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(words)
+        self.assert_custody_denial(event, 'The ship hook could not issue a fresh accounting grant. Run the exact command again.')
+
+    def test_denied_hook_emits_no_grant(self):
+        event = self.own_account_event()
+        self.assert_custody_denial({**event, 'agent_type': 'ship:writer--sol'})
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(self.account_words)
+        with patch.object(ultraship, 'pre', side_effect=RuntimeError):
+            self.assert_custody_denial(event, ultraship.PRE_FAILED)
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(self.account_words)
+
+    def test_grant_store_custody_guards_paths_aliases_and_hook_entry(self):
+        path = self.ledger.grant_store()
+        path.mkdir(mode=0o700, parents=True)
+        alias = self.cwd / 'alias to store'
+        alias.symlink_to(path, target_is_directory=True)
+        hook_alias = self.cwd / 'hook-alias'
+        hook_alias.symlink_to(HOOK)
+        for command in (f'cat {shlex.quote(str(path / "example"))}', "cat 'alias to store/example'",
+                        f'ls {path.parent}/acc*/*', f'ls {path.parent}',
+                        f'python3 {shlex.quote(str(HOOK))} pre', 'python3 ./hook-alias pre'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+        for tool, key, value in (('Read', 'file_path', str(alias / 'example')),
+                                 ('Write', 'file_path', str(alias / 'example')),
+                                 ('Grep', 'path', str(path.parent)),
+                                 ('Glob', 'pattern', str(path.parent / '*/*.json'))):
+            with self.subTest(tool=tool):
+                self.assert_custody_denial({'tool_name': tool, 'tool_input': {key: value}})
+
+    def test_grant_custody_refuses_store_and_ancestor_changes(self):
+        store = self.ledger.grant_store()
+        for target in (store, store.parent.parent.parent):
+            path = shlex.quote(str(target))
+            for command in (f'rm -rf {path}', f'mv {path} saved', f'cp -r fixture {path}',
+                            f'printf data > {path}', f'printf data >> {path}', f'find {path} -delete',
+                            f'find {path} -fprint output', f'find {path} -fprint0 output',
+                            f'rsync -a --delete empty/ {path}/',
+                            f'tar -xf fixture.tar -C {path}', f'printf fixture | xargs rm {path}',
+                            f"python3 -c 'pass' {path}"):
+                with self.subTest(command=command):
+                    self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+            for tool in ('Edit', 'Write'):
+                with self.subTest(tool=tool, target=target):
+                    self.assert_custody_denial({'tool_name': tool, 'tool_input': {'file_path': str(target)}})
+
+    def test_grant_custody_denies_attached_ancestor_paths(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for command in (f'tar -xf fixture.tar --directory={ancestor}',
+                        f'tar -xf fixture.tar -C{ancestor}', f'tar -xC{ancestor} -f fixture.tar',
+                        f'VAR={ancestor} tar -tf fixture.tar'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_denies_gh_api_redirect_to_grant_store(self):
+        destination = shlex.quote(str(self.ledger.grant_store() / 'output'))
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': f'gh api user > {destination}'}})
+
+    def test_grant_custody_denies_hook_execution_forms(self):
+        installed = shlex.quote(str(HOOK))
+        relative = os.path.relpath(HOOK, self.cwd)
+        alias = self.cwd / 'named-entry'
+        alias.symlink_to(HOOK)
+        copy = self.cwd / HOOK.name
+        copy.touch()
+        for form, command in (
+                ('installed path without mode', f'python3 {installed}'),
+                ('installed path as data', f'printf %s {installed}'),
+                ('installed path as redirect', f'cat < {installed}'),
+                ('variable mode with redirect', f'python3 {installed} "$MODE" < input.json'),
+                ('relative installed path', f'python3 {shlex.quote(relative)} stop'),
+                ('alias with interpreter path', 'env /usr/bin/python3 ./named-entry stop'),
+                ('alias as a command', './named-entry'),
+                ('alias in a nested shell', "sh -c 'python3 ./named-entry stop'"),
+                ('repository file as a command', './ultraship.py'),
+                ('repository file via interpreter', '/usr/bin/python3 ./ultraship.py stop'),
+                ('pipeline into repository file', 'cat input.json | python3 ./ultraship.py stop'),
+                ('module', 'python3 -m plugins.ship.hooks.ultraship stop'),
+                ('attached module', 'python3 -multraship stop'),
+                ('grouped module flag', 'python3 -Im plugins.ship.hooks.ultraship stop'),
+                ('grouped attached module', 'python3 -Implugins.ship.hooks.ultraship stop'),
+                ('inline import', 'python3 -c "import ultraship"'),
+                ('standard input import', "python3 - <<'EOF'\nfrom plugins.ship.hooks import ultraship\nEOF"),
+                ('runpy target', "python3 -c 'import runpy; runpy.run_module(\"ultraship\")'"),
+                ('import target', "python3 -c 'import importlib; importlib.import_module(\"ultraship\")'"),
+                ('issuer symbol', 'python3 -c "print(issue_account_grant)"'),
+                ('grant writer symbol', 'python3 -c "print(_issue_grant)"'),
+                ('unparsed hook reference', "echo ultraship 'unfinished"),
+        ):
+            with self.subTest(form=form):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+        with patch.object(ultraship, 'nested_work_exceeded', return_value=True):
+            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'echo ultraship'}})
+
+    def test_grant_custody_denies_hook_path_expansions(self):
+        installed = Path.home() / 'plugin with spaces/hooks/ultraship.py'
+        with patch.object(ultraship, '__file__', str(installed)):
+            for form, command in (
+                    ('file glob', f'python3 {shlex.quote(str(installed.parent))}/ultra*.py'),
+                    ('folder glob', f'python3 {shlex.quote(str(installed.parent.parent))}/hoo?s/*.py'),
+                    ('home and file expansion', 'python3 "$HOME/plugin with spaces/hooks/ultra${SUFFIX}"'),
+                    ('unquoted backtick expansion', f'python3 {shlex.quote(str(installed.parent))}/ultra`printf suffix`'),
+                    ('hook name with no path prefix', 'python3 "${ROOT}/hooks/${SCRIPT}"'),
+            ):
+                with self.subTest(form=form):
+                    self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_denies_hook_folder_brace_expansion(self):
+        installed = Path.home() / 'plugin/hooks/ultraship.py'
+        with patch.object(ultraship, '__file__', str(installed)):
+            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+                'command': f'python3 {shlex.quote(str(installed.parent.parent))}/{{hooks,docs}}/{{ultra,other}}ship.py'}})
+
+    def test_grant_custody_denies_glob_in_noninterpreter_argument(self):
+        installed = Path.home() / 'plugin/hooks/ultraship.py'
+        with patch.object(ultraship, '__file__', str(installed)):
+            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+                'command': f'ls {shlex.quote(str(installed.parent.parent))}/hoo?s/ultra*.py'}})
+
+    def test_grant_custody_denies_braces_in_noninterpreter_argument(self):
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': 'ls ./plugin/{hooks,docs}/{ultra,other}ship.py'}})
+
+    def test_grant_custody_denies_cwd_relative_hook_glob(self):
+        plugin = self.cwd / 'plugin'
+        with patch.object(ultraship, '__file__', str(plugin / 'hooks/ultraship.py')):
+            self.assert_custody_denial({'cwd': str(plugin), 'tool_name': 'Bash',
+                                       'tool_input': {'command': 'ls [h]ooks/ultra*.py'}})
+
+    def test_grant_custody_denies_hook_glob_without_literal_prefix(self):
+        plugin = self.cwd / 'plugin'
+        with patch.object(ultraship, '__file__', str(plugin / 'hooks/ultraship.py')):
+            self.assert_custody_denial({'cwd': str(plugin), 'tool_name': 'Bash',
+                                       'tool_input': {'command': 'ls */ultra*.py'}})
+
+    def test_grant_custody_denies_literal_hook_after_directory_change(self):
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': f'cd {shlex.quote(str(HOOK.parent))} && python3 ultraship.py'}})
+
+    def test_grant_custody_allows_ordinary_shell_and_exact_stop_commands(self):
+        event = self.own_account_event()
+        for command in ('ls *.py', 'df -h /', 'ls ~', 'find / -name x',
+                        f'cd {shlex.quote(str(self.cwd))} && git status',
+                        f'cd {shlex.quote(str(self.cwd))} && uv run pytest'):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command, caller='')
+        words = [*self.account_words[:2], 'account-auto', self.account_words[3]]
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        self.consume(words)
+
+    def test_grant_custody_admits_ordinary_calls_when_the_account_has_no_passwd_entry(self):
+        with patch.object(ultraship.pwd, 'getpwuid', side_effect=KeyError('getpwuid(): uid not found')):
+            self.assert_account_command_allowed('ls *.py', caller='')
+            self.assert_account_command_allowed('ls *.py')
+            with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+                ultraship.guarded_pre({'cwd': str(self.cwd), 'agent_type': '', 'tool_name': 'Read',
+                                       'tool_input': {'file_path': str(self.cwd / 'file.py')}})
+            self.assertEqual(output.getvalue(), '')
+            self.assert_custody_denial({'tool_name': 'Read', 'tool_input': {'file_path': str(self.store / 'key')}})
+
+    def test_own_account_call_is_denied_when_the_account_has_no_passwd_entry(self):
+        event = self.own_account_event()
+        with patch.object(ultraship.pwd, 'getpwuid', side_effect=KeyError('getpwuid(): uid not found')):
+            self.assert_custody_denial(event, 'The ship hook could not issue a fresh accounting grant. '
+                                     'Run the exact command again.')
+
+    def test_grant_custody_admits_literal_indexed_array_assignment(self):
+        self.assert_account_command_allowed('items=([0]=alpha [1]=beta)', caller='ship:writer--sol')
+
+    def test_grant_custody_admits_literal_pr_comment_body(self):
+        self.assert_account_command_allowed(r"gh pr comment 7 --body $'first\nsecond `example`'", caller='')
+
+    def test_grant_custody_treats_find_name_as_data(self):
+        self.assert_account_command_allowed("find ./scripts -name 'uv' -print", caller='ship:writer--sol')
+
+    def test_grant_custody_denies_uncertain_commands_without_custody_words(self):
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': "echo 'unfinished"}})
+        with patch.object(ultraship, 'nested_work_exceeded', return_value=True):
+            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'echo ordinary'}})
+
+    def test_grant_custody_denies_unclosed_group(self):
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': '(echo ordinary'}})
+
+    def test_grant_custody_denies_unterminated_heredoc(self):
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': "cat <<'EOF'\nordinary\n"}})
+
+    def test_grant_custody_denies_open_braces_and_empty_delimiter_heredoc(self):
+        for command in ('{ echo ordinary;', "cat <<''\nordinary\n", 'cat <<""\nordinary\n'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_allows_plain_repository_source_commands(self):
+        source = 'plugins/ship/hooks/ultraship.py'
+        for command in (f'git diff -- {source}', f'git add -- {source}', f'git show HEAD:{source}',
+                        f"grep -n 'issue_account_grant' {source}", f'diff -u saved.py {source}'):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command, caller='ship:writer--sol')
+
+    def test_grant_custody_allows_literal_search_chain_with_hook_name(self):
+        self.assert_account_command_allowed(
+            "cd /repo && find . -name README.md && grep -n 'def pre' plugins/ship/hooks/ultraship.py && ls .")
+
+    def test_grant_custody_allows_path_prefix_above_home(self):
+        home = Path.home()
+        command = f'echo {shlex.quote(str(home.parent))}/$(date)'
+        with patch.object(ultraship, '__file__', str(home / 'plugin/hooks/ultraship.py')):
+            self.assert_account_command_allowed(command)
+
+    def test_grant_custody_allows_home_and_working_paths_that_hold_hook_folder_names(self):
+        home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve() / 'ultraship' / 'hooks' / 'home'
+        self.cwd = home / 'repo'
+        self.cwd.mkdir(parents=True)
+        self.enterContext(patch.dict(os.environ, {'HOME': str(home)}))
+        self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(home))))
+        self.enterContext(patch.object(ultraship, '__file__', str(home / 'plugin/hooks/ultraship.py')))
+        for command in ('PATH="${HOME}/.local/bin:${PATH}" make -r test', f'echo {shlex.quote(str(home.parent))}/$(date)',
+                        f'ls {shlex.quote(str(self.cwd))}/*.py'):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command)
+
+    def test_grant_custody_denies_hook_names_after_an_unresolved_path_segment(self):
+        for command in ('ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py', 'cat ./hoo$x/ultraship.py'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_allows_complete_brace_group_and_literal_shell_code(self):
+        for command in ('{ echo a; echo b; }', "bash -c 'label=sample; echo \"$label\"'"):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command)
+
+    def test_grant_custody_treats_program_running_reader_options_as_writes(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for command in (f'rg --pre=cat text {ancestor}', f'rg --pre-glob=*.txt text {ancestor}',
+                        f'sort --compress-program=cat {ancestor}'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_checks_interpreter_operands_after_value_options(self):
+        for command in ('bash -o pipefail -c "$BODY"', 'uv run --with sample "$SCRIPT"',
+                        'bash --unknown-option sample.sh', 'uv run --unknown-option sample.py'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_admits_ancestor_operands_of_df_and_read_only_git(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        probe = ('env -i PATH="$PATH" HOME="$HOME" GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 '
+                 f'git -C {ancestor} -c credential.helper= ls-remote --symref origin HEAD')
+        for command in (f'{probe} | wc -l; touch result', f'git -C {ancestor} status --porcelain; touch result',
+                        f'df -h {ancestor}; touch result',
+                        f'disk=$(df --output=pcent {ancestor} | tail -n 1); touch result'):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command, caller='')
+        for command in (f'git -C {ancestor} clean -fdx', f'git -C {ancestor} ls-remote --upload-pack=true origin',
+                        f'git -C {ancestor} -c core.pager=true status', f'git -C {ancestor} status > output',
+                        f'df -h {ancestor} > output', f'df -h {ancestor}; rm -rf {ancestor}'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_denies_ls_remote_upload_pack_short_forms(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for option in ('-u true', '-utrue', '-qu true'):
+            with self.subTest(option=option):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+                    'command': f'git -C {ancestor} ls-remote {option} origin; touch result'}})
+
+    def test_grant_custody_denies_ls_remote_options_that_a_shell_expansion_supplies(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for command in (f"opt=-u; git -C {ancestor} ls-remote $opt 'cmd' /some/repo",
+                        f"git -C {ancestor} ls-remote {{-u,'cmd'}} /some/repo",
+                        f"git -C {ancestor} ls-remote $(printf -- -u) 'cmd' /some/repo",
+                        f"git -C {ancestor} ls-remote `printf -- -u` 'cmd' /some/repo"):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_admits_the_short_status_option_u_after_an_ancestor(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        self.assert_account_command_allowed(f'git -C {ancestor} status -uno; touch result', caller='')
+
+    def test_grant_custody_admits_a_single_quoted_dollar_in_git_log(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        self.assert_account_command_allowed(f"git -C {ancestor} log -- '$notes'; touch result", caller='')
+
+    def test_grant_custody_denies_abbreviated_git_program_and_output_options(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for option in ('--upl=true', '--u=true', '--rec=true', '--ex=true', '--e=true', '--out=file', '--o=file'):
+            with self.subTest(option=option):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+                    'command': f'git -C {ancestor} ls-remote {option} origin; touch result'}})
+
+    def test_grant_custody_drops_the_git_read_exception_for_a_quoted_rebinding(self):
+        binding = 'status=$(git -C "$worktree" status --porcelain); '
+        self.assert_account_command_allowed(binding + '$status', caller='')
+        for rebinding in ('printf -v sta"tus" %s x; ', r'read st\atus; '):
+            with self.subTest(rebinding=rebinding):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': binding + rebinding + '$status'}})
+
+    def test_grant_custody_denies_a_git_binding_to_a_name_the_shell_sets(self):
+        for name in ('_', 'REPLY', 'reply', 'argv', '1', 'match', 'mbegin', 'mend'):
+            with self.subTest(name=name):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+                    'command': f'{name}=$(git -C "$worktree" status --porcelain); ${name}'}})
+
+    def test_grant_custody_admits_read_only_commands_that_name_the_hook_by_alias(self):
+        (self.cwd / 'hook-alias').symlink_to(HOOK)
+        self.assert_account_command_allowed('cat ./hook-alias', caller='')
+        for command in ('python3 ./hook-alias pre', 'cat ./hook-alias | python3 - pre'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_treats_an_inert_quoted_script_as_file_text(self):
+        body = "from pathlib import Path\nprint(Path('plugins/ship/hooks/ultraship.py').read_text().count('def'))\n"
+        self.assert_account_command_allowed(f"python3 - <<'EOF'\n{body}EOF\n", caller='')
+        runner = ("import subprocess\nsubprocess.run(['python3', 'plugins/ship/hooks/ultraship.py', 'pre'])\n")
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': f"python3 - <<'EOF'\n{runner}EOF\n"}})
+
+    def test_grant_custody_treats_unresolved_words_after_a_search_pattern_as_data(self):
+        self.assert_account_command_allowed('grep -rn eval "$DIR"', caller='')
+        self.assert_account_command_allowed('grep -rn eval src/*.py | head', caller='')
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'eval "$DIR"'}})
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'grep -rn x eval "$DIR" ; eval "$DIR"'}})
 
     def test_stop_account_diagnostic_admits_quoted_paths(self):
         event = self.own_account_event()
         home = Path(os.environ['HOME']) / 'home with text'
         state = home / '.local/state/ultraship'
         script = self.cwd / 'plugin with space/ledger.py'
+        script.parent.mkdir()
+        script.touch()
         with patch.dict(os.environ, {'HOME': str(home)}), \
                 patch.object(ultraship, 'STATE', state), \
                 patch.object(ultraship, 'ledger_script', return_value=script), \
-                patch.object(ultraship, 'load_ledger', return_value=None), \
+                patch.object(self.ledger, '__file__', str(script)), \
                 patch.object(ultraship, 'account', side_effect=ValueError('synthetic missing review')):
-            pending = ultraship.owed_file(event)
-            pending.parent.mkdir(parents=True)
+            pending = self.prepare_owed(event)
             pending.write_text('100\tship:reviewer--sol\t' + str(self.cwd) + '\t' +
                                json.dumps({'id': self.account_words[4], 'v': 2}) + '\n')
             output = io.StringIO()
@@ -464,6 +903,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                     {'cwd': str(self.cwd), **event, 'tool_input': {'command': command}}))
             self.assertEqual(output.getvalue(), '')
 
+            self.consume(shlex.split(command))
             auto, = re.findall(r'`([^`]* account-auto [^`]*)`', diagnostic['reason'])
             self.assertEqual(shlex.split(auto), ['python3', str(script), 'account-auto', str(pending)])
             for caller in ('', 'ship:driver--sol'):
@@ -473,6 +913,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                         ultraship.guarded_pre({'cwd': str(self.cwd), **event, 'agent_type': caller,
                                                'tool_input': {'command': auto}})
                     self.assertEqual(output.getvalue(), '')
+                    self.consume(shlex.split(auto))
             for invalid in (auto + ' extra', auto + ' && echo done', auto.replace('session-context', 'sibling')):
                 with self.subTest(command=invalid):
                     self.assert_custody_denial({**event, 'tool_input': {'command': invalid}})
@@ -481,7 +922,7 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_plain_account_auto_requires_own_driver_call(self):
         event = self.own_account_event()
         event['session_id'] = 's1'
-        command = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+        command = shlex.join([*self.account_words[:2], 'account-auto', str(self.prepare_owed(event))])
         driver = {**event, 'agent_type': 'ship:driver--sol', 'tool_input': {'command': command}}
         with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
             self.assertIsNone(ultraship.guarded_pre({'cwd': str(self.cwd), **driver}))
@@ -509,6 +950,21 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=invalid):
                 self.assert_custody_denial({**driver, 'tool_input': {'command': shlex.join(invalid)}})
         self.assert_custody_denial({**driver, 'agent_type': 'ship:writer--sol', 'tool_input': {'command': command}})
+
+    def test_correct_binding_requires_exact_own_command(self):
+        event = {'session_id': 's1', 'tool_name': 'Bash'}
+        self.enterContext(patch.object(ultraship, 'STATE', self.state / 'ultraship'))
+        words = ['python3', str(LEDGER), 'correct-binding', str(self.prepare_owed(event)),
+                 '12345678-1234-1234-1234-123456789abc', '12', 'review row']
+        command = shlex.join(words)
+        self.assert_account_command_allowed(command, session_id=event['session_id'])
+        self.consume(words)
+        for invalid in (command + ' && echo done', command.replace('s1.tsv', 'other.tsv'),
+                        shlex.join([*words[:3], *words[4:]])):
+            with self.subTest(command=invalid):
+                self.assert_custody_denial({**event, 'tool_input': {'command': invalid}}, ultraship.ACCOUNT_CUSTODY)
+        self.assert_custody_denial({**event, 'agent_type': 'ship:writer--sol',
+                                   'tool_input': {'command': command}}, ultraship.ACCOUNT_CUSTODY)
 
     def test_account_auto_line_continuations_require_raw_driver_call(self):
         event = self.own_account_event()
@@ -575,7 +1031,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         event = self.own_account_event()
         state = ultraship.STATE / 'CLAUDE_CODE_SESSION_ID'
         with patch.object(ultraship, 'STATE', state):
-            command = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+            command = shlex.join([*self.account_words[:2], 'account-auto', str(self.prepare_owed(event))])
             self.assert_account_command_allowed(command, session_id=event['session_id'])
 
     def test_account_auto_denies_commands_that_name_the_session_variable(self):

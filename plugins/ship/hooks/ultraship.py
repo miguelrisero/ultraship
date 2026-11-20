@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import posixpath
+import pwd
 import re
 import shlex
 import stat
@@ -1067,7 +1068,7 @@ def process_heredoc_denial(command, readers=False):
     return None
 
 
-def shell_raw_words(text):
+def shell_raw_words(text, *, require_complete=False):
     """Keep raw shell words and offsets; quotes and escapes never lose their identity."""
     words, index, parentheses, backtick = [], 0, [], False
     while index < len(text):
@@ -1124,10 +1125,20 @@ def shell_raw_words(text):
         if len(values) != 1:
             raise ValueError('ambiguous shell word')
         words.append((raw, values[0], start, index))
+    if require_complete:
+        braces = 0
+        positions = shell_command_positions(words)
+        for raw, _, start, _ in words:
+            if start in positions and raw in {'{', '}'}:
+                braces += 1 if raw == '{' else -1
+                if braces < 0:
+                    raise ValueError('unexpected shell group end')
+        if parentheses or backtick or braces:
+            raise ValueError('unfinished shell group')
     return words
 
 
-def shell_without_heredoc_bodies(command):
+def shell_without_heredoc_bodies(command, *, require_complete=False):
     """Keep headers and following shell commands, without interpreting data as shell words."""
     lines, kept, pending = command.splitlines(keepends=True), [], []
     if (lines and re.fullmatch(r'[ \t]*(?:cd +[\w./-]+ +&& +)?git +commit(?: +(?:-[a-zA-Z]|--[\w-]+))* +'
@@ -1135,6 +1146,8 @@ def shell_without_heredoc_bodies(command):
             and not process_heredoc_denial(command)):
         return ''
     quoted_lines = literal_quotes_removed(command).splitlines(keepends=True)
+    width = '*' if require_complete else '+'
+    operator = rf'''(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]{width}'|"[^"\n]{width}"|\\?[^\s<>;&|()'"`]+)'''
     for index, line in enumerate(lines):
         if pending:
             delimiter, tabs, quoted = pending[0]
@@ -1144,9 +1157,11 @@ def shell_without_heredoc_bodies(command):
                     quoted_lines[index + 1:] = literal_quotes_removed(''.join(lines[index + 1:])).splitlines(keepends=True)
             continue
         kept.append(line)
-        for match in re.finditer(r"(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", line):
+        for match in re.finditer(operator, line):
             if quoted_lines[index][match.start():match.start() + 2] == '<<':
                 pending.append((shlex.split(match[2])[0], bool(match[1]), match[2][0] in '\'"\\'))
+    if require_complete and pending:
+        raise ValueError('unterminated heredoc')
     return ''.join(kept)
 
 
@@ -4762,15 +4777,34 @@ def own_account_call(data, raw):
         return False
     pending = str(owed_file(data))
     if words[2] == 'account-auto':
-        return words[3:] in ([pending], ['--fail-unparsed', pending])
+        return words if words[3:] in ([pending], ['--fail-unparsed', pending]) else False
+    if words[2] == 'correct-binding':
+        if (len(words) == 7 and words[3] == pending
+                and re.fullmatch(r'(?:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}|legacy:[0-9a-f]{64})', words[4])
+                and re.fullmatch(r'[1-9][0-9]*', words[5]) and words[6].strip()):
+            return words
+        return False
     if len(words) != 10 or words[2] != 'account' or words[3] != pending:
         return False
     result, step, agent, sha, verdict, evidence = words[4:]
-    return (bool(re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', result))
-            and bool(re.fullmatch(r'[a-z][a-z-]*', step))
-            and bool(re.fullmatch(r'[\w:.-]+(@[\w-]+)?', agent))
-            and bool(re.fullmatch(r'[0-9a-f]{7,40}', sha))
-            and bool(re.fullmatch(r'[\w-]+', verdict)) and verdict != 'owed' and bool(evidence.strip()))
+    if (re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', result)
+            and re.fullmatch(r'[a-z][a-z-]*', step)
+            and re.fullmatch(r'[\w:.-]+(@[\w-]+)?', agent)
+            and re.fullmatch(r'[0-9a-f]{7,40}', sha)
+            and re.fullmatch(r'[\w-]+', verdict) and verdict != 'owed' and evidence.strip()):
+        return words
+    return False
+
+
+def issue_account_grant(data):
+    if data.get('tool_name') != 'Bash':
+        return
+    words = own_account_call(data, (data.get('tool_input') or {}).get('command', ''))
+    if words:
+        try:
+            load_ledger()._issue_grant(words[1], words[2:], STATE, data['session_id'])
+        except Exception:
+            deny('The ship hook could not issue a fresh accounting grant. Run the exact command again.')
 
 
 def receipt_custody(data, read_search=False):
@@ -4788,21 +4822,28 @@ def receipt_custody(data, read_search=False):
         path = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(value))
         return {normalized(os.path.abspath(path)), normalized(os.path.realpath(path))}
 
-    receipt_paths = resolved(str(receipt_store))
-    state_paths = resolved(str(state_root))
+    try:
+        account_state = Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state'
+    except KeyError:
+        # Without a passwd entry the ledger cannot open any grant store, so accounting refuses and none can be issued.
+        account_state = None
+    grant_paths = {normalized(str(account_state / 'ultraship/account-grants'))} if account_state else set()
+    receipt_paths = resolved(str(receipt_store)) | grant_paths
+    state_paths = resolved(str(state_root)) | ({normalized(str(account_state))} if account_state else set())
 
     def receipt_text(value):
         value = normalized(value)
-        return any(path in value for path in receipt_paths) or 'ultraship' + '/text-lint' in value
+        return (any(path in value for path in receipt_paths)
+                or any('ultraship/' + folder in value for folder in ('text-lint', 'account-grants')))
 
-    def receipt_path(value, ancestors=False, state_only=False):
+    def receipt_path(value, ancestors=False, state_only=False, stores=receipt_paths):
         if not isinstance(value, str) or not value:
             return False
         return any(candidate == store or candidate.startswith(store + '/')
                    or (ancestors and store.startswith(candidate.rstrip('/') + '/')
                        and (not state_only or any(candidate == root or candidate.startswith(root + '/')
                                                   for root in state_paths)))
-                   for candidate in resolved(value) for store in receipt_paths)
+                   for candidate in resolved(value) for store in stores)
 
     def strings(value):
         if isinstance(value, str):
@@ -4826,10 +4867,11 @@ def receipt_custody(data, read_search=False):
         except Exception:
             deny(RECEIPT_CUSTODY)
         return
-    if tool in ('Edit', 'Write', 'NotebookEdit') and receipt_path(tin.get('file_path') or tin.get('notebook_path')):
-        deny(RECEIPT_CUSTODY)
-    # shortcut: split account spellings and renamed copies of older ledgers can escape this check.
-    # ledger.py checks the session for account-auto; upgrade to isolated per-session state access.
+    if tool in ('Edit', 'Write', 'NotebookEdit'):
+        target = tin.get('file_path') or tin.get('notebook_path')
+        if receipt_path(target) or receipt_path(target, ancestors=True, stores=grant_paths):
+            deny(RECEIPT_CUSTODY)
+    # shortcut: shell text checks cannot isolate same-user code; upgrade to isolated state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
         command = normalized(raw)
@@ -4867,7 +4909,7 @@ def receipt_custody(data, read_search=False):
                             saw_ledger = False
                             continue
                         if saw_ledger and (raw_word in {'(', '`'} or word.casefold().startswith('account')
-                                           or unresolved_shell_word(raw_word)):
+                                           or word.casefold() == 'correct-binding' or unresolved_shell_word(raw_word)):
                             return True
                         if raw_word in {'(', ')', '`'}:
                             continue
@@ -4890,15 +4932,291 @@ def receipt_custody(data, read_search=False):
                 return True
             return False
 
-        def glob_prefix(word):
+        def glob_prefix(word, stores=receipt_paths):
             for pattern in resolved(word):
                 segments = pattern.split('/')
-                for store in receipt_paths:
+                for store in stores:
                     store_segments = store.split('/')
                     if len(segments) >= len(store_segments) and all(
                             fnmatch.fnmatchcase(segment, pattern_segment)
                             for segment, pattern_segment in zip(store_segments, segments)):
                         return True
+            return False
+
+        def plain_hook_source_command(text, tokens):
+            if literal_search_shell(text) and text.split()[0] == 'grep' and '&&' not in text.split():
+                return True
+            if tokens and tokens[-1][0] == '\n':
+                tokens = tokens[:-1]
+            if any(token[0] in {';', '&', '|', '(', ')', '<', '>', '`', '\n'} or unresolved_shell_word(token[0])
+                   for token in tokens):
+                return False
+            words = [token[1] for token in tokens]
+            if not words:
+                return False
+            if words[0] == 'diff':
+                return all(not word.startswith('-') or word in ('--', '-u', '-U0') for word in words[1:])
+            if words[:2] == ['git', '-C']:
+                words = ['git', *words[3:]]
+            return (words[:2] in (['git', 'add'], ['git', 'diff'], ['git', 'show'], ['git', 'status'])
+                    and all(not word.startswith('-') or word in (
+                        '--', '--cached', '--staged', '--check', '--stat', '--numstat', '--name-only',
+                        '--name-status', '--no-ext-diff', '--no-textconv', '--short', '-U0', '--unified=0')
+                            for word in words[2:]))
+
+        def grant_access():
+            hook = Path(__file__).resolve()
+            installed_hook = normalized(str(hook))
+            hook_folder = normalized(str(hook.parent))
+            home_prefix = normalized(str(Path.home())).rstrip('/') + '/'
+            hook_name = re.compile(r'(?<![\w-])ultraship\.py(?![\w.-])|\b(?:issue_account_grant|_issue_grant)\b')
+            module_name = r'(?:\w+\.)*ultraship'
+            module_reference = re.compile(rf"\b(?:import|from)\s+(?:\(\s*)?{module_name}\b|['\"]{module_name}['\"]")
+            read_only = {'ls', 'cat', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'find', 'du', 'df',
+                         'stat', 'wc', 'file', 'cd', 'pushd', 'popd', 'pwd', 'echo', 'printf', 'test', '[',
+                         'true', 'false', 'realpath', 'readlink', 'basename', 'dirname', 'sort', 'uniq', 'cut', 'tr'}
+            find_actions = {'-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'}
+            program_options = {'rg': {'--pre', '--pre-glob'}, 'sort': {'--compress-program'}, 'find': find_actions}
+
+            def expands_to_hook(raw_word, word):
+                if not unresolved_shell_word(raw_word):
+                    return False
+                literal = re.split(r'[*?\[{$`]', normalized(word))
+                if len(literal) == 1:
+                    return False
+                prefix = literal[0]
+                # Folder names inside the home, working or plugin path are not a hook name; only the text past them counts.
+                known = (home_prefix, normalized(os.path.abspath(data.get('cwd') or os.getcwd())).rstrip('/') + '/',
+                         normalized(str(hook.parent.parent)).rstrip('/') + '/')
+                leaf = min((prefix[os.path.commonprefix([prefix, path]).rfind('/') + 1:] for path in known), key=len)
+                return (bool(prefix) and any(path.startswith(home_prefix)
+                                             and (installed_hook.startswith(path) or hook_folder.startswith(path))
+                                             for path in resolved(prefix))
+                        or any('ultraship' in part or 'hooks' in part for part in [leaf, *literal[1:]]))
+
+            # Main admits running a value bound once to plain `git rev-parse` or `git status` output.
+            # The shell sets `_`, `REPLY` and the zsh names `reply`, `argv`, `match`, `mbegin` and `mend` itself.
+            git_value = re.compile(r'(?<![\w$])(?!(?:reply|argv|match|mbegin|mend)=)([a-z][a-z0-9_]*)=\$\(\s*(?:GIT_OPTIONAL_LOCKS=0\s+)?git'
+                                   r'(?:\s+-C\s+(?:"\$\{?\w+\}?"|[\w./-]+))?\s+(?:rev-parse|status)(?:\s+[\w-]+)*\s*\)')
+            git_bound = set()
+            for binding in git_value.finditer(joined):
+                name, later = binding[1], binding.start() + 1
+                rest = joined[:binding.start()] + ' ' + joined[binding.end():]
+                # Only `$name` or `${name}` after the binding keeps the exception; any other use drops it.
+                rest = re.sub(rf'\$(?:{name}(?!\w)|\{{{name}\}})',
+                              lambda use: ' ' if use.start() >= later else use[0], rest)
+                if not re.search(rf'(?<!\w){name}(?!\w)', re.sub(r'[\'"\\]', '', rest)):
+                    git_bound.add(name)
+
+            def unresolved_program(raw_word, word, *, code=False):
+                if raw_word in {'[', '[[', '{', '}'} or not unresolved_shell_word(raw_word):
+                    return False
+                bound = re.fullmatch(r'"?\$(?:(\w+)|\{(\w+)\})"?', raw_word)
+                if bound and (bound[1] or bound[2]) in git_bound:
+                    return False
+                return code or any(char in os.path.basename(raw_word) for char in '$`*?[{')
+
+            def program_operand(base, interpreter, arguments):
+                if arguments[:1] in (['--version'], ['--help']):
+                    return 'none', len(arguments), 0
+                if interpreter in {'python', 'pypy', 'pypy3'}:
+                    kind, _, operand, offset = python_program(arguments)
+                    return kind, operand, offset
+                runner = base in {'uv', 'uvx'}
+                if runner:
+                    value_options = {'--directory', '--project', '--with', '--with-editable', '--with-requirements',
+                                     '--python', '-p', '--env-file', '--config-file', '--cache-dir', '--from'}
+                    switches = {'--frozen', '--locked', '--no-sync', '--isolated', '--script', '-s', '--quiet',
+                                '-q', '--verbose', '-v', '--offline', '--no-project', '--no-config'}
+                elif base in SHELL_INTERPRETERS:
+                    value_options = {'-o', '-O', '--rcfile', '--init-file'}
+                    switches = {'--noprofile', '--norc', '--posix', '--restricted', '--login', '--verbose'}
+                else:
+                    value_options, switches = set(), set()
+                cursor = 0
+                while cursor < len(arguments):
+                    option = arguments[cursor]
+                    if runner and base == 'uv' and option == 'run':
+                        cursor += 1
+                        continue
+                    if option == '--':
+                        return 'script', cursor + 1, 0
+                    if option == '-' or not option.startswith('-'):
+                        if interpreter and option in INLINE_INTERPRETERS[interpreter][2]:
+                            return 'c', cursor + 1, 0
+                        return 'script', cursor, 0
+                    flag, equals, _ = option.partition('=')
+                    if flag in value_options:
+                        cursor += 1 if equals else 2
+                        if cursor > len(arguments):
+                            return 'unknown', cursor, 0
+                        continue
+                    if option in switches:
+                        cursor += 1
+                        continue
+                    if base in SHELL_INTERPRETERS and re.fullmatch(r'-[abefhiklmnprtuvxBCEHPTc]+', option):
+                        if 'c' in option:
+                            return 'c', cursor + 1, 0
+                        cursor += 1
+                        continue
+                    if interpreter:
+                        short, long, _ = INLINE_INTERPRETERS[interpreter]
+                        if flag in long:
+                            return ('c', cursor, len(flag) + 1) if equals else ('c', cursor + 1, 0)
+                        if len(option) >= 2 and option[1] in short:
+                            return ('c', cursor, 2) if len(option) > 2 else ('c', cursor + 1, 0)
+                    return 'unknown', cursor, 0
+                return 'stdin', cursor, 0
+
+            def read_only_git(words, raw_words, ending):
+                # A read-only Git subcommand with plain global options writes no path, even after `-C <ancestor>`.
+                # A shell expansion could supply `-u` or a program option, so only literal words qualify.
+                if ending in {'(', '`'}:
+                    return False
+                allowed_env = r'(?:PATH|HOME|GIT_CONFIG_NOSYSTEM|GIT_CONFIG_GLOBAL|GIT_ALLOW_PROTOCOL|GIT_TERMINAL_PROMPT)=.*|GIT_ASKPASS='
+                allowed_config = r'http\.[\w./:-]+=[\w.:/-]*|credential\.helper=|core\.fsmonitor=false'
+                cursor = int(words[:1] == ['env'])
+                cursor += int(cursor and words[cursor:cursor + 1] == ['-i'])
+                while cursor < len(words) and re.fullmatch(allowed_env, words[cursor]):
+                    cursor += 1
+                if words[cursor:cursor + 1] != ['git']:
+                    return False
+                cursor += 1
+                while cursor < len(words) and words[cursor].startswith('-'):
+                    if words[cursor] == '-C' and cursor + 1 < len(words):
+                        cursor += 2
+                    elif words[cursor] == '-c' and cursor + 1 < len(words) and re.fullmatch(allowed_config, words[cursor + 1]):
+                        cursor += 2
+                    elif words[cursor] in {'--no-pager', '--no-optional-locks'}:
+                        cursor += 1
+                    else:
+                        return False
+                for raw in raw_words[cursor + 1:]:
+                    outside = outside_single_quotes(raw)
+                    if '$' in outside or '`' in outside:
+                        return False
+                    if unresolved_shell_word(raw.replace('$', '_').replace('`', '_')):
+                        return False
+
+                def runs_program_or_writes(word):
+                    # Git accepts a unique prefix of a long option, and `ls-remote -u` is `--upload-pack`.
+                    if word.startswith('--'):
+                        name = word[2:].partition('=')[0]
+                        return word.startswith(('--upload-pack', '--receive-pack', '--exec', '--output')) or (
+                            bool(name) and any(option.startswith(name)
+                                               for option in ('upload-pack', 'receive-pack', 'exec', 'output')))
+                    return words[cursor] == 'ls-remote' and word.startswith('-') and 'u' in word[1:]
+
+                return (words[cursor:cursor + 1] and words[cursor] in {'ls-remote', 'rev-parse', 'status', 'diff', 'show', 'log'}
+                        and not any(runs_program_or_writes(word) for word in words[cursor:]))
+
+            def reads_only(part, ending):
+                # `df` and a read-only Git command write nothing, so an ancestor path operand is data there.
+                parts = list(shell_without_redirections(part))
+                words = [word for _, word, _, _ in parts]
+                first = next((word for word in words if not SHELL_ASSIGNMENT.match(word)), '')
+                return not any(raw_word == '>' for raw_word, _, _, _ in part) and (
+                    first == 'df' or read_only_git(words, [raw for raw, _, _, _ in parts], ending))
+
+            comment = pr_comment_body_removed(raw)
+            pending, seen = [joined if comment == raw else comment], set()
+            try:
+                while pending:
+                    source = pending.pop()
+                    if source in seen:
+                        continue
+                    seen.add(source)
+                    text = shell_without_heredoc_bodies(source, require_complete=True)
+                    tokens = shell_raw_words(text, require_complete=True)
+                    if nested_work_exceeded(tokens, seen):
+                        return True
+                    literal_array = re.fullmatch(
+                        r'[a-z][a-z0-9_]*=\(\[[0-9]+\]=[A-Za-z0-9_]+(?:[ \t]+\[[0-9]+\]=[A-Za-z0-9_]+)*\)[ \t\n]*',
+                        text)
+                    positions = set() if literal_array else shell_command_positions(tokens)
+                    executable = list(shell_without_redirections(tokens))
+                    commands = {os.path.basename(word) for _, word, start, _ in executable if start in positions}
+                    modifies_paths = (any(raw_word == '>' for raw_word, _, _, _ in tokens)
+                                      or any(os.path.basename(word) not in read_only
+                                             and not (os.path.basename(word) == 'gh' and index + 1 < len(executable)
+                                                      and executable[index + 1][1] == 'api')
+                                             for index, (_, word, start, _) in enumerate(executable) if start in positions)
+                                      or any(word.partition('=')[0] in program_options.get(command, ())
+                                             for command in commands for _, word, _, _ in tokens))
+                    data_segment, segment = [], []
+                    for token in [*tokens, ('\n', '\n', 0, 0)]:
+                        if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
+                            data_segment += [reads_only(segment, token[0])] * len(segment) + [False]
+                            segment = []
+                        else:
+                            segment.append(token)
+                    account_words = own_account_call(data, raw) if source == raw else False
+                    if not account_words and any(unresolved_program(raw_word, word)
+                                                 for raw_word, word, start, _ in executable if start in positions):
+                        return True
+                    evidence_index = len(tokens) - 1 if account_words and account_words[2] != 'account-auto' else -1
+                    name_source = source[:tokens[evidence_index][2]] if evidence_index >= 0 else source
+                    plain_source = source == text and plain_hook_source_command(source, tokens)
+                    if not plain_source:
+                        # An inert quoted-delimiter script cannot run a process or import a module; its names are file text.
+                        name_text = python_heredoc_shell(name_source, inert_only=True)
+                        if ((hook_name.search(normalized(name_text)) and not literal_search_shell(source))
+                                or module_reference.search(name_text)):
+                            return True
+                        names = executable if evidence_index < 0 else executable[:evidence_index]
+                        for index, (_, name, _, _) in enumerate(names):
+                            interpreter = interpreter_name(name)
+                            base = os.path.basename(name)
+                            if not interpreter and base not in SHELL_INTERPRETERS | {'uv', 'uvx'}:
+                                continue
+                            if grep_data_token(names, index):
+                                continue
+                            if index and names[index - 1][0] in {'-name', '-iname', '-path', '-ipath'}:
+                                start = index - 1
+                                while start and names[start - 1][0] not in {';', '&', '|', '`', '\n'}:
+                                    start -= 1
+                                if (names[start][0] == 'find'
+                                        and re.fullmatch("'[^']*'", names[index][0])
+                                        and not any(token[1] in find_actions for token in names[start:index])):
+                                    continue
+                            arguments = names[index + 1:]
+                            kind, operand, offset = program_operand(base, interpreter, [token[1] for token in arguments])
+                            if kind == 'unknown':
+                                return True
+                            if operand >= len(arguments):
+                                continue
+                            arg_raw, arg, _, _ = arguments[operand]
+                            if kind == 'm' and re.fullmatch(module_name, arg[offset:]):
+                                return True
+                            if kind == 'c' and base in SHELL_INTERPRETERS and re.fullmatch("'[^']*'", arg_raw):
+                                continue
+                            if not account_words and unresolved_program(arg_raw, arg, code=kind == 'c'):
+                                return True
+                    for index, (raw_word, word, _, end) in enumerate(tokens):
+                        paths = [word]
+                        attached = word.partition('=')[2]
+                        if attached:
+                            paths.append(attached)
+                        if word.startswith('-') and not word.startswith('--'):
+                            paths.extend(word[offset:] for offset in range(2, len(word)))
+                        # The tokenizer separates an unquoted backtick from the preceding literal text.
+                        backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
+                        for path in paths:
+                            path = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), path)
+                            if (receipt_path(path, ancestors=True, state_only=not modifies_paths or data_segment[index], stores=grant_paths)
+                                    or (any(char in path for char in '*?[')
+                                        and (glob_prefix(path) or glob_prefix(path, stores={hook_folder})))
+                                    or (modifies_paths and installed_hook in resolved(path))
+                                    or (index != evidence_index and (
+                                        (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', path))
+                                        or expands_to_hook(raw_word + backtick, path + backtick)))):
+                                return True
+                    # An unresolved word after a search pattern is search data; resolved nested code keeps its scan.
+                    data_starts = {token[2] for index, token in enumerate(tokens) if grep_data_token(tokens, index)}
+                    pending.extend(token[1] for token in nested_shell_strings(tokens, text)
+                                   if not (token[2] in data_starts and unresolved_shell_word(token[1])))
+            except (OSError, RuntimeError, ValueError):
+                return True
             return False
 
         if (receipt_text(raw)
@@ -4922,9 +5240,11 @@ def receipt_custody(data, read_search=False):
                          ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
                 or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
             deny(RECEIPT_CUSTODY)
-        if ('account' in account_command and not own_account_call(data, raw)
+        if (('account' in account_command or 'correct-binding' in account_command)
+                and not own_account_call(data, raw)
                 and ('claude_code_session_id' in account_command or names_ledger())):
             deny(ACCOUNT_CUSTODY)
+        return grant_access()
 
 
 def canonical_row_path(value):
@@ -5032,7 +5352,7 @@ def row_reanchor_gate(data, command):
 def pre(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     try:
-        receipt_custody(data)
+        grant_custody_denied = receipt_custody(data)
     except Exception:
         traceback.print_exc()
         deny(RECEIPT_CUSTODY_FAILED)
@@ -5192,6 +5512,8 @@ def pre(data):
                  ' Keep the task. Report the blocked step and named rule to ' + superior + '.'
                  + (' If the brief names no superior, report it here.' if superior == 'the superior named in your brief' else '')
                  + ' Continue independent work within your authority.')
+        if grant_custody_denied:
+            deny(RECEIPT_CUSTODY)
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
         counter.parent.mkdir(parents=True, exist_ok=True)
@@ -5779,6 +6101,7 @@ def guarded_pre(data):
     """Deny every tool for every caller when `pre` raises an exception."""
     try:
         pre(data)
+        issue_account_grant(data)
     except Exception:
         traceback.print_exc()
         try:

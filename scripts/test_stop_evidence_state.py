@@ -5,6 +5,9 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import re
+import shlex
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -217,6 +220,81 @@ class StopEvidenceStateTests(unittest.TestCase):
         self.assertFalse(self.reminder.exists())
         self.assert_blocked()
         self.assertIsNone(self.stop())
+
+
+class StopAccountingGrantTests(unittest.TestCase):
+    def test_printed_commands_work_through_the_hook_and_cli(self):
+        for form in ('account', 'account-auto', '--fail-unparsed'):
+            with self.subTest(form=form), tempfile.TemporaryDirectory() as temporary:
+                base = Path(temporary).resolve() / 'with spaces'
+                state = base / 'state'
+                script = base / 'plugin scripts/ledger.py'
+                script.parent.mkdir(parents=True)
+                script.write_bytes(hook.ledger_script().read_bytes())
+                ledger_spec = importlib.util.spec_from_file_location('quoted_ledger', script)
+                ledger = importlib.util.module_from_spec(ledger_spec)
+                ledger_spec.loader.exec_module(ledger)
+                session = 's1'
+                data = {'session_id': session, 'cwd': str(base)}
+                with mock.patch.object(hook, 'STATE', state), \
+                        mock.patch.object(hook, 'ledger_script', return_value=script), \
+                        mock.patch.object(hook, 'load_ledger', return_value=ledger), \
+                        mock.patch.object(ledger, 'grant_store', return_value=base / 'grants'):
+                    owed = hook.owed_file(data)
+                    owed.parent.mkdir(parents=True)
+                    home = base / 'ledger.tsv'
+                    start = ['1', 'run-start', 'light', 'abcdef1', 'open', 'run']
+                    home.write_text('\t'.join(start) + '\n')
+                    transcript = base / 's1/subagents/agent-seat.jsonl'
+                    transcript.parent.mkdir(parents=True)
+                    review = 'Verdict: PASS ' + 'ab' * 20 if form != '--fail-unparsed' else 'Verdict: PASS'
+                    transcript.write_text('\n'.join(json.dumps(row) for row in (
+                        {'timestamp': '1970-01-01T00:01:38Z', 'type': 'user', 'message': {'content': 'Review.'}},
+                        {'timestamp': '1970-01-01T00:01:39Z', 'type': 'assistant',
+                         'message': {'content': [{'type': 'text', 'text': review}]}})) + '\n')
+                    identifier = '11111111-1111-1111-1111-111111111111'
+                    result = {'id': identifier, 'v': 2, 'agent_id': 'seat', 'ledger': str(home),
+                              'run': ledger.run_identity(0, start), 'agent_transcript_path': str(transcript)}
+                    owed.write_text('\t'.join(['100', 'ship:reviewer--sol', str(base), json.dumps(result)]) + '\n')
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        hook.stop(data)
+                    diagnostic = json.loads(output.getvalue())
+                    self.assertEqual(diagnostic['decision'], 'block')
+                    if form == 'account':
+                        command, = re.findall(r'`([^`]* account [^`]*)`', diagnostic['reason'])
+                        for placeholder, value in zip(
+                                ('<result-id>', '<step>', '<agent>', '<sha>', '<verdict>', '<evidence>'),
+                                (identifier, 'review', 'ship:reviewer--sol@seat', 'abcdef1', 'pass', 'review file')):
+                            command = command.replace(placeholder, value)
+                    else:
+                        command, = re.findall(r'`([^`]* account-auto [^`]*)`', diagnostic['reason'])
+                        if form == '--fail-unparsed':
+                            command = command.replace(' account-auto ', ' account-auto --fail-unparsed ', 1)
+                    event = {**data, 'tool_name': 'Bash', 'tool_input': {'command': command}}
+                    words = shlex.split(command)
+                    with mock.patch.object(sys, 'argv', words[1:]), \
+                            mock.patch.object(ledger.time, 'time_ns', return_value=100_000_000_000), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        hook.guarded_pre(event)
+                        ledger.main(words[2:])
+                        after = home.read_bytes()
+                        with self.assertRaisesRegex(SystemExit, 'requires a fresh grant'):
+                            ledger.main(words[2:])
+                        self.assertEqual(home.read_bytes(), after)
+                        hook.guarded_pre(event)
+                        ledger.main(words[2:])
+                        self.assertEqual(home.read_bytes(), after)
+                    row = ledger.rows(home)[-1]
+                    self.assertEqual(row[1], 'account-result')
+                    self.assertEqual(row[4], 'fail' if form == '--fail-unparsed' else 'pass')
+                    self.assertEqual(row[3], '0' * 40 if form == '--fail-unparsed' else (
+                        'abcdef1' if form == 'account' else 'ab' * 20))
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        hook.stop(data)
+                    self.assertEqual(output.getvalue(), '')
+                    self.assertEqual(owed.read_bytes(), b'')
 
 
 if __name__ == '__main__':

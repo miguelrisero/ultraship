@@ -114,7 +114,7 @@ Use the Stop diagnostic's `account-auto` command to account for results with a c
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto "<pending.tsv>"
 ```
 
-The command refuses an owed file unless `CLAUDE_CODE_SESSION_ID` names its session.
+The ship hook issues a single-use grant for the exact accounting command and the caller's session. The grant expires after 15 minutes. An identical call while the grant is live reuses it and keeps its issue time. Run a fresh tool call if the grant expires or the command fails. Use the literal script and pending paths from the Stop diagnostic in every accounting command.
 
 Run the command alone on one line. Start exactly one line in the review result with `Verdict:` or `OVERALL:`. The label permits leading whitespace and Markdown markers, as in `**OVERALL:** PASS`. The command matches labels and whole verdict words without regard to case.
 
@@ -143,7 +143,7 @@ Run Stop to publish the receipts.
 When an accounted result is bound to another result's row, move its credit with:
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" correct-binding <result-id> <ledger-line> <reason>
+python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" correct-binding "<pending.tsv>" <result-id> <ledger-line> '<reason>'
 ```
 
 The line is the 1-based line of the correct review row in the bound ledger file, in the same run and with the same agent column. The command refuses a ledger with blank lines or other line breaks. The command appends a `correct-binding` audit row first and never rewrites earlier rows. It then moves the receipt; when another result holds the target row, the two results swap rows. A retry after a crash appends no second audit row, and an exact retry after success changes nothing.

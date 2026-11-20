@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,11 +28,14 @@ class LedgerDirTests(unittest.TestCase):
     def setUp(self):
         scratch = ROOT.parent / '.scratch'
         scratch.mkdir(exist_ok=True)
-        self.base = Path(tempfile.mkdtemp(prefix='ship-ledger-regression-', dir=scratch))
+        self.base = Path(tempfile.mkdtemp(prefix='ship-ledger-regression-', dir=scratch)).resolve()
         self.addCleanup(shutil.rmtree, self.base)
-        self.env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'CLAUDE_CODE_SESSION_ID': 's1',
+        self.env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1',
                     'XDG_STATE_HOME': str(self.base / 'state'), 'HOME': str(self.base)}
+        self.env.pop('CLAUDE_CODE_SESSION_ID', None)
         self.env.pop('SHIP_LEDGER_DIR', None)
+        self.enterContext(mock.patch.object(ledger.pwd, 'getpwuid',
+                                           return_value=SimpleNamespace(pw_dir=str(self.base))))
         self.common = self.base / 'external'
         self.workspace = self.base / 'workspace'
         self.workspace.mkdir()
@@ -52,9 +56,30 @@ class LedgerDirTests(unittest.TestCase):
         return subprocess.run(['git', '-C', str(cwd), *args], env=self.env,
                               capture_output=True, text=True, check=True).stdout.strip()
 
-    def cli(self, *args, env=None, cwd=None):
+    def issue_grant(self, args, *, state=None, session='s1'):
+        state = state if state is not None else Path(self.env['XDG_STATE_HOME']) / 'ultraship'
+        ledger._issue_grant(str(LEDGER), list(args), state, session)
+
+    def cli(self, *args, env=None, cwd=None, grant=True):
+        if args[0] in ledger.ACCOUNT_COMMANDS:
+            pending_arg = ledger.account_pending_arg(args)
+            if grant and pending_arg and Path(pending_arg).is_absolute():
+                self.issue_grant(args)
+            stdout = io.StringIO()
+            with mock.patch.dict(os.environ, env or self.env, clear=True), \
+                    mock.patch.object(sys, 'argv', [str(LEDGER), *args]), redirect_stdout(stdout):
+                try:
+                    ledger.main(list(args))
+                except SystemExit as exc:
+                    if exc.code is None or isinstance(exc.code, int):
+                        return subprocess.CompletedProcess(args, exc.code or 0, stdout.getvalue(), '')
+                    return subprocess.CompletedProcess(args, 1, stdout.getvalue(), f'{exc.code}\n')
+                return subprocess.CompletedProcess(args, 0, stdout.getvalue(), '')
         return subprocess.run([sys.executable, str(LEDGER), *args], cwd=cwd or self.checkout,
                               env=env or self.env, capture_output=True, text=True)
+
+    def correction(self, *args):
+        return self.cli('correct-binding', str(self.base / 'state/ultraship/owed/s1.tsv'), *args)
 
     def resolve(self):
         with mock.patch.dict(os.environ, self.env, clear=True):
@@ -852,10 +877,10 @@ class LedgerDirTests(unittest.TestCase):
         blocked = json.loads(self.hook('stop'))
         self.assertIn(missing, blocked['reason'])
         self.assertEqual({json.loads(k)[2] for k in json.loads(receipts.read_text())}, {complete})
-        fixed = self.cli('correct-binding', complete, explicit, 'keep')
+        fixed = self.correction(complete, explicit, 'keep')
         self.assertEqual(fixed.returncode, 0, fixed.stderr)
         self.assertNotIn(complete, blocked['reason'])
-        refused = self.cli('correct-binding', missing, explicit, 'keep')
+        refused = self.correction(missing, explicit, 'keep')
         self.assertIn('has no Stop receipt', refused.stderr)
         self.assertIn('run Stop to publish its receipt', refused.stderr)
         self.assertEqual(self.hook('stop'), '')
@@ -875,7 +900,7 @@ class LedgerDirTests(unittest.TestCase):
                                   'sha', 'pass', 'Completed review').returncode, 0)
         home = self.resolve()
         explicit = str(len(ledger.rows(home)))
-        fixed = self.cli('correct-binding', result['id'], explicit, 'bind exact result')
+        fixed = self.correction(result['id'], explicit, 'bind exact result')
         self.assertEqual(fixed.returncode, 0, fixed.stderr)
         self.assertEqual(json.loads(self.bound()[result['id']])['step'], 'review')
         self.assertEqual(self.hook('stop'), '')
@@ -899,7 +924,7 @@ class LedgerDirTests(unittest.TestCase):
             transcript.write_text(''.join(line + '\n' for line in lines))
         return owed, transcript, result, int(epoch)
 
-    def assert_account_auto_refuses_session(self, session):
+    def assert_account_auto_refuses_grant(self, session, *, foreign=False):
         sha = 'ab' * 20
         owed, _, _, _ = self.auto_owed([
             (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {sha}')])
@@ -910,32 +935,112 @@ class LedgerDirTests(unittest.TestCase):
         before = [path.read_bytes() for path in paths]
         env = self.env.copy()
         if session is None:
-            del env['CLAUDE_CODE_SESSION_ID']
+            env.pop('CLAUDE_CODE_SESSION_ID', None)
         else:
             env['CLAUDE_CODE_SESSION_ID'] = session
-        refused = self.cli('account-auto', str(owed), env=env)
+        if foreign:
+            sibling = owed.with_name('s2.tsv')
+            sibling.write_bytes(owed.read_bytes())
+            self.issue_grant(['account-auto', str(sibling)], session='s2')
+        refused = self.cli('account-auto', str(owed), env=env, grant=False)
         self.assertNotEqual(refused.returncode, 0)
         self.assertEqual(refused.stdout, '')
-        self.assertEqual(refused.stderr.splitlines(), [
-            'account-auto requires CLAUDE_CODE_SESSION_ID to match the owed file session.'])
+        self.assertEqual(refused.stderr.splitlines(), [ledger.GRANT_REFUSAL])
         self.assertEqual([path.read_bytes() for path in paths], before)
         allowed = self.cli('account-auto', str(owed))
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
         self.assertIn('1 accounted, 0 pending\n', allowed.stdout)
         self.assertNotEqual(home.read_bytes(), before[0])
 
-    def test_account_auto_refuses_foreign_session(self):
-        self.assert_account_auto_refuses_session('s2')
+    def test_account_auto_refuses_foreign_grant(self):
+        self.assert_account_auto_refuses_grant('s2', foreign=True)
 
-    def test_account_auto_refuses_missing_session(self):
-        self.assert_account_auto_refuses_session(None)
+    def test_account_auto_refuses_missing_grant(self):
+        self.assert_account_auto_refuses_grant(None)
 
-    def test_account_auto_refuses_empty_session(self):
-        self.assert_account_auto_refuses_session('')
+    def test_account_auto_refuses_empty_session_without_a_grant(self):
+        self.assert_account_auto_refuses_grant('')
+
+    def test_account_auto_refuses_when_the_account_has_no_passwd_entry(self):
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])
+        args = ('account-auto', str(owed))
+        self.issue_grant(args)
+        receipts = owed.parent.parent / 'accounted.json'
+        receipts.write_bytes(b'{}\n')
+        paths = (self.resolve(), owed, receipts)
+        before = tuple(path.read_bytes() for path in paths)
+        with mock.patch.object(ledger.pwd, 'getpwuid', side_effect=KeyError('getpwuid(): uid not found')):
+            refused = self.cli(*args, grant=False)
+        self.assertEqual((refused.returncode, refused.stdout, refused.stderr), (1, '', ledger.GRANT_REFUSAL + '\n'))
+        self.assertEqual(tuple(path.read_bytes() for path in paths), before)
+
+    def test_accounting_refuses_caller_session_and_fake_grant_stores(self):
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])
+        home = self.resolve()
+        receipts = owed.parent.parent / 'accounted.json'
+        receipts.write_bytes(b'{}\n')
+        paths = (home, owed, receipts)
+        before = tuple(path.read_bytes() for path in paths)
+        caller_home = self.base / 'caller-home'
+        caller_home.mkdir()
+        fake_home = self.base / 'fake-home'
+        caller_state = fake_home / '.local/state'
+        fake_state = caller_state / 'ultraship'
+        fake_owed = fake_state / 'owed' / owed.name
+        fake_owed.parent.mkdir(parents=True)
+        fake_owed.write_bytes(owed.read_bytes())
+        key = json.dumps([str(fake_owed), str(self.checkout), result['id']])
+        history = ledger.rows(home)
+        (fake_state / 'accounted.json').write_text(json.dumps({key: [str(home), result['run'],
+                                                                     ledger.run_identity(1, history[1])]}))
+        env = {**self.env, 'HOME': str(caller_home), 'XDG_STATE_HOME': str(caller_state),
+               'CLAUDE_CODE_SESSION_ID': 's1'}
+        args = [
+            ('account', str(owed), result['id'], 'review', 'ship:reviewer--sol', 'abcdef1', 'pass', 'report'),
+            ('account-auto', str(owed)), ('account-auto', '--fail-unparsed', str(owed)),
+            ('correct-binding', str(owed), result['id'], '2', 'report'),
+            ('correct-binding', str(fake_owed), result['id'], '2', 'report'),
+        ]
+        reminder = owed.with_suffix('.stop-state')
+        control = self.hook('stop')
+        reminder.unlink()
+        with mock.patch.object(ledger.time, 'time_ns', return_value=10_000_000_000) as clock:
+            for argv in args:
+                with self.subTest(command=argv[0]):
+                    state = fake_state if argv[1] == str(fake_owed) else owed.parent.parent
+                    for fake in (caller_home, fake_home):
+                        with mock.patch.object(ledger.pwd, 'getpwuid',
+                                               return_value=SimpleNamespace(pw_dir=str(fake))):
+                            self.issue_grant(argv, state=state)
+                    refused = self.cli(*argv, env=env, grant=False)
+                    self.assertEqual((refused.returncode, refused.stdout, refused.stderr),
+                                     (1, '', ledger.GRANT_REFUSAL + '\n'))
+                    self.assertEqual(tuple(path.read_bytes() for path in paths), before)
+                    clock.return_value += ledger.GRANT_LIFETIME_NS
+        self.assertEqual(self.hook('stop'), control)
+
+    def test_account_auto_refuses_an_owed_inode_replacement(self):
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])
+        args = ('account-auto', '--fail-unparsed', str(owed))
+        self.issue_grant(args)
+        detached = owed.rename(owed.with_name('original.tsv'))
+        owed.write_bytes(detached.read_bytes())
+        receipts = owed.parent.parent / 'accounted.json'
+        receipts.write_bytes(b'{}\n')
+        paths = (self.resolve(), owed, detached, receipts)
+        before = tuple(path.read_bytes() for path in paths)
+        refused = self.cli(*args, grant=False)
+        self.assertEqual((refused.returncode, refused.stdout, refused.stderr), (1, '', ledger.GRANT_REFUSAL + '\n'))
+        self.assertEqual(tuple(path.read_bytes() for path in paths), before)
 
     def test_account_auto_refuses_a_symlinked_owed_file(self):
         owed, _, _, _ = self.auto_owed([
             (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])
+        args = ('account-auto', str(owed))
+        self.issue_grant(args)
         target = owed.rename(owed.with_name('retained.tsv'))
         owed.symlink_to(target)
         home = self.resolve()
@@ -943,10 +1048,10 @@ class LedgerDirTests(unittest.TestCase):
         receipts.write_bytes(b'{}\n')
         paths = (home, receipts, target)
         before = [path.read_bytes() for path in paths]
-        with mock.patch.dict(os.environ, self.env, clear=True), \
-                mock.patch.object(Path, 'read_text', side_effect=AssertionError('unexpected read')):
-            with self.assertRaisesRegex(SystemExit, 'account-auto refuses a symlinked owed file'):
-                ledger.account_auto(owed)
+        with mock.patch.object(Path, 'read_text', side_effect=AssertionError('unexpected read')):
+            refused = self.cli(*args, grant=False)
+        self.assertEqual(refused.returncode, 1)
+        self.assertEqual(refused.stderr, 'Accounting refuses a symlinked owed file.\n')
         self.assertTrue(owed.is_symlink())
         self.assertEqual([path.read_bytes() for path in paths], before)
 
@@ -954,17 +1059,16 @@ class LedgerDirTests(unittest.TestCase):
         owed, _, _, _ = self.auto_owed([
             (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])
         home = self.resolve()
-        output = io.StringIO()
-        with mock.patch.dict(os.environ, self.env, clear=True), \
-                mock.patch.object(ledger, 'STATE', self.base / 'state/ultraship'), \
-                mock.patch.object(ledger.os, 'open', wraps=os.open) as fd_open, \
-                mock.patch.object(Path, 'open', autospec=True, side_effect=Path.open) as path_open, \
-                mock.patch('sys.stdout', output):
-            ledger.account_auto(owed)
+        args = ('account-auto', str(owed))
+        self.issue_grant(args)
+        with mock.patch.object(ledger.os, 'open', wraps=os.open) as fd_open, \
+                mock.patch.object(Path, 'open', autospec=True, side_effect=Path.open) as path_open:
+            result = self.cli(*args, grant=False)
         reads = [call for spy in (fd_open, path_open) for call in spy.call_args_list
-                 if call.args[0] == owed]
+                 if call.args[0] in (owed, str(owed), owed.name)]
         self.assertEqual(len(reads), 1)
-        self.assertIn('1 accounted, 0 pending\n', output.getvalue())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('1 accounted, 0 pending\n', result.stdout)
         self.assertEqual(ledger.rows(home)[-1][1], 'account-result')
 
     def test_account_auto_uses_own_final_text_and_skips_existing_accounting(self):
@@ -1247,26 +1351,34 @@ class LedgerDirTests(unittest.TestCase):
             f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} pass", '1 accounted, 0 pending'])
         self.assertEqual(ledger.rows(self.resolve())[-1][3:5], [sha, 'pass'])
 
-    def test_account_auto_accepts_a_hyphen_prefixed_path(self):
-        owed, _, result, _ = self.auto_owed(None)
+    def test_account_auto_parses_a_hyphen_prefixed_owed_path(self):
+        self.assertEqual(ledger.account_pending_arg(['account-auto', '-archive/s1.tsv']), '-archive/s1.tsv')
+        refused = self.cli('account-auto', '-archive/s1.tsv', grant=False)
+        self.assertNotIn('usage:', refused.stderr)
+
+    def test_account_auto_refuses_a_foreign_hyphen_prefixed_path(self):
+        owed, _, _, _ = self.auto_owed(None)
         relative = Path('-archive/s1.tsv')
         target = self.checkout / relative
         target.parent.mkdir()
         owed.rename(target)
-        auto = self.cli('account-auto', str(relative))
-        self.assertEqual(auto.returncode, 0, auto.stderr)
-        self.assertEqual(auto.stdout.splitlines(), [
-            f"pending {result['id']} no transcript", '0 accounted, 1 pending'])
+        home = self.resolve()
+        before = (target.read_bytes(), home.read_bytes())
+        refused = self.cli('account-auto', str(relative), grant=False)
+        self.assertEqual(refused.returncode, 1)
+        self.assertEqual(refused.stderr, ledger.GRANT_REFUSAL + '\n')
+        self.assertEqual(refused.stdout, '')
+        self.assertEqual((target.read_bytes(), home.read_bytes()), before)
 
     def test_account_auto_rejects_invalid_flag_shapes(self):
-        session_refusal = 'account-auto requires CLAUDE_CODE_SESSION_ID to match the owed file session.'
+        grant_refusal = ledger.GRANT_REFUSAL
         usage = 'usage: ledger.py '
         for args, error in (
             ((), usage),
-            (('--fail-unparsed',), session_refusal),
+            (('--fail-unparsed',), grant_refusal),
             (('--other', 'pending.tsv'), usage),
             (('pending.tsv', '--fail-unparsed'), usage),
-            (('--fail-unparsed', '--fail-unparsed'), session_refusal),
+            (('--fail-unparsed', '--fail-unparsed'), grant_refusal),
             (('--fail-unparsed', 'pending.tsv', 'extra'), usage),
         ):
             with self.subTest(args=args):
@@ -1573,10 +1685,10 @@ class LedgerDirTests(unittest.TestCase):
         home = self.resolve()
         self.assertEqual(self.bound(), {scrub: 'capacity', capacity: 'scrub'})
         before = home.read_bytes()
-        self.assertNotEqual(self.cli('correct-binding', scrub, self.line_of('scrub'), ' ').returncode, 0)
-        self.assertIn('result ID must match exactly one', self.cli('correct-binding', 'absent', self.line_of('scrub'), 'swap').stderr)
+        self.assertNotEqual(self.correction(scrub, self.line_of('scrub'), ' ').returncode, 0)
+        self.assertIn('result ID must match exactly one', self.correction('absent', self.line_of('scrub'), 'swap').stderr)
         self.assertEqual(home.read_bytes(), before)
-        fixed = self.cli('correct-binding', scrub, self.line_of('scrub'), 'scrub findings bound to the capacity PASS')
+        fixed = self.correction(scrub, self.line_of('scrub'), 'scrub findings bound to the capacity PASS')
         self.assertEqual(fixed.returncode, 0, fixed.stderr)
         self.assertEqual(self.bound(), {scrub: 'scrub', capacity: 'capacity'})
         after = home.read_bytes()
@@ -1588,7 +1700,7 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(json.loads(note['swap'])[2], capacity)
         saved = receipt_path.read_bytes()
         self.assertEqual(len(json.loads(saved)[next(iter(json.loads(saved)))]), 3)
-        self.assertEqual(self.cli('correct-binding', scrub, self.line_of('scrub'), 'retry').returncode, 0)
+        self.assertEqual(self.correction(scrub, self.line_of('scrub'), 'retry').returncode, 0)
         self.assertEqual((home.read_bytes(), receipt_path.read_bytes()), (after, saved))  # an exact retry changes nothing
         # A later result never takes the audit row as its review.
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
@@ -1602,14 +1714,14 @@ class LedgerDirTests(unittest.TestCase):
         scrub, capacity, _ = self.swapped_pair()
         receipt_path = self.base / 'state/ultraship/accounted.json'
         wrong = receipt_path.read_bytes()
-        self.assertEqual(self.cli('correct-binding', scrub, self.line_of('scrub'), 'swap').returncode, 0)
+        self.assertEqual(self.correction(scrub, self.line_of('scrub'), 'swap').returncode, 0)
         audited = self.resolve().read_bytes()
         receipt_path.write_bytes(wrong)  # the audit row landed and the receipts did not
-        self.assertEqual(self.cli('correct-binding', scrub, self.line_of('scrub'), 'swap').returncode, 0)
+        self.assertEqual(self.correction(scrub, self.line_of('scrub'), 'swap').returncode, 0)
         self.assertEqual(self.resolve().read_bytes(), audited)
         self.assertEqual(self.bound(), {scrub: 'scrub', capacity: 'capacity'})
         # A later, different move still appends its own audit row.
-        self.assertEqual(self.cli('correct-binding', scrub, self.line_of('capacity'), 'undo').returncode, 0)
+        self.assertEqual(self.correction(scrub, self.line_of('capacity'), 'undo').returncode, 0)
         self.assertEqual(json.loads(ledger.rows(self.resolve())[-1][5])['reason'], 'undo')
 
     def test_correct_binding_refuses_each_unfit_target(self):
@@ -1627,14 +1739,14 @@ class LedgerDirTests(unittest.TestCase):
         before = (home.read_bytes(), (self.base / 'state/ultraship/accounted.json').read_bytes())
         for note in ('owed-row', 'other-type', 'other-id', 'next-run'):
             with self.subTest(target=note):
-                refused = self.cli('correct-binding', scrub, self.line_of(note), 'move')
+                refused = self.correction(scrub, self.line_of(note), 'move')
                 self.assertIn('target line must be a completed review row', refused.stderr)
-        self.assertIn('target line must be', self.cli('correct-binding', scrub, '999', 'move').stderr)
+        self.assertIn('target line must be', self.correction(scrub, '999', 'move').stderr)
         self.assertEqual((home.read_bytes(), (self.base / 'state/ultraship/accounted.json').read_bytes()), before)
         with home.open('ab') as fh:
             fh.write(b'\n')  # a blank line before the next row makes file lines and rows differ
         self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol', 'sha', 'pass', 'after-blank').returncode, 0)
-        self.assertIn('ledger lines differ', self.cli('correct-binding', scrub, self.line_of('scrub'), 'move').stderr)
+        self.assertIn('ledger lines differ', self.correction(scrub, self.line_of('scrub'), 'move').stderr)
 
     def test_correct_binding_refuses_a_swap_onto_an_explicit_record(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol')
@@ -1646,16 +1758,36 @@ class LedgerDirTests(unittest.TestCase):
                                   'sha', 'pass', 'First report.md').returncode, 0)
         self.assertEqual(self.hook('stop'), '')
         self.assertEqual(self.bound()[second], 'ordinary')
-        refused = self.cli('correct-binding', first, self.line_of('ordinary'), 'move')
+        refused = self.correction(first, self.line_of('ordinary'), 'move')
         self.assertIn('cannot take the current row', refused.stderr)
         explicit = str(next(i for i, r in enumerate(ledger.rows(self.resolve())) if r[1] == 'account-result') + 1)
-        refused = self.cli('correct-binding', second, explicit, 'move')  # same agent column, but a record row
+        refused = self.correction(second, explicit, 'move')  # same agent column, but a record row
         self.assertIn('target line must be a completed review row', refused.stderr)
+
+    def test_correct_binding_refuses_receipt_and_swap_from_another_owed_path(self):
+        scrub, capacity, _ = self.swapped_pair()
+        home = self.resolve()
+        root = self.base / 'state/ultraship'
+        owed, receipt_path = root / 'owed/s1.tsv', root / 'accounted.json'
+        receipts = json.loads(receipt_path.read_text())
+        for identifier in (scrub, capacity):
+            with self.subTest(receipt='selected' if identifier == scrub else 'swap'):
+                key = next(key for key in receipts if json.loads(key)[2] == identifier)
+                foreign_key = json.dumps([str(owed.with_name('s2.tsv')), *json.loads(key)[1:]])
+                receipt_path.write_text(json.dumps({foreign_key if k == key else k: v for k, v in receipts.items()}))
+                paths = (home, owed, receipt_path)
+                before = tuple(path.read_bytes() for path in paths)
+                refused = self.correction(scrub, self.line_of('scrub'), 'swap')
+                self.assertEqual(refused.returncode, 1)
+                expected = ('Accounting receipt belongs to a different owed file.' if identifier == scrub else
+                            'target row is credited to another result that cannot take the current row')
+                self.assertEqual(refused.stderr, expected + '\n')
+                self.assertEqual(tuple(path.read_bytes() for path in paths), before)
 
     def test_correct_binding_refuses_a_ledger_with_another_line_break(self):
         scrub, _, _ = self.swapped_pair()
         self.assertEqual(self.cli('append', 'deep-review', 'other', 'sha', 'pass', 'a\u2028b').returncode, 0)
-        self.assertIn('ledger lines differ', self.cli('correct-binding', scrub, self.line_of('scrub'), 'move').stderr)
+        self.assertIn('ledger lines differ', self.correction(scrub, self.line_of('scrub'), 'move').stderr)
 
     def test_older_pending_record_with_an_agent_id_accepts_a_row_without_one(self):
         self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='in-flight')

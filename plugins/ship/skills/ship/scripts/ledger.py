@@ -9,12 +9,15 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 import re
+import secrets
 import stat
 import subprocess
 import sys
 import tempfile
 import time
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,9 +31,241 @@ USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py append <step> <agent>[@<agent-id>] <sha> <verdict> [note]
        ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
        ledger.py account-auto [--fail-unparsed] <pending.tsv>
-       ledger.py correct-binding <result-id> <ledger-line> <reason>"""
-STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
+       ledger.py correct-binding <pending.tsv> <result-id> <ledger-line> <reason>"""
 MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
+ACCOUNT_COMMANDS = ('account', 'account-auto', 'correct-binding')
+GRANT_LIFETIME_NS = 900_000_000_000
+GRANT_REFUSAL = 'Accounting requires a fresh grant from the ship hook. Run the exact command again.'
+DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+
+
+def account_pending_arg(argv):
+    if not argv:
+        return None
+    cmd, args = argv[0], argv[1:]
+    if cmd == 'account-auto':
+        if len(args) == 2 and args[0] == '--fail-unparsed':
+            return args[1]
+        if len(args) == 1:
+            return args[0]
+    if (cmd, len(args)) in (('account', 7), ('correct-binding', 4)):
+        return args[0]
+    return None
+
+
+def grant_store():
+    return Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state/ultraship/account-grants'
+
+
+@contextmanager
+def directory_descriptor(path, *, create_tail=0):
+    if not path.is_absolute() or '..' in path.parts:
+        raise ValueError(GRANT_REFUSAL)
+    fd = os.open(path.anchor, DIRECTORY_FLAGS)
+    try:
+        for index, part in enumerate(path.parts[1:], 1):
+            if index >= len(path.parts) - create_tail:
+                try:
+                    os.mkdir(part, 0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            child = os.open(part, DIRECTORY_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            if not create_tail:
+                raise
+
+
+@contextmanager
+def locked_grant_store(*, create=False):
+    with directory_descriptor(grant_store(), create_tail=4 if create else 0) as fd:
+        info = os.fstat(fd)
+        if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise ValueError(GRANT_REFUSAL)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield fd
+
+
+def grant_digest(items):
+    return hashlib.sha256(json.dumps(items).encode()).hexdigest()
+
+
+def file_identity(info):
+    return [info.st_dev, info.st_ino]
+
+
+def grant_request(script, argv):
+    owed = account_pending_arg(argv)
+    if not owed:
+        raise ValueError(GRANT_REFUSAL)
+    pending = Path(owed)
+    if (str(pending) != owed or not pending.is_absolute() or '..' in pending.parts
+            or pending.parent.name != 'owed' or pending.suffix != '.tsv'):
+        raise ValueError(GRANT_REFUSAL)
+    canonical_script = str(Path(script).resolve(strict=True))
+    if canonical_script != str(Path(__file__).resolve(strict=True)):
+        raise ValueError(GRANT_REFUSAL)
+    name = grant_digest([canonical_script, owed]) + '.json'
+    fields = {'script': canonical_script, 'pending': owed, 'command': argv[0],
+              'argv_sha256': grant_digest([script, *argv])}
+    return name, fields, pending
+
+
+def grant_bytes(record):
+    return json.dumps(record, sort_keys=True).encode()
+
+
+def read_grant(fd, name):
+    with os.fdopen(os.open(name, READ_FLAGS, dir_fd=fd), 'rb') as source:
+        info = os.fstat(source.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+            raise ValueError(GRANT_REFUSAL)
+        raw = source.read()
+    record = json.loads(raw)
+    strings = ('script', 'pending', 'command', 'argv_sha256', 'session', 'root')
+    identities = ('root_id', 'owed_id')
+    if (not isinstance(record, dict) or set(record) != {*strings, *identities, 'issued_ns'}
+            or any(type(record[key]) is not str or not record[key] for key in strings)
+            or any(not isinstance(record[key], list) or len(record[key]) != 2
+                   or any(type(value) is not int or value < 0 for value in record[key]) for key in identities)
+            or type(record['issued_ns']) is not int or record['issued_ns'] <= 0
+            or grant_bytes(record) != raw):
+        raise ValueError(GRANT_REFUSAL)
+    return record
+
+
+@contextmanager
+def evidence_root(root):
+    if not root.is_absolute() or root.resolve(strict=True) != root:
+        raise ValueError(GRANT_REFUSAL)
+    with directory_descriptor(root) as fd:
+        yield fd
+
+
+def owed_status(fd, name):
+    info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError('Accounting refuses a symlinked or nonregular owed file.')
+    return info
+
+
+def _issue_grant(script, argv, state, session):
+    name, fields, pending = grant_request(script, argv)
+    if (str(state / 'owed' / (re.sub(r'[^\w.-]', '_', session) + '.tsv')) != str(pending)
+            or not session):
+        raise ValueError(GRANT_REFUSAL)
+    root = state.parent.resolve(strict=True) / state.name
+    with evidence_root(root) as evidence_fd:
+        owed_fd = os.open('owed', DIRECTORY_FLAGS, dir_fd=evidence_fd)
+        try:
+            fields.update(session=session, root=str(root), root_id=file_identity(os.fstat(evidence_fd)),
+                          owed_id=file_identity(owed_status(owed_fd, pending.name)))
+        finally:
+            os.close(owed_fd)
+    with locked_grant_store(create=True) as fd:
+        try:
+            saved = read_grant(fd, name)
+        except FileNotFoundError:
+            pass
+        else:
+            age = time.time_ns() - saved.pop('issued_ns')
+            if age < GRANT_LIFETIME_NS:
+                # An identical retry reuses the live grant; its issue time stays, so the window never extends.
+                if 0 <= age and saved == json.loads(grant_bytes(fields)):
+                    return
+                raise ValueError(GRANT_REFUSAL)
+        publish_at(fd, name, grant_bytes(dict(fields, issued_ns=time.time_ns())), sync_directory=False)
+
+
+def publish_at(fd, name, content, *, sync_directory=True):
+    temp = '.' + name + '-' + secrets.token_hex(16)
+    temp_fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=fd)
+    try:
+        with os.fdopen(temp_fd, 'wb') as target:
+            target.write(content)
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temp, name, src_dir_fd=fd, dst_dir_fd=fd)
+    except BaseException:
+        os.unlink(temp, dir_fd=fd)
+        raise
+    if sync_directory:
+        os.fsync(fd)
+
+
+@contextmanager
+def consume_grant(script, argv):
+    with ExitStack() as evidence:
+        try:
+            name, fields, pending = grant_request(script, argv)
+            with locked_grant_store() as fd:
+                record = read_grant(fd, name)
+                if (any(record[key] != value for key, value in fields.items())
+                        or re.sub(r'[^\w.-]', '_', record['session']) + '.tsv' != pending.name
+                        or not 0 <= time.time_ns() - record['issued_ns'] < GRANT_LIFETIME_NS):
+                    raise ValueError(GRANT_REFUSAL)
+                pending, root, root_fd, owed_fd, source = evidence.enter_context(open_owed(record))
+                if not 0 <= time.time_ns() - record['issued_ns'] < GRANT_LIFETIME_NS:
+                    raise ValueError(GRANT_REFUSAL)
+                os.unlink(name, dir_fd=fd)
+                os.fsync(fd)
+        except OwedSymlink:
+            raise ValueError('Accounting refuses a symlinked owed file.') from None
+        except (OSError, KeyError, ValueError, RuntimeError):
+            raise ValueError(GRANT_REFUSAL) from None
+        fcntl.flock(source, fcntl.LOCK_EX)
+        if file_identity(owed_status(owed_fd, pending.name)) != record['owed_id']:
+            raise ValueError('Accounting owed file changed. Run the exact command again.')
+        yield pending, root, root_fd, source
+
+
+class OwedSymlink(ValueError):
+    pass
+
+
+@contextmanager
+def open_owed(record):
+    pending = Path(record['pending'])
+    root = Path(record['root'])
+    with evidence_root(root) as root_fd:
+        if (file_identity(os.fstat(root_fd)) != record['root_id']
+                or pending.parent.parent.resolve(strict=True) != root):
+            raise ValueError('Accounting evidence directory changed. Run the exact command again.')
+        owed_fd = os.open('owed', DIRECTORY_FLAGS, dir_fd=root_fd)
+        try:
+            try:
+                source_fd = os.open(pending.name, READ_FLAGS, dir_fd=owed_fd)
+            except OSError as exc:
+                if exc.errno == errno.ELOOP:
+                    raise OwedSymlink from None
+                raise
+            with os.fdopen(source_fd) as source:
+                info = os.fstat(source.fileno())
+                if not stat.S_ISREG(info.st_mode) or file_identity(info) != record['owed_id']:
+                    raise ValueError('Accounting owed file changed. Run the exact command again.')
+                yield pending, root, root_fd, owed_fd, source
+        finally:
+            os.close(owed_fd)
+
+
+@contextmanager
+def locked_receipts(root_fd):
+    fd = os.open('accounted.lock', os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                 0o600, dir_fd=root_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError('Accounting receipt lock must be a regular file.')
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 def agent_key(field):
@@ -173,14 +408,11 @@ def accounting_row(row, result_id, run):
     return value['result'] == result_id and value['run'] == run
 
 
-def account(pending, identifier, step, agent, sha, verdict, evidence, *, entries=None):
+def account(pending, identifier, step, agent, sha, verdict, evidence, *, entries):
     """Append bookkeeping for a completed result; preserve the bound run's historical rows and closure."""
     if (not all((step, agent, sha, verdict, evidence.strip())) or verdict == 'owed'
             or any('\t' in f or '\n' in f or '\r' in f for f in (step, agent, sha, verdict))):
         raise ValueError('completed result needs single-line step, agent, sha, verdict and evidence')
-    pending = Path(pending).absolute()  # Keep the hook's path spelling, including a symlinked XDG_STATE_HOME.
-    if entries is None:
-        entries = pending.read_text().splitlines()
     matches = []
     for line in entries:
         fields = line.split('\t')
@@ -304,28 +536,19 @@ def final_turn_text(path, epoch, budgets):
     return ''
 
 
-def load_receipts(path):
+def load_receipts(path, *, root_fd=None):
     try:
-        return json.loads(path.read_text())
+        if root_fd is None:
+            return json.loads(path.read_text())
+        with os.fdopen(os.open(path.name, READ_FLAGS, dir_fd=root_fd)) as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise ValueError('Accounting receipts must be in a regular file.')
+            return json.load(source)
     except FileNotFoundError:
         return {}
 
 
-def account_auto(pending, *, fail_unparsed=False):
-    pending = Path(pending).absolute()
-    # shortcut: the caller controls this variable; upgrade to isolated per-session state access.
-    session = os.environ.get('CLAUDE_CODE_SESSION_ID')
-    if not session or re.sub(r'[^\w.-]', '_', session) != pending.stem:
-        sys.exit('account-auto requires CLAUDE_CODE_SESSION_ID to match the owed file session.')
-    try:
-        fd = os.open(pending, os.O_RDONLY | os.O_NOFOLLOW)
-    except OSError as exc:
-        if exc.errno == errno.ELOOP:
-            sys.exit('account-auto refuses a symlinked owed file.')
-        raise
-    with os.fdopen(fd) as source:
-        entries = source.read().splitlines()
-    receipts = load_receipts(STATE / 'accounted.json')
+def account_auto(pending, entries, receipts, *, fail_unparsed=False):
     budgets = {}
     accounted = remaining = 0
     for fields in (line.split('\t') for line in entries if line):
@@ -443,31 +666,30 @@ def publish(path, value):
         os.close(directory)
 
 
-def correct_binding(identifier, line, reason):
+def correct_binding(pending, root, root_fd, identifier, line, reason):
     """Move one accounted result to another review row of its bound run.
 
     The audit row is appended before the hook-state receipts change; the ledger is never rewritten.
     A target row already credited to another result swaps credit with it."""
     if not reason.strip() or '\t' in reason or '\n' in reason:
         raise ValueError('correction needs a single-line reason')
-    receipt_path = STATE / 'accounted.json'
+    receipt_path = root / 'accounted.json'
     missing = ('result ID must match exactly one accounted result: this result has no Stop receipt. '
                'Account the retained result if needed, then run Stop to publish its receipt.')
-    try:
-        lock = (STATE / 'accounted.lock').open('a')
-    except FileNotFoundError:
-        raise ValueError(missing) from None
-    with lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        receipts = load_receipts(receipt_path)
+    with locked_receipts(root_fd):
+        receipts = load_receipts(receipt_path, root_fd=root_fd)
         keys = [k for k in receipts if json.loads(k)[2] == identifier]
         if not keys:
             raise ValueError(missing)
         if len(keys) != 1:
             raise ValueError('result ID must match exactly one accounted result')
         key = keys[0]
+        if json.loads(key)[0] != str(pending):
+            raise ValueError('Accounting receipt belongs to a different owed file.')
         saved = receipts[key]
         home, run, old = Path(saved[0]), saved[1], saved[2]
+        if not home.is_absolute() or home.resolve() != home:
+            raise ValueError('recorded ledger must be an absolute path without symlinks')
         with home.open('r+b') as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
             text = fh.read().decode()
@@ -498,7 +720,8 @@ def correct_binding(identifier, line, reason):
             if new == old:
                 return home
             other = next((k for k, v in receipts.items() if v[0] == saved[0] and v[2] == new), None)
-            if other and (receipts[other][1] != run or not review(old[0])):
+            if other and (json.loads(other)[0] != str(pending)
+                          or receipts[other][1] != run or not review(old[0])):
                 raise ValueError('target row is credited to another result that cannot take the current row')
             note = {'result': key, 'agent': history[index][2], 'from': old, 'to': new, 'swap': other, 'reason': reason}
             # The '-' agent keeps older hooks from taking the audit row as a review.
@@ -517,7 +740,7 @@ def correct_binding(identifier, line, reason):
         if other:
             receipts[other] = [*receipts[other][:2], old]
         receipts[key] = [*saved[:2], new]
-        publish(receipt_path, receipts)
+        publish_at(root_fd, receipt_path.name, json.dumps(receipts).encode())
     return home
 
 
@@ -525,23 +748,24 @@ def main(argv):
     if not argv:
         sys.exit(USAGE)
     cmd, args = argv[0], argv[1:]
-    if cmd == 'account':
-        if len(args) != 7:
+    if cmd in ACCOUNT_COMMANDS:
+        if account_pending_arg(argv) is None:
             sys.exit(USAGE)
-        print(account(*args))
-        return
-    if cmd == 'account-auto':
-        if len(args) == 1:
-            account_auto(args[0])
-        elif len(args) == 2 and args[0] == '--fail-unparsed':
-            account_auto(args[1], fail_unparsed=True)
-        else:
-            sys.exit(USAGE)
-        return
-    if cmd == 'correct-binding':
-        if len(args) != 3:
-            sys.exit(USAGE)
-        print(correct_binding(*args))
+        try:
+            with consume_grant(sys.argv[0], argv) as (pending, root, root_fd, source):
+                if cmd == 'correct-binding':
+                    print(correct_binding(pending, root, root_fd, *args[1:]))
+                elif cmd == 'account':
+                    print(account(pending, *args[1:], entries=source.read().splitlines()))
+                else:
+                    with locked_receipts(root_fd):
+                        account_auto(pending, source.read().splitlines(),
+                                     load_receipts(root / 'accounted.json', root_fd=root_fd),
+                                     fail_unparsed=len(args) == 2)
+        except OSError:
+            sys.exit('Accounting evidence is unavailable. Run the exact command again.')
+        except ValueError as exc:
+            sys.exit(str(exc))
         return
     path = ledger_path()
     run = open_run(path)
