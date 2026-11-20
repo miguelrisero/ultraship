@@ -124,7 +124,21 @@ The review turn must contain exactly one distinct 40-digit hexadecimal commit SH
 
 The command strips Markdown markers and whitespace from the value on the label line. The first word must be a verdict word. The command recognizes `pass` as positive and `fail`, `failed`, `fails`, `failing`, `failure`, and `findings` as negative. A `pass` value permits only one verdict word and excludes negations: `not`, `no`, `never`, `without`, and words ending in `n't`. The command records `findings` for a negative value that contains `findings`, or `fail` for other negative values.
 
-The command requires exactly one `run-start` row that matches the recorded run before it accepts a receipt or an `account-result` row. The receipt must name the same ledger and run. The receipt row must follow the recorded `run-start`. The first `run-end` or next `run-start`, if present, ends the range. The result's own `account-result` row can also satisfy the receipt outside that range. The result stays pending if any required evidence is missing or differs. It also stays pending if the verdict label repeats or the verdict value mixes positive and negative words. Run Stop to publish the receipts.
+The command requires exactly one `run-start` row that matches the recorded run before it accepts a receipt or an `account-result` row. The receipt must name the same ledger and run. The receipt row must follow the recorded `run-start`. The first `run-end` or next `run-start`, if present, ends the range. The result's own `account-result` row can also satisfy the receipt outside that range. The plain `account-auto <pending.tsv>` form leaves the result pending if any required evidence is missing or differs. The plain form also leaves it pending if the verdict label repeats or the verdict value mixes positive and negative words.
+
+Use `--fail-unparsed` to account for legacy results with a bound transcript and one of three parse failures:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto --fail-unparsed "<pending.tsv>"
+```
+
+- `expected one commit`
+- `expected one verdict`
+- `transcript parse error`
+
+For these failures, the command records `fail` with SHA `0000000000000000000000000000000000000000`. The row names the transcript path, the epoch and the reason. It grants no pipeline step, review or completion evidence. All binding and accounting checks still apply. Other failures stay pending. Results with a clear commit and verdict keep their normal outcomes.
+
+Run Stop to publish the receipts.
 
 When an accounted result is bound to another result's row, move its credit with:
 
