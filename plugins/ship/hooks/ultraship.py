@@ -4960,7 +4960,7 @@ def receipt_custody(data, read_search=False):
             read_only = {'ls', 'cat', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'find', 'du', 'df',
                          'stat', 'wc', 'file', 'cd', 'pushd', 'popd', 'pwd', 'echo', 'printf', 'test', '[',
                          'true', 'false', 'realpath', 'readlink', 'basename', 'dirname', 'sort', 'uniq', 'cut', 'tr'}
-            find_actions = {'-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprintf', '-fls'}
+            find_actions = {'-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'}
 
             def expands_to_hook(raw_word, word):
                 if not unresolved_shell_word(raw_word):

@@ -579,7 +579,8 @@ class ReceiptCustodyTests(unittest.TestCase):
             path = shlex.quote(str(target))
             for command in (f'rm -rf {path}', f'mv {path} saved', f'cp -r fixture {path}',
                             f'printf data > {path}', f'printf data >> {path}', f'find {path} -delete',
-                            f'find {path} -fprint output', f'rsync -a --delete empty/ {path}/',
+                            f'find {path} -fprint output', f'find {path} -fprint0 output',
+                            f'rsync -a --delete empty/ {path}/',
                             f'tar -xf fixture.tar -C {path}', f'printf fixture | xargs rm {path}',
                             f"python3 -c 'pass' {path}"):
                 with self.subTest(command=command):
