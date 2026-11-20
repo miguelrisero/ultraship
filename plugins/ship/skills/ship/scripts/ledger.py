@@ -27,7 +27,7 @@ USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py run-start <full|light> <run-id> [board-path]
        ledger.py append <step> <agent>[@<agent-id>] <sha> <verdict> [note]
        ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
-       ledger.py account-auto <pending.tsv>
+       ledger.py account-auto [--fail-unparsed] <pending.tsv>
        ledger.py correct-binding <result-id> <ledger-line> <reason>"""
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
 MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
@@ -311,7 +311,7 @@ def load_receipts(path):
         return {}
 
 
-def account_auto(pending):
+def account_auto(pending, *, fail_unparsed=False):
     pending = Path(pending).absolute()
     # shortcut: the caller controls this variable; upgrade to isolated per-session state access.
     session = os.environ.get('CLAUDE_CODE_SESSION_ID')
@@ -380,30 +380,39 @@ def account_auto(pending):
                     raise ValueError('transcript path does not match the recorded agent and session')
                 epoch = int(epoch)
                 when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
-                text = final_turn_text(path, epoch, budgets)
-                if not text:
-                    raise ValueError('no final turn text')
-                commits = re.finditer(r'(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])', text)
-                first = next(commits, None)
-                if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
-                    raise ValueError('expected one commit')
-                sha = first[0].lower()
-                label_pattern = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
-                labels = (match[1] for line in text.splitlines() if (match := label_pattern.match(line)))
-                label = next(labels, None)
-                if label is None or next(labels, None) is not None:
-                    raise ValueError('expected one verdict')
-                words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower())
-                         if (word := token.strip('_'))]
-                verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
-                if not words or words[0] not in verdict_words:
-                    raise ValueError('expected one verdict')
-                if 'pass' in words and (words[0] != 'pass' or any(
-                        word in verdict_words or word in ('not', 'no', 'never', 'without')
-                        or word.endswith(("n't", 'n’t')) for word in words[1:])):
-                    raise ValueError('expected one verdict')
-                verdict = 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
-                account(pending, identifier, 'review', agent, sha, verdict, f'{source} at {when}: {verdict}',
+                try:
+                    text = final_turn_text(path, epoch, budgets)
+                    if not text:
+                        raise ValueError('no final turn text')
+                    commits = re.finditer(r'(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])', text)
+                    first = next(commits, None)
+                    if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
+                        raise ValueError('expected one commit')
+                    sha = first[0].lower()
+                    label_pattern = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
+                    labels = (match[1] for line in text.splitlines() if (match := label_pattern.match(line)))
+                    label = next(labels, None)
+                    if label is None or next(labels, None) is not None:
+                        raise ValueError('expected one verdict')
+                    words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower())
+                             if (word := token.strip('_'))]
+                    verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
+                    if not words or words[0] not in verdict_words:
+                        raise ValueError('expected one verdict')
+                    if 'pass' in words and (words[0] != 'pass' or any(
+                            word in verdict_words or word in ('not', 'no', 'never', 'without')
+                            or word.endswith(("n't", 'n’t')) for word in words[1:])):
+                        raise ValueError('expected one verdict')
+                    verdict = 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
+                except ValueError as exc:
+                    reason = str(exc)
+                    if not fail_unparsed or reason not in (
+                            'expected one commit', 'expected one verdict', 'transcript parse error'):
+                        raise
+                    sha, verdict = '0' * 40, 'fail'
+                else:
+                    reason = verdict
+                account(pending, identifier, 'review', agent, sha, verdict, f'{source} at {when}: {reason}',
                         entries=entries)
                 named = f'{agent}@{result["agent_id"]}' if result.get('agent_id') else agent
         except (json.JSONDecodeError, UnicodeError, OverflowError, RecursionError):
@@ -522,9 +531,12 @@ def main(argv):
         print(account(*args))
         return
     if cmd == 'account-auto':
-        if len(args) != 1:
+        if len(args) == 1:
+            account_auto(args[0])
+        elif len(args) == 2 and args[0] == '--fail-unparsed':
+            account_auto(args[1], fail_unparsed=True)
+        else:
             sys.exit(USAGE)
-        account_auto(*args)
         return
     if cmd == 'correct-binding':
         if len(args) != 3:

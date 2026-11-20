@@ -4758,12 +4758,12 @@ def own_account_call(data, raw):
     if not re.fullmatch(word + r'(?:[ \t]+' + word + r')*', raw):
         return False
     words = shlex.split(raw)
-    if (len(words) < 4 or words[:2] != ['python3', str(ledger_script())]
-            or words[3] != str(owed_file(data))):
+    if len(words) < 4 or words[:2] != ['python3', str(ledger_script())]:
         return False
+    pending = str(owed_file(data))
     if words[2] == 'account-auto':
-        return len(words) == 4
-    if len(words) != 10 or words[2] != 'account':
+        return words[3:] in ([pending], ['--fail-unparsed', pending])
+    if len(words) != 10 or words[2] != 'account' or words[3] != pending:
         return False
     result, step, agent, sha, verdict, evidence = words[4:]
     return (bool(re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', result))
