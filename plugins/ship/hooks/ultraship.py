@@ -4825,7 +4825,7 @@ def receipt_custody(data, read_search=False):
     try:
         account_state = Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state'
     except KeyError:
-        # No passwd entry means the ledger cannot name a grant store, so no grant exists to guard.
+        # Without a passwd entry the ledger cannot open any grant store, so accounting refuses and none can be issued.
         account_state = None
     grant_paths = {normalized(str(account_state / 'ultraship/account-grants'))} if account_state else set()
     receipt_paths = resolved(str(receipt_store)) | grant_paths
@@ -5064,8 +5064,11 @@ def receipt_custody(data, read_search=False):
                     return 'unknown', cursor, 0
                 return 'stdin', cursor, 0
 
-            def read_only_git(words):
+            def read_only_git(words, raw_words, ending):
                 # A read-only Git subcommand with plain global options writes no path, even after `-C <ancestor>`.
+                # A shell expansion could supply `-u` or a program option, so only literal words qualify.
+                if ending in {'(', '`'}:
+                    return False
                 allowed_env = r'(?:PATH|HOME|GIT_CONFIG_NOSYSTEM|GIT_CONFIG_GLOBAL|GIT_ALLOW_PROTOCOL|GIT_TERMINAL_PROMPT)=.*|GIT_ASKPASS='
                 allowed_config = r'http\.[\w./:-]+=[\w.:/-]*|credential\.helper=|core\.fsmonitor=false'
                 cursor = int(words[:1] == ['env'])
@@ -5084,6 +5087,9 @@ def receipt_custody(data, read_search=False):
                         cursor += 1
                     else:
                         return False
+                if any(unresolved_shell_word(raw) for raw in raw_words[cursor + 1:]):
+                    return False
+
                 def runs_program_or_writes(word):
                     # Git accepts a unique prefix of a long option, and `ls-remote -u` is `--upload-pack`.
                     if word.startswith('--'):
@@ -5091,16 +5097,18 @@ def receipt_custody(data, read_search=False):
                         return word.startswith(('--upload-pack', '--receive-pack', '--exec', '--output')) or (
                             bool(name) and any(option.startswith(name)
                                                for option in ('upload-pack', 'receive-pack', 'exec', 'output')))
-                    return word.startswith('-') and 'u' in word[1:]
+                    return words[cursor] == 'ls-remote' and word.startswith('-') and 'u' in word[1:]
 
                 return (words[cursor:cursor + 1] and words[cursor] in {'ls-remote', 'rev-parse', 'status', 'diff', 'show', 'log'}
                         and not any(runs_program_or_writes(word) for word in words[cursor:]))
 
-            def reads_only(part):
+            def reads_only(part, ending):
                 # `df` and a read-only Git command write nothing, so an ancestor path operand is data there.
-                words = [word for _, word, _, _ in shell_without_redirections(part)]
+                parts = list(shell_without_redirections(part))
+                words = [word for _, word, _, _ in parts]
                 first = next((word for word in words if not SHELL_ASSIGNMENT.match(word)), '')
-                return not any(raw_word == '>' for raw_word, _, _, _ in part) and (first == 'df' or read_only_git(words))
+                return not any(raw_word == '>' for raw_word, _, _, _ in part) and (
+                    first == 'df' or read_only_git(words, [raw for raw, _, _, _ in parts], ending))
 
             comment = pr_comment_body_removed(raw)
             pending, seen = [joined if comment == raw else comment], set()
@@ -5130,7 +5138,7 @@ def receipt_custody(data, read_search=False):
                     data_segment, segment = [], []
                     for token in [*tokens, ('\n', '\n', 0, 0)]:
                         if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
-                            data_segment += [reads_only(segment)] * len(segment) + [False]
+                            data_segment += [reads_only(segment, token[0])] * len(segment) + [False]
                             segment = []
                         else:
                             segment.append(token)
