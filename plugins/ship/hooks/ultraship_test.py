@@ -621,6 +621,18 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
             'command': 'ls ./plugin/{hooks,docs}/{ultra,other}ship.py'}})
 
+    def test_grant_custody_denies_cwd_relative_hook_glob(self):
+        plugin = self.cwd / 'plugin'
+        with patch.object(ultraship, '__file__', str(plugin / 'hooks/ultraship.py')):
+            self.assert_custody_denial({'cwd': str(plugin), 'tool_name': 'Bash',
+                                       'tool_input': {'command': 'ls [h]ooks/ultra*.py'}})
+
+    def test_grant_custody_denies_hook_glob_without_literal_prefix(self):
+        plugin = self.cwd / 'plugin'
+        with patch.object(ultraship, '__file__', str(plugin / 'hooks/ultraship.py')):
+            self.assert_custody_denial({'cwd': str(plugin), 'tool_name': 'Bash',
+                                       'tool_input': {'command': 'ls */ultra*.py'}})
+
     def test_grant_custody_denies_literal_hook_after_directory_change(self):
         self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
             'command': f'cd {shlex.quote(str(HOOK.parent))} && python3 ultraship.py'}})

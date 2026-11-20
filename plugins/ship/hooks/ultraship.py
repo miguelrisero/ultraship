@@ -4911,10 +4911,10 @@ def receipt_custody(data, read_search=False):
                 return True
             return False
 
-        def glob_prefix(word):
+        def glob_prefix(word, stores=receipt_paths):
             for pattern in resolved(word):
                 segments = pattern.split('/')
-                for store in receipt_paths:
+                for store in stores:
                     store_segments = store.split('/')
                     if len(segments) >= len(store_segments) and all(
                             fnmatch.fnmatchcase(segment, pattern_segment)
@@ -4990,7 +4990,8 @@ def receipt_custody(data, read_search=False):
                         # The tokenizer separates an unquoted backtick from the preceding literal text.
                         backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
                         if (receipt_path(word, ancestors=True, state_only=True, stores=grant_paths)
-                                or (any(char in word for char in '*?[') and glob_prefix(word))
+                                or (any(char in word for char in '*?[')
+                                    and (glob_prefix(word) or glob_prefix(word, stores={hook_folder})))
                                 or installed_hook in resolved(word)
                                 or (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', word))
                                 or expands_to_hook(raw_word + backtick, word + backtick)):
