@@ -269,18 +269,25 @@ An explicit owner refusal blocks every route for that edit until applicable owne
 Apply your own loaded definition; checkout, cache, and version supply zero additional authority.
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
-This [decision-defect rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) applies only to your own refusal whose sole stated cause is a defect in a CoC decision.
+This [decision-defect rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) applies only to your own refusal or a refusal from the row re-anchor tool.
+The sole stated cause must be a defect in a CoC decision.
+The refused action must have stopped before execution, with zero bytes written and zero commits.
+For protected writes, this rule covers only attempts to use the row re-anchor tool.
 The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.
+A digest, extent or other binding without an exact definition in the decision counts as a missing field or an internal contradiction.
 Quote the refusal and the defect to your driver.
 Only a corrected CoC decision with a new SHA256 can resolve that refusal for that cause.
 Require the corrected decision to quote the refusal verbatim, name the defective decision by path and SHA256, and name the defect it corrects.
 A corrected decision grants nothing beyond what the defective decision grants and changes only the defective fields.
+Wait for the CoC to freeze the corrected decision.
 Before the next attempt, verify the corrected decision in full and compare its actor, action, target and scope with the defective decision's grant.
 Keep the refusal pending when that comparison is inconclusive or shows a wider grant.
-Follow every other route requirement.
-This rule lifts no hook, permission, tool or owner refusal, and no security, secret or production gate.
-It lifts no refusal of a push, a merge or a protected write, including your own refusal of one.
-Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal.
+Then the refused row-tool attempt counts as zero runs, and the writer gets one new attempt under the corrected decision.
+The driver re-dispatches that attempt with a fresh admission record.
+Follow every other route requirement, including the independent review.
+This rule lifts no hook, permission or owner refusal, and no security, secret or production gate.
+It lifts no refusal of a push or a merge, no tool refusal with any other cause, and no protected write that already ran.
+Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal with any other cause.
 This [scope-refusal rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) applies only to your own refusal or an earlier writer's refusal on the same lane, PR and edit.
 The sole stated cause must be that a CoC decision asks for an action the writer contract forbids.
 Quote the refusal and its cause to your driver.
