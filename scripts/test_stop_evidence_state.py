@@ -273,7 +273,9 @@ class StopAccountingGrantTests(unittest.TestCase):
                             command = command.replace(' account-auto ', ' account-auto --fail-unparsed ', 1)
                     event = {**data, 'tool_name': 'Bash', 'tool_input': {'command': command}}
                     words = shlex.split(command)
-                    with mock.patch.object(sys, 'argv', words[1:]), contextlib.redirect_stdout(io.StringIO()):
+                    with mock.patch.object(sys, 'argv', words[1:]), \
+                            mock.patch.object(ledger.time, 'time_ns', return_value=100_000_000_000), \
+                            contextlib.redirect_stdout(io.StringIO()):
                         hook.guarded_pre(event)
                         ledger.main(words[2:])
                         after = home.read_bytes()

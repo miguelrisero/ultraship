@@ -1067,7 +1067,7 @@ def process_heredoc_denial(command, readers=False):
     return None
 
 
-def shell_raw_words(text):
+def shell_raw_words(text, *, require_complete=False):
     """Keep raw shell words and offsets; quotes and escapes never lose their identity."""
     words, index, parentheses, backtick = [], 0, [], False
     while index < len(text):
@@ -1124,10 +1124,12 @@ def shell_raw_words(text):
         if len(values) != 1:
             raise ValueError('ambiguous shell word')
         words.append((raw, values[0], start, index))
+    if require_complete and (parentheses or backtick):
+        raise ValueError('unfinished shell group')
     return words
 
 
-def shell_without_heredoc_bodies(command):
+def shell_without_heredoc_bodies(command, *, require_complete=False):
     """Keep headers and following shell commands, without interpreting data as shell words."""
     lines, kept, pending = command.splitlines(keepends=True), [], []
     if (lines and re.fullmatch(r'[ \t]*(?:cd +[\w./-]+ +&& +)?git +commit(?: +(?:-[a-zA-Z]|--[\w-]+))* +'
@@ -1147,6 +1149,8 @@ def shell_without_heredoc_bodies(command):
         for match in re.finditer(r"(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", line):
             if quoted_lines[index][match.start():match.start() + 2] == '<<':
                 pending.append((shlex.split(match[2])[0], bool(match[1]), match[2][0] in '\'"\\'))
+    if require_complete and pending:
+        raise ValueError('unterminated heredoc')
     return ''.join(kept)
 
 
@@ -4848,8 +4852,10 @@ def receipt_custody(data, read_search=False):
         except Exception:
             deny(RECEIPT_CUSTODY)
         return
-    if tool in ('Edit', 'Write', 'NotebookEdit') and receipt_path(tin.get('file_path') or tin.get('notebook_path')):
-        deny(RECEIPT_CUSTODY)
+    if tool in ('Edit', 'Write', 'NotebookEdit'):
+        target = tin.get('file_path') or tin.get('notebook_path')
+        if receipt_path(target) or receipt_path(target, ancestors=True, stores=grant_paths):
+            deny(RECEIPT_CUSTODY)
     # shortcut: shell text checks cannot isolate same-user code; upgrade to isolated state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
@@ -4970,11 +4976,14 @@ def receipt_custody(data, read_search=False):
                     if source in seen:
                         continue
                     seen.add(source)
-                    text = shell_without_heredoc_bodies(source)
-                    tokens = shell_raw_words(text)
+                    text = shell_without_heredoc_bodies(source, require_complete=True)
+                    tokens = shell_raw_words(text, require_complete=True)
                     if nested_work_exceeded(tokens, seen):
                         return True
                     positions = shell_command_positions(tokens)
+                    modifies_paths = any(
+                        token[0] == '>' or os.path.basename(token[1]) in {'cp', 'mv', 'rm', 'rmdir', 'unlink', '-delete'}
+                        for token in tokens)
                     unresolved = {start for raw_word, _, start, _ in tokens if unresolved_shell_word(raw_word)}
                     if unresolved and (unresolved & positions or any(
                             interpreter_name(word) or os.path.basename(word) in interpreter_names
@@ -4982,19 +4991,34 @@ def receipt_custody(data, read_search=False):
                         # The exact accounting grammar treats the quoted evidence as literal text.
                         if source != raw or not own_account_call(data, raw):
                             return True
+                    account_words = own_account_call(data, raw) if source == raw else False
+                    evidence_index = len(tokens) - 1 if account_words and account_words[2] != 'account-auto' else -1
+                    name_source = source[:tokens[evidence_index][2]] if evidence_index >= 0 else source
                     plain_source = plain_hook_source_command(source, tokens) if source == text else False
-                    if not plain_source and (hook_name.search(normalized(source)) or module_reference.search(source)):
-                        return True
+                    if not plain_source:
+                        if hook_name.search(normalized(name_source)) or module_reference.search(name_source):
+                            return True
+                        names = tokens if evidence_index < 0 else tokens[:evidence_index]
+                        words = [token[1] for token in shell_without_redirections(names)]
+                        for index, name in enumerate(words):
+                            if interpreter_name(name) not in {'python', 'pypy', 'pypy3'}:
+                                continue
+                            arguments = words[index + 1:]
+                            kind, _, operand, offset = python_program(arguments)
+                            if (kind == 'm' and operand < len(arguments)
+                                    and re.fullmatch(module_name, arguments[operand][offset:])):
+                                return True
                     for index, (raw_word, word, _, end) in enumerate(tokens):
                         word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
                         # The tokenizer separates an unquoted backtick from the preceding literal text.
                         backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
-                        if (receipt_path(word, ancestors=True, state_only=True, stores=grant_paths)
+                        if (receipt_path(word, ancestors=True, state_only=not modifies_paths, stores=grant_paths)
                                 or (any(char in word for char in '*?[')
                                     and (glob_prefix(word) or glob_prefix(word, stores={hook_folder})))
                                 or installed_hook in resolved(word)
-                                or (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', word))
-                                or expands_to_hook(raw_word + backtick, word + backtick)):
+                                or (index != evidence_index and (
+                                    (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', word))
+                                    or expands_to_hook(raw_word + backtick, word + backtick)))):
                             return True
                     pending.extend(token[1] for token in nested_shell_strings(tokens, text))
             except (OSError, RuntimeError, ValueError):

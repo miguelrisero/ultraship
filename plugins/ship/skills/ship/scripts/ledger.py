@@ -75,7 +75,11 @@ def directory_descriptor(path, *, create_tail=0):
             fd = child
         yield fd
     finally:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            if not create_tail:
+                raise
 
 
 @contextmanager
@@ -173,28 +177,23 @@ def _issue_grant(script, argv, state, session):
         else:
             if time.time_ns() - saved['issued_ns'] < GRANT_LIFETIME_NS:
                 raise ValueError(GRANT_REFUSAL)
-        publish_at(fd, name, grant_bytes(dict(fields, issued_ns=time.time_ns())), revoke_on_failure=True)
+        publish_at(fd, name, grant_bytes(dict(fields, issued_ns=time.time_ns())), sync_directory=False)
 
 
-def publish_at(fd, name, content, *, revoke_on_failure=False):
+def publish_at(fd, name, content, *, sync_directory=True):
     temp = '.' + name + '-' + secrets.token_hex(16)
-    with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=fd), 'wb') as target:
-        try:
+    temp_fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=fd)
+    try:
+        with os.fdopen(temp_fd, 'wb') as target:
             target.write(content)
             target.flush()
             os.fsync(target.fileno())
-            os.replace(temp, name, src_dir_fd=fd, dst_dir_fd=fd)
-            try:
-                os.fsync(fd)
-            except OSError:
-                if revoke_on_failure:
-                    os.unlink(name, dir_fd=fd)
-                raise
-        finally:
-            try:
-                os.unlink(temp, dir_fd=fd)
-            except FileNotFoundError:
-                pass
+        os.replace(temp, name, src_dir_fd=fd, dst_dir_fd=fd)
+    except BaseException:
+        os.unlink(temp, dir_fd=fd)
+        raise
+    if sync_directory:
+        os.fsync(fd)
 
 
 @contextmanager

@@ -451,6 +451,21 @@ class ReceiptCustodyTests(unittest.TestCase):
                 self.assertEqual(output.getvalue(), '')
                 self.consume(shlex.split(command))
 
+    def test_own_account_call_allows_literal_hook_name_in_evidence(self):
+        event = self.own_account_event()
+        words = [*self.account_words[:-1], "Reviewer's finding in ultraship.py: $HOME/hooks/*"]
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        self.consume(words)
+
+    def test_grant_issuance_failure_removes_temporary_record(self):
+        event = self.own_account_event()
+        with patch.object(self.ledger.os, 'fsync', side_effect=OSError):
+            self.assert_custody_denial(event, 'The ship hook could not issue a fresh accounting grant. '
+                                     'Run the exact command again.')
+        self.assertFalse(any(self.ledger.grant_store().iterdir()))
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(self.account_words)
+
     def test_grant_refuses_mismatch_expiry_replay_and_failed_consume(self):
         event = self.own_account_event()
         words = self.account_words
@@ -558,6 +573,18 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assert_custody_denial({'tool_name': tool, 'tool_input': {key: value}})
 
+    def test_grant_custody_refuses_store_and_ancestor_changes(self):
+        store = self.ledger.grant_store()
+        for target in (store, store.parent.parent.parent):
+            path = shlex.quote(str(target))
+            for command in (f'rm -rf {path}', f'mv {path} saved', f'cp -r fixture {path}',
+                            f'printf data > {path}', f'find {path} -delete'):
+                with self.subTest(command=command):
+                    self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+            for tool in ('Edit', 'Write'):
+                with self.subTest(tool=tool, target=target):
+                    self.assert_custody_denial({'tool_name': tool, 'tool_input': {'file_path': str(target)}})
+
     def test_grant_custody_denies_hook_execution_forms(self):
         installed = shlex.quote(str(HOOK))
         relative = os.path.relpath(HOOK, self.cwd)
@@ -579,6 +606,8 @@ class ReceiptCustodyTests(unittest.TestCase):
                 ('pipeline into repository file', 'cat input.json | python3 ./ultraship.py stop'),
                 ('module', 'python3 -m plugins.ship.hooks.ultraship stop'),
                 ('attached module', 'python3 -multraship stop'),
+                ('grouped module flag', 'python3 -Im plugins.ship.hooks.ultraship stop'),
+                ('grouped attached module', 'python3 -Implugins.ship.hooks.ultraship stop'),
                 ('inline import', 'python3 -c "import ultraship"'),
                 ('standard input import', "python3 - <<'EOF'\nfrom plugins.ship.hooks import ultraship\nEOF"),
                 ('runpy target', "python3 -c 'import runpy; runpy.run_module(\"ultraship\")'"),
@@ -651,6 +680,12 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': "echo 'unfinished"}})
         with patch.object(ultraship, 'nested_work_exceeded', return_value=True):
             self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'echo ordinary'}})
+
+    def test_grant_custody_denies_unclosed_group(self):
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': '(echo ordinary'}})
+
+    def test_grant_custody_denies_unterminated_heredoc(self):
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': "cat <<'EOF'\nordinary\n"}})
 
     def test_grant_custody_allows_plain_repository_source_commands(self):
         source = 'plugins/ship/hooks/ultraship.py'

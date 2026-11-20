@@ -70,6 +70,8 @@ class LedgerDirTests(unittest.TestCase):
                 try:
                     ledger.main(list(args))
                 except SystemExit as exc:
+                    if exc.code is None or isinstance(exc.code, int):
+                        return subprocess.CompletedProcess(args, exc.code or 0, stdout.getvalue(), '')
                     return subprocess.CompletedProcess(args, 1, stdout.getvalue(), f'{exc.code}\n')
                 return subprocess.CompletedProcess(args, 0, stdout.getvalue(), '')
         return subprocess.run([sys.executable, str(LEDGER), *args], cwd=cwd or self.checkout,
