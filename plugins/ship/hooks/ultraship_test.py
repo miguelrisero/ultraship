@@ -828,6 +828,10 @@ class ReceiptCustodyTests(unittest.TestCase):
         ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
         self.assert_account_command_allowed(f'git -C {ancestor} status -uno; touch result', caller='')
 
+    def test_grant_custody_admits_a_single_quoted_dollar_in_git_log(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        self.assert_account_command_allowed(f"git -C {ancestor} log -- '$notes'; touch result", caller='')
+
     def test_grant_custody_denies_abbreviated_git_program_and_output_options(self):
         ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
         for option in ('--upl=true', '--u=true', '--rec=true', '--ex=true', '--e=true', '--out=file', '--o=file'):

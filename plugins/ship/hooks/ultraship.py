@@ -5091,8 +5091,12 @@ def receipt_custody(data, read_search=False):
                         cursor += 1
                     else:
                         return False
-                if any(unresolved_shell_word(raw) for raw in raw_words[cursor + 1:]):
-                    return False
+                for raw in raw_words[cursor + 1:]:
+                    outside = outside_single_quotes(raw)
+                    if '$' in outside or '`' in outside:
+                        return False
+                    if unresolved_shell_word(raw.replace('$', '_').replace('`', '_')):
+                        return False
 
                 def runs_program_or_writes(word):
                     # Git accepts a unique prefix of a long option, and `ls-remote -u` is `--upload-pack`.
