@@ -785,6 +785,20 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
+    def test_grant_custody_denies_ls_remote_upload_pack_short_forms(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for option in ('-u true', '-utrue', '-qu true'):
+            with self.subTest(option=option):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+                    'command': f'git -C {ancestor} ls-remote {option} origin; touch result'}})
+
+    def test_grant_custody_denies_abbreviated_git_program_and_output_options(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for option in ('--upl=true', '--u=true', '--rec=true', '--ex=true', '--e=true', '--out=file', '--o=file'):
+            with self.subTest(option=option):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+                    'command': f'git -C {ancestor} ls-remote {option} origin; touch result'}})
+
     def test_grant_custody_drops_the_git_read_exception_for_a_quoted_rebinding(self):
         binding = 'status=$(git -C "$worktree" status --porcelain); '
         self.assert_account_command_allowed(binding + '$status', caller='')

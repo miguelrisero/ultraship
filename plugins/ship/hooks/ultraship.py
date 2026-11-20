@@ -5084,9 +5084,17 @@ def receipt_custody(data, read_search=False):
                         cursor += 1
                     else:
                         return False
+                def runs_program_or_writes(word):
+                    # Git accepts a unique prefix of a long option, and `ls-remote -u` is `--upload-pack`.
+                    if word.startswith('--'):
+                        name = word[2:].partition('=')[0]
+                        return word.startswith(('--upload-pack', '--receive-pack', '--exec', '--output')) or (
+                            bool(name) and any(option.startswith(name)
+                                               for option in ('upload-pack', 'receive-pack', 'exec', 'output')))
+                    return word.startswith('-') and 'u' in word[1:]
+
                 return (words[cursor:cursor + 1] and words[cursor] in {'ls-remote', 'rev-parse', 'status', 'diff', 'show', 'log'}
-                        and not any(word.startswith(('--upload-pack', '--receive-pack', '--exec', '--output'))
-                                    for word in words[cursor:]))
+                        and not any(runs_program_or_writes(word) for word in words[cursor:]))
 
             def reads_only(part):
                 # `df` and a read-only Git command write nothing, so an ancestor path operand is data there.
