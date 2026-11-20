@@ -760,6 +760,40 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
+    def test_grant_custody_admits_ancestor_operands_of_df_and_read_only_git(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        probe = ('env -i PATH="$PATH" HOME="$HOME" GIT_ASKPASS= GIT_TERMINAL_PROMPT=0 '
+                 f'git -C {ancestor} -c credential.helper= ls-remote --symref origin HEAD')
+        for command in (f'{probe} | wc -l; touch result', f'git -C {ancestor} status --porcelain; touch result',
+                        f'df -h {ancestor}; touch result',
+                        f'disk=$(df --output=pcent {ancestor} | tail -n 1); touch result'):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command, caller='')
+        for command in (f'git -C {ancestor} clean -fdx', f'git -C {ancestor} ls-remote --upload-pack=true origin',
+                        f'git -C {ancestor} -c core.pager=true status', f'git -C {ancestor} status > output',
+                        f'df -h {ancestor} > output', f'df -h {ancestor}; rm -rf {ancestor}'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_admits_read_only_commands_that_name_the_hook_by_alias(self):
+        (self.cwd / 'hook-alias').symlink_to(HOOK)
+        self.assert_account_command_allowed('cat ./hook-alias', caller='')
+        for command in ('python3 ./hook-alias pre', 'cat ./hook-alias | python3 - pre'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_treats_an_inert_quoted_script_as_file_text(self):
+        body = "from pathlib import Path\nprint(Path('plugins/ship/hooks/ultraship.py').read_text().count('def'))\n"
+        self.assert_account_command_allowed(f"python3 - <<'EOF'\n{body}EOF\n", caller='')
+        runner = ("import subprocess\nsubprocess.run(['python3', 'plugins/ship/hooks/ultraship.py', 'pre'])\n")
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': f"python3 - <<'EOF'\n{runner}EOF\n"}})
+
+    def test_grant_custody_treats_unresolved_words_after_a_search_pattern_as_data(self):
+        self.assert_account_command_allowed('grep -rn eval "$DIR"', caller='')
+        self.assert_account_command_allowed('grep -rn eval src/*.py | head', caller='')
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'eval "$DIR"'}})
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'grep -rn x eval "$DIR" ; eval "$DIR"'}})
+
     def test_stop_account_diagnostic_admits_quoted_paths(self):
         event = self.own_account_event()
         home = Path(os.environ['HOME']) / 'home with text'

@@ -5043,6 +5043,36 @@ def receipt_custody(data, read_search=False):
                     return 'unknown', cursor, 0
                 return 'stdin', cursor, 0
 
+            def read_only_git(words):
+                # A read-only Git subcommand with plain global options writes no path, even after `-C <ancestor>`.
+                allowed_env = r'(?:PATH|HOME|GIT_CONFIG_NOSYSTEM|GIT_CONFIG_GLOBAL|GIT_ALLOW_PROTOCOL|GIT_TERMINAL_PROMPT)=.*|GIT_ASKPASS='
+                allowed_config = r'http\.[\w./:-]+=[\w.:/-]*|credential\.helper=|core\.fsmonitor=false'
+                cursor = int(words[:1] == ['env'])
+                cursor += int(cursor and words[cursor:cursor + 1] == ['-i'])
+                while cursor < len(words) and re.fullmatch(allowed_env, words[cursor]):
+                    cursor += 1
+                if words[cursor:cursor + 1] != ['git']:
+                    return False
+                cursor += 1
+                while cursor < len(words) and words[cursor].startswith('-'):
+                    if words[cursor] == '-C' and cursor + 1 < len(words):
+                        cursor += 2
+                    elif words[cursor] == '-c' and cursor + 1 < len(words) and re.fullmatch(allowed_config, words[cursor + 1]):
+                        cursor += 2
+                    elif words[cursor] in {'--no-pager', '--no-optional-locks'}:
+                        cursor += 1
+                    else:
+                        return False
+                return (words[cursor:cursor + 1] and words[cursor] in {'ls-remote', 'rev-parse', 'status', 'diff', 'show', 'log'}
+                        and not any(word.startswith(('--upload-pack', '--receive-pack', '--exec', '--output'))
+                                    for word in words[cursor:]))
+
+            def reads_only(part):
+                # `df` and a read-only Git command write nothing, so an ancestor path operand is data there.
+                words = [word for _, word, _, _ in shell_without_redirections(part)]
+                first = next((word for word in words if not SHELL_ASSIGNMENT.match(word)), '')
+                return not any(raw_word == '>' for raw_word, _, _, _ in part) and (first == 'df' or read_only_git(words))
+
             comment = pr_comment_body_removed(raw)
             pending, seen = [joined if comment == raw else comment], set()
             try:
@@ -5068,6 +5098,13 @@ def receipt_custody(data, read_search=False):
                                              for index, (_, word, start, _) in enumerate(executable) if start in positions)
                                       or any(word.partition('=')[0] in program_options.get(command, ())
                                              for command in commands for _, word, _, _ in tokens))
+                    data_segment, segment = [], []
+                    for token in [*tokens, ('\n', '\n', 0, 0)]:
+                        if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
+                            data_segment += [reads_only(segment)] * len(segment) + [False]
+                            segment = []
+                        else:
+                            segment.append(token)
                     account_words = own_account_call(data, raw) if source == raw else False
                     if not account_words and any(unresolved_program(raw_word, word)
                                                  for raw_word, word, start, _ in executable if start in positions):
@@ -5076,8 +5113,10 @@ def receipt_custody(data, read_search=False):
                     name_source = source[:tokens[evidence_index][2]] if evidence_index >= 0 else source
                     plain_source = source == text and plain_hook_source_command(source, tokens)
                     if not plain_source:
-                        if ((hook_name.search(normalized(name_source)) and not literal_search_shell(source))
-                                or module_reference.search(name_source)):
+                        # An inert quoted-delimiter script cannot run a process or import a module; its names are file text.
+                        name_text = python_heredoc_shell(name_source, inert_only=True)
+                        if ((hook_name.search(normalized(name_text)) and not literal_search_shell(source))
+                                or module_reference.search(name_text)):
                             return True
                         names = executable if evidence_index < 0 else executable[:evidence_index]
                         for index, (_, name, _, _) in enumerate(names):
@@ -5119,15 +5158,18 @@ def receipt_custody(data, read_search=False):
                         backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
                         for path in paths:
                             path = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), path)
-                            if (receipt_path(path, ancestors=True, state_only=not modifies_paths, stores=grant_paths)
+                            if (receipt_path(path, ancestors=True, state_only=not modifies_paths or data_segment[index], stores=grant_paths)
                                     or (any(char in path for char in '*?[')
                                         and (glob_prefix(path) or glob_prefix(path, stores={hook_folder})))
-                                    or installed_hook in resolved(path)
+                                    or (modifies_paths and installed_hook in resolved(path))
                                     or (index != evidence_index and (
                                         (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', path))
                                         or expands_to_hook(raw_word + backtick, path + backtick)))):
                                 return True
-                    pending.extend(token[1] for token in nested_shell_strings(tokens, text))
+                    # An unresolved word after a search pattern is search data; resolved nested code keeps its scan.
+                    data_starts = {token[2] for index, token in enumerate(tokens) if grep_data_token(tokens, index)}
+                    pending.extend(token[1] for token in nested_shell_strings(tokens, text)
+                                   if not (token[2] in data_starts and unresolved_shell_word(token[1])))
             except (OSError, RuntimeError, ValueError):
                 return True
             return False
