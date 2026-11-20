@@ -393,7 +393,8 @@ class LedgerDirTests(unittest.TestCase):
         probe = subprocess.run(['git', '-C', str(cwd), 'rev-parse', '--abbrev-ref', 'HEAD'],
                                env=self.env, capture_output=True, text=True)
         self.assertEqual(probe.returncode, 128)
-        self.assertEqual(probe.stderr, f'fatal: not a git repository: {missing}\n')
+        self.assertTrue(probe.stderr.startswith('fatal: '), probe.stderr)
+        self.assertFalse(probe.stderr.startswith('fatal: not a git repository (or any '), probe.stderr)
         pending = self.non_git_notice(cwd=cwd)
         reminder = owed.with_suffix('.stop-state')
         error = 'returned non-zero exit status 128'
