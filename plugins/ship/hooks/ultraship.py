@@ -4996,7 +4996,7 @@ def receipt_custody(data, read_search=False):
                 # Only `$name` or `${name}` after the binding keeps the exception; any other use drops it.
                 rest = re.sub(rf'\$(?:{name}(?!\w)|\{{{name}\}})',
                               lambda use: ' ' if use.start() >= later else use[0], rest)
-                if not re.search(rf'(?<!\w){name}(?!\w)', rest):
+                if not re.search(rf'(?<!\w){name}(?!\w)', re.sub(r'[\'"\\]', '', rest)):
                     git_bound.add(name)
 
             def unresolved_program(raw_word, word, *, code=False):

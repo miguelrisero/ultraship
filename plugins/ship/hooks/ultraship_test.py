@@ -775,6 +775,13 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
+    def test_grant_custody_drops_the_git_read_exception_for_a_quoted_rebinding(self):
+        binding = 'status=$(git -C "$worktree" status --porcelain); '
+        self.assert_account_command_allowed(binding + '$status', caller='')
+        for rebinding in ('printf -v sta"tus" %s x; ', r'read st\atus; '):
+            with self.subTest(rebinding=rebinding):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': binding + rebinding + '$status'}})
+
     def test_grant_custody_admits_read_only_commands_that_name_the_hook_by_alias(self):
         (self.cwd / 'hook-alias').symlink_to(HOOK)
         self.assert_account_command_allowed('cat ./hook-alias', caller='')
