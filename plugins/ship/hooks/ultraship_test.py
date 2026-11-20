@@ -605,6 +605,26 @@ class ReceiptCustodyTests(unittest.TestCase):
                 with self.subTest(form=form):
                     self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
+    def test_grant_custody_denies_hook_folder_brace_expansion(self):
+        installed = Path.home() / 'plugin/hooks/ultraship.py'
+        with patch.object(ultraship, '__file__', str(installed)):
+            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+                'command': f'python3 {shlex.quote(str(installed.parent.parent))}/{{hooks,docs}}/{{ultra,other}}ship.py'}})
+
+    def test_grant_custody_denies_literal_hook_after_directory_change(self):
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': f'cd {shlex.quote(str(HOOK.parent))} && python3 ultraship.py'}})
+
+    def test_grant_custody_allows_ordinary_shell_and_exact_stop_commands(self):
+        event = self.own_account_event()
+        for command in ('ls *.py', f'cd {shlex.quote(str(self.cwd))} && git status',
+                        f'cd {shlex.quote(str(self.cwd))} && uv run pytest'):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command, caller='')
+        words = [*self.account_words[:2], 'account-auto', self.account_words[3]]
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        self.consume(words)
+
     def test_grant_custody_denies_uncertain_commands_without_custody_words(self):
         self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': "echo 'unfinished"}})
         with patch.object(ultraship, 'nested_work_exceeded', return_value=True):

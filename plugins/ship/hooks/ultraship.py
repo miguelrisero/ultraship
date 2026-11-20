@@ -4944,24 +4944,11 @@ def receipt_custody(data, read_search=False):
                             for word in words[2:]))
 
         def grant_access():
-            hook = Path(__file__).resolve()
-            installed_hook = normalized(str(hook))
-            hook_folder = normalized(str(hook.parent))
+            installed_hook = normalized(str(Path(__file__).resolve()))
             hook_name = re.compile(r'(?<![\w-])ultraship\.py(?![\w.-])|\b(?:issue_account_grant|_issue_grant)\b')
             module_name = r'(?:\w+\.)*ultraship'
             module_reference = re.compile(rf"\b(?:import|from)\s+(?:\(\s*)?{module_name}\b|['\"]{module_name}['\"]")
-
-            def expands_to_hook(raw_word, word):
-                if not unresolved_shell_word(raw_word):
-                    return False
-                literal = re.split(r'[*?\[$`]', normalized(word))
-                if len(literal) == 1:
-                    return False
-                prefix = literal[0]
-                if prefix and any(installed_hook.startswith(path) or hook_folder.startswith(path)
-                                  for path in resolved(prefix)):
-                    return True
-                return '/' not in prefix and any('ultraship' in part or 'hooks' in part for part in literal)
+            interpreter_names = SHELL_INTERPRETERS | {'uv', 'uvx'}
 
             pending, seen = [joined], set()
             try:
@@ -4974,18 +4961,23 @@ def receipt_custody(data, read_search=False):
                     tokens = shell_raw_words(text)
                     if nested_work_exceeded(tokens, seen):
                         return True
+                    positions = shell_command_positions(tokens)
+                    unresolved = {start for raw_word, _, start, _ in tokens if unresolved_shell_word(raw_word)}
+                    if unresolved and (unresolved & positions or any(
+                            interpreter_name(word) or os.path.basename(word) in interpreter_names
+                            for _, word, _, _ in tokens)):
+                        # The exact accounting grammar treats the quoted evidence as literal text.
+                        if source != raw or not own_account_call(data, raw):
+                            return True
                     plain_source = plain_hook_source_command(source, tokens) if source == text else False
                     if not plain_source and (hook_name.search(normalized(source)) or module_reference.search(source)):
                         return True
-                    for index, (raw_word, word, _, end) in enumerate(tokens):
+                    for _, word, _, _ in tokens:
                         word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
-                        # The tokenizer splits an unquoted command substitution from its literal prefix.
-                        backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
                         if (receipt_path(word, ancestors=True, state_only=True, stores=grant_paths)
                                 or (any(char in word for char in '*?[') and glob_prefix(word))
                                 or installed_hook in resolved(word)
-                                or (not plain_source and (expands_to_hook(raw_word + backtick, word + backtick)
-                                                          or re.fullmatch(rf'(?:-m)?{module_name}', word)))):
+                                or (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', word))):
                             return True
                     pending.extend(token[1] for token in nested_shell_strings(tokens, text))
             except (OSError, RuntimeError, ValueError):
