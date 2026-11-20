@@ -274,7 +274,7 @@ The sole stated cause must be a defect in a CoC decision.
 The refusal must come before the refused action writes anything, with zero bytes written and zero commits.
 For protected writes, this rule covers only row re-anchor tool attempts and native-Edit attempts on a CoC-approved row that a frozen CoC decision file binds.
 For the row re-anchor tool, it covers your refusal before the run and the tool's refusal during the run.
-For native Edit, this rule covers only your own refusal before the Edit call on the lane-owned row route's CoC-approved path.
+For protected native Edit, this rule covers only your own refusal before the Edit call on the lane-owned row route's CoC-approved path.
 The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.
 A digest, extent or other binding without an exact definition in the decision counts as a missing field or an internal contradiction.
 Quote the refusal and the defect to your driver.
@@ -286,14 +286,14 @@ Before the next attempt, verify the corrected decision in full and compare its a
 Keep the refusal pending when that comparison is inconclusive or shows a wider grant.
 Then the refused row-tool attempt counts as zero runs, and the writer gets one new attempt under the corrected decision.
 The driver re-dispatches that attempt with a fresh admission record.
-Then the refused native-Edit attempt counts as zero attempts, and the writer gets one new native-Edit attempt under the corrected decision.
-For native Edit, the driver verifies the corrected decision again at the frozen head.
+Then the refused protected native-Edit attempt counts as zero attempts, and the writer gets one new protected native-Edit attempt under the corrected decision.
+For protected native Edit, the driver verifies the corrected decision again at the frozen head.
 The driver records the result in the reviewer brief.
 Follow every other route requirement, including the independent review.
 This rule lifts no hook, permission or owner refusal, and no security, secret or production gate.
 It lifts no refusal of a push or a merge, and no tool refusal with any other cause.
 It lifts no refusal of a protected write that already wrote bytes or made a commit.
-It lifts no refusal of a protected write that no frozen CoC decision file binds.
+Outside row re-anchor tool attempts, it lifts no refusal of a protected write that no frozen CoC decision file binds.
 Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal with any other cause.
 This [scope-refusal rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) applies only to your own refusal or an earlier writer's refusal on the same lane, PR and edit.
 The sole stated cause must be that a CoC decision asks for an action the writer contract forbids.

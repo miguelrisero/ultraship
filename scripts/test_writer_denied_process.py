@@ -85,7 +85,7 @@ class WriterDeniedProcessTests(unittest.TestCase):
             'on a CoC-approved row that a frozen CoC decision file binds.'
         )
         pre_edit_refusal = (
-            'For native Edit, this rule covers only your own refusal before the Edit call '
+            'For protected native Edit, this rule covers only your own refusal before the Edit call '
             "on the lane-owned row route's CoC-approved path."
         )
         freeze_decision = 'Wait for the CoC to freeze the corrected decision.'
@@ -94,11 +94,14 @@ class WriterDeniedProcessTests(unittest.TestCase):
             "with the defective decision's grant."
         )
         native_edit_retry = (
-            'Then the refused native-Edit attempt counts as zero attempts, and the writer gets one new native-Edit attempt '
-            'under the corrected decision.'
+            'Then the refused protected native-Edit attempt counts as zero attempts, and the writer gets one new '
+            'protected native-Edit attempt under the corrected decision.'
         )
         already_wrote = 'It lifts no refusal of a protected write that already wrote bytes or made a commit.'
-        unbound_write = 'It lifts no refusal of a protected write that no frozen CoC decision file binds.'
+        unbound_write = (
+            'Outside row re-anchor tool attempts, it lifts no refusal of a protected write '
+            'that no frozen CoC decision file binds.'
+        )
         eligibility = (
             sole_cause,
             zero_writes,
@@ -119,7 +122,7 @@ class WriterDeniedProcessTests(unittest.TestCase):
             'Then the refused row-tool attempt counts as zero runs, and the writer gets one new attempt under the corrected decision.',
             'The driver re-dispatches that attempt with a fresh admission record.',
             native_edit_retry,
-            'For native Edit, the driver verifies the corrected decision again at the frozen head.',
+            'For protected native Edit, the driver verifies the corrected decision again at the frozen head.',
             'The driver records the result in the reviewer brief.',
             'Follow every other route requirement, including the independent review.',
             'This rule lifts no hook, permission or owner refusal, and no security, secret or production gate.',
