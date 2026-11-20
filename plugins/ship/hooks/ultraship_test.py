@@ -413,7 +413,8 @@ class ReceiptCustodyTests(unittest.TestCase):
         return pending
 
     def consume(self, words):
-        self.ledger.consume_grant(words[1], words[2:])
+        with self.ledger.consume_grant(words[1], words[2:]):
+            pass
 
     def own_account_event(self):
         os.environ.pop('XDG_STATE_HOME', None)
@@ -498,9 +499,39 @@ class ReceiptCustodyTests(unittest.TestCase):
                 claimant.join()
             self.assertEqual(outcomes, ['refused'])
 
+    def test_grant_refuses_malformed_and_linked_records(self):
+        event = self.own_account_event()
+        words = self.account_words
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        record, = self.ledger.grant_store().iterdir()
+        retained = record.with_suffix('.retained')
+        os.link(record, retained)
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(words)
+        record.unlink()
+        record.symlink_to(retained)
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(words)
+        record.unlink()
+        retained.rename(record)
+        record.write_bytes(b'{broken')
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(words)
+
+    def test_grant_refuses_a_symlinked_store_component(self):
+        event = self.own_account_event()
+        words = self.account_words
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        store = self.ledger.grant_store()
+        retained = store.rename(store.with_name('retained'))
+        store.symlink_to(retained, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(words)
+        self.assert_custody_denial(event, 'The ship hook could not issue a fresh accounting grant. Run the exact command again.')
+
     def test_denied_hook_emits_no_grant(self):
         event = self.own_account_event()
-        self.assert_custody_denial({**event, 'agent_type': 'ship:writer--sol'}, ultraship.ACCOUNT_CUSTODY)
+        self.assert_custody_denial({**event, 'agent_type': 'ship:writer--sol'})
         with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
             self.consume(self.account_words)
         with patch.object(ultraship, 'pre', side_effect=RuntimeError):
@@ -606,6 +637,21 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=invalid):
                 self.assert_custody_denial({**driver, 'tool_input': {'command': shlex.join(invalid)}})
         self.assert_custody_denial({**driver, 'agent_type': 'ship:writer--sol', 'tool_input': {'command': command}})
+
+    def test_correct_binding_requires_exact_own_command(self):
+        event = {'session_id': 's1', 'tool_name': 'Bash'}
+        self.enterContext(patch.object(ultraship, 'STATE', self.state / 'ultraship'))
+        words = ['python3', str(LEDGER), 'correct-binding', str(self.prepare_owed(event)),
+                 '12345678-1234-1234-1234-123456789abc', '12', 'review row']
+        command = shlex.join(words)
+        self.assert_account_command_allowed(command, session_id=event['session_id'])
+        self.consume(words)
+        for invalid in (command + ' && echo done', command.replace('s1.tsv', 'other.tsv'),
+                        shlex.join([*words[:3], *words[4:]])):
+            with self.subTest(command=invalid):
+                self.assert_custody_denial({**event, 'tool_input': {'command': invalid}}, ultraship.ACCOUNT_CUSTODY)
+        self.assert_custody_denial({**event, 'agent_type': 'ship:writer--sol',
+                                   'tool_input': {'command': command}}, ultraship.ACCOUNT_CUSTODY)
 
     def test_account_auto_line_continuations_require_raw_driver_call(self):
         event = self.own_account_event()

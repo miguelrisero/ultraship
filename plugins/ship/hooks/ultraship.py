@@ -4763,6 +4763,12 @@ def own_account_call(data, raw):
     pending = str(owed_file(data))
     if words[2] == 'account-auto':
         return words if words[3:] in ([pending], ['--fail-unparsed', pending]) else False
+    if words[2] == 'correct-binding':
+        if (len(words) == 7 and words[3] == pending
+                and re.fullmatch(r'(?:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}|legacy:[0-9a-f]{64})', words[4])
+                and re.fullmatch(r'[1-9][0-9]*', words[5]) and words[6].strip()):
+            return words
+        return False
     if len(words) != 10 or words[2] != 'account' or words[3] != pending:
         return False
     result, step, agent, sha, verdict, evidence = words[4:]
@@ -4811,14 +4817,14 @@ def receipt_custody(data, read_search=False):
         return (any(path in value for path in receipt_paths)
                 or any('ultraship/' + folder in value for folder in ('text-lint', 'account-grants')))
 
-    def receipt_path(value, ancestors=False, state_only=False):
+    def receipt_path(value, ancestors=False, state_only=False, stores=receipt_paths):
         if not isinstance(value, str) or not value:
             return False
         return any(candidate == store or candidate.startswith(store + '/')
                    or (ancestors and store.startswith(candidate.rstrip('/') + '/')
                        and (not state_only or any(candidate == root or candidate.startswith(root + '/')
                                                   for root in state_paths)))
-                   for candidate in resolved(value) for store in receipt_paths)
+                   for candidate in resolved(value) for store in stores)
 
     def strings(value):
         if isinstance(value, str):
@@ -4882,7 +4888,7 @@ def receipt_custody(data, read_search=False):
                             saw_ledger = False
                             continue
                         if saw_ledger and (raw_word in {'(', '`'} or word.casefold().startswith('account')
-                                           or unresolved_shell_word(raw_word)):
+                                           or word.casefold() == 'correct-binding' or unresolved_shell_word(raw_word)):
                             return True
                         if raw_word in {'(', ')', '`'}:
                             continue
@@ -4929,14 +4935,15 @@ def receipt_custody(data, read_search=False):
                     tokens = shell_raw_words(text)
                     if nested_work_exceeded(tokens, seen):
                         return 'ultraship' in command or 'account-grants' in command
-                    for _, word, _, _ in tokens:
-                        if (any(candidate == store or candidate.startswith(store + '/')
-                                for candidate in resolved(word) for store in grant_paths)
+                    executable = list(shell_without_redirections(tokens))
+                    for index, (_, word, _, _) in enumerate(executable):
+                        if (receipt_path(word, ancestors=True, state_only=True, stores=grant_paths)
                                 or (any(char in word for char in '*?[') and glob_prefix(word))):
                             return True
-                        path = Path(cwd) / Path(word).expanduser()
-                        if path.name == installed_hook.name or path.is_symlink():
-                            if path.resolve() == installed_hook:
+                        if index + 1 < len(executable) and executable[index + 1][1] == 'pre':
+                            path = Path(cwd) / Path(word).expanduser()
+                            if (path.name == installed_hook.name or path.resolve() == installed_hook
+                                    or word in ('ultraship', 'plugins.ship.hooks.ultraship')):
                                 return True
                     pending.extend(token[1] for token in nested_shell_strings(tokens, text))
                 except (OSError, RuntimeError, ValueError):
@@ -4964,7 +4971,8 @@ def receipt_custody(data, read_search=False):
                          ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
                 or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
             deny(RECEIPT_CUSTODY)
-        if ('account' in account_command and not own_account_call(data, raw)
+        if (('account' in account_command or 'correct-binding' in account_command)
+                and not own_account_call(data, raw)
                 and ('claude_code_session_id' in account_command or names_ledger())):
             deny(ACCOUNT_CUSTODY)
 
