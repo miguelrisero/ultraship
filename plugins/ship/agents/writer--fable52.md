@@ -271,8 +271,9 @@ Report available identity evidence and unknown fields honestly when diagnosing a
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
 This [decision-defect rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) applies only to your own refusal or a refusal from the row re-anchor tool.
 The sole stated cause must be a defect in a CoC decision.
-The refused action must have stopped before execution, with zero bytes written and zero commits.
-For protected writes, this rule covers only attempts to use the row re-anchor tool.
+The refusal must come before the refused action writes anything, with zero bytes written and zero commits.
+For protected writes, this rule covers only row re-anchor tool attempts.
+It covers your refusal before the run and the tool's refusal during the run.
 The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.
 A digest, extent or other binding without an exact definition in the decision counts as a missing field or an internal contradiction.
 Quote the refusal and the defect to your driver.
