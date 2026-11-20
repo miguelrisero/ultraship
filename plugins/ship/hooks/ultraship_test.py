@@ -700,6 +700,16 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
         self.consume(words)
 
+    def test_grant_custody_admits_ordinary_calls_when_the_account_has_no_passwd_entry(self):
+        with patch.object(ultraship.pwd, 'getpwuid', side_effect=KeyError('getpwuid(): uid not found')):
+            self.assert_account_command_allowed('ls *.py', caller='')
+            self.assert_account_command_allowed('ls *.py')
+            with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+                ultraship.guarded_pre({'cwd': str(self.cwd), 'agent_type': '', 'tool_name': 'Read',
+                                       'tool_input': {'file_path': str(self.cwd / 'file.py')}})
+            self.assertEqual(output.getvalue(), '')
+            self.assert_custody_denial({'tool_name': 'Read', 'tool_input': {'file_path': str(self.store / 'key')}})
+
     def test_grant_custody_admits_literal_indexed_array_assignment(self):
         self.assert_account_command_allowed('items=([0]=alpha [1]=beta)', caller='ship:writer--sol')
 

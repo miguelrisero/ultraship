@@ -4822,10 +4822,14 @@ def receipt_custody(data, read_search=False):
         path = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(value))
         return {normalized(os.path.abspath(path)), normalized(os.path.realpath(path))}
 
-    account_state = Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state'
-    grant_paths = {normalized(str(account_state / 'ultraship/account-grants'))}
+    try:
+        account_state = Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state'
+    except KeyError:
+        # No passwd entry means the ledger cannot name a grant store, so no grant exists to guard.
+        account_state = None
+    grant_paths = {normalized(str(account_state / 'ultraship/account-grants'))} if account_state else set()
     receipt_paths = resolved(str(receipt_store)) | grant_paths
-    state_paths = resolved(str(state_root)) | {normalized(str(account_state))}
+    state_paths = resolved(str(state_root)) | ({normalized(str(account_state))} if account_state else set())
 
     def receipt_text(value):
         value = normalized(value)
