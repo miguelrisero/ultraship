@@ -135,6 +135,10 @@ PY"""
             'status=$(git -C "$worktree" status --porcelain); status=$1; $status',
             'status=$(git -C "$worktree" status --porcelain); read status; bash -c "$status"',
             'other=$(git -C "$worktree" status --porcelain); $status',
+            'status=$(git -C "$worktree" status --porcelain); status=$(git -C "$worktree" status); $status',
+            ': "${status:=$1}"; status=$(git -C "$worktree" status --porcelain); $status',
+            '$status; status=$(git -C "$worktree" status --porcelain); "$status"',
+            'status=$(git -C "$worktree" status --porcelain); printf -v status %s "$1"; $status',
         ):
             with self.subTest(command=command):
                 result = self.admission(command)

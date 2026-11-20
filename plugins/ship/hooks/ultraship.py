@@ -4989,11 +4989,15 @@ def receipt_custody(data, read_search=False):
             # Main admits running a value bound once to plain `git rev-parse` or `git status` output.
             git_value = re.compile(r'(?<![\w$])(\w+)=\$\(\s*(?:GIT_OPTIONAL_LOCKS=0\s+)?git'
                                    r'(?:\s+-C\s+(?:"\$\{?\w+\}?"|[\w./-]+))?\s+(?:rev-parse|status)(?:\s+[\w-]+)*\s*\)')
-            git_names = git_value.findall(joined)
-            unbound_text = git_value.sub(' ', joined)
-            # Any other bare use of the name (a second assignment, `read`, `for`) drops the exception.
-            git_bound = {name for name in git_names if git_names.count(name) == 1
-                         and not re.search(rf'(?<![\w${{]){name}(?!\w)', unbound_text)}
+            git_bound = set()
+            for binding in git_value.finditer(joined):
+                name, later = binding[1], binding.start() + 1
+                rest = joined[:binding.start()] + ' ' + joined[binding.end():]
+                # Only `$name` or `${name}` after the binding keeps the exception; any other use drops it.
+                rest = re.sub(rf'\$(?:{name}(?!\w)|\{{{name}\}})',
+                              lambda use: ' ' if use.start() >= later else use[0], rest)
+                if not re.search(rf'(?<!\w){name}(?!\w)', rest):
+                    git_bound.add(name)
 
             def unresolved_program(raw_word, word, *, code=False):
                 if raw_word in {'[', '[[', '{', '}'} or not unresolved_shell_word(raw_word):
