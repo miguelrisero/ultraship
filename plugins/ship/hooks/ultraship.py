@@ -4874,11 +4874,61 @@ def receipt_custody(data, read_search=False):
     # shortcut: shell text checks cannot isolate same-user code; upgrade to isolated state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
-        command = normalized(raw)
         joined = raw.replace('\\\n', '')
         account_command = normalized(joined)
+        literal = r'''(?:'[^'\x00\r\n]*'|"[^"$`\\!\x00\r\n]*")'''
+        display = re.fullmatch(
+            r"[ \t]*(?:echo|printf[ \t]+'%s\\n')[ \t]+("
+            + literal + r'(?:[ \t]+' + literal + r')*)'
+            r'(?:[ \t]+>>?[ \t]+[A-Za-z0-9_./-]+)?[ \t]*\n?', raw)
+        state_display = re.fullmatch(
+            r'''[ \t]*printf[ \t]+'%s\\n'[ \t]+("\$\{XDG_STATE_HOME:-\$HOME/\.local/state\}")[ \t]*\n?''', raw)
+        cache_search = re.fullmatch(r'[ \t]*grep[ \t]+-rl[ \t]+(' + literal
+                                    + r')[ \t]+(~/.claude/plugins/cache/\*/\*/\*/)[ \t]*\n?', raw)
+        cache_listing = re.fullmatch(
+            r'[ \t]*ls[ \t]+-d[ \t]+(~/.claude/plugins/cache/ultraship/ship/\*)[ \t]*\n?', raw)
+
+        def safe_cache_operands(pattern, depth, directories_only):
+            # Inspect only shell glob operands. grep -r does not follow symlinks inside those directories.
+            root = Path(pattern.split('/*', 1)[0]).expanduser()
+            if receipt_path(str(root), ancestors=True):
+                return False
+            pending, inspected = [(root, depth)], 0
+            while pending:
+                directory, remaining = pending.pop()
+                try:
+                    with os.scandir(directory) as entries:
+                        for entry in entries:
+                            inspected += 1
+                            if inspected > 4096:
+                                return False
+                            if entry.is_symlink():
+                                return False
+                            is_dir = entry.is_dir(follow_symlinks=False)
+                            if (remaining > 1 or directories_only) and not is_dir:
+                                continue
+                            if receipt_path(entry.path, ancestors=True):
+                                return False
+                            if remaining > 1:
+                                pending.append((Path(entry.path), remaining - 1))
+                except (FileNotFoundError, NotADirectoryError):
+                    continue
+                except OSError:
+                    return False
+            return True
+
+        if cache_search and cache_search[1][1:].startswith('-'):
+            cache_search = None
+        if ((cache_search and not safe_cache_operands(cache_search[2], 3, True))
+                or (cache_listing and not safe_cache_operands(cache_listing[1], 1, False))):
+            deny(RECEIPT_CUSTODY)
+        data_match = display or state_display or cache_search
+        # Search patterns and printed values are data. Leave the output path and other custody checks intact.
+        path_command = (raw[:data_match.start(1)] + "'data'" + raw[data_match.end(1):]
+                        if data_match else raw)
+        command = normalized(path_command)
         raw_words = [word.translate(str.maketrans('', '', "\"'\\"))
-                     for word in re.split(r'[\s;&|<>()]+', raw) if word]
+                     for word in re.split(r'[\s;&|<>()]+', path_command) if word]
         words = [re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
                         lambda match: os.environ.get(match[1] or match[2], ''), word)
                  for word in raw_words]
@@ -5119,7 +5169,9 @@ def receipt_custody(data, read_search=False):
                     first == 'df' or read_only_git(words, [raw for raw, _, _, _ in parts], ending))
 
             comment = pr_comment_body_removed(raw)
-            pending, seen = [joined if comment == raw else comment], set()
+            custody_source = path_command if data_match else joined if comment == raw else comment
+            cache_operand = cache_search[2] if cache_search else cache_listing[1] if cache_listing else None
+            pending, seen = [custody_source], set()
             try:
                 while pending:
                     source = pending.pop()
@@ -5209,7 +5261,8 @@ def receipt_custody(data, read_search=False):
                                     or (modifies_paths and installed_hook in resolved(path))
                                     or (index != evidence_index and (
                                         (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', path))
-                                        or expands_to_hook(raw_word + backtick, path + backtick)))):
+                                        or (raw_word != cache_operand
+                                            and expands_to_hook(raw_word + backtick, path + backtick))))):
                                 return True
                     # An unresolved word after a search pattern is search data; resolved nested code keeps its scan.
                     data_starts = {token[2] for index, token in enumerate(tokens) if grep_data_token(tokens, index)}
@@ -5219,7 +5272,7 @@ def receipt_custody(data, read_search=False):
                 return True
             return False
 
-        if (receipt_text(raw)
+        if (receipt_text(path_command)
                 or ('ledger.py' in account_command and 'account-auto' in account_command
                     and not own_account_call(data, raw))
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)

@@ -1204,6 +1204,42 @@ class ReceiptCustodyTests(unittest.TestCase):
                              'tool_input': {'command': command}}))
                     self.assertEqual(output.getvalue(), '')
 
+    def test_scratch_append_with_custody_message(self):
+        self.assert_account_command_allowed(
+            f"echo {shlex.quote(ultraship.RECEIPT_CUSTODY)} >> .scratch/coc/state-owed.md", caller='')
+
+    def test_cache_search_with_custody_pattern(self):
+        (Path.home() / '.claude/plugins/cache/ultraship/ship/1.15.20/hooks').mkdir(parents=True)
+        self.assert_account_command_allowed(
+            f'grep -rl "{ultraship.RECEIPT_CUSTODY}" ~/.claude/plugins/cache/*/*/*/', caller='')
+
+    def test_cache_globs_refuse_a_protected_alias(self):
+        cache = Path.home() / '.claude/plugins/cache/ultraship/ship'
+        cache.mkdir(parents=True)
+        self.store.mkdir(parents=True)
+        (cache / '1.15.20').symlink_to(self.store, target_is_directory=True)
+        for command in (f'grep -rl "{ultraship.RECEIPT_CUSTODY}" ~/.claude/plugins/cache/*/*/*/',
+                        'ls -d ~/.claude/plugins/cache/ultraship/ship/*'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_printf_with_custody_message(self):
+        self.assert_account_command_allowed(
+            f"printf '%s\\n' {shlex.quote(ultraship.RECEIPT_CUSTODY)}", caller='')
+
+    def test_list_ship_cache_versions(self):
+        installed = Path.home() / '.claude/plugins/cache/ultraship/ship/1.15.20/hooks/ultraship.py'
+        with patch.object(ultraship, '__file__', str(installed)):
+            self.assert_account_command_allowed('ls -d ~/.claude/plugins/cache/ultraship/ship/*', caller='')
+
+    def test_print_state_root(self):
+        self.assert_account_command_allowed("printf '%s\\n' \"${XDG_STATE_HOME:-$HOME/.local/state}\"", caller='')
+
+    def test_custody_message_cannot_be_written_to_receipt(self):
+        target = self.store / 'receipts' / ('a' * 32 + '.json')
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': f"printf '%s\\n' {shlex.quote(ultraship.RECEIPT_CUSTODY)} > {shlex.quote(str(target))}"}})
+
     def test_text_lint_execution_and_nonplain_grep_deny_every_caller(self):
         script = str(self.cwd / 'text_lint.py')
         hook_command = 'python3 ' + script + ' hook'
