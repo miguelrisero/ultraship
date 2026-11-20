@@ -717,6 +717,34 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_account_command_allowed(command, caller='ship:writer--sol')
 
+    def test_grant_custody_allows_literal_search_chain_with_hook_name(self):
+        self.assert_account_command_allowed(
+            "cd /repo && find . -name README.md && grep -n 'def pre' plugins/ship/hooks/ultraship.py && ls .")
+
+    def test_grant_custody_allows_path_prefix_above_home(self):
+        home = Path.home()
+        command = f'echo {shlex.quote(str(home.parent))}/$(date)'
+        with patch.object(ultraship, '__file__', str(home / 'plugin/hooks/ultraship.py')):
+            self.assert_account_command_allowed(command)
+
+    def test_grant_custody_allows_complete_brace_group_and_literal_shell_code(self):
+        for command in ('{ echo a; echo b; }', "bash -c 'label=sample; echo \"$label\"'"):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command)
+
+    def test_grant_custody_treats_program_running_reader_options_as_writes(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for command in (f'rg --pre=cat text {ancestor}', f'rg --pre-glob=*.txt text {ancestor}',
+                        f'sort --compress-program=cat {ancestor}'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_checks_interpreter_operands_after_value_options(self):
+        for command in ('bash -o pipefail -c "$BODY"', 'uv run --with sample "$SCRIPT"',
+                        'bash --unknown-option sample.sh', 'uv run --unknown-option sample.py'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
     def test_stop_account_diagnostic_admits_quoted_paths(self):
         event = self.own_account_event()
         home = Path(os.environ['HOME']) / 'home with text'

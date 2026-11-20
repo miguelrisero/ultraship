@@ -4964,6 +4964,7 @@ def receipt_custody(data, read_search=False):
             hook = Path(__file__).resolve()
             installed_hook = normalized(str(hook))
             hook_folder = normalized(str(hook.parent))
+            home_prefix = normalized(str(Path.home())).rstrip('/') + '/'
             hook_name = re.compile(r'(?<![\w-])ultraship\.py(?![\w.-])|\b(?:issue_account_grant|_issue_grant)\b')
             module_name = r'(?:\w+\.)*ultraship'
             module_reference = re.compile(rf"\b(?:import|from)\s+(?:\(\s*)?{module_name}\b|['\"]{module_name}['\"]")
@@ -4971,6 +4972,7 @@ def receipt_custody(data, read_search=False):
                          'stat', 'wc', 'file', 'cd', 'pushd', 'popd', 'pwd', 'echo', 'printf', 'test', '[',
                          'true', 'false', 'realpath', 'readlink', 'basename', 'dirname', 'sort', 'uniq', 'cut', 'tr'}
             find_actions = {'-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'}
+            program_options = {'rg': {'--pre', '--pre-glob'}, 'sort': {'--compress-program'}, 'find': find_actions}
 
             def expands_to_hook(raw_word, word):
                 if not unresolved_shell_word(raw_word):
@@ -4979,14 +4981,67 @@ def receipt_custody(data, read_search=False):
                 if len(literal) == 1:
                     return False
                 prefix = literal[0]
-                return (bool(prefix) and any(installed_hook.startswith(path) or hook_folder.startswith(path)
+                return (bool(prefix) and any(path.startswith(home_prefix)
+                                             and (installed_hook.startswith(path) or hook_folder.startswith(path))
                                              for path in resolved(prefix))
                         or any('ultraship' in part or 'hooks' in part for part in literal))
 
             def unresolved_program(raw_word, word, *, code=False):
-                if word in {'[', '[['} or not unresolved_shell_word(raw_word):
+                if raw_word in {'[', '[[', '{', '}'} or not unresolved_shell_word(raw_word):
                     return False
                 return code or any(char in os.path.basename(raw_word) for char in '$`*?[{')
+
+            def program_operand(base, interpreter, arguments):
+                if arguments[:1] in (['--version'], ['--help']):
+                    return 'none', len(arguments), 0
+                if interpreter in {'python', 'pypy', 'pypy3'}:
+                    kind, _, operand, offset = python_program(arguments)
+                    return kind, operand, offset
+                runner = base in {'uv', 'uvx'}
+                if runner:
+                    value_options = {'--directory', '--project', '--with', '--with-editable', '--with-requirements',
+                                     '--python', '-p', '--env-file', '--config-file', '--cache-dir', '--from'}
+                    switches = {'--frozen', '--locked', '--no-sync', '--isolated', '--script', '-s', '--quiet',
+                                '-q', '--verbose', '-v', '--offline', '--no-project', '--no-config'}
+                elif base in SHELL_INTERPRETERS:
+                    value_options = {'-o', '-O', '--rcfile', '--init-file'}
+                    switches = {'--noprofile', '--norc', '--posix', '--restricted', '--login', '--verbose'}
+                else:
+                    value_options, switches = set(), set()
+                cursor = 0
+                while cursor < len(arguments):
+                    option = arguments[cursor]
+                    if runner and base == 'uv' and option == 'run':
+                        cursor += 1
+                        continue
+                    if option == '--':
+                        return 'script', cursor + 1, 0
+                    if option == '-' or not option.startswith('-'):
+                        if interpreter and option in INLINE_INTERPRETERS[interpreter][2]:
+                            return 'c', cursor + 1, 0
+                        return 'script', cursor, 0
+                    flag, equals, _ = option.partition('=')
+                    if flag in value_options:
+                        cursor += 1 if equals else 2
+                        if cursor > len(arguments):
+                            return 'unknown', cursor, 0
+                        continue
+                    if option in switches:
+                        cursor += 1
+                        continue
+                    if base in SHELL_INTERPRETERS and re.fullmatch(r'-[abefhiklmnprtuvxBCEHPTc]+', option):
+                        if 'c' in option:
+                            return 'c', cursor + 1, 0
+                        cursor += 1
+                        continue
+                    if interpreter:
+                        short, long, _ = INLINE_INTERPRETERS[interpreter]
+                        if flag in long:
+                            return ('c', cursor, len(flag) + 1) if equals else ('c', cursor + 1, 0)
+                        if len(option) >= 2 and option[1] in short:
+                            return ('c', cursor, 2) if len(option) > 2 else ('c', cursor + 1, 0)
+                    return 'unknown', cursor, 0
+                return 'stdin', cursor, 0
 
             pending, seen = [joined], set()
             try:
@@ -5007,16 +5062,18 @@ def receipt_custody(data, read_search=False):
                                              and not (os.path.basename(word) == 'gh' and index + 1 < len(executable)
                                                       and executable[index + 1][1] == 'api')
                                              for index, (_, word, start, _) in enumerate(executable) if start in positions)
-                                      or ('find' in commands and any(word in find_actions for _, word, _, _ in tokens)))
+                                      or any(word.partition('=')[0] in program_options.get(command, ())
+                                             for command in commands for _, word, _, _ in tokens))
                     account_words = own_account_call(data, raw) if source == raw else False
                     if not account_words and any(unresolved_program(raw_word, word)
                                                  for raw_word, word, start, _ in executable if start in positions):
                         return True
                     evidence_index = len(tokens) - 1 if account_words and account_words[2] != 'account-auto' else -1
                     name_source = source[:tokens[evidence_index][2]] if evidence_index >= 0 else source
-                    plain_source = not modifies_paths or (source == text and plain_hook_source_command(source, tokens))
+                    plain_source = source == text and plain_hook_source_command(source, tokens)
                     if not plain_source:
-                        if hook_name.search(normalized(name_source)) or module_reference.search(name_source):
+                        if ((hook_name.search(normalized(name_source)) and not literal_search_shell(source))
+                                or module_reference.search(name_source)):
                             return True
                         names = executable if evidence_index < 0 else executable[:evidence_index]
                         for index, (_, name, _, _) in enumerate(names):
@@ -5024,29 +5081,19 @@ def receipt_custody(data, read_search=False):
                             base = os.path.basename(name)
                             if not interpreter and base not in SHELL_INTERPRETERS | {'uv', 'uvx'}:
                                 continue
+                            if grep_data_token(names, index):
+                                continue
                             arguments = names[index + 1:]
-                            if interpreter in {'python', 'pypy', 'pypy3'}:
-                                kind, _, operand, offset = python_program([token[1] for token in arguments])
-                            else:
-                                kind, operand, offset = 'script', 0, 0
-                                if base == 'uv' and arguments and arguments[0][1] == 'run':
-                                    operand = 1
-                                while operand < len(arguments) and arguments[operand][1].startswith('-'):
-                                    option = arguments[operand][1]
-                                    operand += 1
-                                    if option == '--':
-                                        break
-                                    if base in SHELL_INTERPRETERS and re.fullmatch(r'-[a-zA-Z]*c[a-zA-Z]*', option):
-                                        kind = 'c'
-                                        break
-                                    if interpreter and (code_option(option) or option in INLINE_INTERPRETERS[interpreter][1]):
-                                        kind = 'c'
-                                        break
+                            kind, operand, offset = program_operand(base, interpreter, [token[1] for token in arguments])
+                            if kind == 'unknown':
+                                return True
                             if operand >= len(arguments):
                                 continue
                             arg_raw, arg, _, _ = arguments[operand]
                             if kind == 'm' and re.fullmatch(module_name, arg[offset:]):
                                 return True
+                            if kind == 'c' and base in SHELL_INTERPRETERS and re.fullmatch("'[^']*'", arg_raw):
+                                continue
                             if not account_words and unresolved_program(arg_raw, arg, code=kind == 'c'):
                                 return True
                     for index, (raw_word, word, _, end) in enumerate(tokens):
