@@ -78,11 +78,33 @@ class WriterDeniedProcessTests(unittest.TestCase):
                     self.assertIn('Ask your coordinator for permission at any time. ' + rule, joined)
 
     def test_decision_defect_rule_limits_refusal_resolution(self):
+        sole_cause = 'The sole stated cause must be a defect in a CoC decision.'
+        zero_writes = 'The refusal must come before the refused action writes anything, with zero bytes written and zero commits.'
+        protected_writes = (
+            'For protected writes, this rule covers only row re-anchor tool attempts and native-Edit attempts '
+            'on a CoC-approved row that a frozen CoC decision file binds.'
+        )
+        pre_edit_refusal = (
+            'For native Edit, this rule covers only your own refusal before the Edit call '
+            "on the lane-owned row route's CoC-approved path."
+        )
+        freeze_decision = 'Wait for the CoC to freeze the corrected decision.'
+        verify_decision = (
+            'Before the next attempt, verify the corrected decision in full and compare its actor, action, target and scope '
+            "with the defective decision's grant."
+        )
+        native_edit_retry = (
+            'Then the refused native-Edit attempt counts as zero attempts, and the writer gets one new native-Edit attempt '
+            'under the corrected decision.'
+        )
+        already_wrote = 'It lifts no refusal of a protected write that already wrote bytes or made a commit.'
+        unbound_write = 'It lifts no refusal of a protected write that no frozen CoC decision file binds.'
         eligibility = (
-            'The sole stated cause must be a defect in a CoC decision.',
-            'The refusal must come before the refused action writes anything, with zero bytes written and zero commits.',
-            'For protected writes, this rule covers only row re-anchor tool attempts.',
-            "It covers your refusal before the run and the tool's refusal during the run.",
+            sole_cause,
+            zero_writes,
+            protected_writes,
+            "For the row re-anchor tool, it covers your refusal before the run and the tool's refusal during the run.",
+            pre_edit_refusal,
             'The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction.',
             'A digest, extent or other binding without an exact definition in the decision counts as a missing field or an internal contradiction.',
         )
@@ -91,17 +113,29 @@ class WriterDeniedProcessTests(unittest.TestCase):
             'Require the corrected decision to quote the refusal verbatim, name the defective decision by path and SHA256, '
             'and name the defect it corrects.',
             'A corrected decision grants nothing beyond what the defective decision grants and changes only the defective fields.',
-            'Wait for the CoC to freeze the corrected decision.',
-            'Before the next attempt, verify the corrected decision in full and compare its actor, action, target and scope '
-            "with the defective decision's grant.",
+            freeze_decision,
+            verify_decision,
             'Keep the refusal pending when that comparison is inconclusive or shows a wider grant.',
             'Then the refused row-tool attempt counts as zero runs, and the writer gets one new attempt under the corrected decision.',
             'The driver re-dispatches that attempt with a fresh admission record.',
+            native_edit_retry,
+            'For native Edit, the driver verifies the corrected decision again at the frozen head.',
+            'The driver records the result in the reviewer brief.',
             'Follow every other route requirement, including the independent review.',
             'This rule lifts no hook, permission or owner refusal, and no security, secret or production gate.',
-            'It lifts no refusal of a push or a merge, no tool refusal with any other cause, and no protected write that already ran.',
+            'It lifts no refusal of a push or a merge, and no tool refusal with any other cause.',
+            already_wrote,
+            unbound_write,
             "Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal with any other cause.",
         )
+        with self.subTest(case='one native-Edit retry under a corrected frozen decision'):
+            self.check((*WRITER_FILES, REFERENCE_FILE), (
+                sole_cause, zero_writes, protected_writes, pre_edit_refusal, freeze_decision, verify_decision, native_edit_retry,
+            ))
+        with self.subTest(case='the attempt already wrote bytes'):
+            self.check((*WRITER_FILES, REFERENCE_FILE), (zero_writes, already_wrote))
+        with self.subTest(case='no frozen CoC decision file binds the row'):
+            self.check((*WRITER_FILES, REFERENCE_FILE), (protected_writes, unbound_write))
         reference = ' '.join((
             "Decision-defect rule: it applies only to an agent's own refusal or a refusal from the row re-anchor tool.",
             *eligibility,
