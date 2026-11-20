@@ -4957,6 +4957,10 @@ def receipt_custody(data, read_search=False):
             module_name = r'(?:\w+\.)*ultraship'
             module_reference = re.compile(rf"\b(?:import|from)\s+(?:\(\s*)?{module_name}\b|['\"]{module_name}['\"]")
             interpreter_names = SHELL_INTERPRETERS | {'uv', 'uvx'}
+            read_only = {'ls', 'cat', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'find', 'du', 'df',
+                         'stat', 'wc', 'file', 'cd', 'pushd', 'popd', 'pwd', 'echo', 'printf', 'test', '[',
+                         'true', 'false', 'realpath', 'readlink', 'basename', 'dirname', 'sort', 'uniq', 'cut', 'tr'}
+            find_actions = {'-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprintf', '-fls'}
 
             def expands_to_hook(raw_word, word):
                 if not unresolved_shell_word(raw_word):
@@ -4981,9 +4985,9 @@ def receipt_custody(data, read_search=False):
                     if nested_work_exceeded(tokens, seen):
                         return True
                     positions = shell_command_positions(tokens)
-                    modifies_paths = any(
-                        token[0] == '>' or os.path.basename(token[1]) in {'cp', 'mv', 'rm', 'rmdir', 'unlink', '-delete'}
-                        for token in tokens)
+                    commands = {os.path.basename(word) for _, word, start, _ in tokens if start in positions}
+                    modifies_paths = (not commands <= read_only or any(raw_word == '>' for raw_word, _, _, _ in tokens)
+                                      or ('find' in commands and any(word in find_actions for _, word, _, _ in tokens)))
                     unresolved = {start for raw_word, _, start, _ in tokens if unresolved_shell_word(raw_word)}
                     if unresolved and (unresolved & positions or any(
                             interpreter_name(word) or os.path.basename(word) in interpreter_names

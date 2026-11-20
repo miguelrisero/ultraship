@@ -578,7 +578,10 @@ class ReceiptCustodyTests(unittest.TestCase):
         for target in (store, store.parent.parent.parent):
             path = shlex.quote(str(target))
             for command in (f'rm -rf {path}', f'mv {path} saved', f'cp -r fixture {path}',
-                            f'printf data > {path}', f'find {path} -delete'):
+                            f'printf data > {path}', f'printf data >> {path}', f'find {path} -delete',
+                            f'find {path} -fprint output', f'rsync -a --delete empty/ {path}/',
+                            f'tar -xf fixture.tar -C {path}', f'printf fixture | xargs rm {path}',
+                            f"python3 -c 'pass' {path}"):
                 with self.subTest(command=command):
                     self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
             for tool in ('Edit', 'Write'):
@@ -668,7 +671,8 @@ class ReceiptCustodyTests(unittest.TestCase):
 
     def test_grant_custody_allows_ordinary_shell_and_exact_stop_commands(self):
         event = self.own_account_event()
-        for command in ('ls *.py', f'cd {shlex.quote(str(self.cwd))} && git status',
+        for command in ('ls *.py', 'df -h /', 'ls ~', 'find / -name x',
+                        f'cd {shlex.quote(str(self.cwd))} && git status',
                         f'cd {shlex.quote(str(self.cwd))} && uv run pytest'):
             with self.subTest(command=command):
                 self.assert_account_command_allowed(command, caller='')
