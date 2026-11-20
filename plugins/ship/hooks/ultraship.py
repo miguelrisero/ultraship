@@ -4986,8 +4986,20 @@ def receipt_custody(data, read_search=False):
                                              for path in resolved(prefix))
                         or any('ultraship' in part or 'hooks' in part for part in literal))
 
+            # Main admits running a value bound once to plain `git rev-parse` or `git status` output.
+            git_value = re.compile(r'(?<![\w$])(\w+)=\$\(\s*(?:GIT_OPTIONAL_LOCKS=0\s+)?git'
+                                   r'(?:\s+-C\s+(?:"\$\{?\w+\}?"|[\w./-]+))?\s+(?:rev-parse|status)(?:\s+[\w-]+)*\s*\)')
+            git_names = git_value.findall(joined)
+            unbound_text = git_value.sub(' ', joined)
+            # Any other bare use of the name (a second assignment, `read`, `for`) drops the exception.
+            git_bound = {name for name in git_names if git_names.count(name) == 1
+                         and not re.search(rf'(?<![\w${{]){name}(?!\w)', unbound_text)}
+
             def unresolved_program(raw_word, word, *, code=False):
                 if raw_word in {'[', '[[', '{', '}'} or not unresolved_shell_word(raw_word):
+                    return False
+                bound = re.fullmatch(r'"?\$(?:(\w+)|\{(\w+)\})"?', raw_word)
+                if bound and (bound[1] or bound[2]) in git_bound:
                     return False
                 return code or any(char in os.path.basename(raw_word) for char in '$`*?[{')
 

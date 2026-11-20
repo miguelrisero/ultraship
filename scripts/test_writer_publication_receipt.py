@@ -127,6 +127,19 @@ PY"""
                 self.assertNotEqual(self.admission(literal).get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
                 self.assertNotEqual(self.admission(command).get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
 
+    def test_running_a_value_needs_one_plain_git_read_binding(self):
+        for command in (
+            'status=$(git -C "$worktree" config core.pager); $status',
+            'status=$(git -C "$worktree" config core.pager); eval "$status"',
+            'status=$(git -C "$worktree" status --porcelain | sh); "$status"',
+            'status=$(git -C "$worktree" status --porcelain); status=$1; $status',
+            'status=$(git -C "$worktree" status --porcelain); read status; bash -c "$status"',
+            'other=$(git -C "$worktree" status --porcelain); $status',
+        ):
+            with self.subTest(command=command):
+                result = self.admission(command)
+                self.assertEqual(result.get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
+
     def test_unsupported_assignment_context_preserves_original_refusal(self):
         for command in (
             '''echo "$(head=$(git -C "$worktree" rev-parse HEAD))"''',
