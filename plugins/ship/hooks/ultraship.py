@@ -4922,32 +4922,58 @@ def receipt_custody(data, read_search=False):
                         return True
             return False
 
+        def plain_hook_source_command(text, tokens):
+            if literal_search_shell(text) and text.split()[0] == 'grep' and '&&' not in text.split():
+                return True
+            if tokens and tokens[-1][0] == '\n':
+                tokens = tokens[:-1]
+            if any(token[0] in {';', '&', '|', '(', ')', '<', '>', '`', '\n'} or unresolved_shell_word(token[0])
+                   for token in tokens):
+                return False
+            words = [token[1] for token in tokens]
+            if not words:
+                return False
+            if words[0] == 'diff':
+                return all(not word.startswith('-') or word in ('--', '-u', '-U0') for word in words[1:])
+            if words[:2] == ['git', '-C']:
+                words = ['git', *words[3:]]
+            return (words[:2] in (['git', 'add'], ['git', 'diff'], ['git', 'show'], ['git', 'status'])
+                    and all(not word.startswith('-') or word in (
+                        '--', '--cached', '--staged', '--check', '--stat', '--numstat', '--name-only',
+                        '--name-status', '--no-ext-diff', '--no-textconv', '--short', '-U0', '--unified=0')
+                            for word in words[2:]))
+
         def grant_access():
-            installed_hook = Path(__file__).resolve()
-            cwd = data.get('cwd') or os.getcwd()
+            installed_hook = normalized(str(Path(__file__).resolve()))
+            hook_name = re.compile(r'(?<![\w-])ultraship\.py(?![\w.-])|\b(?:issue_account_grant|_issue_grant)\b')
+            module_name = r'(?:\w+\.)*ultraship'
+            module_reference = re.compile(rf"\b(?:import|from)\s+(?:\(\s*)?{module_name}\b|['\"]{module_name}['\"]")
+            mentions_custody = any(name in account_command for name in (
+                'ultraship', 'account-grants', 'issue_account_grant', '_issue_grant'))
             pending, seen = [joined], set()
-            while pending:
-                text = shell_without_heredoc_bodies(pending.pop())
-                if text in seen:
-                    continue
-                seen.add(text)
-                try:
+            try:
+                while pending:
+                    source = pending.pop()
+                    if source in seen:
+                        continue
+                    seen.add(source)
+                    text = shell_without_heredoc_bodies(source)
                     tokens = shell_raw_words(text)
                     if nested_work_exceeded(tokens, seen):
-                        return 'ultraship' in command or 'account-grants' in command
-                    executable = list(shell_without_redirections(tokens))
-                    for index, (_, word, _, _) in enumerate(executable):
+                        return mentions_custody
+                    plain_source = plain_hook_source_command(source, tokens) if source == text else False
+                    if not plain_source and (hook_name.search(normalized(source)) or module_reference.search(source)):
+                        return True
+                    for _, word, _, _ in tokens:
+                        word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
                         if (receipt_path(word, ancestors=True, state_only=True, stores=grant_paths)
-                                or (any(char in word for char in '*?[') and glob_prefix(word))):
+                                or (any(char in word for char in '*?[') and glob_prefix(word))
+                                or installed_hook in resolved(word)
+                                or (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', word))):
                             return True
-                        if index + 1 < len(executable) and executable[index + 1][1] == 'pre':
-                            path = Path(cwd) / Path(word).expanduser()
-                            if (path.name == installed_hook.name or path.resolve() == installed_hook
-                                    or word in ('ultraship', 'plugins.ship.hooks.ultraship')):
-                                return True
                     pending.extend(token[1] for token in nested_shell_strings(tokens, text))
-                except (OSError, RuntimeError, ValueError):
-                    return 'ultraship.py' in command or 'account-grants' in command
+            except (OSError, RuntimeError, ValueError):
+                return mentions_custody
             return False
 
         if (receipt_text(raw) or grant_access()

@@ -558,6 +558,47 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assert_custody_denial({'tool_name': tool, 'tool_input': {key: value}})
 
+    def test_grant_custody_denies_hook_execution_forms(self):
+        installed = shlex.quote(str(HOOK))
+        relative = os.path.relpath(HOOK, self.cwd)
+        alias = self.cwd / 'named-entry'
+        alias.symlink_to(HOOK)
+        copy = self.cwd / HOOK.name
+        copy.touch()
+        for form, command in (
+                ('installed path without mode', f'python3 {installed}'),
+                ('installed path as data', f'printf %s {installed}'),
+                ('installed path as redirect', f'cat < {installed}'),
+                ('variable mode with redirect', f'python3 {installed} "$MODE" < input.json'),
+                ('relative installed path', f'python3 {shlex.quote(relative)} stop'),
+                ('alias with interpreter path', 'env /usr/bin/python3 ./named-entry stop'),
+                ('alias as a command', './named-entry'),
+                ('alias in a nested shell', "sh -c 'python3 ./named-entry stop'"),
+                ('repository file as a command', './ultraship.py'),
+                ('repository file via interpreter', '/usr/bin/python3 ./ultraship.py stop'),
+                ('pipeline into repository file', 'cat input.json | python3 ./ultraship.py stop'),
+                ('module', 'python3 -m plugins.ship.hooks.ultraship stop'),
+                ('attached module', 'python3 -multraship stop'),
+                ('inline import', 'python3 -c "import ultraship"'),
+                ('standard input import', "python3 - <<'EOF'\nfrom plugins.ship.hooks import ultraship\nEOF"),
+                ('runpy target', "python3 -c 'import runpy; runpy.run_module(\"ultraship\")'"),
+                ('import target', "python3 -c 'import importlib; importlib.import_module(\"ultraship\")'"),
+                ('issuer symbol', 'python3 -c "print(issue_account_grant)"'),
+                ('grant writer symbol', 'python3 -c "print(_issue_grant)"'),
+                ('unparsed hook reference', "echo ultraship 'unfinished"),
+        ):
+            with self.subTest(form=form):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+        with patch.object(ultraship, 'nested_work_exceeded', return_value=True):
+            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'echo ultraship'}})
+
+    def test_grant_custody_allows_plain_repository_source_commands(self):
+        source = 'plugins/ship/hooks/ultraship.py'
+        for command in (f'git diff -- {source}', f'git add -- {source}', f'git show HEAD:{source}',
+                        f"grep -n 'issue_account_grant' {source}", f'diff -u saved.py {source}'):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command, caller='ship:writer--sol')
+
     def test_stop_account_diagnostic_admits_quoted_paths(self):
         event = self.own_account_event()
         home = Path(os.environ['HOME']) / 'home with text'
