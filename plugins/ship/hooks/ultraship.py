@@ -1124,8 +1124,16 @@ def shell_raw_words(text, *, require_complete=False):
         if len(values) != 1:
             raise ValueError('ambiguous shell word')
         words.append((raw, values[0], start, index))
-    if require_complete and (parentheses or backtick):
-        raise ValueError('unfinished shell group')
+    if require_complete:
+        braces = 0
+        positions = shell_command_positions(words)
+        for raw, _, start, _ in words:
+            if start in positions and raw in {'{', '}'}:
+                braces += 1 if raw == '{' else -1
+                if braces < 0:
+                    raise ValueError('unexpected shell group end')
+        if parentheses or backtick or braces:
+            raise ValueError('unfinished shell group')
     return words
 
 
@@ -1137,6 +1145,8 @@ def shell_without_heredoc_bodies(command, *, require_complete=False):
             and not process_heredoc_denial(command)):
         return ''
     quoted_lines = literal_quotes_removed(command).splitlines(keepends=True)
+    width = '*' if require_complete else '+'
+    operator = rf'''(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]{width}'|"[^"\n]{width}"|\\?[^\s<>;&|()'"`]+)'''
     for index, line in enumerate(lines):
         if pending:
             delimiter, tabs, quoted = pending[0]
@@ -1146,7 +1156,7 @@ def shell_without_heredoc_bodies(command, *, require_complete=False):
                     quoted_lines[index + 1:] = literal_quotes_removed(''.join(lines[index + 1:])).splitlines(keepends=True)
             continue
         kept.append(line)
-        for match in re.finditer(r"(?<!<)<<(?!<)(-?)[ \t]*('[^'\n]+'|\"[^\"\n]+\"|\\?[^\s<>;&|()'\"`]+)", line):
+        for match in re.finditer(operator, line):
             if quoted_lines[index][match.start():match.start() + 2] == '<<':
                 pending.append((shlex.split(match[2])[0], bool(match[1]), match[2][0] in '\'"\\'))
     if require_complete and pending:
@@ -5013,17 +5023,24 @@ def receipt_custody(data, read_search=False):
                                     and re.fullmatch(module_name, arguments[operand][offset:])):
                                 return True
                     for index, (raw_word, word, _, end) in enumerate(tokens):
-                        word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
+                        paths = [word]
+                        attached = word.partition('=')[2]
+                        if attached:
+                            paths.append(attached)
+                        if re.match(r'^-[A-Za-z].', word, re.S):
+                            paths.append(word[2:])
                         # The tokenizer separates an unquoted backtick from the preceding literal text.
                         backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
-                        if (receipt_path(word, ancestors=True, state_only=not modifies_paths, stores=grant_paths)
-                                or (any(char in word for char in '*?[')
-                                    and (glob_prefix(word) or glob_prefix(word, stores={hook_folder})))
-                                or installed_hook in resolved(word)
-                                or (index != evidence_index and (
-                                    (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', word))
-                                    or expands_to_hook(raw_word + backtick, word + backtick)))):
-                            return True
+                        for path in paths:
+                            path = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), path)
+                            if (receipt_path(path, ancestors=True, state_only=not modifies_paths, stores=grant_paths)
+                                    or (any(char in path for char in '*?[')
+                                        and (glob_prefix(path) or glob_prefix(path, stores={hook_folder})))
+                                    or installed_hook in resolved(path)
+                                    or (index != evidence_index and (
+                                        (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', path))
+                                        or expands_to_hook(raw_word + backtick, path + backtick)))):
+                                return True
                     pending.extend(token[1] for token in nested_shell_strings(tokens, text))
             except (OSError, RuntimeError, ValueError):
                 return True

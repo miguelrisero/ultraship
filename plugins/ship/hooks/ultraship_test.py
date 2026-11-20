@@ -589,6 +589,14 @@ class ReceiptCustodyTests(unittest.TestCase):
                 with self.subTest(tool=tool, target=target):
                     self.assert_custody_denial({'tool_name': tool, 'tool_input': {'file_path': str(target)}})
 
+    def test_grant_custody_denies_attached_ancestor_paths(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for command in (f'tar -xf fixture.tar --directory={ancestor}',
+                        f'tar -xf fixture.tar -C{ancestor}',
+                        f'VAR={ancestor} tar -tf fixture.tar'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
     def test_grant_custody_denies_hook_execution_forms(self):
         installed = shlex.quote(str(HOOK))
         relative = os.path.relpath(HOOK, self.cwd)
@@ -691,6 +699,11 @@ class ReceiptCustodyTests(unittest.TestCase):
 
     def test_grant_custody_denies_unterminated_heredoc(self):
         self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': "cat <<'EOF'\nordinary\n"}})
+
+    def test_grant_custody_denies_open_braces_and_empty_delimiter_heredoc(self):
+        for command in ('{ echo ordinary;', "cat <<''\nordinary\n", 'cat <<""\nordinary\n'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
     def test_grant_custody_allows_plain_repository_source_commands(self):
         source = 'plugins/ship/hooks/ultraship.py'
