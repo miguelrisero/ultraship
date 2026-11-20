@@ -34,7 +34,7 @@ USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py correct-binding <pending.tsv> <result-id> <ledger-line> <reason>"""
 MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
 ACCOUNT_COMMANDS = ('account', 'account-auto', 'correct-binding')
-GRANT_LIFETIME_NS = 5_000_000_000
+GRANT_LIFETIME_NS = 900_000_000_000
 GRANT_REFUSAL = 'Accounting requires a fresh grant from the ship hook. Run the exact command again.'
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK

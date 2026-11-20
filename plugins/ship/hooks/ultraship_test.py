@@ -476,12 +476,12 @@ class ReceiptCustodyTests(unittest.TestCase):
             with patch.object(self.ledger.os, 'unlink', side_effect=PermissionError):
                 with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
                     self.consume(words)
-            clock.return_value += 4_999_999_999
+            clock.return_value += 899_999_999_999
             self.consume(words)
             with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
                 self.consume(words)
             self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
-            clock.return_value += 5_000_000_000
+            clock.return_value += 900_000_000_000
             with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
                 self.consume(words)
             self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
