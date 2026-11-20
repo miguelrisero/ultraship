@@ -5043,7 +5043,8 @@ def receipt_custody(data, read_search=False):
                     return 'unknown', cursor, 0
                 return 'stdin', cursor, 0
 
-            pending, seen = [joined], set()
+            comment = pr_comment_body_removed(raw)
+            pending, seen = [joined if comment == raw else comment], set()
             try:
                 while pending:
                     source = pending.pop()
@@ -5054,7 +5055,10 @@ def receipt_custody(data, read_search=False):
                     tokens = shell_raw_words(text, require_complete=True)
                     if nested_work_exceeded(tokens, seen):
                         return True
-                    positions = shell_command_positions(tokens)
+                    literal_array = re.fullmatch(
+                        r'[a-z][a-z0-9_]*=\(\[[0-9]+\]=[A-Za-z0-9_]+(?:[ \t]+\[[0-9]+\]=[A-Za-z0-9_]+)*\)[ \t\n]*',
+                        text)
+                    positions = set() if literal_array else shell_command_positions(tokens)
                     executable = list(shell_without_redirections(tokens))
                     commands = {os.path.basename(word) for _, word, start, _ in executable if start in positions}
                     modifies_paths = (any(raw_word == '>' for raw_word, _, _, _ in tokens)
@@ -5083,6 +5087,14 @@ def receipt_custody(data, read_search=False):
                                 continue
                             if grep_data_token(names, index):
                                 continue
+                            if index and names[index - 1][0] in {'-name', '-iname', '-path', '-ipath'}:
+                                start = index - 1
+                                while start and names[start - 1][0] not in {';', '&', '|', '`', '\n'}:
+                                    start -= 1
+                                if (names[start][0] == 'find'
+                                        and re.fullmatch("'[^']*'", names[index][0])
+                                        and not any(token[1] in find_actions for token in names[start:index])):
+                                    continue
                             arguments = names[index + 1:]
                             kind, operand, offset = program_operand(base, interpreter, [token[1] for token in arguments])
                             if kind == 'unknown':

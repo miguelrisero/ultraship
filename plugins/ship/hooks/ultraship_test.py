@@ -700,6 +700,15 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
         self.consume(words)
 
+    def test_grant_custody_admits_literal_indexed_array_assignment(self):
+        self.assert_account_command_allowed('items=([0]=alpha [1]=beta)', caller='ship:writer--sol')
+
+    def test_grant_custody_admits_literal_pr_comment_body(self):
+        self.assert_account_command_allowed(r"gh pr comment 7 --body $'first\nsecond `example`'", caller='')
+
+    def test_grant_custody_treats_find_name_as_data(self):
+        self.assert_account_command_allowed("find ./scripts -name 'uv' -print", caller='ship:writer--sol')
+
     def test_grant_custody_denies_uncertain_commands_without_custody_words(self):
         self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': "echo 'unfinished"}})
         with patch.object(ultraship, 'nested_work_exceeded', return_value=True):
