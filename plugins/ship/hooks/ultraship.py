@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import posixpath
+import pwd
 import re
 import shlex
 import stat
@@ -4761,15 +4762,28 @@ def own_account_call(data, raw):
         return False
     pending = str(owed_file(data))
     if words[2] == 'account-auto':
-        return words[3:] in ([pending], ['--fail-unparsed', pending])
+        return words if words[3:] in ([pending], ['--fail-unparsed', pending]) else False
     if len(words) != 10 or words[2] != 'account' or words[3] != pending:
         return False
     result, step, agent, sha, verdict, evidence = words[4:]
-    return (bool(re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', result))
-            and bool(re.fullmatch(r'[a-z][a-z-]*', step))
-            and bool(re.fullmatch(r'[\w:.-]+(@[\w-]+)?', agent))
-            and bool(re.fullmatch(r'[0-9a-f]{7,40}', sha))
-            and bool(re.fullmatch(r'[\w-]+', verdict)) and verdict != 'owed' and bool(evidence.strip()))
+    if (re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', result)
+            and re.fullmatch(r'[a-z][a-z-]*', step)
+            and re.fullmatch(r'[\w:.-]+(@[\w-]+)?', agent)
+            and re.fullmatch(r'[0-9a-f]{7,40}', sha)
+            and re.fullmatch(r'[\w-]+', verdict) and verdict != 'owed' and evidence.strip()):
+        return words
+    return False
+
+
+def issue_account_grant(data):
+    if data.get('tool_name') != 'Bash':
+        return
+    words = own_account_call(data, (data.get('tool_input') or {}).get('command', ''))
+    if words:
+        try:
+            load_ledger()._issue_grant(words[1], words[2:], STATE, data['session_id'])
+        except Exception:
+            deny('The ship hook could not issue a fresh accounting grant. Run the exact command again.')
 
 
 def receipt_custody(data, read_search=False):
@@ -4787,12 +4801,15 @@ def receipt_custody(data, read_search=False):
         path = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(value))
         return {normalized(os.path.abspath(path)), normalized(os.path.realpath(path))}
 
-    receipt_paths = resolved(str(receipt_store))
-    state_paths = resolved(str(state_root))
+    account_state = Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state'
+    grant_paths = {normalized(str(account_state / 'ultraship/account-grants'))}
+    receipt_paths = resolved(str(receipt_store)) | grant_paths
+    state_paths = resolved(str(state_root)) | {normalized(str(account_state))}
 
     def receipt_text(value):
         value = normalized(value)
-        return any(path in value for path in receipt_paths) or 'ultraship' + '/text-lint' in value
+        return (any(path in value for path in receipt_paths)
+                or any('ultraship/' + folder in value for folder in ('text-lint', 'account-grants')))
 
     def receipt_path(value, ancestors=False, state_only=False):
         if not isinstance(value, str) or not value:
@@ -4827,8 +4844,7 @@ def receipt_custody(data, read_search=False):
         return
     if tool in ('Edit', 'Write', 'NotebookEdit') and receipt_path(tin.get('file_path') or tin.get('notebook_path')):
         deny(RECEIPT_CUSTODY)
-    # shortcut: split account spellings and renamed copies of older ledgers can escape this check.
-    # ledger.py checks the session for account-auto; upgrade to isolated per-session state access.
+    # shortcut: shell text checks cannot isolate same-user code; upgrade to isolated state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
         command = normalized(raw)
@@ -4900,7 +4916,34 @@ def receipt_custody(data, read_search=False):
                         return True
             return False
 
-        if (receipt_text(raw)
+        def grant_access():
+            installed_hook = Path(__file__).resolve()
+            cwd = data.get('cwd') or os.getcwd()
+            pending, seen = [joined], set()
+            while pending:
+                text = shell_without_heredoc_bodies(pending.pop())
+                if text in seen:
+                    continue
+                seen.add(text)
+                try:
+                    tokens = shell_raw_words(text)
+                    if nested_work_exceeded(tokens, seen):
+                        return 'ultraship' in command or 'account-grants' in command
+                    for _, word, _, _ in tokens:
+                        if (any(candidate == store or candidate.startswith(store + '/')
+                                for candidate in resolved(word) for store in grant_paths)
+                                or (any(char in word for char in '*?[') and glob_prefix(word))):
+                            return True
+                        path = Path(cwd) / Path(word).expanduser()
+                        if path.name == installed_hook.name or path.is_symlink():
+                            if path.resolve() == installed_hook:
+                                return True
+                    pending.extend(token[1] for token in nested_shell_strings(tokens, text))
+                except (OSError, RuntimeError, ValueError):
+                    return 'ultraship.py' in command or 'account-grants' in command
+            return False
+
+        if (receipt_text(raw) or grant_access()
                 or ('ledger.py' in account_command and 'account-auto' in account_command
                     and not own_account_call(data, raw))
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
@@ -5628,6 +5671,7 @@ def guarded_pre(data):
     """Deny every tool for every caller when `pre` raises an exception."""
     try:
         pre(data)
+        issue_account_grant(data)
     except Exception:
         traceback.print_exc()
         try:

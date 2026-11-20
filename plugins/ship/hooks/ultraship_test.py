@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 import uuid
 import unittest
+from threading import Barrier, Thread
+from types import SimpleNamespace
 from unittest.mock import patch
 import shlex
 import sys
@@ -389,6 +391,9 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.cwd.mkdir()
         self.enterContext(patch.dict(os.environ, {'HOME': temporary, 'XDG_STATE_HOME': str(self.state)}))
         self.store = self.state / 'ultraship' / 'text-lint'
+        self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=temporary)))
+        self.ledger = ultraship.load_ledger()
+        self.enterContext(patch.object(ultraship, 'load_ledger', return_value=self.ledger))
 
     def assert_custody_denial(self, event, reason=(
             'Only the text_lint hook reads or writes refusal receipts (custody rule). '
@@ -401,10 +406,20 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assertEqual(result['permissionDecision'], 'deny')
         self.assertEqual(result['permissionDecisionReason'].split('\n', 1)[0], reason)
 
+    def prepare_owed(self, event):
+        pending = ultraship.owed_file(event)
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        pending.touch(exist_ok=True)
+        return pending
+
+    def consume(self, words):
+        self.ledger.consume_grant(words[1], words[2:])
+
     def own_account_event(self):
         os.environ.pop('XDG_STATE_HOME', None)
         state = Path(os.environ['HOME']) / '.local/state/ultraship'
         self.enterContext(patch.object(ultraship, 'STATE', state))
+        self.prepare_owed({'session_id': 'session-context'})
         self.account_words = ['python3', str(LEDGER), 'account', str(state / 'owed/session-context.tsv'),
                               '12345678-1234-1234-1234-123456789abc', 'slice-review',
                               'ship:reviewer--sol@reviewer-a', 'abcdef1', 'pass', 'reviewed context, [P2] nit']
@@ -423,6 +438,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                             {'cwd': str(self.cwd), **event, 'agent_type': caller,
                              'tool_input': {'command': command}}))
                     self.assertEqual(output.getvalue(), '')
+                    self.consume(shlex.split(command))
 
         for evidence in ('"reviewed context, [P2] nit"', r"'Reviewer'\''s [P2] context'"):
             command = shlex.join(self.account_words[:-1]) + ' ' + evidence
@@ -432,19 +448,98 @@ class ReceiptCustodyTests(unittest.TestCase):
                     self.assertIsNone(ultraship.guarded_pre(
                         {'cwd': str(self.cwd), **event, 'tool_input': {'command': command}}))
                 self.assertEqual(output.getvalue(), '')
+                self.consume(shlex.split(command))
+
+    def test_grant_refuses_mismatch_expiry_replay_and_failed_consume(self):
+        event = self.own_account_event()
+        words = self.account_words
+        with patch.object(self.ledger.time, 'time_ns', return_value=10_000_000_000) as clock:
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+                self.consume([*words[:-1], 'different evidence'])
+            with patch.object(self.ledger.os, 'unlink', side_effect=PermissionError):
+                with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+                    self.consume(words)
+            clock.return_value += 4_999_999_999
+            self.consume(words)
+            with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+                self.consume(words)
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            clock.return_value += 5_000_000_000
+            with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+                self.consume(words)
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            self.consume(words)
+
+    def test_grant_refuses_replacement_and_second_claimant(self):
+        event = self.own_account_event()
+        words = self.account_words
+        refusal = 'The ship hook could not issue a fresh accounting grant. Run the exact command again.'
+        with patch.object(self.ledger.time, 'time_ns', return_value=10_000_000_000):
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(
+                [*words[:-1], 'different evidence'])}}, refusal)
+            barrier = Barrier(2, timeout=5)
+            outcomes = []
+
+            def claim():
+                barrier.wait()
+                try:
+                    self.consume(words)
+                except ValueError:
+                    outcomes.append('refused')
+
+            claimant = Thread(target=claim)
+            claimant.start()
+            try:
+                self.consume(words)
+            finally:
+                barrier.wait()
+                claimant.join()
+            self.assertEqual(outcomes, ['refused'])
+
+    def test_denied_hook_emits_no_grant(self):
+        event = self.own_account_event()
+        self.assert_custody_denial({**event, 'agent_type': 'ship:writer--sol'}, ultraship.ACCOUNT_CUSTODY)
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(self.account_words)
+        with patch.object(ultraship, 'pre', side_effect=RuntimeError):
+            self.assert_custody_denial(event, ultraship.PRE_FAILED)
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(self.account_words)
+
+    def test_grant_store_custody_guards_paths_aliases_and_hook_entry(self):
+        path = self.ledger.grant_store()
+        path.mkdir(mode=0o700, parents=True)
+        alias = self.cwd / 'alias to store'
+        alias.symlink_to(path, target_is_directory=True)
+        hook_alias = self.cwd / 'hook-alias'
+        hook_alias.symlink_to(HOOK)
+        for command in (f'cat {shlex.quote(str(path / "example"))}', "cat 'alias to store/example'",
+                        f'ls {path.parent}/acc*/*', f'ls {path.parent}',
+                        f'python3 {shlex.quote(str(HOOK))} pre', 'python3 ./hook-alias pre'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+        for tool, key, value in (('Read', 'file_path', str(alias / 'example')),
+                                 ('Write', 'file_path', str(alias / 'example')),
+                                 ('Grep', 'path', str(path.parent)),
+                                 ('Glob', 'pattern', str(path.parent / '*/*.json'))):
+            with self.subTest(tool=tool):
+                self.assert_custody_denial({'tool_name': tool, 'tool_input': {key: value}})
 
     def test_stop_account_diagnostic_admits_quoted_paths(self):
         event = self.own_account_event()
         home = Path(os.environ['HOME']) / 'home with text'
         state = home / '.local/state/ultraship'
         script = self.cwd / 'plugin with space/ledger.py'
+        script.parent.mkdir()
+        script.touch()
         with patch.dict(os.environ, {'HOME': str(home)}), \
                 patch.object(ultraship, 'STATE', state), \
                 patch.object(ultraship, 'ledger_script', return_value=script), \
-                patch.object(ultraship, 'load_ledger', return_value=None), \
+                patch.object(self.ledger, '__file__', str(script)), \
                 patch.object(ultraship, 'account', side_effect=ValueError('synthetic missing review')):
-            pending = ultraship.owed_file(event)
-            pending.parent.mkdir(parents=True)
+            pending = self.prepare_owed(event)
             pending.write_text('100\tship:reviewer--sol\t' + str(self.cwd) + '\t' +
                                json.dumps({'id': self.account_words[4], 'v': 2}) + '\n')
             output = io.StringIO()
@@ -464,6 +559,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                     {'cwd': str(self.cwd), **event, 'tool_input': {'command': command}}))
             self.assertEqual(output.getvalue(), '')
 
+            self.consume(shlex.split(command))
             auto, = re.findall(r'`([^`]* account-auto [^`]*)`', diagnostic['reason'])
             self.assertEqual(shlex.split(auto), ['python3', str(script), 'account-auto', str(pending)])
             for caller in ('', 'ship:driver--sol'):
@@ -473,6 +569,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                         ultraship.guarded_pre({'cwd': str(self.cwd), **event, 'agent_type': caller,
                                                'tool_input': {'command': auto}})
                     self.assertEqual(output.getvalue(), '')
+                    self.consume(shlex.split(auto))
             for invalid in (auto + ' extra', auto + ' && echo done', auto.replace('session-context', 'sibling')):
                 with self.subTest(command=invalid):
                     self.assert_custody_denial({**event, 'tool_input': {'command': invalid}})
@@ -481,7 +578,7 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_plain_account_auto_requires_own_driver_call(self):
         event = self.own_account_event()
         event['session_id'] = 's1'
-        command = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+        command = shlex.join([*self.account_words[:2], 'account-auto', str(self.prepare_owed(event))])
         driver = {**event, 'agent_type': 'ship:driver--sol', 'tool_input': {'command': command}}
         with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
             self.assertIsNone(ultraship.guarded_pre({'cwd': str(self.cwd), **driver}))
@@ -575,7 +672,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         event = self.own_account_event()
         state = ultraship.STATE / 'CLAUDE_CODE_SESSION_ID'
         with patch.object(ultraship, 'STATE', state):
-            command = shlex.join([*self.account_words[:2], 'account-auto', str(ultraship.owed_file(event))])
+            command = shlex.join([*self.account_words[:2], 'account-auto', str(self.prepare_owed(event))])
             self.assert_account_command_allowed(command, session_id=event['session_id'])
 
     def test_account_auto_denies_commands_that_name_the_session_variable(self):

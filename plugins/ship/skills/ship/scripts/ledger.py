@@ -9,12 +9,15 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 import re
+import secrets
 import stat
 import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +34,177 @@ USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py correct-binding <result-id> <ledger-line> <reason>"""
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'ultraship'
 MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
+ACCOUNT_COMMANDS = ('account', 'account-auto', 'correct-binding')
+GRANT_LIFETIME_NS = 5_000_000_000
+GRANT_REFUSAL = 'Accounting requires a fresh grant from the ship hook. Run the exact command again.'
+DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+
+
+def account_pending_arg(argv):
+    if not argv:
+        return None
+    cmd, args = argv[0], argv[1:]
+    if cmd == 'account-auto':
+        if len(args) == 2 and args[0] == '--fail-unparsed':
+            return args[1]
+        if len(args) == 1:
+            return args[0]
+    if (cmd, len(args)) in (('account', 7), ('correct-binding', 4)):
+        return args[0]
+    return None
+
+
+def grant_store():
+    return Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state/ultraship/account-grants'
+
+
+@contextmanager
+def locked_grant_store(*, create=False):
+    path = grant_store()
+    if not path.is_absolute() or '..' in path.parts:
+        raise ValueError(GRANT_REFUSAL)
+    fd = os.open(path.anchor, DIRECTORY_FLAGS)
+    try:
+        for index, part in enumerate(path.parts[1:], 1):
+            if create and index >= len(path.parts) - 4:
+                try:
+                    os.mkdir(part, 0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            child = os.open(part, DIRECTORY_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        info = os.fstat(fd)
+        if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise ValueError(GRANT_REFUSAL)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def grant_digest(items):
+    return hashlib.sha256(json.dumps(items).encode()).hexdigest()
+
+
+def file_identity(info):
+    return [info.st_dev, info.st_ino]
+
+
+def grant_request(script, argv):
+    owed = account_pending_arg(argv)
+    if not owed:
+        raise ValueError(GRANT_REFUSAL)
+    pending = Path(owed)
+    if (str(pending) != owed or not pending.is_absolute() or '..' in pending.parts
+            or pending.parent.name != 'owed' or pending.suffix != '.tsv'):
+        raise ValueError(GRANT_REFUSAL)
+    canonical_script = str(Path(script).resolve(strict=True))
+    if canonical_script != str(Path(__file__).resolve(strict=True)):
+        raise ValueError(GRANT_REFUSAL)
+    name = grant_digest([canonical_script, owed]) + '.json'
+    fields = {'script': canonical_script, 'pending': owed, 'command': argv[0],
+              'argv_sha256': grant_digest([script, *argv])}
+    return name, fields, pending
+
+
+def grant_bytes(record):
+    return json.dumps(record, sort_keys=True).encode()
+
+
+def read_grant(fd, name):
+    with os.fdopen(os.open(name, READ_FLAGS, dir_fd=fd), 'rb') as source:
+        info = os.fstat(source.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+            raise ValueError(GRANT_REFUSAL)
+        raw = source.read()
+    record = json.loads(raw)
+    strings = ('script', 'pending', 'command', 'argv_sha256', 'session', 'root')
+    identities = ('root_id', 'owed_id')
+    if (not isinstance(record, dict) or set(record) != {*strings, *identities, 'issued_ns'}
+            or any(type(record[key]) is not str or not record[key] for key in strings)
+            or any(not isinstance(record[key], list) or len(record[key]) != 2
+                   or any(type(value) is not int or value < 0 for value in record[key]) for key in identities)
+            or type(record['issued_ns']) is not int or record['issued_ns'] <= 0
+            or grant_bytes(record) != raw):
+        raise ValueError(GRANT_REFUSAL)
+    return record
+
+
+@contextmanager
+def evidence_root(root):
+    if not root.is_absolute() or root.resolve(strict=True) != root:
+        raise ValueError(GRANT_REFUSAL)
+    fd = os.open(root, DIRECTORY_FLAGS)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def owed_status(fd, name):
+    directory = os.open('owed', DIRECTORY_FLAGS, dir_fd=fd)
+    try:
+        info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('Accounting refuses a symlinked or nonregular owed file.')
+        return info
+    finally:
+        os.close(directory)
+
+
+def _issue_grant(script, argv, state, session):
+    name, fields, pending = grant_request(script, argv)
+    if (str(state / 'owed' / (re.sub(r'[^\w.-]', '_', session) + '.tsv')) != str(pending)
+            or not session):
+        raise ValueError(GRANT_REFUSAL)
+    root = state.parent.resolve(strict=True) / state.name
+    with evidence_root(root) as evidence_fd:
+        fields.update(session=session, root=str(root), root_id=file_identity(os.fstat(evidence_fd)),
+                      owed_id=file_identity(owed_status(evidence_fd, pending.name)))
+    with locked_grant_store(create=True) as fd:
+        try:
+            saved = read_grant(fd, name)
+        except FileNotFoundError:
+            pass
+        else:
+            if time.time_ns() - saved['issued_ns'] < GRANT_LIFETIME_NS:
+                raise ValueError(GRANT_REFUSAL)
+        temp = '.grant-' + secrets.token_hex(16)
+        with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=fd), 'wb') as target:
+            try:
+                target.write(grant_bytes(dict(fields, issued_ns=time.time_ns())))
+                target.flush()
+                os.fsync(target.fileno())
+                os.replace(temp, name, src_dir_fd=fd, dst_dir_fd=fd)
+                try:
+                    os.fsync(fd)
+                except OSError:
+                    os.unlink(name, dir_fd=fd)
+                    raise
+            finally:
+                try:
+                    os.unlink(temp, dir_fd=fd)
+                except FileNotFoundError:
+                    pass
+
+
+def consume_grant(script, argv):
+    try:
+        name, fields, pending = grant_request(script, argv)
+        with locked_grant_store() as fd:
+            record = read_grant(fd, name)
+            if (any(record[key] != value for key, value in fields.items())
+                    or re.sub(r'[^\w.-]', '_', record['session']) + '.tsv' != pending.name
+                    or not 0 <= time.time_ns() - record['issued_ns'] < GRANT_LIFETIME_NS):
+                raise ValueError(GRANT_REFUSAL)
+            os.unlink(name, dir_fd=fd)
+            os.fsync(fd)
+        return record
+    except (OSError, KeyError, ValueError, RuntimeError):
+        raise ValueError(GRANT_REFUSAL) from None
 
 
 def agent_key(field):
