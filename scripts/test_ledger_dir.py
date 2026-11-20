@@ -961,6 +961,20 @@ class LedgerDirTests(unittest.TestCase):
     def test_account_auto_refuses_empty_session_without_a_grant(self):
         self.assert_account_auto_refuses_grant('')
 
+    def test_account_auto_refuses_when_the_account_has_no_passwd_entry(self):
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])
+        args = ('account-auto', str(owed))
+        self.issue_grant(args)
+        receipts = owed.parent.parent / 'accounted.json'
+        receipts.write_bytes(b'{}\n')
+        paths = (self.resolve(), owed, receipts)
+        before = tuple(path.read_bytes() for path in paths)
+        with mock.patch.object(ledger.pwd, 'getpwuid', side_effect=KeyError('getpwuid(): uid not found')):
+            refused = self.cli(*args, grant=False)
+        self.assertEqual((refused.returncode, refused.stdout, refused.stderr), (1, '', ledger.GRANT_REFUSAL + '\n'))
+        self.assertEqual(tuple(path.read_bytes() for path in paths), before)
+
     def test_accounting_refuses_caller_session_and_fake_grant_stores(self):
         owed, _, result, _ = self.auto_owed([
             (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {"ab" * 20}')])

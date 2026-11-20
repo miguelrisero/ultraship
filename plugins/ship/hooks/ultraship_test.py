@@ -710,6 +710,12 @@ class ReceiptCustodyTests(unittest.TestCase):
             self.assertEqual(output.getvalue(), '')
             self.assert_custody_denial({'tool_name': 'Read', 'tool_input': {'file_path': str(self.store / 'key')}})
 
+    def test_own_account_call_is_denied_when_the_account_has_no_passwd_entry(self):
+        event = self.own_account_event()
+        with patch.object(ultraship.pwd, 'getpwuid', side_effect=KeyError('getpwuid(): uid not found')):
+            self.assert_custody_denial(event, 'The ship hook could not issue a fresh accounting grant. '
+                                     'Run the exact command again.')
+
     def test_grant_custody_admits_literal_indexed_array_assignment(self):
         self.assert_account_command_allowed('items=([0]=alpha [1]=beta)', caller='ship:writer--sol')
 
@@ -792,6 +798,19 @@ class ReceiptCustodyTests(unittest.TestCase):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
                     'command': f'git -C {ancestor} ls-remote {option} origin; touch result'}})
 
+    def test_grant_custody_denies_ls_remote_options_that_a_shell_expansion_supplies(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for command in (f"opt=-u; git -C {ancestor} ls-remote $opt 'cmd' /some/repo",
+                        f"git -C {ancestor} ls-remote {{-u,'cmd'}} /some/repo",
+                        f"git -C {ancestor} ls-remote $(printf -- -u) 'cmd' /some/repo",
+                        f"git -C {ancestor} ls-remote `printf -- -u` 'cmd' /some/repo"):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_admits_the_short_status_option_u_after_an_ancestor(self):
+        ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        self.assert_account_command_allowed(f'git -C {ancestor} status -uno; touch result', caller='')
+
     def test_grant_custody_denies_abbreviated_git_program_and_output_options(self):
         ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
         for option in ('--upl=true', '--u=true', '--rec=true', '--ex=true', '--e=true', '--out=file', '--o=file'):
@@ -807,7 +826,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': binding + rebinding + '$status'}})
 
     def test_grant_custody_denies_a_git_binding_to_a_name_the_shell_sets(self):
-        for name in ('_', 'REPLY', 'reply', 'argv'):
+        for name in ('_', 'REPLY', 'reply', 'argv', '1', 'match', 'mbegin', 'mend'):
             with self.subTest(name=name):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
                     'command': f'{name}=$(git -C "$worktree" status --porcelain); ${name}'}})
