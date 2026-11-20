@@ -4944,12 +4944,25 @@ def receipt_custody(data, read_search=False):
                             for word in words[2:]))
 
         def grant_access():
-            installed_hook = normalized(str(Path(__file__).resolve()))
+            hook = Path(__file__).resolve()
+            installed_hook = normalized(str(hook))
+            hook_folder = normalized(str(hook.parent))
             hook_name = re.compile(r'(?<![\w-])ultraship\.py(?![\w.-])|\b(?:issue_account_grant|_issue_grant)\b')
             module_name = r'(?:\w+\.)*ultraship'
             module_reference = re.compile(rf"\b(?:import|from)\s+(?:\(\s*)?{module_name}\b|['\"]{module_name}['\"]")
-            mentions_custody = any(name in account_command for name in (
-                'ultraship', 'account-grants', 'issue_account_grant', '_issue_grant'))
+
+            def expands_to_hook(raw_word, word):
+                if not unresolved_shell_word(raw_word):
+                    return False
+                literal = re.split(r'[*?\[$`]', normalized(word))
+                if len(literal) == 1:
+                    return False
+                prefix = literal[0]
+                if prefix and any(installed_hook.startswith(path) or hook_folder.startswith(path)
+                                  for path in resolved(prefix)):
+                    return True
+                return '/' not in prefix and any('ultraship' in part or 'hooks' in part for part in literal)
+
             pending, seen = [joined], set()
             try:
                 while pending:
@@ -4960,23 +4973,26 @@ def receipt_custody(data, read_search=False):
                     text = shell_without_heredoc_bodies(source)
                     tokens = shell_raw_words(text)
                     if nested_work_exceeded(tokens, seen):
-                        return mentions_custody
+                        return True
                     plain_source = plain_hook_source_command(source, tokens) if source == text else False
                     if not plain_source and (hook_name.search(normalized(source)) or module_reference.search(source)):
                         return True
-                    for _, word, _, _ in tokens:
+                    for index, (raw_word, word, _, end) in enumerate(tokens):
                         word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
+                        # The tokenizer splits an unquoted command substitution from its literal prefix.
+                        backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
                         if (receipt_path(word, ancestors=True, state_only=True, stores=grant_paths)
                                 or (any(char in word for char in '*?[') and glob_prefix(word))
                                 or installed_hook in resolved(word)
-                                or (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', word))):
+                                or (not plain_source and (expands_to_hook(raw_word + backtick, word + backtick)
+                                                          or re.fullmatch(rf'(?:-m)?{module_name}', word)))):
                             return True
                     pending.extend(token[1] for token in nested_shell_strings(tokens, text))
             except (OSError, RuntimeError, ValueError):
-                return mentions_custody
+                return True
             return False
 
-        if (receipt_text(raw) or grant_access()
+        if (receipt_text(raw)
                 or ('ledger.py' in account_command and 'account-auto' in account_command
                     and not own_account_call(data, raw))
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
@@ -5001,6 +5017,7 @@ def receipt_custody(data, read_search=False):
                 and not own_account_call(data, raw)
                 and ('claude_code_session_id' in account_command or names_ledger())):
             deny(ACCOUNT_CUSTODY)
+        return grant_access()
 
 
 def canonical_row_path(value):
@@ -5108,7 +5125,7 @@ def row_reanchor_gate(data, command):
 def pre(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     try:
-        receipt_custody(data)
+        grant_custody_denied = receipt_custody(data)
     except Exception:
         traceback.print_exc()
         deny(RECEIPT_CUSTODY_FAILED)
@@ -5268,6 +5285,8 @@ def pre(data):
                  ' Keep the task. Report the blocked step and named rule to ' + superior + '.'
                  + (' If the brief names no superior, report it here.' if superior == 'the superior named in your brief' else '')
                  + ' Continue independent work within your authority.')
+        if grant_custody_denied:
+            deny(RECEIPT_CUSTODY)
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
         counter.parent.mkdir(parents=True, exist_ok=True)

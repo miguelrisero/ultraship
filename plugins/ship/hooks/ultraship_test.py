@@ -592,6 +592,24 @@ class ReceiptCustodyTests(unittest.TestCase):
         with patch.object(ultraship, 'nested_work_exceeded', return_value=True):
             self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'echo ultraship'}})
 
+    def test_grant_custody_denies_hook_path_expansions(self):
+        installed = Path.home() / 'plugin with spaces/hooks/ultraship.py'
+        with patch.object(ultraship, '__file__', str(installed)):
+            for form, command in (
+                    ('file glob', f'python3 {shlex.quote(str(installed.parent))}/ultra*.py'),
+                    ('folder glob', f'python3 {shlex.quote(str(installed.parent.parent))}/hoo?s/*.py'),
+                    ('home and file expansion', 'python3 "$HOME/plugin with spaces/hooks/ultra${SUFFIX}"'),
+                    ('unquoted backtick expansion', f'python3 {shlex.quote(str(installed.parent))}/ultra`printf suffix`'),
+                    ('hook name with no path prefix', 'python3 "${ROOT}/hooks/${SCRIPT}"'),
+            ):
+                with self.subTest(form=form):
+                    self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_grant_custody_denies_uncertain_commands_without_custody_words(self):
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': "echo 'unfinished"}})
+        with patch.object(ultraship, 'nested_work_exceeded', return_value=True):
+            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'echo ordinary'}})
+
     def test_grant_custody_allows_plain_repository_source_commands(self):
         source = 'plugins/ship/hooks/ultraship.py'
         for command in (f'git diff -- {source}', f'git add -- {source}', f'git show HEAD:{source}',
