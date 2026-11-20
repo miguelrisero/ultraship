@@ -792,6 +792,12 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(rebinding=rebinding):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': binding + rebinding + '$status'}})
 
+    def test_grant_custody_denies_a_git_binding_to_a_name_the_shell_sets(self):
+        for name in ('_', 'REPLY', 'reply', 'argv'):
+            with self.subTest(name=name):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+                    'command': f'{name}=$(git -C "$worktree" status --porcelain); ${name}'}})
+
     def test_grant_custody_admits_read_only_commands_that_name_the_hook_by_alias(self):
         (self.cwd / 'hook-alias').symlink_to(HOOK)
         self.assert_account_command_allowed('cat ./hook-alias', caller='')

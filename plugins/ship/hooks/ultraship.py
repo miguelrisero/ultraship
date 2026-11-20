@@ -4991,7 +4991,8 @@ def receipt_custody(data, read_search=False):
                         or any('ultraship' in part or 'hooks' in part for part in literal))
 
             # Main admits running a value bound once to plain `git rev-parse` or `git status` output.
-            git_value = re.compile(r'(?<![\w$])(\w+)=\$\(\s*(?:GIT_OPTIONAL_LOCKS=0\s+)?git'
+            # The shell sets `_`, `REPLY` and the zsh names `reply`, `argv`, `match`, `mbegin` and `mend` itself.
+            git_value = re.compile(r'(?<![\w$])(?!(?:reply|argv|match|mbegin|mend)=)([a-z][a-z0-9_]*)=\$\(\s*(?:GIT_OPTIONAL_LOCKS=0\s+)?git'
                                    r'(?:\s+-C\s+(?:"\$\{?\w+\}?"|[\w./-]+))?\s+(?:rev-parse|status)(?:\s+[\w-]+)*\s*\)')
             git_bound = set()
             for binding in git_value.finditer(joined):
