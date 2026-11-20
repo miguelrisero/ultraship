@@ -971,7 +971,8 @@ class LedgerDirTests(unittest.TestCase):
         before = tuple(path.read_bytes() for path in paths)
         caller_home = self.base / 'caller-home'
         caller_home.mkdir()
-        caller_state = self.base / 'caller-state'
+        fake_home = self.base / 'fake-home'
+        caller_state = fake_home / '.local/state'
         fake_state = caller_state / 'ultraship'
         fake_owed = fake_state / 'owed' / owed.name
         fake_owed.parent.mkdir(parents=True)
@@ -995,8 +996,9 @@ class LedgerDirTests(unittest.TestCase):
             for argv in args:
                 with self.subTest(command=argv[0]):
                     state = fake_state if argv[1] == str(fake_owed) else owed.parent.parent
-                    for store in (caller_home / '.local/state/ultraship/account-grants', fake_state / 'account-grants'):
-                        with mock.patch.object(ledger, 'grant_store', return_value=store):
+                    for fake in (caller_home, fake_home):
+                        with mock.patch.object(ledger.pwd, 'getpwuid',
+                                               return_value=SimpleNamespace(pw_dir=str(fake))):
                             self.issue_grant(argv, state=state)
                     refused = self.cli(*argv, env=env, grant=False)
                     self.assertEqual((refused.returncode, refused.stdout, refused.stderr),

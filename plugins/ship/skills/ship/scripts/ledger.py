@@ -175,7 +175,11 @@ def _issue_grant(script, argv, state, session):
         except FileNotFoundError:
             pass
         else:
-            if time.time_ns() - saved['issued_ns'] < GRANT_LIFETIME_NS:
+            age = time.time_ns() - saved.pop('issued_ns')
+            if age < GRANT_LIFETIME_NS:
+                # An identical retry reuses the live grant; its issue time stays, so the window never extends.
+                if 0 <= age and saved == json.loads(grant_bytes(fields)):
+                    return
                 raise ValueError(GRANT_REFUSAL)
         publish_at(fd, name, grant_bytes(dict(fields, issued_ns=time.time_ns())), sync_directory=False)
 

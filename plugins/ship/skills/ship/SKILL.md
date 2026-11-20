@@ -114,7 +114,7 @@ Use the Stop diagnostic's `account-auto` command to account for results with a c
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto "<pending.tsv>"
 ```
 
-The ship hook issues a single-use grant for the exact accounting command and the caller's session. The grant expires after five seconds. Run a fresh tool call if the grant expires or the command fails. Use the literal script and pending paths from the Stop diagnostic in every accounting command.
+The ship hook issues a single-use grant for the exact accounting command and the caller's session. The grant expires after 15 minutes. An identical call while the grant is live reuses it and keeps its issue time. Run a fresh tool call if the grant expires or the command fails. Use the literal script and pending paths from the Stop diagnostic in every accounting command.
 
 Run the command alone on one line. Start exactly one line in the review result with `Verdict:` or `OVERALL:`. The label permits leading whitespace and Markdown markers, as in `**OVERALL:** PASS`. The command matches labels and whole verdict words without regard to case.
 

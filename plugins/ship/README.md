@@ -111,7 +111,7 @@ Hook state lives in `${XDG_STATE_HOME:-~/.local/state}/ultraship`.
 
 The hook issues one grant for one exact `account`, `account-auto`, or `correct-binding` call from the main session or driver. Run the command alone on one line with the literal script and pending paths. Copy the pending path from Stop. The grant store uses the OS account home. The CLI consumes the grant before it reads accounting evidence and uses the hook's evidence directory.
 
-Grants expire after five seconds. The hook issues the grant before the permission prompt. A later denial can leave the grant usable for an identical invocation until expiry. The grant protects calls that control arguments and environment variables. It provides no isolation from arbitrary code that runs as the same OS user.
+Grants expire after 15 minutes. An identical call while a grant is live reuses it and keeps its issue time. The hook issues the grant before the permission prompt. A later denial can leave the grant usable for an identical invocation until expiry. The grant protects calls that control arguments and environment variables. It provides no isolation from arbitrary code that runs as the same OS user.
 
 A checkout with its Git directory inside the checkout uses `<common-git-dir>/ship/ledger/<branch>.tsv`. An existing parent `.scratch` identifies the workspace for a direct-child linked checkout. A common Git directory inside that workspace also uses the common-directory default. An external common Git directory selects `<workspace>/.scratch/ship-ledgers/<canonical-checkout-sha256>/<branch>.tsv`. The resolver canonicalizes roots and rejects symlink escapes. Ambiguous layouts require an absolute `SHIP_LEDGER_DIR`.
 

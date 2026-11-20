@@ -491,8 +491,13 @@ class ReceiptCustodyTests(unittest.TestCase):
         event = self.own_account_event()
         words = self.account_words
         refusal = 'The ship hook could not issue a fresh accounting grant. Run the exact command again.'
-        with patch.object(self.ledger.time, 'time_ns', return_value=10_000_000_000):
+        with patch.object(self.ledger.time, 'time_ns', return_value=10_000_000_000) as clock:
             self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            record, = self.ledger.grant_store().iterdir()
+            issued = record.read_bytes()
+            clock.return_value += 899_999_999_999
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            self.assertEqual(record.read_bytes(), issued)
             self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(
                 [*words[:-1], 'different evidence'])}}, refusal)
             barrier = Barrier(2, timeout=5)
@@ -502,17 +507,18 @@ class ReceiptCustodyTests(unittest.TestCase):
                 barrier.wait()
                 try:
                     self.consume(words)
+                    outcomes.append('consumed')
                 except ValueError:
                     outcomes.append('refused')
 
-            claimant = Thread(target=claim)
-            claimant.start()
-            try:
-                self.consume(words)
-            finally:
-                barrier.wait()
+            claimants = [Thread(target=claim) for _ in range(2)]
+            for claimant in claimants:
+                claimant.start()
+            for claimant in claimants:
                 claimant.join()
-            self.assertEqual(outcomes, ['refused'])
+            self.assertEqual(sorted(outcomes), ['consumed', 'refused'])
+            with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+                self.consume(words)
 
     def test_grant_refuses_malformed_and_linked_records(self):
         event = self.own_account_event()
