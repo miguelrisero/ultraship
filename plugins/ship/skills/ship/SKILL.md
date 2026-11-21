@@ -331,10 +331,13 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.
    The driver then admits only the head copy.
    At the frozen head, the driver records the test runner's fixture listing, such as `pytest --fixtures-per-test`.
-   From it, the driver lists each test that uses a changed fixture or helper, directly, transitively or through an autouse fixture.
-   For each listed test, the driver names every active row whose designated test it is, with its row ID.
+   From it, the driver lists each test that uses a changed fixture, directly, transitively or through an autouse fixture.
+   For each changed helper, the driver traces its callers, directly and transitively, and adds each test that reaches it.
+   The driver supplies a map of every active row ID to its designated test at the frozen head, from the repository's mutation tooling, with no row text.
+   For each listed test, the driver names every active row that the map assigns to it, with its row ID.
    The admission record lists each such row file path. The reviewer brief names each listed row's exact line range and commit.
-   The reviewer confirms from the fixture listing and the diff that the list is complete.
+   The reviewer confirms from the fixture listing, the helper trace and the diff that the test list is complete.
+   The reviewer checks every listed test against the map and confirms that every row that designates it is listed.
    For each listed row, the reviewer traces the changed fixture or helper into the test.
    The reviewer confirms that the designated assertion still separates the original result from the mutant result.
    The reviewer blocks approval when the list, the admitted lines or the trace is missing or inconclusive.
