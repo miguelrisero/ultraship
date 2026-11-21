@@ -28,7 +28,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         for name in ROUTE_CARRIERS:
             route = section((SHIP / name).read_text(), '### Lane-owned row route')
             for requirement in (
-                'No CoC decision file is required.',
+                'No CoC decision file is required, except for a follow-up row that step 4 admits under a CoC grant.',
                 'Authority: the owner\'s global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.',
                 "Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.",
                 'Admit the writer with the [row re-anchor tool admission record]',
@@ -88,6 +88,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 "Its diff changes no subject code, and the parent's merge commit is an ancestor of the recorded base.",
                 "Its PR body names the parent PR URL, the parent's full merge commit SHA and the CoC decision file by absolute path and SHA256.",
                 'Each such row keeps the identical mutant edit that the decision file names and passes the review in step 8.',
+                "The parent PR's merged diff must add each such row's subject file and guarded line.",
                 'The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.',
                 'Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.',
                 'The driver marks the draft ready only after the review in step 8 passes at the exact head.',
@@ -98,6 +99,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.',
                 'From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.',
                 'The driver then admits only the head copy.',
+                'The reviewer lists each existing designated test whose fixture or helper the diff changes.',
+                "For each such test, the reviewer confirms that it still reaches its row's mutated line before any earlier refusal, so the mutant stays killed.",
                 'Any later push to the PR needs a new review at the pushed head. Return a ready PR to draft before that push.',
                 'Mark it ready again only after the new review passes.',
             ):
@@ -135,6 +138,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'When the brief records the verified base commit and a root-level `git ls-tree` result with exit status 0 and empty output, use that proof in place of the grep.',
                 'Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.',
                 'For an added row in a test-only follow-up PR, confirm that the PR changes no subject code and that the mutant matches the CoC decision file that the brief names.',
+                "For each such row, confirm from the parent PR's merged diff that the parent added the row's subject file and guarded line.",
+                'List each existing designated test whose fixture or helper the diff changes.',
+                "For each such test, confirm that it still reaches its row's mutated line before any earlier refusal, so the mutant stays killed.",
                 'For a CoC-approved row change, match each applied value to the decision file that the brief names by path and SHA256.',
                 "Use that file only when the brief records the driver's SHA256 and binding check at the frozen head.",
                 'Confirm that no other field changed and that the row is not weaker.',
