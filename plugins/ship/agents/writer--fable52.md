@@ -136,7 +136,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
 
 ### Lane-owned row route
 
-A lane re-anchors, retires or adds the protected mutation rows that its own diff breaks or needs. No CoC decision file is required, except for a follow-up row that step 4 admits under a CoC grant.
+A lane re-anchors, retires or adds the protected mutation rows that its own diff breaks or needs. Only a row action that needs CoC approval needs a CoC decision file. A step 4 follow-up row needs one.
 Authority: the owner's global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.
 Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.
 
@@ -156,6 +156,8 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    Its PR body names the parent PR URL, the parent's full merge commit SHA and the CoC decision file by absolute path and SHA256.
    Each such row keeps the identical mutant edit that the decision file names and passes the review in step 8.
    The parent PR's merged diff must add each such row's subject file and guarded line.
+   The driver supplies a local diff of those subject files from the parent's pre-merge base to its merge commit.
+   The driver records both SHAs in the reviewer brief.
    Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.
    The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.
    Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
@@ -195,8 +197,12 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
    From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.
    The driver then admits only the head copy.
-   The reviewer lists each existing designated test whose fixture or helper the diff changes.
-   For each such test, the reviewer confirms that it still reaches its row's mutated line before any earlier refusal, so the mutant stays killed.
+   The driver lists each existing designated test whose fixture or helper the diff changes, with its row ID.
+   The driver admits the unchanged lines of each listed row in the reviewer admission record.
+   The reviewer confirms from the diff and the test imports that the list is complete.
+   For each listed row, the reviewer traces the changed fixture or helper into the test.
+   The reviewer confirms that the designated assertion still separates the original result from the mutant result.
+   The reviewer blocks approval when the list, the admitted lines or the trace is missing or inconclusive.
    Any later push to the PR needs a new review at the pushed head. Return a ready PR to draft before that push.
    Mark it ready again only after the new review passes.
 9. The mutation proof runs after merge, under its execution admission.

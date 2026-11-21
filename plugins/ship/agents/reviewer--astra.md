@@ -54,8 +54,12 @@ When the brief records the verified base commit and a root-level `git ls-tree` r
 Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
 For an added row in a test-only follow-up PR, confirm that the PR changes no subject code and that the mutant matches the CoC decision file that the brief names.
 For each such row, confirm from the parent PR's merged diff that the parent added the row's subject file and guarded line.
-List each existing designated test whose fixture or helper the diff changes.
-For each such test, confirm that it still reaches its row's mutated line before any earlier refusal, so the mutant stays killed.
+Use only the driver's local parent diff, bound to the parent's pre-merge base and merge commit that the brief records.
+Block approval if that diff is missing or unbound.
+Confirm from the diff and the test imports that the driver's list of existing designated tests whose fixture or helper the diff changes is complete.
+For each listed row, read its admitted lines and trace the changed fixture or helper into the test.
+Confirm that the designated assertion still separates the original result from the mutant result.
+Block approval when the list, the admitted lines or the trace is missing or inconclusive.
 For a CoC-approved row change, match each applied value to the decision file that the brief names by path and SHA256.
 Use that file only when the brief records the driver's SHA256 and binding check at the frozen head.
 For a narrowed claim, confirm the same designated test and mutant at the base and the frozen head, that the claim keeps only part of the base claim, and that the test proves all of it.
