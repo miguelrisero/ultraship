@@ -128,10 +128,12 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    At the base and the frozen head, the driver records the test runner's fixture listing, such as `pytest --fixtures-per-test`.
    From both listings, the driver lists each test that uses a changed, added or removed fixture, directly, transitively or through an autouse fixture.
    For each changed, added or removed helper, the driver traces its callers in both checkouts, directly and transitively, and adds each test that reaches it.
+   The driver also traces runtime fixture requests, such as `request.getfixturevalue()`, in both checkouts.
    The driver supplies a map of every active row ID to its designated test at the frozen head, from the repository's mutation tooling, with no row text.
    For each listed test, the driver names every active row that the map assigns to it, with its row ID.
    The admission record lists each such row file path. The reviewer brief names each listed row's exact line range and commit.
    The reviewer confirms from the fixture listing, the helper trace and the diff that the test list is complete.
+   The reviewer blocks approval when it cannot determine every test that reaches a changed fixture or helper by any mechanism.
    The reviewer checks every listed test against the map and confirms that every row that designates it is listed.
    For each listed row, the reviewer traces the changed fixture or helper into the test.
    The reviewer confirms that the designated assertion still separates the original result from the mutant result.
