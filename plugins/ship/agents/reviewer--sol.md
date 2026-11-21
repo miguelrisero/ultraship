@@ -85,7 +85,7 @@ For an added row in a test-only follow-up PR, confirm that the PR changes no sub
 For each such row, confirm from the parent PR's merged diff that the parent added the row's subject file and guarded line.
 Use only the driver's local parent diff from the merge commit's first parent to the merge commit, with the merge commit lookup result that the brief records.
 Block approval if that diff is missing or unbound.
-Confirm from the driver's fixture listing, helper trace and the diff that its list of tests that use a changed fixture or helper is complete, including autouse and transitive fixtures and direct or transitive helper calls.
+Confirm from the driver's base and frozen-head fixture listings, helper traces and the diff that its list of tests that use a changed, added or removed fixture or helper in either checkout is complete, including autouse and transitive fixtures and direct or transitive helper calls.
 Check every listed test against the driver's map of active row IDs to designated tests, and confirm that every row that designates it is listed.
 Block approval if the helper trace or the map is missing or incomplete.
 For each listed row, read only the line range and commit that the brief names, and trace the changed fixture or helper into the test.

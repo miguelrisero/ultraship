@@ -330,9 +330,9 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
    From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.
    The driver then admits only the head copy.
-   At the frozen head, the driver records the test runner's fixture listing, such as `pytest --fixtures-per-test`.
-   From it, the driver lists each test that uses a changed fixture, directly, transitively or through an autouse fixture.
-   For each changed helper, the driver traces its callers, directly and transitively, and adds each test that reaches it.
+   At the base and the frozen head, the driver records the test runner's fixture listing, such as `pytest --fixtures-per-test`.
+   From both listings, the driver lists each test that uses a changed, added or removed fixture, directly, transitively or through an autouse fixture.
+   For each changed, added or removed helper, the driver traces its callers in both checkouts, directly and transitively, and adds each test that reaches it.
    The driver supplies a map of every active row ID to its designated test at the frozen head, from the repository's mutation tooling, with no row text.
    For each listed test, the driver names every active row that the map assigns to it, with its row ID.
    The admission record lists each such row file path. The reviewer brief names each listed row's exact line range and commit.
