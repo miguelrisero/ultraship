@@ -52,6 +52,7 @@ Read each row in the base checkout and the frozen-head checkout that the admissi
 For each added row, grep the base copy of the row file for its ID and confirm zero matches.
 When the brief records the verified base commit and a root-level `git ls-tree` result with exit status 0 and empty output, use that proof in place of the grep.
 Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
+For an added row in a test-only follow-up PR, confirm that the PR changes no subject code and that the mutant matches the CoC decision file that the brief names.
 For a CoC-approved row change, match each applied value to the decision file that the brief names by path and SHA256.
 Use that file only when the brief records the driver's SHA256 and binding check at the frozen head.
 For a narrowed claim, confirm the same designated test and mutant at the base and the frozen head, that the claim keeps only part of the base claim, and that the test proves all of it.

@@ -283,6 +283,10 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The script appends one `[[retired]]` table per row with the row ID, the reason and the `replacement` row ID.
    The replacement row guards the new code. The anchor guard fails a removed row without a `[[retired]]` entry.
 4. Add: the writer adds rows for the PR's own new code, each with a claim, a designated test, a subject and a mutant.
+   A test-only follow-up PR may also add rows for code that a named earlier merged PR added, when the CoC grants it.
+   Its diff changes no subject code, and the parent's merge commit is an ancestor of the recorded base.
+   Its PR body names the parent PR URL, the parent's full merge commit SHA and the CoC decision file by absolute path and SHA256.
+   Each such row keeps the identical mutant edit that the decision file names and passes the review in step 8.
    Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.
    The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.
    Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
