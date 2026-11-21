@@ -288,8 +288,9 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    Its PR body names the parent PR URL, the parent's full merge commit SHA and the CoC decision file by absolute path and SHA256.
    Each such row keeps the identical mutant edit that the decision file names and passes the review in step 8.
    The parent PR's merged diff must add each such row's subject file and guarded line.
-   The driver supplies a local diff of those subject files from the parent's pre-merge base to its merge commit.
-   The driver records both SHAs in the reviewer brief.
+   The driver confirms that `gh pr view <parent PR URL> --json mergeCommit` returns the named merge commit SHA.
+   The driver supplies a local diff of those subject files from that merge commit's first parent to the merge commit.
+   The driver records both SHAs and that lookup result in the reviewer brief.
    Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.
    The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.
    Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
@@ -329,9 +330,11 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
    From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.
    The driver then admits only the head copy.
-   The driver lists each existing designated test whose fixture or helper the diff changes, with its row ID.
-   The driver admits the unchanged lines of each listed row in the reviewer admission record.
-   The reviewer confirms from the diff and the test imports that the list is complete.
+   At the frozen head, the driver records the test runner's fixture listing, such as `pytest --fixtures-per-test`.
+   From it, the driver lists each test that uses a changed fixture or helper, directly, transitively or through an autouse fixture.
+   For each listed test, the driver names every active row whose designated test it is, with its row ID.
+   The admission record lists each such row file path. The reviewer brief names each listed row's exact line range and commit.
+   The reviewer confirms from the fixture listing and the diff that the list is complete.
    For each listed row, the reviewer traces the changed fixture or helper into the test.
    The reviewer confirms that the designated assertion still separates the original result from the mutant result.
    The reviewer blocks approval when the list, the admitted lines or the trace is missing or inconclusive.
