@@ -121,6 +121,82 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, route)
 
+    def test_test_only_parent_requires_exact_test_and_existing_subject(self):
+        for name in ROUTE_CARRIERS:
+            with self.subTest(path=name):
+                route = section((SHIP / name).read_text(), '### Lane-owned row route')
+                creation = route.split('\n4. Add:', 1)[1].split('\n5. Restore:', 1)[0]
+                earlier_code, marker, parent = creation.partition('   Earlier test-only parent:')
+                self.assertTrue(marker, 'Step 4 needs a separate route for an earlier test-only merge.')
+                self.assertIn("The parent PR's merged diff must add each such row's subject file and guarded line.", earlier_code)
+                for requirement in (
+                    'Require the parent PR to be merged in the same repository as the row PR.',
+                    'Match the recorded merge commit to the full squash SHA in the row PR base history.',
+                    'Require the squash to have one parent.',
+                    'Verify the complete changed-path inventory in the local first-parent diff.',
+                    'Require every changed path to contain only tests, test-only fixtures or test-only helpers.',
+                    'Tie a changed hunk to the exact designated test selector and relevant cases for each row.',
+                    'Match the Git tree mode, path and blob ID for the designated test and each relevant fixture and helper.',
+                    'Compare these files at the squash, row base and frozen head.',
+                    "Match the subject's Git tree mode, path and blob ID.",
+                    'Compare the subject at the first parent, squash, row base and frozen head.',
+                    'Limit the complete row base-to-head diff to the approved new rows.',
+                    'Admit no row re-anchor tool and run none.',
+                    'Use the shared anchor proof in step 7 and the independent reviewer admission in step 8.',
+                    'Keep live proof under separate execution admission and GO.',
+                ):
+                    with self.subTest(requirement=requirement):
+                        self.assertTrue(requirement in parent, requirement)
+                approval = (
+                    'Require an existing authorized draft for the same repository and lane.',
+                    'Before any protected insertion, the writer verifies the frozen CoC decision by absolute path and SHA256.',
+                    'Bind it to the writer, repository, lane, draft URL, row base, parent PR URL and full squash SHA.',
+                    'Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.',
+                    'The writer uses native Edit with `replace_all=false` for the authorized insertion.',
+                    'At the frozen head, the driver verifies the decision digest and bindings again against the applied rows.',
+                )
+                for rule in approval:
+                    with self.subTest(requirement=rule):
+                        self.assertTrue(rule in parent, rule)
+                positions = [parent.find(rule) for rule in approval]
+                if -1 not in positions:
+                    self.assertEqual(positions, sorted(positions))
+
+    def test_test_only_parent_review_binds_diff_row_and_anchor_evidence(self):
+        for name in REVIEWERS:
+            with self.subTest(path=name):
+                route = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
+                marker = 'For an added row on the earlier test-only parent route,'
+                self.assertTrue(marker in route, 'Review needs separate evidence for an earlier test-only merge.')
+                parent = route.split(marker, 1)[1].split('\n\n', 1)[0]
+                with self.subTest(requirement='shared anchor proof'):
+                    self.assertTrue(
+                        'Shared anchor proof for native exact-pair edits and earlier test-only parent rows:' in route,
+                        'Both routes need the same anchor proof.',
+                    )
+                for requirement in (
+                    'verify the same-repository merge lookup and full squash SHA in the row base history.',
+                    'Verify the complete test-only path inventory and the changed hunk in the local first-parent diff.',
+                    'Trace that hunk to the exact designated selector, relevant cases and claim.',
+                    'Verify the Git tree mode, path and blob ID for the designated test and each relevant fixture and helper.',
+                    'Compare these files at the squash, row base and frozen head.',
+                    "Verify the subject's Git tree mode, path and blob ID.",
+                    'Compare the subject at the first parent, squash, row base and frozen head.',
+                    'Confirm that the complete row base-to-head diff contains only the approved new rows.',
+                    'Read only the admitted row sections and verify that each new ID is absent at the base.',
+                    'Require the frozen decision by absolute path and SHA256.',
+                    "Require the driver's digest and binding verification at the frozen head.",
+                    'Match the decision to the writer, repository, lane, authorized draft, row base, parent PR and full squash SHA.',
+                    'Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.',
+                    'Require exact-head anchor CI with matching trees, row selection and failure on count mismatch.',
+                    'Apply the shared anchor proof above, including the match to the draft head.',
+                    'Require direct or inferred proof of the exact approved anchor count for each row.',
+                    'Require evidence that the designated assertion passes on the original and fails on the exact approved mutant.',
+                    'Keep live proof under separate execution admission and GO.',
+                ):
+                    with self.subTest(requirement=requirement):
+                        self.assertTrue(requirement in parent, requirement)
+
     def test_lane_owned_route_and_review_copies_match(self):
         for names, heading in ((ROUTE_CARRIERS, '### Lane-owned row route'),
                                ([f'agents/{name}' for name in REVIEWERS], '## Lane-owned row review')):
@@ -177,14 +253,16 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertIn('For a CoC-approved native exact-pair edit, the driver names the frozen decision path, SHA256 and verification result in the reviewer brief.', records)
                 self.assertIn('The driver lists the decision file under `Readable files` in the reviewer brief.', records)
                 self.assertIn('The driver verifies the decision against the applying writer, repository, lane, PR, row file, row ID, source commit and exact edit.', records)
-                self.assertIn('For a CoC-approved native exact-pair edit, the driver supplies content-free evidence from the anchor guard at that draft head.', ci)
                 for requirement in (
+                    'For a CoC-approved native exact-pair edit or an earlier test-only parent row, use the shared anchor proof below.',
+                    'The driver supplies content-free evidence from the anchor guard at the authorized draft head.',
                     'The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.',
                     'The reviewer brief names both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count.',
                     'Include proof that the guard selected the row and that a count mismatch on that row fails the job.',
                     'Report an observed count only when the evidence gives it directly.',
                 ):
-                    self.assertTrue(requirement in ci, requirement)
+                    with self.subTest(requirement=requirement):
+                        self.assertTrue(requirement in ci, requirement)
 
     def test_native_exact_pair_review_uses_decision_and_exact_head_ci(self):
         for name in REVIEWERS:

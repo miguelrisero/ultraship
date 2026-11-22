@@ -161,6 +161,39 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The driver confirms that `gh pr view <parent PR URL> --json mergeCommit` returns the named merge commit SHA.
    The driver supplies a local diff of those subject files from that merge commit's first parent to the merge commit.
    The driver records both SHAs and that lookup result in the reviewer brief.
+
+   Earlier test-only parent: add rows for existing subject code when a named earlier PR changed the designated tests.
+   Require the parent PR to be merged in the same repository as the row PR.
+   Match the recorded merge commit to the full squash SHA in the row PR base history.
+   Require the squash to have one parent.
+   Verify the complete changed-path inventory in the local first-parent diff.
+   Check both paths for renames and copies.
+   Require every changed path to contain only tests, test-only fixtures or test-only helpers.
+   Tie a changed hunk to the exact designated test selector and relevant cases for each row.
+   Show how the changed lines affect the designated assertion.
+   Match the Git tree mode, path and blob ID for the designated test and each relevant fixture and helper.
+   Compare these files at the squash, row base and frozen head.
+   Trace direct, transitive, autouse and runtime fixture use and direct and transitive helper calls.
+   Match the subject's Git tree mode, path and blob ID.
+   Compare the subject at the first parent, squash, row base and frozen head.
+   Limit the complete row base-to-head diff to the approved new rows.
+   Require an existing authorized draft for the same repository and lane.
+   Before any protected insertion, the writer verifies the frozen CoC decision by absolute path and SHA256.
+   Bind it to the writer, repository, lane, draft URL, row base, parent PR URL and full squash SHA.
+   Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.
+   The writer uses native Edit with `replace_all=false` for the authorized insertion.
+   Preserve all existing protected read and edit restrictions.
+   Admit no row re-anchor tool and run none.
+   At the frozen head, the driver verifies the decision digest and bindings again against the applied rows.
+   The driver names the decision under `Readable files` and supplies the merge lookup, both commit SHAs and local first-parent evidence.
+   Include the parent path inventory and hunk-to-test trace.
+   Include the Git tree mode, path and blob ID for each file at each comparison point.
+   Supply content-free evidence that the row diff leaves every path and byte outside the approved insertions unchanged.
+   Name the parent PR URL, full squash SHA and decision path and SHA256 in the row PR body.
+   Use the shared anchor proof in step 7 and the independent reviewer admission in step 8.
+   Keep live proof under separate execution admission and GO.
+   Hold the row on any missing, stale or mismatched evidence.
+
    Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.
 5. Restore: the writer returns rows that only the lane's own unmerged commits changed to their bytes at the merge base.
    A restored row needs no failing CI report, so a row that the starting head deletes stays in scope.
@@ -196,7 +229,8 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    Reuse the existing authorized draft for CI and reviewer admission.
    If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.
    Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
-   For a CoC-approved native exact-pair edit, the driver supplies content-free evidence from the anchor guard at that draft head.
+   For a CoC-approved native exact-pair edit or an earlier test-only parent row, use the shared anchor proof below.
+   The driver supplies content-free evidence from the anchor guard at the authorized draft head.
    The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.
    The reviewer brief names both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count.
    Include proof that the guard selected the row and that a count mismatch on that row fails the job.
