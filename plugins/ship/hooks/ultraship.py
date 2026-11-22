@@ -4874,11 +4874,38 @@ def receipt_custody(data, read_search=False):
     # shortcut: shell text checks cannot isolate same-user code; upgrade to isolated state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
-        command = normalized(raw)
         joined = raw.replace('\\\n', '')
         account_command = normalized(joined)
+        literal = r'''(?:'[^'\x00\r\n]*'|"[^"$`\\!\x00\r\n]*")'''
+        display = re.fullmatch(
+            r"[ \t]*(?:echo|printf[ \t]+'%s\\n')[ \t]+("
+            + literal + r'(?:[ \t]+' + literal + r')*)'
+            r'(?:[ \t]+>>?[ \t]+[A-Za-z0-9_./-]+)?[ \t]*\n?', raw)
+        state_display = re.fullmatch(
+            r'''[ \t]*printf[ \t]+'%s\\n'[ \t]+("\$\{XDG_STATE_HOME:-\$HOME/\.local/state\}")[ \t]*\n?''', raw)
+        cache_listing = re.fullmatch(
+            r'[ \t]*ls[ \t]+-d[ \t]+(~/.claude/plugins/cache/ultraship/ship/\*)[ \t]*\n?', raw)
+        if cache_listing:
+            # With -d, ls lists operand names without traversing their contents.
+            root = Path(cache_listing[1][:-2]).expanduser()
+            if receipt_path(str(root), ancestors=True):
+                deny(RECEIPT_CUSTODY)
+            try:
+                with os.scandir(root) as entries:
+                    for index, entry in enumerate(entries):
+                        if index >= 4096 or receipt_path(entry.path, ancestors=True):
+                            deny(RECEIPT_CUSTODY)
+            except (FileNotFoundError, NotADirectoryError):
+                pass
+            except OSError:
+                deny(RECEIPT_CUSTODY)
+        data_match = display or state_display
+        # Printed values are data. Keep the output path and other custody checks intact.
+        path_command = (raw[:data_match.start(1)] + "'data'" + raw[data_match.end(1):]
+                        if data_match else raw)
+        command = normalized(path_command)
         raw_words = [word.translate(str.maketrans('', '', "\"'\\"))
-                     for word in re.split(r'[\s;&|<>()]+', raw) if word]
+                     for word in re.split(r'[\s;&|<>()]+', path_command) if word]
         words = [re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
                         lambda match: os.environ.get(match[1] or match[2], ''), word)
                  for word in raw_words]
@@ -5119,7 +5146,9 @@ def receipt_custody(data, read_search=False):
                     first == 'df' or read_only_git(words, [raw for raw, _, _, _ in parts], ending))
 
             comment = pr_comment_body_removed(raw)
-            pending, seen = [joined if comment == raw else comment], set()
+            custody_source = path_command if data_match else joined if comment == raw else comment
+            cache_operand = cache_listing[1] if cache_listing else None
+            pending, seen = [custody_source], set()
             try:
                 while pending:
                     source = pending.pop()
@@ -5180,6 +5209,13 @@ def receipt_custody(data, read_search=False):
                                         and not any(token[1] in find_actions for token in names[start:index])):
                                     continue
                             arguments = names[index + 1:]
+                            if interpreter in {'node', 'nodejs'} and arguments and arguments[0][0] == '--test':
+                                # Admit one literal test file, without Node discovery or shell expansion.
+                                if (len(arguments) < 2
+                                        or not re.fullmatch(r'(?!-)[A-Za-z0-9_./-]+\.[cm]?js', arguments[1][0])
+                                        or (len(arguments) > 2 and arguments[2][0] not in {';', '&', '|', ')', '\n'})):
+                                    return True
+                                continue
                             kind, operand, offset = program_operand(base, interpreter, [token[1] for token in arguments])
                             if kind == 'unknown':
                                 return True
@@ -5209,7 +5245,8 @@ def receipt_custody(data, read_search=False):
                                     or (modifies_paths and installed_hook in resolved(path))
                                     or (index != evidence_index and (
                                         (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', path))
-                                        or expands_to_hook(raw_word + backtick, path + backtick)))):
+                                        or (raw_word != cache_operand
+                                            and expands_to_hook(raw_word + backtick, path + backtick))))):
                                 return True
                     # An unresolved word after a search pattern is search data; resolved nested code keeps its scan.
                     data_starts = {token[2] for index, token in enumerate(tokens) if grep_data_token(tokens, index)}
@@ -5219,7 +5256,7 @@ def receipt_custody(data, read_search=False):
                 return True
             return False
 
-        if (receipt_text(raw)
+        if (receipt_text(path_command)
                 or ('ledger.py' in account_command and 'account-auto' in account_command
                     and not own_account_call(data, raw))
                 or any(receipt_path(word, ancestors=True, state_only=True) for word in words)

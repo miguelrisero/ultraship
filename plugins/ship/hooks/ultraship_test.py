@@ -70,6 +70,20 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     receipt_store = Path(tmp) / 'ultraship' / 'text-lint'
     custody = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                'Report the blocked scope to the driver.')
+    build = ('cd /workspace/service-walkthroughs && npm run build'
+             ' && node --test scripts/test-service-examples.mjs')
+    build_payload = {'cwd': '/workspace/repo', 'tool_name': 'Bash'}
+    for command, expected_reason in (
+            (build, None),
+            (build + ' && true', None),
+            (build.rsplit(' ', 1)[0], custody),
+            (build + ' scripts/other.test.mjs', custody),
+            (build + f' && cat {shlex.quote(str(receipt_store / "key"))}', custody),
+            (build + f' > {shlex.quote(str(receipt_store / "key"))}', custody)):
+        result = hook('pre', {**build_payload, 'tool_input': {'command': command}}, env)
+        actual_reason = result['hookSpecificOutput']['permissionDecisionReason'].split('\n', 1)[0] if denied(result) else None
+        assert actual_reason == expected_reason, (command, result)
+
     for caller in ({'agent_type': 'ship:writer--sol'}, {'agent_type': 'ship:driver'}, {}):
         for tool, inputs in (
                 ('Edit', {'file_path': str(receipt_store / 'key')}),
@@ -1203,6 +1217,41 @@ class ReceiptCustodyTests(unittest.TestCase):
                             {'cwd': str(self.cwd), 'agent_type': caller, 'tool_name': 'Bash',
                              'tool_input': {'command': command}}))
                     self.assertEqual(output.getvalue(), '')
+
+    def test_scratch_append_with_custody_message(self):
+        self.assert_account_command_allowed(
+            f"echo {shlex.quote(ultraship.RECEIPT_CUSTODY)} >> .scratch/coc/state-owed.md", caller='')
+
+    def test_recursive_cache_search_keeps_its_refusal(self):
+        (Path.home() / '.claude/plugins/cache/ultraship/ship/1.15.20/hooks').mkdir(parents=True)
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': f'grep -rl "{ultraship.RECEIPT_CUSTODY}" ~/.claude/plugins/cache/*/*/*/'}})
+
+    def test_cache_listing_refuses_a_protected_alias(self):
+        cache = Path.home() / '.claude/plugins/cache/ultraship/ship'
+        cache.mkdir(parents=True)
+        self.store.mkdir(parents=True)
+        (cache / '1.15.20').symlink_to(self.store, target_is_directory=True)
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': 'ls -d ~/.claude/plugins/cache/ultraship/ship/*'}})
+
+    def test_printf_with_custody_message(self):
+        self.assert_account_command_allowed(
+            f"printf '%s\\n' {shlex.quote(ultraship.RECEIPT_CUSTODY)}", caller='')
+
+    def test_list_ship_cache_versions(self):
+        installed = Path.home() / '.claude/plugins/cache/ultraship/ship/1.15.20/hooks/ultraship.py'
+        installed.parent.mkdir(parents=True)
+        with patch.object(ultraship, '__file__', str(installed)):
+            self.assert_account_command_allowed('ls -d ~/.claude/plugins/cache/ultraship/ship/*', caller='')
+
+    def test_print_state_root(self):
+        self.assert_account_command_allowed("printf '%s\\n' \"${XDG_STATE_HOME:-$HOME/.local/state}\"", caller='')
+
+    def test_custody_message_cannot_be_written_to_receipt(self):
+        target = self.store / 'receipts' / ('a' * 32 + '.json')
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            'command': f"printf '%s\\n' {shlex.quote(ultraship.RECEIPT_CUSTODY)} > {shlex.quote(str(target))}"}})
 
     def test_text_lint_execution_and_nonplain_grep_deny_every_caller(self):
         script = str(self.cwd / 'text_lint.py')
