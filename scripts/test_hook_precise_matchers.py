@@ -145,6 +145,7 @@ class PreciseMatcherTests(unittest.TestCase):
         for command in ("sed 's/x/resolveReviewThread/e' notes.txt", 'rg --pre=sh resolveReviewThread notes.txt',
                         'sort --compress-program=sh resolveReviewThread', 'sort --compress-prog=sh resolveReviewThread',
                         'git grep --open-f resolveReviewThread', 'git grep -nO resolveReviewThread',
+                        'rg -e -- --pre=sh resolveReviewThread notes.txt', 'git grep -e -- --open-f resolveReviewThread',
                         'rg --hostname-bin=sh resolveReviewThread notes.txt'):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Ship replies to and resolves review threads')
@@ -155,17 +156,29 @@ class PreciseMatcherTests(unittest.TestCase):
                         "python3 \"$(find ~/.claude/plugins/cache -name 'ultra*.py' | head -n1)\" pre",
                         'ls ~/.local/state/ultraship; cat "$_/text-lint/key"',
                         'P=$HOME/.local/state/ultra; cat "${P}ship/text-lint/key"',
-                        f'cp {PLUGIN}/hooks/ultraship.py {PLUGIN}/hooks/u.py && python3 {PLUGIN}/hooks/u.py pre'):
+                        f'cp {PLUGIN}/hooks/ultraship.py {PLUGIN}/hooks/u.py && python3 {PLUGIN}/hooks/u.py pre',
+                        'cd ~ && cat .lo*/st*/ul*/te*/key',
+                        f'cd / && cat {str(self.home.parent)[1:]}/*/.lo*/st*/ul*/te*/key',
+                        "grep -r '' ~/.loc*"):
             with self.subTest(command=command):
                 self.assert_denied(command, start=custody)
         self.assert_denied("gh api graphql -f query='query($id:ID!){node(id:$id){id}}' -F id=@notes.txt",
                            'ship:driver', 'Ship replies to and resolves review threads')
 
+    def test_hook_folder_glob_denies_unless_listed(self):
+        installed = self.home / '.claude/plugins/cache/x/ship/1/hooks/ultraship.py'
+        with patch.object(ultraship, '__file__', str(installed)):
+            for command in ("sed -i 's/^/#/' ~/.claude/plugins/cache/*/ship/*/hooks/u*.py",
+                            'cp ~/.claude/plugins/cache/*/ship/*/hooks/u*.py z.py && python3 z.py pre'):
+                with self.subTest(command=command):
+                    self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+            self.assert_allowed('ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py', advisory=True)
+
     def test_reviewer_row_globs_that_can_reach_rows_deny(self):
         rows = self.cwd / 'repo/backend/tests/mutation'
         rows.mkdir(parents=True)
         (rows / 'rows.py').write_text('x')
-        for glob in ('!tests/mutation', 'rows\\.py'):
+        for glob in ('!tests/mutation', 'rows\\.py', '[^x]*', '/backend/**', '/rows.py'):
             with self.subTest(glob=glob):
                 self.assertEqual(self.reviewer_grep(glob=glob).get('permissionDecision'), 'deny')
 

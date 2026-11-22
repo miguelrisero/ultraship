@@ -4495,9 +4495,11 @@ def reader_options_known(program, words):
     if program not in READER_OPTIONS:
         return True
     long_options, unsafe_letters = READER_OPTIONS[program]
+    # Every word is checked: `--` can be the value of an option such as `-e`, so it never ends the scan.
+    # An operand that only looks like an option is denied too, which errs toward refusal.
     for word in words:
         if word == '--':
-            break
+            continue
         if word.startswith('--') and word.split('=', 1)[0] not in long_options:
             return False
         if re.match(r'-[^-]', word) and any(letter in word for letter in unsafe_letters):
@@ -5094,14 +5096,27 @@ def receipt_custody(data, read_search=False):
                 return True
             return False
 
-        def glob_prefix(word, stores=receipt_paths):
+        def glob_prefix(word, stores=receipt_paths, ancestors=False):
+            # With ancestors, a glob that stops at a parent folder of a store also matches.
             for pattern in resolved(word):
                 segments = pattern.split('/')
                 for store in stores:
                     store_segments = store.split('/')
-                    if len(segments) >= len(store_segments) and all(
+                    if (len(segments) >= len(store_segments) or ancestors) and all(
                             fnmatch.fnmatchcase(segment, pattern_segment)
                             for segment, pattern_segment in zip(store_segments, segments)):
+                        return True
+            return False
+
+        def glob_window(word, stores):
+            """True when the glob's segments match a run of a store path's segments, from any folder."""
+            parts = [part for part in normalized(word).split('/') if part not in ('', '.', '~')]
+            if not parts or all(re.fullmatch(r'[*?]+', part) for part in parts):
+                return False
+            for store in stores:
+                segments = store.split('/')
+                for start in range(len(segments)):
+                    if all(fnmatch.fnmatchcase(segment, part) for segment, part in zip(segments[start:], parts)):
                         return True
             return False
 
@@ -5323,6 +5338,7 @@ def receipt_custody(data, read_search=False):
                                              for index, (_, word, start, _) in enumerate(executable) if start in positions)
                                       or any(word.partition('=')[0] in program_options.get(command, ())
                                              for command in commands for _, word, _, _ in tokens))
+                    changes_dir = re.search(r'(?:^|[;&|(\s])(?:cd|pushd)(?=\s|$)', text) is not None
                     data_segment, listing, segment = [], [], []
                     for token in [*tokens, ('\n', '\n', 0, 0)]:
                         if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
@@ -5408,12 +5424,19 @@ def receipt_custody(data, read_search=False):
                         backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
                         for path in paths:
                             path = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), path)
+                            globbed = any(char in path for char in '*?[')
+                            # A glob reaches a store or the hook folder unless the segment only lists it. After cd,
+                            # the glob's own folder is unknown, so a match at any depth of a store path counts.
                             if (receipt_path(path, ancestors=not listing[index],
                                              state_only=not modifies_paths or data_segment[index], stores=grant_paths)
-                                    or (any(char in path for char in '*?[') and glob_prefix(path))
+                                    or globbed and glob_prefix(path, receipt_paths | grant_paths,
+                                                               ancestors=not listing[index])
+                                    or globbed and changes_dir and not listing[index]
+                                    and glob_window(path, receipt_paths | grant_paths)
+                                    or globbed and not listing[index] and glob_prefix(path, stores={hook_folder})
                                     or (modifies_paths and installed_hook in resolved(path))):
                                 return 'hard'
-                            if ((any(char in path for char in '*?[') and glob_prefix(path, stores={hook_folder}))
+                            if ((globbed and glob_prefix(path, stores={hook_folder}))
                                     or (index != evidence_index and (
                                         (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', path))
                                         or (raw_word != cache_operand
@@ -5979,7 +6002,8 @@ def reviewer_row_folders(tin, tool, globs, row_folders, blocked, deadline):
     exact = all(folder.startswith(root + '/') and os.path.realpath(folder) == folder
                 and re.search(r'(?:^|/)tests/mutation$', folder[len(root):]) for folder in row_folders)
     tokens = ' '.join(globs).split()
-    positives = [token for token in tokens if not token.startswith('!')]
+    # A leading `/` anchors a ripgrep glob to the search root; fnmatch compares the rest.
+    positives = [token.lstrip('/') for token in tokens if not token.startswith('!')]
     if tool == 'Grep' and not positives and exact:
         if not tokens:
             UPDATED_INPUT['glob'] = ROW_EXCLUSION
@@ -5989,9 +6013,19 @@ def reviewer_row_folders(tin, tool, globs, row_folders, blocked, deadline):
         if any(re.fullmatch(r'!\*\*/tests/mutation(?:/\*\*)?/?', token) for token in tokens):
             return
         deny(blocked + f' Add `{ROW_EXCLUSION}` to the glob.')
-    # fnmatch has no brace sets or backslash escapes, so either counts as a match.
-    if not positives or any(char in token for token in positives for char in '{\\'):
+    # fnmatch reads braces, backslashes and `[^` differently from ripgrep, so any of them counts as a match.
+    if not positives or any(char in token for token in positives for char in '{\\['):
         deny(blocked)
+    for folder in row_folders:
+        # A glob whose folder part lines up with a row folder can reach rows created later, so it matches.
+        parts = posixpath.relpath(folder, root).split('/')
+        for token in positives:
+            segments = token.split('/')
+            prefix = segments[:segments.index('**')] if '**' in segments else segments
+            reaches = '**' in segments or len(segments) > len(parts)
+            if len(segments) > 1 and reaches and all(
+                    fnmatch.fnmatchcase(part, segment) for part, segment in zip(parts, prefix)):
+                deny(blocked)
     count = 0
     for folder in row_folders:
         names = [(posixpath.dirname(folder), [posixpath.basename(folder)])]

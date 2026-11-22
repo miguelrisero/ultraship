@@ -819,11 +819,12 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
-    def test_grant_custody_warns_on_interpreter_operands_after_value_options(self):
+    def test_grant_custody_denies_interpreter_operands_after_value_options(self):
+        # An unresolved interpreter operand or an unknown interpreter option could run the hook.
         for command in ('bash -o pipefail -c "$BODY"', 'uv run --with sample "$SCRIPT"',
                         'bash --unknown-option sample.sh', 'uv run --unknown-option sample.py'):
             with self.subTest(command=command):
-                self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': command}})
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
     def test_grant_custody_admits_ancestor_operands_of_df_and_read_only_git(self):
         ancestor = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))

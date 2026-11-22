@@ -66,8 +66,6 @@ class ReviewerSearchTests(unittest.TestCase):
         cases = (
             ('Grep', {'path': self.root + '/backend', 'glob': '!tests/mutation/**',
                       'pattern': 'identifier'}, 'cannot access explicit tests/mutation/'),
-            ('Grep', {'path': self.root + '/backend', 'pattern': 'identifier'},
-             'cannot access explicit tests/mutation/'),
             ('Read', {'file_path': self.root + '/tests/mutation/x.txt'},
              'cannot access explicit tests/mutation/'),
             ('Grep', {'pattern': 'identifier'}, 'scope searches to an explicit path'),
@@ -82,9 +80,15 @@ class ReviewerSearchTests(unittest.TestCase):
                     agent = prefix + path.stem
                     with self.subTest(agent=agent, tool=tool, arguments=arguments):
                         self.assertEqual(self.decision(tool, arguments, agent), reviewer)
+        # A plain search above row folders gets the same exclusion glob for every reviewing role.
+        above = ('Grep', {'path': self.root + '/backend', 'pattern': 'identifier'})
+        rewritten = self.decision(*above)
+        self.assertEqual(rewritten['updatedInput']['glob'], ultraship.ROW_EXCLUSION)
         for path in LEDGER_AGENTS:
             for prefix in ('', 'ship:'):
                 agent = prefix + path.stem
+                with self.subTest(agent=agent, scope='above rows'):
+                    self.assertEqual(self.decision(*above, agent), rewritten)
                 with self.subTest(agent=agent, scope='ordinary'):
                     self.assertEqual(self.decision('Grep', {'path': self.root + '/src',
                                                            'pattern': 'identifier'}, agent), {})
@@ -104,6 +108,9 @@ class ReviewerSearchTests(unittest.TestCase):
             ]
             for agent in ('ship:reviewer--sol', 'reviewer--sol'):
                 for tool, arguments in cases:
+                    # An exclusion glob over a folder without rows keeps rows out, so it proceeds.
+                    if protected.startswith('!') and arguments.get('path') == self.root + '/src':
+                        continue
                     with self.subTest(path=protected, agent=agent, tool=tool, arguments=arguments):
                         self.assert_denied(tool, arguments, agent)
 
@@ -248,16 +255,23 @@ class ReviewerSearchTests(unittest.TestCase):
                         self.assert_rule(tool, arguments, 'scope searches to an explicit path',
                                          cwd=self.root + '/src')
 
-    def test_a_search_root_with_a_protected_directory_is_denied_whatever_the_glob(self):
+    def test_a_search_root_with_a_protected_directory_is_denied_when_the_glob_can_reach_it(self):
         for glob in ('tests/m*tion/**', 'tests/mut?tion/**', 'tests/[m]utation/**',
-                     'tests/**/x.py', 'tests/{mutation,unit}/**',
-                     'tests/test_search.py', 'backend/**/*.py'):
+                     'tests/**/x.py', 'tests/{mutation,unit}/**', 'tests/m*', '**'):
             for tool, arguments in (
                 ('Grep', {'path': self.root + '/backend', 'glob': glob, 'pattern': 'identifier'}),
                 ('Glob', {'path': self.root + '/backend', 'pattern': glob}),
             ):
                 with self.subTest(tool=tool, arguments=arguments):
                     self.assert_protected(tool, arguments)
+        # A glob that cannot match any path under a row folder proceeds.
+        for glob in ('tests/test_search.py', 'backend/**/*.py'):
+            for tool, arguments in (
+                ('Grep', {'path': self.root + '/backend', 'glob': glob, 'pattern': 'identifier'}),
+                ('Glob', {'path': self.root + '/backend', 'pattern': glob}),
+            ):
+                with self.subTest(tool=tool, arguments=arguments):
+                    self.assertNotEqual(self.decision(tool, arguments).get('permissionDecision'), 'deny')
         for tool, arguments in (
             ('Grep', {'path': self.root + '/backend/api/tests', 'glob': '**/*.py', 'pattern': 'identifier'}),
             ('Grep', {'path': self.root + '/backend/api/tests', 'pattern': 'identifier'}),
@@ -280,6 +294,8 @@ class ReviewerSearchTests(unittest.TestCase):
                 self.assertEqual(self.decision(tool, arguments), {})
 
     def test_round_three_directory_scope_bypasses_are_denied(self):
+        # A positive glob is checked against the row files, so the row folder holds one.
+        Path(self.root, 'backend/api/tests/mutation/x.py').write_text('x')
         cases = (
             ('Grep', {'path': self.root + '/backend/api/tests', 'glob': '*.py',
                       'pattern': 'identifier'}, self.root),
@@ -474,6 +490,8 @@ class ReviewerSearchTests(unittest.TestCase):
 
     def test_protected_names_are_matched_without_regard_to_case(self):
         Path(self.root, 'src/Tests/Mutation').mkdir(parents=True)
+        # A positive glob is checked against the row files, so the folder holds one.
+        Path(self.root, 'src/Tests/Mutation/x.py').write_text('x')
         for tool, arguments in (
             ('Read', {'file_path': self.root + '/tests/Mutation/x.py'}),
             ('LSP', {'operation': 'hover', 'filePath': self.root + '/TESTS/mutation/x.py'}),
@@ -913,7 +931,7 @@ class ReviewerSearchTests(unittest.TestCase):
         self.assertIn("'pre': guarded_pre", read('plugins/ship/hooks/ultraship.py'))
         for agent in ('ship:reviewer--sol', 'reviewer--opus', 'ship:researcher--luna', 'ship:writer--sol', None):
             output = io.StringIO()
-            with self.subTest(agent=agent), patch.object(ultraship, 'pre', side_effect=RuntimeError('synthetic')), \
+            with self.subTest(agent=agent), patch.object(ultraship, 'pre_output', side_effect=RuntimeError('synthetic')), \
                     patch.object(ultraship.traceback, 'print_exc') as printed:
                 with redirect_stdout(output), self.assertRaises(SystemExit) as exit:
                     ultraship.guarded_pre({'agent_type': agent, 'tool_name': 'Read', 'tool_input': {'file_path': '/x'}})
