@@ -121,6 +121,40 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, route)
 
+    def earlier_code_routes(self):
+        for name in ROUTE_CARRIERS:
+            route = section((SHIP / name).read_text(encoding='utf-8'), '### Lane-owned row route')
+            creation = route.split('\n4. Add:', 1)[1].split('\n5. Restore:', 1)[0]
+            earlier_code = creation.split('   A test-only follow-up PR may also add rows', 1)[1]
+            yield name, earlier_code.partition('   Earlier test-only parent:')[0]
+        for name in REVIEWERS:
+            route = section((SHIP / 'agents' / name).read_text(encoding='utf-8'), '## Lane-owned row review')
+            yield name, route.split('Earlier-code parent route:', 1)[1].split('\n\n', 1)[0]
+
+    def test_follow_up_row_passes_for_parent_added_lines_on_an_unchanged_subject(self):
+        for name, route in self.earlier_code_routes():
+            with self.subTest(path=name):
+                if name in REVIEWERS:
+                    required = ("Confirm from the brief's blob IDs that each such subject file is unchanged from the parent's merge commit to the recorded base.",
+                                "Confirm that the CoC decision file names the parent PR URL and the parent's full merge commit SHA.",
+                                "Confirm that the lookup's parent PR URL and merge commit SHA match the CoC decision file "
+                                "and the PR body fields that the brief copies.")
+                else:
+                    required = ("Each such subject file has the same Git blob ID at the parent's merge commit and at the recorded base.",
+                                "The CoC decision file names the parent PR URL and the parent's full merge commit SHA.",
+                                "The driver also records each such subject file's blob ID at the merge commit and at the base.",
+                                'The driver records the parent PR URL that it passed to that lookup in the reviewer brief.',
+                                'The driver copies the parent PR URL and merge commit SHA from the row PR body into the reviewer brief.')
+                for requirement in required:
+                    self.assertIn(requirement, route)
+
+    def test_follow_up_row_is_refused_for_a_guarded_line_the_parent_did_not_add(self):
+        for name, route in self.earlier_code_routes():
+            with self.subTest(path=name):
+                verb, line = ('Block approval', 'a guarded line') if name in REVIEWERS else ('Hold the row', 'its guarded line')
+                self.assertIn(f'{verb} when the parent diff did not add or change {line}.', route)
+                self.assertIn(f"{verb} when the subject file's blob IDs at the merge commit and at the base differ.", route)
+
     def test_test_only_parent_requires_exact_test_and_existing_subject(self):
         for name in ROUTE_CARRIERS:
             with self.subTest(path=name):
