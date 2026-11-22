@@ -4955,9 +4955,15 @@ def receipt_custody(data, read_search=False):
         value = value.casefold().translate(str.maketrans('', '', "\"'\\"))
         return re.sub(r'/\.(?=/|$)', '', re.sub(r'/+', '/', value))
 
+    # Folders that a `cd` or `pushd` in the command can enter; a relative word resolves against each of them too.
+    cd_bases = []
+
     def resolved(value):
-        path = os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(value))
-        return {normalized(os.path.abspath(path)), normalized(os.path.realpath(path))}
+        found = set()
+        for base in [data.get('cwd') or os.getcwd(), *cd_bases]:
+            path = os.path.join(base, os.path.expanduser(value))
+            found |= {normalized(os.path.abspath(path)), normalized(os.path.realpath(path))}
+        return found
 
     try:
         account_state = Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state'
@@ -5304,8 +5310,32 @@ def receipt_custody(data, read_search=False):
             except Exception:
                 masked_source = custody_source
             # An unresolved word stays fail-closed whenever the command names the hook or its folder anywhere.
+            home_source = re.sub(r'~(?=/|\s|$)|\$\{HOME\}|\$HOME\b', lambda _: str(Path.home()), masked_source)
             mentions_hook = bool(hook_name.search(normalized(masked_source)) or module_reference.search(masked_source)
-                                 or hook_folder in normalized(masked_source))
+                                 or hook_folder in normalized(home_source))
+            # Each `cd` or `pushd` target joins the folders a relative word can resolve against.
+            # A target the scan cannot read could be any folder, so it is refused.
+            base = data.get('cwd') or os.getcwd()
+            # A target that is one variable set to a literal path earlier in the same command resolves to that path.
+            literals = dict(re.findall(r'(?:^|[;&|\s])([A-Za-z_]\w*)=([^\s;&|()$`\'"\\*?\[{]+)(?=[;&|\s]|$)',
+                                       custody_source))
+            for match in re.finditer(r'(?:^|[;&|(\s])(?:cd|pushd)(?:[ \t]+("?\$\(git rev-parse --show-toplevel\)"?'
+                                     r'|[^\s;&|()]+))?(?=[\s;&|()]|$)', custody_source):
+                target = match[1]
+                variable = re.fullmatch(r'"?\$\{?([A-Za-z_]\w*)\}?"?', target or '')
+                if variable and variable[1] in literals:
+                    target = literals[variable[1]]
+                if re.fullmatch(r'"?\$\(git rev-parse --show-toplevel\)"?', target or ''):
+                    # The repository top folder is the working folder or one of its parents.
+                    cd_bases.extend(str(folder) for folder in Path(base).parents)
+                    continue
+                if target is None or target == '--':
+                    target = str(Path.home())
+                elif re.search(r'[$`*?\[{\\\'"]', target) or target.startswith('-'):
+                    return 'hard'
+                base = os.path.join(base, os.path.expanduser(target))
+                cd_bases.append(base)
+                cd_bases.append(os.path.join(data.get('cwd') or os.getcwd(), os.path.expanduser(target)))
 
             def unread():
                 # Unreadable text proceeds only when it names no hook and holds no expansion or hidden program.
@@ -5339,7 +5369,7 @@ def receipt_custody(data, read_search=False):
                                       or any(word.partition('=')[0] in program_options.get(command, ())
                                              for command in commands for _, word, _, _ in tokens))
                     changes_dir = re.search(r'(?:^|[;&|(\s])(?:cd|pushd)(?=\s|$)', text) is not None
-                    data_segment, listing, segment = [], [], []
+                    data_segment, listing, recursive, segment = [], [], [], []
                     for token in [*tokens, ('\n', '\n', 0, 0)]:
                         if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
                             data_segment += [reads_only(segment, token[0])] * len(segment) + [False]
@@ -5347,13 +5377,21 @@ def receipt_custody(data, read_search=False):
                             first = next((word for _, word, _, _ in segment if not SHELL_ASSIGNMENT.match(word)), '')
                             listing += [first in {'ls', 'stat', 'du', 'test', '['}
                                         and not any(raw_word == '>' for raw_word, _, _, _ in segment)] * len(segment) + [False]
+                            # A recursive reader or copier enters every folder below an operand.
+                            flags = r'-\w*[rR]\w*|--recursive|--dereference-recursive' + (
+                                r'|-\w*a\w*|--archive' if os.path.basename(first) in {'cp', 'rsync', 'scp'} else '')
+                            recursive += [os.path.basename(first) in {'rg', 'tar', 'zip', '7z', 'rsync'}
+                                          or any(re.fullmatch(flags, word) for _, word, _, _ in segment)
+                                          ] * len(segment) + [False]
                             segment = []
                         else:
                             segment.append(token)
                     account_words = own_account_call(data, raw) if source == raw else False
-                    if not account_words and any(unresolved_program(raw_word, word)
+                    # A program word the scan cannot read, or one with a glob, could name the hook or gh.
+                    if not account_words and any((unresolved_program(raw_word, word)
+                                                  or re.search(r'[*?]|[^\[]\[', word))
                                                  for raw_word, word, start, _ in executable if start in positions):
-                        verdict = 'soft'
+                        return 'hard'
                     if any(start in positions and (hook_name.search(os.path.basename(normalized(word)))
                                                    or installed_hook in resolved(word))
                            for _, word, start, _ in executable):
@@ -5427,8 +5465,10 @@ def receipt_custody(data, read_search=False):
                             globbed = any(char in path for char in '*?[')
                             # A glob reaches a store or the hook folder unless the segment only lists it. After cd,
                             # the glob's own folder is unknown, so a match at any depth of a store path counts.
-                            if (receipt_path(path, ancestors=not listing[index],
-                                             state_only=not modifies_paths or data_segment[index], stores=grant_paths)
+                            if (receipt_path(path, ancestors=not listing[index] or recursive[index],
+                                             state_only=(not modifies_paths or data_segment[index])
+                                             and not recursive[index], stores=grant_paths)
+                                    or recursive[index] and receipt_path(path, ancestors=True, stores=receipt_paths)
                                     or globbed and glob_prefix(path, receipt_paths | grant_paths,
                                                                ancestors=not listing[index])
                                     or globbed and changes_dir and not listing[index]
@@ -5438,7 +5478,10 @@ def receipt_custody(data, read_search=False):
                                 return 'hard'
                             if ((globbed and glob_prefix(path, stores={hook_folder}))
                                     or (index != evidence_index and (
-                                        (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', path))
+                                        # The module name matters only where an interpreter could import it.
+                                        (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', path)
+                                         and any(interpreter_name(command) or command in SHELL_INTERPRETERS | {'uv', 'uvx'}
+                                                 for command in commands))
                                         or (raw_word != cache_operand
                                             and expands_to_hook(raw_word + backtick, path + backtick))))):
                                 verdict = 'soft'
@@ -5996,16 +6039,16 @@ ROW_EXCLUSION = '!**/tests/mutation/**'
 
 
 def glob_pieces(globs):
-    """Split globs as the Grep tool does: on whitespace, then on commas only in a piece without braces."""
-    pieces = []
-    for piece in ' '.join(globs).split():
-        # A brace piece stays whole, so a comma inside braces never makes a separate exclusion.
-        pieces += [piece] if '{' in piece or '}' in piece else [part for part in piece.split(',') if part]
-    return pieces
+    """Split reviewer globs on spaces and commas; the caller refuses braces and characters outside printable ASCII."""
+    return [part for piece in ' '.join(globs).split(' ') for part in piece.split(',') if part]
 
 
 def reviewer_row_folders(tin, tool, globs, row_folders, blocked, deadline):
     """Admit a search above row folders only when no row file can match it."""
+    # The Grep tool splits braces and whitespace by rules this check cannot mirror exactly, so above row folders
+    # any brace or character outside printable ASCII is refused before the split.
+    if any(re.search(r'[{}]|[^\x20-\x7e]', glob) for glob in globs):
+        deny(blocked + ' Above row folders, reviewer globs cannot hold braces or characters outside printable ASCII.')
     root = tin['path'].rstrip('/')
     # The exclusion glob is case-sensitive and relative to the search path, so it covers only plain, exact folders.
     exact = all(folder.startswith(root + '/') and os.path.realpath(folder) == folder

@@ -174,6 +174,35 @@ class PreciseMatcherTests(unittest.TestCase):
                     self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
             self.assert_allowed('ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py', advisory=True)
 
+    def test_fail_closed_review_round_three(self):
+        installed = self.home / '.claude/plugins/cache/x/ship/1/hooks/ultraship.py'
+        with patch.object(ultraship, '__file__', str(installed)):
+            for command in ('cd && cd .local && cd state && cd ultraship && cd account-grants && cat *',
+                            'cd .local; cd state; cd ultraship; cd text\\-lint; cat key',
+                            'cd ~/.claude/plugins/cache/x/ship/1/hooks && ./u*.py pre',
+                            'cd ~/.claude/plugins/cache/x/ship/1 && hoo?s/ultra*.py pre',
+                            'touch api graphql; /usr/bin/g? a[p]i gr[a]phql -F query=@q.txt',
+                            'cd ~/.claude/plugins/cache/x/ship/1 && cd hooks && sed -i s/a/b/ u*.py',
+                            'cd ~/.claude/plugins/cache/x/ship/1 && cd hooks && cp u*.py /tmp/z.py',
+                            'grep -r . ~/.local', 'grep -r . ~', 'cd ~; grep -r . .local', 'cd "$D" && cat key'):
+                with self.subTest(command=command):
+                    self.assert_denied(command, 'ship:driver')
+        self.assert_allowed('cd repo && git status')
+
+    def test_plugin_update_commands_name_ultraship_without_a_store(self):
+        for command in ('claude plugin marketplace update ultraship', 'claude plugin update ship@ultraship'):
+            with self.subTest(command=command):
+                self.assert_allowed(command)
+
+    def test_reviewer_brace_and_unusual_character_globs_deny(self):
+        rows = self.cwd / 'repo/backend/tests/mutation'
+        rows.mkdir(parents=True)
+        (rows / 'rows.py').write_text('x')
+        for glob in ('{!**/tests/mutation/**,x}', '!**/tests/mutation/** !}x,*.py', 'x{', '*.{ts,tsx}',
+                     'foo﻿*.py', '!**/tests/mutation/**\x1f!x', '!**/tests/mutation/**\x85!x'):
+            with self.subTest(glob=glob):
+                self.assertEqual(self.reviewer_grep(glob=glob).get('permissionDecision'), 'deny')
+
     def test_reviewer_row_globs_that_can_reach_rows_deny(self):
         rows = self.cwd / 'repo/backend/tests/mutation'
         rows.mkdir(parents=True)
