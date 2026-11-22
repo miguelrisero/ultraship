@@ -36,7 +36,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The record names the lane, base, head, row IDs, base and head line ranges, expected counts and the unchanged mutant check.',
                 'The tool prints the record path and every record field as `key=value` lines, with no row text.',
                 'The driver copies the printed fields of the frozen-head run into the reviewer brief. The reviewer reads no file under `.git`.',
-                'The record expires on any head change. Rerun the tool at the frozen head for each re-anchored row; that run changes zero statements.',
+                'The record expires on any head change. Rerun the tool at the frozen head for each tool re-anchor; that run changes zero statements.',
                 'A CoC-approved row change gets no tool run. Its decision file and the review in step 8 cover it.',
                 'A run that changes statements writes no record entry and unfreezes the head. The writer commits the edit and reruns the tool.',
                 'the anchor guard requires each anchor count to equal the row\'s expected count, not only a nonzero count.',
@@ -92,7 +92,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The driver confirms that `gh pr view <parent PR URL> --json mergeCommit` returns the named merge commit SHA.',
                 "The driver supplies a local diff of those subject files from that merge commit's first parent to the merge commit.",
                 'The driver records both SHAs and that lookup result in the reviewer brief.',
-                'The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.',
+                'If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.',
                 'Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.',
                 'The driver marks the draft ready only after the review in step 8 passes at the exact head.',
                 'one independent reviewer confirms that every changed, retired, restored or added row is not weaker.',
@@ -130,6 +130,117 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     copy = section((SHIP / name).read_text(), heading).rstrip('\n')
                     self.assertEqual(canonical, copy.replace('](../skills/ship/references/', '](references/'))
 
+    def test_lane_owned_route_selection_precedes_tool_admission_and_run(self):
+        for name in ROUTE_CARRIERS:
+            with self.subTest(path=name):
+                route = section((SHIP / name).read_text(), '### Lane-owned row route')
+                selection = '1. Select the route for each row before any tool admission or tool run.'
+                self.assertTrue(selection in route, 'Each row needs a route before tool admission or execution.')
+                admission = 'For tool re-anchor or restoration only: Admit the writer with the [row re-anchor tool admission record]'
+                native = 'For a CoC-approved native exact-pair edit, use zero row re-anchor tool admissions and zero row re-anchor tool runs.'
+                tool_run = '2. Tool re-anchor: the writer runs the sanctioned re-anchor tool once per row'
+                self.assertEqual(route.count('[row re-anchor tool admission record]'), 1)
+                self.assertLess(route.index(selection), route.index(admission))
+                self.assertLess(route.index(admission), route.index(native))
+                self.assertLess(route.index(native), route.index(tool_run))
+
+    def test_pr_bound_decision_requires_draft_before_verification_and_native_edit(self):
+        for name in ROUTE_CARRIERS:
+            with self.subTest(path=name):
+                route = section((SHIP / name).read_text(), '### Lane-owned row route')
+                draft = 'Before verifying a PR-bound decision, require the verified URL of an existing, authorized draft PR for the same repository and lane.'
+                self.assertTrue(draft in route, 'A PR-bound decision needs a verified, authorized draft identity before verification.')
+                hold = 'Keep the row pending if that draft identity is missing or unverified.'
+                binding = 'Match the PR URL in the decision to that draft.'
+                self.assertIn('Draft creation still requires separate authority.', route)
+                self.assertIn('Reuse the existing authorized draft for CI and reviewer admission.', route)
+                verification = 'The writer verifies its SHA256 and bindings before the edit.'
+                frozen = 'The driver verifies them again at the frozen head and records the result in the reviewer brief.'
+                edit = 'The writer applies only those fields with native Edit and `replace_all=false`'
+                order = [route.index(rule) for rule in (draft, hold, binding, verification, edit)]
+                self.assertEqual(order, sorted(order))
+                self.assertIn(frozen, route)
+
+    def test_native_exact_pair_handoff_requires_draft_and_row_counts(self):
+        for name in ROUTE_CARRIERS:
+            with self.subTest(path=name):
+                route = section((SHIP / name).read_text(), '### Lane-owned row route')
+                records = route.split('\n6. Authorization record:', 1)[1].split('\n7. CI:', 1)[0]
+                self.assertTrue(
+                    'For each tool re-anchor or restoration, require the generated record from the frozen-head run.' in records,
+                    'The shared route must require a generated record for both tool paths.',
+                )
+                ci = route.split('\n7. CI:', 1)[1].split('\n8. Review:', 1)[0]
+                review = route.split('\n8. Review:', 1)[1].split('\n9. ', 1)[0]
+                self.assertIn('If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.', ci)
+                self.assertIn('The driver marks the draft ready only after the review in step 8 passes at the exact head.', review)
+                self.assertIn('For a CoC-approved native exact-pair edit, the driver names the frozen decision path, SHA256 and verification result in the reviewer brief.', records)
+                self.assertIn('The driver lists the decision file under `Readable files` in the reviewer brief.', records)
+                self.assertIn('The driver verifies the decision against the applying writer, repository, lane, PR, row file, row ID, source commit and exact edit.', records)
+                self.assertIn('For a CoC-approved native exact-pair edit, the driver supplies content-free evidence from the anchor guard at that draft head.', ci)
+                for requirement in (
+                    'The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.',
+                    'The reviewer brief names both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count.',
+                    'Include proof that the guard selected the row and that a count mismatch on that row fails the job.',
+                    'Report an observed count only when the evidence gives it directly.',
+                ):
+                    self.assertTrue(requirement in ci, requirement)
+
+    def test_native_exact_pair_review_uses_decision_and_exact_head_ci(self):
+        for name in REVIEWERS:
+            with self.subTest(reviewer=name):
+                route = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
+                tool, native = [paragraph for paragraph in route.split('\n\n') if paragraph.startswith((
+                    'For each tool re-anchor or restoration,', 'For a CoC-approved native exact-pair edit,',
+                ))]
+                self.assertIn('require the generated record fields that the brief copies from the tool output.', tool)
+                self.assertIn('Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.', tool)
+                for requirement in (
+                    'For a CoC-approved native exact-pair edit, require zero row re-anchor tool runs and no generated record.',
+                    'Require the frozen CoC decision by absolute path and SHA256.',
+                    "Require the driver's digest and binding verification at the frozen head.",
+                    'Match the decision to the applying writer, repository, lane, PR, row file, row ID and source commit.',
+                    'Confirm that the decision authorizes this native edit of only `old` and `new`.',
+                    'Compare only the admitted base and frozen-head row extents.',
+                    'Match both applied values exactly to the approved values.',
+                    'Confirm the identical mutant operation and designated test.',
+                    'Require a passing anchor guard run on the head that the driver will publish.',
+                    'Require both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count in the brief.',
+                    "Match the run's head SHA to the frozen review head and the draft PR head.",
+                    "Require evidence that the actual anchor count equals the row's declared count.",
+                    'Block approval on a missing or stale decision, any mismatch, or missing passing CI at that exact head.',
+                    'The driver keeps the PR in draft until the independent review passes at that head.',
+                ):
+                    self.assertIn(requirement, native)
+
+    def test_native_exact_pair_requires_exact_equality_for_declared_count_of_two(self):
+        for name in REVIEWERS:
+            with self.subTest(reviewer=name):
+                route = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
+                native = route.split('For a CoC-approved native exact-pair edit,', 1)[1].split('\n\n', 1)[0]
+                self.assertTrue(
+                    'For a declared count of 2, require direct or inferred proof of exactly 2 anchors.' in native,
+                    'A declared count of two requires exact equality, whether the proof is direct or inferred.',
+                )
+
+    def test_native_exact_pair_aggregate_ci_needs_row_specific_proof(self):
+        for name in REVIEWERS:
+            with self.subTest(reviewer=name):
+                route = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
+                native = route.split('For a CoC-approved native exact-pair edit,', 1)[1].split('\n\n', 1)[0]
+                for requirement in (
+                    'Compare the CI checkout tree SHA with the tree SHA derived from the frozen commit.',
+                    'A matching PR head SHA alone supplies no tree match.',
+                    'Block approval if either tree SHA is missing or they differ.',
+                    'Require proof that the guard selected this row and would fail the job for a count mismatch on it.',
+                    'A warning-only path supplies no failure proof.',
+                    'An aggregate pass alone proves no row count.',
+                    'If CI emits only an aggregate, use the verified selection and failure proof with the passing result to establish equality.',
+                    'Label that result as inferred. Report an observed count only when the evidence gives it directly.',
+                    'Block approval if the checked tree, row selection, or failure on mismatch cannot be verified.',
+                ):
+                    self.assertTrue(requirement in native, requirement)
+
     def test_lane_owned_review_pins_independence_scope_and_all_row_verdicts(self):
         for name in REVIEWERS:
             text = (SHIP / 'agents' / name).read_text()
@@ -143,7 +254,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'You differ from the PR author and the writer.',
                 'For each re-anchored row, confirm the same test, the same claim and the same mutant intent at the base and the frozen head.',
                 'Confirm that the paired `old` and `new` fields are the only changed fields of that row.',
-                'Use the record fields that the brief copies from the tool output. Read no file under `.git`.',
+                'Read no file under `.git`.',
+                'For each tool re-anchor or restoration, require the generated record fields that the brief copies from the tool output.',
                 'Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.',
                 'For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.',
                 'Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.',
@@ -206,7 +318,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     route,
                 )
                 self.assertIn(
-                    '   The record expires on any head change. Rerun the tool at the frozen head for each re-anchored row; that run changes zero statements.\n'
+                    '   The record expires on any head change. Rerun the tool at the frozen head for each tool re-anchor; that run changes zero statements.\n'
                     '   On the restore route, that rerun keeps `--restoration` and prints `changed_statements=0`.\n',
                     route,
                 )

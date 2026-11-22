@@ -65,8 +65,36 @@ Read rows only under the driver's reviewer admission record. Read only the named
 You differ from the PR author and the writer.
 For each re-anchored row, confirm the same test, the same claim and the same mutant intent at the base and the frozen head.
 Confirm that the paired `old` and `new` fields are the only changed fields of that row.
-Use the record fields that the brief copies from the tool output. Read no file under `.git`.
+Read no file under `.git`.
+
+For each tool re-anchor or restoration, require the generated record fields that the brief copies from the tool output.
 Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.
+
+For a CoC-approved native exact-pair edit, require zero row re-anchor tool runs and no generated record.
+Require the frozen CoC decision by absolute path and SHA256.
+Require the driver's digest and binding verification at the frozen head.
+Match the decision to the applying writer, repository, lane, PR, row file, row ID and source commit.
+Confirm that the decision authorizes this native edit of only `old` and `new`.
+Compare only the admitted base and frozen-head row extents.
+Match both applied values exactly to the approved values.
+Confirm the identical mutant operation and designated test.
+Require a passing anchor guard run on the head that the driver will publish.
+Require both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count in the brief.
+Match the run's head SHA to the frozen review head and the draft PR head.
+Compare the CI checkout tree SHA with the tree SHA derived from the frozen commit.
+A matching PR head SHA alone supplies no tree match.
+Block approval if either tree SHA is missing or they differ.
+Require proof that the guard selected this row and would fail the job for a count mismatch on it.
+A warning-only path supplies no failure proof.
+An aggregate pass alone proves no row count.
+Require evidence that the actual anchor count equals the row's declared count.
+If CI emits only an aggregate, use the verified selection and failure proof with the passing result to establish equality.
+Label that result as inferred. Report an observed count only when the evidence gives it directly.
+Block approval if the checked tree, row selection, or failure on mismatch cannot be verified.
+For a declared count of 2, require direct or inferred proof of exactly 2 anchors.
+Block approval on a missing or stale decision, any mismatch, or missing passing CI at that exact head.
+The driver keeps the PR in draft until the independent review passes at that head.
+
 For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.
 Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.
 For each restored row, confirm from the copied record fields `restoration_base_equal=true`, `restoration_outside_equal=true` and `changed_statements=0`.
