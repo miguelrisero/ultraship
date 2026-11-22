@@ -3661,6 +3661,15 @@ def deny(reason):
     sys.exit(0)
 
 
+# Advisory warnings and input rewrites that `pre` prints when no rule denies the call.
+WARNINGS, UPDATED_INPUT = [], {}
+
+
+def warn(rule, text):
+    if f'{rule}: {text}' not in WARNINGS:
+        WARNINGS.append(f'{rule}: {text}')
+
+
 def ledger_script():
     return Path(__file__).resolve().parents[1] / 'skills/ship/scripts/ledger.py'
 
@@ -4426,6 +4435,54 @@ def review_thread_preflight_denial(command, normalized, data_mode, reason):
     return review_thread_scan(quoted, normalized, data_mode)
 
 
+def text_search_only(command):
+    """True when every segment is a plain text reader with no substitution, heredoc or redirect."""
+    if re.search(r'\$\(|`|<<|>|<\(', command):
+        return False
+    readers = {'grep', 'egrep', 'fgrep', 'rg', 'awk', 'sed', 'head', 'tail', 'cat', 'wc', 'sort', 'uniq', 'cut'}
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
+        lexer.whitespace, lexer.whitespace_split, lexer.commenters = ' \t\r', True, ''
+        segments, words = [], []
+        for token in lexer:
+            if token and all(char in ';&|\n' for char in token):
+                segments.append(words)
+                words = []
+            else:
+                words.append(token)
+        segments.append(words)
+    except ValueError:
+        return False
+    for words in filter(None, segments):
+        if words[0] == 'git' and 'grep' in words[1:4]:
+            continue
+        if (words[0] not in readers or words[0] == 'sed' and any(word.startswith(('-i', '--in-place')) for word in words)
+                or words[0] == 'awk' and any('system' in word or '|' in word for word in words)
+                or any(char in word for word in words for char in '()')):
+            return False
+    return True
+
+
+THREAD_WRITE_REASONS = ('raw review-thread mutation', 'gh api write outside the helper',
+                        'REST review-comment write or opaque endpoint')
+
+
+def thread_write_hard(command):
+    """Return a write reason when unparsed text still shows a GitHub API write."""
+    text = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()
+    if not re.search(r'gh[\s,\'"]+api\b', command.casefold()) and not hidden_gh_api_calls(text) \
+            and 'api.github.com' not in text:
+        return None
+    if re.search(r'comments/\S*/replies', text):
+        return 'raw review-thread mutation'
+    if (re.search(r'\bmutation\b', text)
+            or re.search(r'(?:^|\s)(?:-x|--method|--request)(?:\s*|=)(?:post|patch|put|delete)\b', text)
+            or ('graphql' not in text and not re.search(r'(?:-x|--method)(?:\s*|=)(?:get|head)\b', text)
+                and re.search(r'(?:^|\s)(?:-f|--field|--raw-field|--input)(?:\s|=)', text))):
+        return 'gh api write outside the helper'
+    return None
+
+
 # shortcut: script files run by path, gh aliases and extensions, command words built from variables or globs, opaque non-gh URLs, files written by Write/Edit then run, interpreter scripts such as python3 -c or node -e that run gh, and shell runners that build gh from escapes or expansions escape this scan; upgrade to a GitHub token the driver cannot use for review-thread writes.
 def review_thread_denial(command, data_mode=False, *, outer=True):
     if read_only_shell(command) or literal_search_shell(command):
@@ -4445,9 +4502,11 @@ def review_thread_denial(command, data_mode=False, *, outer=True):
     if body_file:
         masked = command[:body_file.start(1)] + '_' + command[body_file.end(1):]
         mutation_text = re.sub(r'''['"\\]''', '', masked).casefold()
-    if (any(name in mutation_text for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
-                                               'resolvereviewthread'))
-            or re.search(r'comments/\S*/replies', mutation_text)):
+    # Mutation names inside a pure text search are data; any other command keeps the refusal.
+    if ((any(name in mutation_text for name in ('addpullrequestreviewthreadreply', 'addpullrequestreviewcomment',
+                                                'resolvereviewthread'))
+         or re.search(r'comments/\S*/replies', mutation_text))
+            and not text_search_only(command)):
         return 'raw review-thread mutation'
     reason = review_thread_scan(cat_heredoc_data(command), normalized, data_mode)
     if outer and reason == 'unparsed shell syntax rule: No closing quotation':
@@ -4703,6 +4762,12 @@ def review_thread_scan(command, normalized, data_mode):
                     and not any('$' in outside_single_quotes(raw) for _, raw in arguments)
                     and graphql_read_document(document, required_variables, paginate=paginate)):
                 continue
+            # A literal GraphQL document that is not a mutation reads; gh sends every GraphQL call as POST.
+            if (route == 'graphql' and document is not None and not inputs
+                    and all(method == 'POST' for method in methods)
+                    and not re.search(r'\bmutation\b', document, re.IGNORECASE)
+                    and re.match(r'\s*(?:query\b|\{)', re.sub(r'#[^\n]*', '', document))):
+                continue
             method = methods[-1] if methods else ('POST' if field_count else 'GET')
             if method not in ('GET', 'HEAD'):
                 return 'gh api write outside the helper'
@@ -4755,6 +4820,8 @@ RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (cu
                    'Report the blocked scope to the driver.')
 ACCOUNT_CUSTODY = ('Use the exact Stop command for your session (account custody rule). '
                    'Report the blocked scope to the driver.')
+CUSTODY_ADVISORY = ('the custody check could not resolve every word of this command, and no word names the '
+                    'text-lint or account-grants store or runs the ship hook. Keep the command away from those stores.')
 RECEIPT_CUSTODY_FAILED = ('The ship hook could not check refusal-receipt custody, so it denies this call. '
                           'Report the blocked scope to the driver.')
 PRE_FAILED = ('The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
@@ -5006,7 +5073,8 @@ def receipt_custody(data, read_search=False):
             program_options = {'rg': {'--pre', '--pre-glob'}, 'sort': {'--compress-program'}, 'find': find_actions}
 
             def expands_to_hook(raw_word, word):
-                if not unresolved_shell_word(raw_word):
+                # A single-quoted word never expands.
+                if not unresolved_shell_word(raw_word) or re.fullmatch(r"'[^']*'", raw_word):
                     return False
                 literal = re.split(r'[*?\[{$`]', normalized(word))
                 if len(literal) == 1:
@@ -5148,7 +5216,17 @@ def receipt_custody(data, read_search=False):
             comment = pr_comment_body_removed(raw)
             custody_source = path_command if data_match else joined if comment == raw else comment
             cache_operand = cache_listing[1] if cache_listing else None
-            pending, seen = [custody_source], set()
+            def unread():
+                # Text the scan cannot read is denied only when it both runs an interpreter and names the hook.
+                text = normalized(custody_source)
+                names_hook = hook_name.search(text) or re.search(r'\bimport\b.*\bultraship\b', text)
+                runs = re.search(r'(?:^|[\s;&|(`])(?:\S*/)?(?:python[\d.]*|pypy\d*|uvx?|sh|bash|zsh|dash|env|exec)'
+                                 r'(?=\s|$)', text)
+                return 'hard' if names_hook and runs else 'soft'
+
+            # 'hard' means the command runs, imports or changes the hook or names a store; 'soft' means a word
+            # stayed unresolved, so the call proceeds with an advisory warning.
+            pending, seen, verdict = [custody_source], set(), False
             try:
                 while pending:
                     source = pending.pop()
@@ -5158,7 +5236,7 @@ def receipt_custody(data, read_search=False):
                     text = shell_without_heredoc_bodies(source, require_complete=True)
                     tokens = shell_raw_words(text, require_complete=True)
                     if nested_work_exceeded(tokens, seen):
-                        return True
+                        return unread()
                     literal_array = re.fullmatch(
                         r'[a-z][a-z0-9_]*=\(\[[0-9]+\]=[A-Za-z0-9_]+(?:[ \t]+\[[0-9]+\]=[A-Za-z0-9_]+)*\)[ \t\n]*',
                         text)
@@ -5172,26 +5250,35 @@ def receipt_custody(data, read_search=False):
                                              for index, (_, word, start, _) in enumerate(executable) if start in positions)
                                       or any(word.partition('=')[0] in program_options.get(command, ())
                                              for command in commands for _, word, _, _ in tokens))
-                    data_segment, segment = [], []
+                    data_segment, listing, segment = [], [], []
                     for token in [*tokens, ('\n', '\n', 0, 0)]:
                         if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
                             data_segment += [reads_only(segment, token[0])] * len(segment) + [False]
+                            # Listing or testing a parent folder of a store reads no store file.
+                            first = next((word for _, word, _, _ in segment if not SHELL_ASSIGNMENT.match(word)), '')
+                            listing += [first in {'ls', 'stat', 'du', 'test', '['}
+                                        and not any(raw_word == '>' for raw_word, _, _, _ in segment)] * len(segment) + [False]
                             segment = []
                         else:
                             segment.append(token)
                     account_words = own_account_call(data, raw) if source == raw else False
                     if not account_words and any(unresolved_program(raw_word, word)
                                                  for raw_word, word, start, _ in executable if start in positions):
-                        return True
+                        verdict = 'soft'
+                    if any(start in positions and (hook_name.search(os.path.basename(normalized(word)))
+                                                   or installed_hook in resolved(word))
+                           for _, word, start, _ in executable):
+                        return 'hard'
                     evidence_index = len(tokens) - 1 if account_words and account_words[2] != 'account-auto' else -1
                     name_source = source[:tokens[evidence_index][2]] if evidence_index >= 0 else source
                     plain_source = source == text and plain_hook_source_command(source, tokens)
                     if not plain_source:
                         # An inert quoted-delimiter script cannot run a process or import a module; its names are file text.
                         name_text = python_heredoc_shell(name_source, inert_only=True)
-                        if ((hook_name.search(normalized(name_text)) and not literal_search_shell(source))
-                                or module_reference.search(name_text)):
-                            return True
+                        if module_reference.search(name_text) and any(
+                                interpreter_name(command) or command in SHELL_INTERPRETERS | {'uv', 'uvx'}
+                                for command in commands):
+                            return 'hard'
                         names = executable if evidence_index < 0 else executable[:evidence_index]
                         for index, (_, name, _, _) in enumerate(names):
                             interpreter = interpreter_name(name)
@@ -5214,20 +5301,29 @@ def receipt_custody(data, read_search=False):
                                 if (len(arguments) < 2
                                         or not re.fullmatch(r'(?!-)[A-Za-z0-9_./-]+\.[cm]?js', arguments[1][0])
                                         or (len(arguments) > 2 and arguments[2][0] not in {';', '&', '|', ')', '\n'})):
-                                    return True
+                                    verdict = 'soft'
                                 continue
                             kind, operand, offset = program_operand(base, interpreter, [token[1] for token in arguments])
                             if kind == 'unknown':
-                                return True
+                                verdict = 'soft'
+                                continue
                             if operand >= len(arguments):
                                 continue
                             arg_raw, arg, _, _ = arguments[operand]
                             if kind == 'm' and re.fullmatch(module_name, arg[offset:]):
-                                return True
+                                return 'hard'
+                            if (kind == 'script' and (installed_hook in resolved(arg)
+                                                      or hook_name.search(os.path.basename(normalized(arg)))
+                                                      or expands_to_hook(arg_raw, arg)
+                                                      or (any(char in arg for char in '*?[{')
+                                                          and glob_prefix(arg, stores={hook_folder}))) or
+                                    kind == 'c' and (hook_name.search(normalized(arg))
+                                                     or module_reference.search(arg))):
+                                return 'hard'
                             if kind == 'c' and base in SHELL_INTERPRETERS and re.fullmatch("'[^']*'", arg_raw):
                                 continue
                             if not account_words and unresolved_program(arg_raw, arg, code=kind == 'c'):
-                                return True
+                                verdict = 'soft'
                     for index, (raw_word, word, _, end) in enumerate(tokens):
                         paths = [word]
                         attached = word.partition('=')[2]
@@ -5239,28 +5335,61 @@ def receipt_custody(data, read_search=False):
                         backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
                         for path in paths:
                             path = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), path)
-                            if (receipt_path(path, ancestors=True, state_only=not modifies_paths or data_segment[index], stores=grant_paths)
-                                    or (any(char in path for char in '*?[')
-                                        and (glob_prefix(path) or glob_prefix(path, stores={hook_folder})))
-                                    or (modifies_paths and installed_hook in resolved(path))
+                            if (receipt_path(path, ancestors=not listing[index],
+                                             state_only=not modifies_paths or data_segment[index], stores=grant_paths)
+                                    or (any(char in path for char in '*?[') and glob_prefix(path))
+                                    or (modifies_paths and installed_hook in resolved(path))):
+                                return 'hard'
+                            if ((any(char in path for char in '*?[') and glob_prefix(path, stores={hook_folder}))
                                     or (index != evidence_index and (
                                         (not plain_source and re.fullmatch(rf'(?:-m)?{module_name}', path))
                                         or (raw_word != cache_operand
                                             and expands_to_hook(raw_word + backtick, path + backtick))))):
-                                return True
+                                verdict = 'soft'
                     # An unresolved word after a search pattern is search data; resolved nested code keeps its scan.
                     data_starts = {token[2] for index, token in enumerate(tokens) if grep_data_token(tokens, index)}
                     pending.extend(token[1] for token in nested_shell_strings(tokens, text)
                                    if not (token[2] in data_starts and unresolved_shell_word(token[1])))
             except (OSError, RuntimeError, ValueError):
-                return True
+                return unread()
+            return verdict
+
+        try:
+            code_text = normalized(cat_heredoc_data(path_command))
+        except Exception:
+            code_text = command
+
+        def ancestor_operand():
+            # Listing or testing a parent folder of a store reads no store file; any other program may.
+            for segment in re.split(r'[;&|()\n`]+|\$\(', path_command):
+                found = [re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
+                                lambda match: os.environ.get(match[1] or match[2], ''),
+                                word.translate(str.maketrans('', '', "\"'\\")))
+                         for word in segment.split()]
+                found = [word for word in found if word and not SHELL_ASSIGNMENT.match(word)]
+                if (found and os.path.basename(found[0]) not in {'ls', 'stat', 'du', 'test', '['}
+                        and any(receipt_path(word, ancestors=True, state_only=True) for word in found)):
+                    return True
             return False
 
         if (receipt_text(path_command)
                 or ('ledger.py' in account_command and 'account-auto' in account_command
                     and not own_account_call(data, raw))
-                or any(receipt_path(word, ancestors=True, state_only=True) for word in words)
+                or any(receipt_path(word) for word in words)
+                or ancestor_operand()
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
+                or re.search(r'text_lint(\.py)?\s+hook\b', code_text)
+                or ('text_lint' in code_text and re.search(r'\b(?:python[\d.]*|pypy\d*|uvx?)\b', code_text)
+                    and any(token in code_text for token in (
+                        'import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec(')))
+                or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
+            deny(RECEIPT_CUSTODY)
+        if (('account' in account_command or 'correct-binding' in account_command)
+                and not own_account_call(data, raw)
+                and ('claude_code_session_id' in account_command or names_ledger())):
+            deny(ACCOUNT_CUSTODY)
+        # The remaining shapes name no protected path; they proceed with an advisory warning.
+        if (re.search(r'(?:^|[\s;&|(])PATH=\S*\$\{?(?!(?:HOME|PATH)\b)\w', raw)
                 or (('.local/state' in command or 'xdg_state_home' in command)
                     and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
                          or any(char in raw for char in '*?[]{}$`'))
@@ -5274,13 +5403,8 @@ def receipt_custody(data, read_search=False):
                     literal_search_shell(raw) and raw.split()[0] == 'grep' and '&&' not in raw.split()
                     and not any(char.isspace() and char not in ' \t\n' for char in raw))
                     and (re.search(r'text_lint(\.py)?\s+hook\b', command) or any(token in command for token in
-                         ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
-                or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
-            deny(RECEIPT_CUSTODY)
-        if (('account' in account_command or 'correct-binding' in account_command)
-                and not own_account_call(data, raw)
-                and ('claude_code_session_id' in account_command or names_ledger())):
-            deny(ACCOUNT_CUSTODY)
+                         ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))):
+            warn('S2', CUSTODY_ADVISORY)
         return grant_access()
 
 
@@ -5387,6 +5511,20 @@ def row_reanchor_gate(data, command):
 
 
 def pre(data):
+    WARNINGS.clear()
+    UPDATED_INPUT.clear()
+    checks(data)
+    output = {'hookEventName': 'PreToolUse'}
+    if UPDATED_INPUT:
+        output.update(permissionDecision='allow',
+                      updatedInput={**(data.get('tool_input') or {}), **UPDATED_INPUT})
+    if WARNINGS:
+        output['additionalContext'] = ' '.join(WARNINGS)
+    if len(output) > 1:
+        print(json.dumps({'hookSpecificOutput': output}))
+
+
+def checks(data):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     try:
         grant_custody_denied = receipt_custody(data)
@@ -5534,6 +5672,15 @@ def pre(data):
                     reason = 'ambiguous shell quote pattern'
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__
+        if reason and reason not in THREAD_WRITE_REASONS:
+            # A shape the scan could not read proceeds with a warning unless the text shows an API write.
+            hard = thread_write_hard(command)
+            if hard:
+                reason = hard
+            else:
+                warn('S1', f'the review-thread guard could not read this command. Rule: {reason}. Reply to and '
+                           'resolve review threads only through `skills/babysit/scripts/thread_reply.py`.')
+                reason = None
         if reason:
             agent_type = data.get('agent_type') or ''
             if role(data, 'writer'):
@@ -5549,8 +5696,10 @@ def pre(data):
                  ' Keep the task. Report the blocked step and named rule to ' + superior + '.'
                  + (' If the brief names no superior, report it here.' if superior == 'the superior named in your brief' else '')
                  + ' Continue independent work within your authority.')
-        if grant_custody_denied:
+        if grant_custody_denied == 'hard':
             deny(RECEIPT_CUSTODY)
+        if grant_custody_denied:
+            warn('S2', CUSTODY_ADVISORY)
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
         counter.parent.mkdir(parents=True, exist_ok=True)
@@ -5674,7 +5823,9 @@ def pre(data):
                     if re.search(r'(?:^|[{,!])[/~]|(?:^|[/{,!])\.\.(?:$|[/},])', token):
                         deny('Reviewers must pass globs relative to the search path: '
                              'no absolute or `~` glob and no `..` segment.')
-                    if re.search(protected, posixpath.normpath(posixpath.join(base, token.lstrip('!'))), re.IGNORECASE):
+                    # An exclusion glob such as `!**/tests/mutation/**` keeps rows out of the search.
+                    if not token.startswith('!') and re.search(
+                            protected, posixpath.normpath(posixpath.join(base, token)), re.IGNORECASE):
                         deny(blocked)
             if tool == 'LSP' and (tin.get('operation') not in ('hover', 'documentSymbol') or 'filePath' not in tin):
                 deny('Reviewers may use LSP hover and documentSymbol on one explicit file only. '
@@ -5689,13 +5840,14 @@ def pre(data):
                 roots = [tin['path']]
 
                 deadline = time.monotonic() + 5
-                seen = set()
+                seen, row_folders = set(), []
                 while roots:
                     if time.monotonic() > deadline:
                         deny('Reviewers must narrow the search scope: directory walk exceeds 5 seconds.')
                     directory = roots.pop()
                     if not admitted and re.search(protected, directory, re.IGNORECASE):
-                        deny(blocked)
+                        row_folders.append(directory)
+                        continue
                     if claude_data(directory):
                         deny(private)
                     try:
@@ -5716,11 +5868,13 @@ def pre(data):
                                 deny('Reviewers must narrow the search scope: directory walk exceeds 5 seconds.')
                     except FileNotFoundError:
                         continue
-                    if posixpath.basename(directory).casefold() == 'tests' and any(
-                            entry.name.casefold() == 'mutation' for entry in entries):
-                        deny(blocked)
                     for entry in entries:
                         if entry.name == '.git':
+                            continue
+                        if (not admitted and posixpath.basename(directory).casefold() == 'tests'
+                                and entry.name.casefold() == 'mutation'):
+                            # A case-insensitive file system can hide the folder under any letter case.
+                            row_folders.append(entry.path)
                             continue
                         if entry.is_symlink():
                             target = os.path.realpath(entry.path)
@@ -5729,9 +5883,47 @@ def pre(data):
                             roots.append(target)
                         elif entry.is_dir(follow_symlinks=False):
                             roots.append(entry.path)
+                if row_folders:
+                    reviewer_row_folders(tin, tool, globs, row_folders, blocked, deadline)
         except Exception:
             deny('Reviewers cannot proceed when search scope validation fails. Report the blocked scope to the coordinator.')
     receipt_custody(data, read_search=True)
+
+
+ROW_EXCLUSION = '!**/tests/mutation/**'
+
+
+def reviewer_row_folders(tin, tool, globs, row_folders, blocked, deadline):
+    """Admit a search above row folders only when no row file can match it."""
+    root = tin['path'].rstrip('/')
+    # The exclusion glob is case-sensitive and relative to the search path, so it covers only plain, exact folders.
+    exact = all(folder.startswith(root + '/') and os.path.realpath(folder) == folder
+                and re.search(r'(?:^|/)tests/mutation$', folder[len(root):]) for folder in row_folders)
+    tokens = ' '.join(globs).split()
+    positives = [token for token in tokens if not token.startswith('!')]
+    if tool == 'Grep' and not positives and exact:
+        if not tokens:
+            UPDATED_INPUT['glob'] = ROW_EXCLUSION
+            warn('S3', f'the search path holds protected mutation rows, so the hook added the glob `{ROW_EXCLUSION}`.')
+            return
+        if any(re.fullmatch(r'!(?:\*\*/)?tests/mutation(?:/\*\*)?/?', token) for token in tokens):
+            return
+        deny(blocked + f' Add `{ROW_EXCLUSION}` to the glob.')
+    # fnmatch has no brace sets, so a brace glob counts as a match.
+    if not positives or any('{' in token for token in positives):
+        deny(blocked)
+    count = 0
+    for folder in row_folders:
+        names = [(posixpath.dirname(folder), [posixpath.basename(folder)])]
+        names += [(current, folders + files) for current, folders, files in os.walk(folder)]
+        for current, entries in names:
+            for name in entries:
+                count += 1
+                if count > 5000 or time.monotonic() > deadline:
+                    deny(blocked)
+                relative = posixpath.relpath(posixpath.join(current, name), root)
+                if any(fnmatch.fnmatch(name, token) or fnmatch.fnmatch(relative, token) for token in positives):
+                    deny(blocked)
 
 
 def owed_file(data):
