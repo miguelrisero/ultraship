@@ -274,6 +274,53 @@ class ToolTests(unittest.TestCase):
         self.assertIn(f'restoration_parent={starting}', output.splitlines())
         self.assertIn('restoration_outside_equal=true', output.splitlines())
 
+    def test_restoration_with_empty_net_row_diff_only_writes_record(self):
+        prefix, table, suffix = self.restoration_fixture()
+        edited = self.commit_rows(prefix + table.replace('claim =', 'claim  =') + suffix)
+        self.subject.write_text('# outside the pair\n' + self.subject.read_text())
+        starting = self.commit()
+        self.git('revert', '--no-edit', edited)
+        self.head_sha = self.git('rev-parse', 'HEAD')
+        self.git('diff', '--quiet', self.base, self.head_sha, '--', self.row.name)
+        self.assertEqual(self.git('--no-optional-locks', 'status', '--porcelain'), '')
+        index = self.root / self.git('rev-parse', '--git-path', 'index')
+        index_before = index.read_bytes()
+        row_inode = self.row.stat().st_ino
+        record = self.record_path()
+        self.assertFalse(record.exists())
+
+        before, output = self.invoke(restoration=self.head_sha)
+
+        self.assertIn('changed_statements=0', output.splitlines())
+        self.assertIn(f'record={record}', output.splitlines())
+        data = json.loads(record.read_bytes())
+        entry, = data['rows']
+        self.assertEqual(data['head'], self.head_sha)
+        self.assertEqual(entry['row_id'], 'target')
+        self.assertEqual(entry['changed_statements'], 0)
+        self.assertEqual(entry['restoration'], self.head_sha)
+        self.assertEqual(entry['restoration_parent'], starting)
+        self.assertEqual(self.git('rev-parse', 'HEAD'), self.head_sha)
+        self.assertEqual(index.read_bytes(), index_before)
+        self.assertEqual(self.row.stat().st_ino, row_inode)
+        self.assertEqual(self.row.read_bytes(), before)
+        self.assertEqual(self.git('--no-optional-locks', 'status', '--porcelain'), '')
+
+    def test_restoration_missing_head_subject_reports_only_git_operation_and_exit(self):
+        prefix, table, suffix = self.restoration_fixture()
+        deletion = self.commit_rows(prefix + suffix)
+        self.git('revert', '--no-edit', deletion)
+        restoration = self.git('rev-parse', 'HEAD')
+        self.git('rm', '--', self.subject.name)
+        self.git('commit', '-qm', 'remove fixture subject')
+        self.head_sha = self.git('rev-parse', 'HEAD')
+
+        reason = 'read head subject blob (Git exit 128)'
+        _, output = self.invoke(2, reason, restoration=restoration)
+
+        self.assertEqual(output, f'REFUSED: {reason}\n')
+        self.assertFalse(self.record_path().exists())
+
     def test_restoration_keeps_lane_edit_in_the_deleted_row_hunk(self):
         prefix, table, suffix = self.restoration_fixture()
         base_prefix = prefix.removesuffix('\n') + '# base comment\n'
@@ -497,6 +544,43 @@ class ToolTests(unittest.TestCase):
         self.head_sha = self.commit()
         self.invoke(2, 'restoration must be HEAD or an ancestor of HEAD', restoration=restoration)
         self.assertFalse(self.record_path().exists())
+
+    def test_restoration_reports_fatal_git_ancestry_failures(self):
+        prefix, table, suffix = self.restoration_fixture()
+        starting = self.commit_rows(prefix + suffix)
+        restoration = self.commit_rows(prefix + table + suffix)
+        self.head_sha = self.commit()
+        original = self.row.read_bytes()
+        record = self.record_path()
+        record.parent.mkdir(mode=0o700)
+        prior = b'{"schema": 1, "lane": "expired", "rows": []}'
+        record.write_bytes(prior)
+        argv = [str(TOOL), '--row-file', str(self.row), '--row-id', 'target', '--subject', 'subject.txt',
+                '--base', self.base, '--head', self.head_sha, '--restoration', restoration]
+        env = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+        run = subprocess.run
+
+        for operation, commits in (('check restoration ancestry', [restoration, self.head_sha]),
+                                   ('check base ancestry', [self.base, starting])):
+            with self.subTest(operation=operation):
+                def fail_ancestry(command, **kwargs):
+                    if command[-4:] == ['merge-base', '--is-ancestor', *commits]:
+                        result = subprocess.CompletedProcess(command, 128, SENTINEL.encode(), SENTINEL.encode())
+                        if kwargs.get('check'):
+                            result.check_returncode()
+                        return result
+                    return run(command, **kwargs)
+
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with patch.dict(os.environ, env), patch('sys.argv', argv), \
+                        patch.object(reanchor.subprocess, 'run', side_effect=fail_ancestry), \
+                        contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    self.assertEqual(reanchor.main(), 2)
+                self.assertTrue(stdout.getvalue() == f'REFUSED: {operation} (Git exit 128)\n',
+                                'stdout must contain only the fixed refusal')
+                self.assertFalse(stderr.getvalue(), 'stderr must be empty')
+                self.assertEqual(self.row.read_bytes(), original)
+                self.assertEqual(record.read_bytes(), prior)
 
     def test_restoration_refuses_duplicate_row_id(self):
         prefix, table, suffix = self.restoration_fixture()
