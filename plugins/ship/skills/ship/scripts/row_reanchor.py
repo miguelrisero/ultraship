@@ -364,69 +364,74 @@ def run(args):
     require(row_file.is_absolute() and stat.S_ISREG(row_file.lstat().st_mode)
             and row_file.resolve() == row_file, 'row file must be absolute, regular and canonical without links')
 
-    def git(*words):
-        return subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', str(row_file.parent), *words],
-                              check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
+    def git(operation, *words, not_ancestor=None):
+        try:
+            return subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', str(row_file.parent), *words],
+                                  check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
+        except subprocess.CalledProcessError as error:
+            if not_ancestor is not None and error.returncode == 1:
+                raise Refused(not_ancestor) from None
+            raise Refused(f'{operation} (Git exit {error.returncode})') from None
 
-    def commit_sha(ref):
-        return git('rev-parse', '--verify', '--end-of-options', ref + '^{commit}').decode().strip()
+    def commit_sha(operation, ref):
+        return git(operation, 'rev-parse', '--verify', '--end-of-options', ref + '^{commit}').decode().strip()
 
-    root = Path(git('rev-parse', '--show-toplevel').decode().strip()).resolve()
+    root = Path(git('find worktree root', 'rev-parse', '--show-toplevel').decode().strip()).resolve()
     relative = row_file.relative_to(root).as_posix()
     subject = PurePosixPath(args.subject)
     require(not subject.is_absolute() and args.subject == subject.as_posix()
             and '..' not in subject.parts and subject.parts, 'subject must be repository-relative')
-    lane = git('branch', '--show-current').decode().rstrip('\n')
+    lane = git('read lane branch', 'branch', '--show-current').decode().rstrip('\n')
     require(lane, 'lane branch required')
-    base_sha, head_sha = commit_sha(args.base), commit_sha(args.head)
-    require(head_sha == git('rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
-    record = Path(git('rev-parse', '--path-format=absolute', '--git-path', 'ship/row-auth.json').decode().rstrip('\n'))
+    base_sha = commit_sha('resolve base commit', args.base)
+    head_sha = commit_sha('resolve head commit', args.head)
+    require(head_sha == git('read HEAD', 'rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
+    record = Path(git('find record path', 'rev-parse', '--path-format=absolute', '--git-path',
+                      'ship/row-auth.json').decode().rstrip('\n'))
 
-    def blob(sha, path):
-        return git('cat-file', 'blob', sha + ':' + path)
+    def blob(operation, sha, path):
+        return git(operation, 'cat-file', 'blob', sha + ':' + path)
 
     original = row_file.read_bytes()
-    require(original == blob(head_sha, relative), 'working row file differs from head')
+    require(original == blob('read head row blob', head_sha, relative), 'working row file differs from head')
     text = original.decode('utf-8')
-    base_text = blob(base_sha, relative).decode('utf-8')
+    base_text = blob('read base row blob', base_sha, relative).decode('utf-8')
     restoration_fields = {}
     if args.restoration is not None:
-        restoration = commit_sha(args.restoration)
-        try:
-            git('merge-base', '--is-ancestor', restoration, head_sha)
-        except subprocess.CalledProcessError:
-            raise Refused('restoration must be HEAD or an ancestor of HEAD') from None
-        parents = git('rev-list', '--parents', '-n', '1', restoration).decode().split()
+        restoration = commit_sha('resolve restoration commit', args.restoration)
+        git('check restoration ancestry', 'merge-base', '--is-ancestor', restoration, head_sha,
+            not_ancestor='restoration must be HEAD or an ancestor of HEAD')
+        parents = git('read restoration parents', 'rev-list', '--parents', '-n', '1', restoration).decode().split()
         require(len(parents) == 2, 'restoration must have exactly one parent')
         restoration_parent = parents[1]
-        try:
-            git('merge-base', '--is-ancestor', base_sha, restoration_parent)
-        except subprocess.CalledProcessError:
-            raise Refused('merge base must be an ancestor of the restoration parent') from None
+        git('check base ancestry', 'merge-base', '--is-ancestor', base_sha, restoration_parent,
+            not_ancestor='merge base must be an ancestor of the restoration parent')
         reason = 'restoration commit must change only the row file'
-        changes = git('diff-tree', '-r', '--raw', '--no-commit-id', '--no-renames', '-z',
+        changes = git('read restoration diff', 'diff-tree', '-r', '--raw', '--no-commit-id', '--no-renames', '-z',
                       restoration_parent, restoration).split(b'\0')
         path = relative.encode('utf-8')
         require(len(changes) == 3 and changes[1] == path and changes[2] == b'', reason)
         old_mode, mode, _, _, status = changes[0].split()
-        base_entry = git('ls-tree', '--full-tree', '-z', base_sha, '--', ':(literal)' + relative)
+        base_entry = git('read base row entry', 'ls-tree', '--full-tree', '-z', base_sha, '--', ':(literal)' + relative)
         require(mode in (b'100644', b'100755') and base_entry.startswith(mode + b' blob ')
                 and base_entry.endswith(b'\t' + path + b'\0')
                 and (status, old_mode) in ((b'A', b':000000'), (b'M', b':' + mode)), reason)
-        start_text = '' if status == b'A' else blob(restoration_parent, relative).decode('utf-8')
+        start_text = '' if status == b'A' else blob('read restoration parent row blob', restoration_parent,
+                                                   relative).decode('utf-8')
+        restored_text = blob('read restoration row blob', restoration, relative).decode('utf-8')
         restoration_fields = {'restoration': restoration, 'restoration_parent': restoration_parent,
-                              **restoration_check(base_text, start_text, blob(restoration, relative).decode('utf-8'),
-                                                  args.row_id)}
+                              **restoration_check(base_text, start_text, restored_text, args.row_id)}
     base_values, base_fields, base_extent = row_statements(base_text, args.row_id)
     head_values, head_fields, _ = row_statements(text, args.row_id)
     require(base_values['file'] == head_values['file'] == args.subject, 'subject mismatch')
     require([field[2] for key, field in base_fields.items() if key not in ('old', 'new')]
             == [field[2] for key, field in head_fields.items() if key not in ('old', 'new')], 'frozen row statements differ')
 
-    def subject_text(sha):
-        return blob(sha, args.subject).decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
+    def subject_text(operation, sha):
+        return blob(operation, sha, args.subject).decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
 
-    base, head = subject_text(base_sha), subject_text(head_sha)
+    base = subject_text('read base subject blob', base_sha)
+    head = subject_text('read head subject blob', head_sha)
     old, new, count = derive(base_values['old'], base_values['new'], base, head)
     source = lines(text)
     replacements = []
@@ -465,8 +470,10 @@ def run(args):
     identity = {'lane': lane, 'base': base_sha, 'head': head_sha}
 
     def check_worktree(phase):
-        require(git('branch', '--show-current').decode().rstrip('\n') == lane, 'lane branch changed during ' + phase)
-        require(git('rev-parse', 'HEAD').decode().strip() == head_sha, 'HEAD changed during ' + phase)
+        require(git('recheck lane branch', 'branch', '--show-current').decode().rstrip('\n') == lane,
+                'lane branch changed during ' + phase)
+        require(git('recheck HEAD', 'rev-parse', 'HEAD').decode().strip() == head_sha,
+                'HEAD changed during ' + phase)
         require(row_file.read_bytes() == original, 'row file changed during ' + phase)
 
     with record_lock(record):

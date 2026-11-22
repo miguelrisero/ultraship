@@ -63,12 +63,14 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
 
 ### Lane-owned row route
 
-A lane re-anchors, retires or adds the protected mutation rows that its own diff breaks or needs. No CoC decision file is required.
+A lane re-anchors, retires or adds the protected mutation rows that its own diff breaks or needs. Only a row action that needs CoC approval needs a CoC decision file. A step 4 follow-up row needs one.
 Authority: the owner's global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.
 Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.
 
-1. Admit the writer with the [row re-anchor tool admission record](../skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
-2. Re-anchor: the writer runs the sanctioned re-anchor tool once per row, then commits the row file alone.
+1. Select the route for each row before any tool admission or tool run.
+   For tool re-anchor or restoration only: Admit the writer with the [row re-anchor tool admission record](../skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
+   For a CoC-approved native exact-pair edit, use zero row re-anchor tool admissions and zero row re-anchor tool runs.
+2. Tool re-anchor: the writer runs the sanctioned re-anchor tool once per row, then commits the row file alone.
    The tool derives the paired `old` and `new` fields from the subject's new source text and keeps the identical mutant.
    It refuses a change to any other field, and it prints no row text.
    The writer's worktree has one user. No other command runs there while the tool runs.
@@ -78,10 +80,48 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The script appends one `[[retired]]` table per row with the row ID, the reason and the `replacement` row ID.
    The replacement row guards the new code. The anchor guard fails a removed row without a `[[retired]]` entry.
 4. Add: the writer adds rows for the PR's own new code, each with a claim, a designated test, a subject and a mutant.
+   A test-only follow-up PR may also add rows for code that a named earlier merged PR added, when the CoC grants it.
+   Its diff changes no subject code, and the parent's merge commit is an ancestor of the recorded base.
+   Its PR body names the parent PR URL, the parent's full merge commit SHA and the CoC decision file by absolute path and SHA256.
+   Each such row keeps the identical mutant edit that the decision file names and passes the review in step 8.
+   The parent PR's merged diff must add each such row's subject file and guarded line.
+   The driver confirms that `gh pr view <parent PR URL> --json mergeCommit` returns the named merge commit SHA.
+   The driver supplies a local diff of those subject files from that merge commit's first parent to the merge commit.
+   The driver records both SHAs and that lookup result in the reviewer brief.
+
+   Earlier test-only parent: add rows for existing subject code when a named earlier PR changed the designated tests.
+   Require the parent PR to be merged in the same repository as the row PR.
+   Match the recorded merge commit to the full squash SHA in the row PR base history.
+   Require the squash to have one parent.
+   Verify the complete changed-path inventory in the local first-parent diff.
+   Check both paths for renames and copies.
+   Require every changed path to contain only tests, test-only fixtures or test-only helpers.
+   Tie a changed hunk to the exact designated test selector and relevant cases for each row.
+   Show how the changed lines affect the designated assertion.
+   Match the Git tree mode, path and blob ID for the designated test and each relevant fixture and helper.
+   Compare these files at the squash, row base and frozen head.
+   Trace direct, transitive, autouse and runtime fixture use and direct and transitive helper calls.
+   Match the subject's Git tree mode, path and blob ID.
+   Compare the subject at the first parent, squash, row base and frozen head.
+   Limit the complete row base-to-head diff to the approved new rows.
+   Require an existing authorized draft for the same repository and lane.
+   Before any protected insertion, the writer verifies the frozen CoC decision by absolute path and SHA256.
+   Bind it to the writer, repository, lane, draft URL, row base, parent PR URL and full squash SHA.
+   Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.
+   The writer uses native Edit with `replace_all=false` for the authorized insertion.
+   Preserve all existing protected read and edit restrictions.
+   Admit no row re-anchor tool and run none.
+   At the frozen head, the driver verifies the decision digest and bindings again against the applied rows.
+   The driver names the decision under `Readable files` and supplies the merge lookup, both commit SHAs and local first-parent evidence.
+   Include the parent path inventory and hunk-to-test trace.
+   Include the Git tree mode, path and blob ID for each file at each comparison point.
+   Supply content-free evidence that the row diff leaves every path and byte outside the approved insertions unchanged.
+   Name the parent PR URL, full squash SHA and decision path and SHA256 in the row PR body.
+   Use the shared anchor proof in step 7 and the independent reviewer admission in step 8.
+   Keep live proof under separate execution admission and GO.
+   Hold the row on any missing, stale or mismatched evidence.
+
    Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.
-   The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.
-   Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
-   The driver marks the draft ready only after the review in step 8 passes at the exact head.
 5. Restore: the writer returns rows that only the lane's own unmerged commits changed to their bytes at the merge base.
    A restored row needs no failing CI report, so a row that the starting head deletes stays in scope.
    Its evidence is the merge-base diff and the tool fields `starting_lines`, `base_lines` and `restoration_lines`.
@@ -103,13 +143,27 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The record names the lane, base, head, row IDs, base and head line ranges, expected counts and the unchanged mutant check.
    A restore entry also names the restoration commit, its parent, the three row ranges and `insert_after`.
    The tool prints the record path and every record field as `key=value` lines, with no row text.
-   The record expires on any head change. Rerun the tool at the frozen head for each re-anchored row; that run changes zero statements.
+   The record expires on any head change. Rerun the tool at the frozen head for each tool re-anchor; that run changes zero statements.
    On the restore route, that rerun keeps `--restoration` and prints `changed_statements=0`.
-   A CoC-approved row change gets no tool run. Its decision file and the review in step 8 cover it.
    A run that changes statements writes no record entry and unfreezes the head. The writer commits the edit and reruns the tool.
+   For each tool re-anchor or restoration, require the generated record from the frozen-head run.
    The driver copies the printed fields of the frozen-head run into the reviewer brief. The reviewer reads no file under `.git`.
+   A CoC-approved row change gets no tool run. Its decision file and the review in step 8 cover it.
+   For a CoC-approved native exact-pair edit, the driver names the frozen decision path, SHA256 and verification result in the reviewer brief.
+   The driver lists the decision file under `Readable files` in the reviewer brief.
+   The driver verifies the decision against the applying writer, repository, lane, PR, row file, row ID, source commit and exact edit.
 7. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
+   Reuse the existing authorized draft for CI and reviewer admission.
+   If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.
+   Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
+   For a CoC-approved native exact-pair edit or an earlier test-only parent row, use the shared anchor proof below.
+   The driver supplies content-free evidence from the anchor guard at the authorized draft head.
+   The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.
+   The reviewer brief names both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count.
+   Include proof that the guard selected the row and that a count mismatch on that row fails the job.
+   Report an observed count only when the evidence gives it directly.
 8. Review: one independent reviewer confirms that every changed, retired, restored or added row is not weaker.
+   The driver marks the draft ready only after the review in step 8 passes at the exact head.
    Not weaker means the same test and the same mutant intent with the same claim or a CoC-approved narrowed claim, or a replacement that guards as tightly.
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](../skills/ship/references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
    The driver supplies read-only checkouts at the base and the frozen head. The admission record lists the row file in each checkout.
@@ -117,6 +171,19 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
    From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.
    The driver then admits only the head copy.
+   At the base and the frozen head, the driver records the test runner's fixture listing, such as `pytest --fixtures-per-test`.
+   From both listings, the driver lists each test that uses a changed, added or removed fixture, directly, transitively or through an autouse fixture.
+   For each changed, added or removed helper, the driver traces its callers in both checkouts, directly and transitively, and adds each test that reaches it.
+   The driver also traces runtime fixture requests, such as `request.getfixturevalue()`, in both checkouts.
+   The driver supplies a map of every active row ID to its designated test at the frozen head, from the repository's mutation tooling, with no row text.
+   For each listed test, the driver names every active row that the map assigns to it, with its row ID.
+   The admission record lists each such row file path. The reviewer brief names each listed row's exact line range and commit.
+   The reviewer confirms from the fixture listing, the helper trace and the diff that the test list is complete.
+   The reviewer blocks approval when it cannot determine every test that reaches a changed fixture or helper by any mechanism.
+   The reviewer checks every listed test against the map and confirms that every row that designates it is listed.
+   For each listed row, the reviewer traces the changed fixture or helper into the test.
+   The reviewer confirms that the designated assertion still separates the original result from the mutant result.
+   The reviewer blocks approval when the list, the admitted lines or the trace is missing or inconclusive.
    Any later push to the PR needs a new review at the pushed head. Return a ready PR to draft before that push.
    Mark it ready again only after the new review passes.
 9. The mutation proof runs after merge, under its execution admission.
@@ -127,6 +194,10 @@ A narrowed claim keeps the same designated test and the same mutant. It claims l
 Send a widened or otherwise changed claim to the CoC. The CoC approves it only with a current task-specific owner event.
 A CoC approval is a frozen decision file named by absolute path and SHA256.
 It binds the row ID, the source commit, the fields and their replacement values.
+Before verifying a PR-bound decision, require the verified URL of an existing, authorized draft PR for the same repository and lane.
+Keep the row pending if that draft identity is missing or unverified.
+Draft creation still requires separate authority.
+Match the PR URL in the decision to that draft.
 The writer verifies its SHA256 and bindings before the edit. The driver verifies them again at the frozen head and records the result in the reviewer brief.
 The writer applies only those fields with native Edit and `replace_all=false`, then commits the row file alone.
 Step 8 reviews that row, and a follow-up row guards any new code.

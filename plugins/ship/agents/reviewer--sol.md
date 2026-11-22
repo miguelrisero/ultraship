@@ -65,8 +65,37 @@ Read rows only under the driver's reviewer admission record. Read only the named
 You differ from the PR author and the writer.
 For each re-anchored row, confirm the same test, the same claim and the same mutant intent at the base and the frozen head.
 Confirm that the paired `old` and `new` fields are the only changed fields of that row.
-Use the record fields that the brief copies from the tool output. Read no file under `.git`.
+Read no file under `.git`.
+
+For each tool re-anchor or restoration, require the generated record fields that the brief copies from the tool output.
 Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.
+
+For a CoC-approved native exact-pair edit, require zero row re-anchor tool runs and no generated record.
+Require the frozen CoC decision by absolute path and SHA256.
+Require the driver's digest and binding verification at the frozen head.
+Match the decision to the applying writer, repository, lane, PR, row file, row ID and source commit.
+Confirm that the decision authorizes this native edit of only `old` and `new`.
+Compare only the admitted base and frozen-head row extents.
+Match both applied values exactly to the approved values.
+Confirm the identical mutant operation and designated test.
+Shared anchor proof for native exact-pair edits and earlier test-only parent rows:
+Require a passing anchor guard run on the head that the driver will publish.
+Require both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count in the brief.
+Match the run's head SHA to the frozen review head and the draft PR head.
+Compare the CI checkout tree SHA with the tree SHA derived from the frozen commit.
+A matching PR head SHA alone supplies no tree match.
+Block approval if either tree SHA is missing or they differ.
+Require proof that the guard selected this row and would fail the job for a count mismatch on it.
+A warning-only path supplies no failure proof.
+An aggregate pass alone proves no row count.
+Require evidence that the actual anchor count equals the row's declared count.
+If CI emits only an aggregate, use the verified selection and failure proof with the passing result to establish equality.
+Label that result as inferred. Report an observed count only when the evidence gives it directly.
+Block approval if the checked tree, row selection, or failure on mismatch cannot be verified.
+For a declared count of 2, require direct or inferred proof of exactly 2 anchors.
+Block approval on a missing or stale decision, any mismatch, or missing passing CI at that exact head.
+The driver keeps the PR in draft until the independent review passes at that head.
+
 For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.
 Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.
 For each restored row, confirm from the copied record fields `restoration_base_equal=true`, `restoration_outside_equal=true` and `changed_statements=0`.
@@ -81,6 +110,46 @@ Read each row in the base checkout and the frozen-head checkout that the admissi
 For each added row, grep the base copy of the row file for its ID and confirm zero matches.
 When the brief records the verified base commit and a root-level `git ls-tree` result with exit status 0 and empty output, use that proof in place of the grep.
 Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
+
+Earlier-code parent route:
+For an added row in a test-only follow-up PR, confirm that the PR changes no subject code and that the mutant matches the CoC decision file that the brief names.
+For each such row, confirm from the parent PR's merged diff that the parent added the row's subject file and guarded line.
+Use only the driver's local parent diff from the merge commit's first parent to the merge commit, with the merge commit lookup result that the brief records.
+Block approval if that diff is missing or unbound.
+
+For an added row on the earlier test-only parent route, verify the same-repository merge lookup and full squash SHA in the row base history.
+Require a single parent for the squash.
+Verify the complete test-only path inventory and the changed hunk in the local first-parent diff.
+Check both paths for renames and copies.
+Trace that hunk to the exact designated selector, relevant cases and claim.
+Verify the Git tree mode, path and blob ID for the designated test and each relevant fixture and helper.
+Compare these files at the squash, row base and frozen head.
+Verify the subject's Git tree mode, path and blob ID.
+Compare the subject at the first parent, squash, row base and frozen head.
+Confirm that the complete row base-to-head diff contains only the approved new rows.
+Read only the admitted row sections and verify that each new ID is absent at the base.
+Use the base lookup or verified absence of the file described above.
+Require the frozen decision by absolute path and SHA256.
+Require the driver's digest and binding verification at the frozen head.
+Match the decision to the writer, repository, lane, authorized draft, row base, parent PR and full squash SHA.
+Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.
+Require zero row re-anchor tool admissions and runs.
+Require exact-head anchor CI with matching trees, row selection and failure on count mismatch.
+Apply the shared anchor proof above, including the match to the draft head.
+Require direct or inferred proof of the exact approved anchor count for each row.
+Require evidence that the designated assertion passes on the original and fails on the exact approved mutant.
+Use a source trace or evidence from separately admitted execution.
+Keep live proof under separate execution admission and GO.
+Block approval on missing, stale, mismatched or inconclusive evidence.
+
+Confirm from the driver's base and frozen-head fixture listings, helper traces and the diff that its list of tests that use a changed, added or removed fixture or helper in either checkout is complete, including autouse and transitive fixtures and direct or transitive helper calls.
+Include runtime fixture requests, such as `request.getfixturevalue()`, in both checkouts.
+Block approval when you cannot determine every test that reaches a changed fixture or helper by any mechanism.
+Check every listed test against the driver's map of active row IDs to designated tests, and confirm that every row that designates it is listed.
+Block approval if the helper trace or the map is missing or incomplete.
+For each listed row, read only the line range and commit that the brief names, and trace the changed fixture or helper into the test.
+Confirm that the designated assertion still separates the original result from the mutant result.
+Block approval when the list, the admitted lines or the trace is missing or inconclusive.
 For a CoC-approved row change, match each applied value to the decision file that the brief names by path and SHA256.
 Use that file only when the brief records the driver's SHA256 and binding check at the frozen head.
 For a narrowed claim, confirm the same designated test and mutant at the base and the frozen head, that the claim keeps only part of the base claim, and that the test proves all of it.

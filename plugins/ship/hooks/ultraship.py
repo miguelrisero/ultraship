@@ -5209,6 +5209,13 @@ def receipt_custody(data, read_search=False):
                                         and not any(token[1] in find_actions for token in names[start:index])):
                                     continue
                             arguments = names[index + 1:]
+                            if interpreter in {'node', 'nodejs'} and arguments and arguments[0][0] == '--test':
+                                # Admit one literal test file, without Node discovery or shell expansion.
+                                if (len(arguments) < 2
+                                        or not re.fullmatch(r'(?!-)[A-Za-z0-9_./-]+\.[cm]?js', arguments[1][0])
+                                        or (len(arguments) > 2 and arguments[2][0] not in {';', '&', '|', ')', '\n'})):
+                                    return True
+                                continue
                             kind, operand, offset = program_operand(base, interpreter, [token[1] for token in arguments])
                             if kind == 'unknown':
                                 return True

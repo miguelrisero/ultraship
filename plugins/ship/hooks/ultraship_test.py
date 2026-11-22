@@ -70,6 +70,20 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     receipt_store = Path(tmp) / 'ultraship' / 'text-lint'
     custody = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                'Report the blocked scope to the driver.')
+    build = ('cd /workspace/service-walkthroughs && npm run build'
+             ' && node --test scripts/test-service-examples.mjs')
+    build_payload = {'cwd': '/workspace/repo', 'tool_name': 'Bash'}
+    for command, expected_reason in (
+            (build, None),
+            (build + ' && true', None),
+            (build.rsplit(' ', 1)[0], custody),
+            (build + ' scripts/other.test.mjs', custody),
+            (build + f' && cat {shlex.quote(str(receipt_store / "key"))}', custody),
+            (build + f' > {shlex.quote(str(receipt_store / "key"))}', custody)):
+        result = hook('pre', {**build_payload, 'tool_input': {'command': command}}, env)
+        actual_reason = result['hookSpecificOutput']['permissionDecisionReason'].split('\n', 1)[0] if denied(result) else None
+        assert actual_reason == expected_reason, (command, result)
+
     for caller in ({'agent_type': 'ship:writer--sol'}, {'agent_type': 'ship:driver'}, {}):
         for tool, inputs in (
                 ('Edit', {'file_path': str(receipt_store / 'key')}),
