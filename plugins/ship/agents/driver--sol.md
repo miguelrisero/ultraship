@@ -84,7 +84,7 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    Its diff changes no subject code, and the parent's merge commit is an ancestor of the recorded base.
    Its PR body names the parent PR URL, the parent's full merge commit SHA and the CoC decision file by absolute path and SHA256.
    Each such row keeps the identical mutant edit that the decision file names and passes the review in step 8.
-   The parent PR's merged diff must add each such row's subject file and guarded line.
+   The parent PR's merged diff must change each such row's subject file and add or change its guarded line.
    The driver confirms that `gh pr view <parent PR URL> --json mergeCommit` returns the named merge commit SHA.
    The driver supplies a local diff of those subject files from that merge commit's first parent to the merge commit.
    The driver records both SHAs and that lookup result in the reviewer brief.
