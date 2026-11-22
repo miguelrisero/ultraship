@@ -4439,7 +4439,8 @@ def text_search_only(command):
     """True when every segment is a plain text reader with no substitution, heredoc or redirect."""
     if re.search(r'\$\(|`|<<|>|<\(', command):
         return False
-    readers = {'grep', 'egrep', 'fgrep', 'rg', 'awk', 'sed', 'head', 'tail', 'cat', 'wc', 'sort', 'uniq', 'cut'}
+    # sed is absent because its `e`, `w` and `s///e` commands run programs or write files.
+    readers = {'grep', 'egrep', 'fgrep', 'rg', 'awk', 'head', 'tail', 'cat', 'wc', 'sort', 'uniq', 'cut'}
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace, lexer.whitespace_split, lexer.commenters = ' \t\r', True, ''
@@ -4453,14 +4454,44 @@ def text_search_only(command):
         segments.append(words)
     except ValueError:
         return False
+    # An unquoted expansion could add an option such as `--pre`, so only single-quoted text may hold `$`.
+    if '$' in outside_single_quotes(command):
+        return False
     for words in filter(None, segments):
-        if words[0] == 'git' and 'grep' in words[1:4]:
+        if any(char in word for word in words for char in '()'):
+            return False
+        # Read-only Git and GitHub CLI views print text and start no other program.
+        if (words[:2] == ['git', 'grep'] and not any(word.startswith(('-O', '--open')) for word in words)
+                or words[:3] in (['gh', 'pr', 'diff'], ['gh', 'pr', 'view']) and '--web' not in words):
             continue
-        if (words[0] not in readers or words[0] == 'sed' and any(word.startswith(('-i', '--in-place')) for word in words)
-                or words[0] == 'awk' and any('system' in word or '|' in word for word in words)
-                or any(char in word for word in words for char in '()')):
+        if (words[0] not in readers
+                or words[0] == 'awk' and any(token in word for word in words
+                                             for token in ('system', 'getline', '|', '>'))
+                or words[0] == 'rg' and any(word.startswith('--pre') for word in words)
+                or words[0] == 'sort' and any(word.startswith('--compress') for word in words)):
             return False
     return True
+
+
+def could_build_api_call(command):
+    """True when shell text could name gh, the GitHub API or a client, or build a command word it cannot show."""
+    text = re.sub(r'''['"\\]''', '', command.replace('\\\n', '')).casefold()
+    if re.search(r'(?<![a-z0-9_])gh\b|\bapi\b|github|graphql|curl|wget|https?:|http\.|python|\bnode|perl|ruby|\bphp|\blua'
+                 r'|\bdeno|\bbun\b|osascript|\bsh\b|bash|zsh|\bdash\b|\bksh\b|busybox', text):
+        return True
+    return obfuscated_shell(command)
+
+
+def obfuscated_shell(command):
+    """True when the text could run a program it never names: escapes, eval, a shell pipe or a variable command word."""
+    return bool(re.search(r"\$'|\\[0-7xu]|\b(?:eval|source|exec|alias|xargs|parallel|env\s+-s)\b|git_config"
+                          r"|--config-env|\|\s*(?:\S*/)?(?:ba|z|da|k|mk)?sh\b"
+                          r"|(?:^|[;&|(\n`]\s*|\bthen\s+|\bdo\s+)(?:\w+=\S*\s+)*[\"']?\$", command.casefold())
+                or re.search(r'(?:^|[;&|(\n]\s*)\.\s', command))
+
+
+OBFUSCATED_COMMAND = ('This command could run a program that it never names (an escape, eval, a shell pipe or a '
+                      'variable command word), and the hooks cannot read it. Rewrite it with literal program names.')
 
 
 THREAD_WRITE_REASONS = ('raw review-thread mutation', 'gh api write outside the helper',
@@ -4648,6 +4679,7 @@ def review_thread_scan(command, normalized, data_mode):
             cursor, parsed, options = 0, True, True
             static_read, field_count, document = True, 0, None
             scalar_fields, paginate = set(), False
+            query_fields, field_mutation = 0, False
             expanded_values = set()
             value_options = {'-H', '-X', '-f', '-F', '-q', '-t', '-p', '--method', '--field', '--raw-field',
                              '--input', '--header', '--jq', '--template', '--hostname', '--cache', '--preview'}
@@ -4698,6 +4730,8 @@ def review_thread_scan(command, normalized, data_mode):
                     elif option in ('-f', '-F', '--field', '--raw-field', '--input'):
                         field_count += 1
                         inputs = inputs or option == '--input'
+                        query_fields += option_value.startswith('query=')
+                        field_mutation = field_mutation or 'mutation' in option_value.casefold()
                         static_read = static_read and attached is None
                         if option_value.startswith('query='):
                             static_read = static_read and query is None and option in ('-f', '--raw-field')
@@ -4762,10 +4796,10 @@ def review_thread_scan(command, normalized, data_mode):
                     and not any('$' in outside_single_quotes(raw) for _, raw in arguments)
                     and graphql_read_document(document, required_variables, paginate=paginate)):
                 continue
-            # A literal GraphQL document that is not a mutation reads; gh sends every GraphQL call as POST.
-            if (route == 'graphql' and document is not None and not inputs
-                    and all(method == 'POST' for method in methods)
-                    and not re.search(r'\bmutation\b', document, re.IGNORECASE)
+            # One literal GraphQL document that is not a mutation reads; gh sends every GraphQL call as POST.
+            # No field may carry the word mutation, since gh can send a later field as the document.
+            if (route == 'graphql' and document is not None and not inputs and query_fields == 1
+                    and not field_mutation and all(method == 'POST' for method in methods)
                     and re.match(r'\s*(?:query\b|\{)', re.sub(r'#[^\n]*', '', document))):
                 continue
             method = methods[-1] if methods else ('POST' if field_count else 'GET')
@@ -5216,16 +5250,19 @@ def receipt_custody(data, read_search=False):
             comment = pr_comment_body_removed(raw)
             custody_source = path_command if data_match else joined if comment == raw else comment
             cache_operand = cache_listing[1] if cache_listing else None
+            try:
+                masked_source = cat_heredoc_data(custody_source)
+            except Exception:
+                masked_source = custody_source
+            # An unresolved word stays fail-closed whenever the command names the hook or its folder anywhere.
+            mentions_hook = bool(hook_name.search(normalized(masked_source)) or module_reference.search(masked_source)
+                                 or hook_folder in normalized(masked_source))
+
             def unread():
-                # Text the scan cannot read is denied only when it both runs an interpreter and names the hook.
-                text = normalized(custody_source)
-                names_hook = hook_name.search(text) or re.search(r'\bimport\b.*\bultraship\b', text)
-                runs = re.search(r'(?:^|[\s;&|(`])(?:\S*/)?(?:python[\d.]*|pypy\d*|uvx?|sh|bash|zsh|dash|env|exec)'
-                                 r'(?=\s|$)', text)
-                return 'hard' if names_hook and runs else 'soft'
+                return 'hard' if mentions_hook else 'soft'
 
             # 'hard' means the command runs, imports or changes the hook or names a store; 'soft' means a word
-            # stayed unresolved, so the call proceeds with an advisory warning.
+            # stayed unresolved where no hook name appears, so the call proceeds with an advisory warning.
             pending, seen, verdict = [custody_source], set(), False
             try:
                 while pending:
@@ -5274,10 +5311,10 @@ def receipt_custody(data, read_search=False):
                     plain_source = source == text and plain_hook_source_command(source, tokens)
                     if not plain_source:
                         # An inert quoted-delimiter script cannot run a process or import a module; its names are file text.
-                        name_text = python_heredoc_shell(name_source, inert_only=True)
-                        if module_reference.search(name_text) and any(
-                                interpreter_name(command) or command in SHELL_INTERPRETERS | {'uv', 'uvx'}
-                                for command in commands):
+                        name_text = python_heredoc_shell(cat_heredoc_data(name_source), inert_only=True)
+                        # Only a pure literal text search keeps a hook name as data.
+                        if ((hook_name.search(normalized(name_text)) or module_reference.search(name_text))
+                                and not literal_search_shell(source) and not text_search_only(source)):
                             return 'hard'
                         names = executable if evidence_index < 0 else executable[:evidence_index]
                         for index, (_, name, _, _) in enumerate(names):
@@ -5352,7 +5389,7 @@ def receipt_custody(data, read_search=False):
                                    if not (token[2] in data_starts and unresolved_shell_word(token[1])))
             except (OSError, RuntimeError, ValueError):
                 return unread()
-            return verdict
+            return 'hard' if verdict and mentions_hook else verdict
 
         try:
             code_text = normalized(cat_heredoc_data(path_command))
@@ -5378,18 +5415,7 @@ def receipt_custody(data, read_search=False):
                 or any(receipt_path(word) for word in words)
                 or ancestor_operand()
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
-                or re.search(r'text_lint(\.py)?\s+hook\b', code_text)
-                or ('text_lint' in code_text and re.search(r'\b(?:python[\d.]*|pypy\d*|uvx?)\b', code_text)
-                    and any(token in code_text for token in (
-                        'import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec(')))
-                or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
-            deny(RECEIPT_CUSTODY)
-        if (('account' in account_command or 'correct-binding' in account_command)
-                and not own_account_call(data, raw)
-                and ('claude_code_session_id' in account_command or names_ledger())):
-            deny(ACCOUNT_CUSTODY)
-        # The remaining shapes name no protected path; they proceed with an advisory warning.
-        if (re.search(r'(?:^|[\s;&|(])PATH=\S*\$\{?(?!(?:HOME|PATH)\b)\w', raw)
+                # An expansion, glob or directory change near the state root could reach a store.
                 or (('.local/state' in command or 'xdg_state_home' in command)
                     and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
                          or any(char in raw for char in '*?[]{}$`'))
@@ -5398,12 +5424,20 @@ def receipt_custody(data, read_search=False):
                        and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
                             or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
                        for word in raw_words)
-                # One literal grep starts no program; its text_lint words are search data.
-                or ('text_lint' in command and not (
-                    literal_search_shell(raw) and raw.split()[0] == 'grep' and '&&' not in raw.split()
-                    and not any(char.isspace() and char not in ' \t\n' for char in raw))
-                    and (re.search(r'text_lint(\.py)?\s+hook\b', command) or any(token in command for token in
-                         ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))):
+                # A literal text search starts no program, and an inert note body is file text.
+                or ('text_lint' in code_text and not (
+                    text_search_only(raw) or literal_search_shell(raw) and raw.split()[0] == 'grep'
+                    and '&&' not in raw.split() and not any(char.isspace() and char not in ' \t\n' for char in raw))
+                    and (re.search(r'text_lint(\.py)?\s+hook\b', code_text) or any(token in code_text for token in
+                         ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
+                or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):
+            deny(RECEIPT_CUSTODY)
+        if (('account' in account_command or 'correct-binding' in account_command)
+                and not own_account_call(data, raw)
+                and ('claude_code_session_id' in account_command or names_ledger())):
+            deny(ACCOUNT_CUSTODY)
+        # An unresolved PATH entry names no store; the call proceeds with an advisory warning.
+        if re.search(r'(?:^|[\s;&|(])PATH=\S*\$\{?(?!(?:HOME|PATH)\b)\w', raw):
             warn('S2', CUSTODY_ADVISORY)
         return grant_access()
 
@@ -5673,11 +5707,11 @@ def checks(data):
         except Exception as error:
             reason = 'review-thread guard exception: ' + type(error).__name__
         if reason and reason not in THREAD_WRITE_REASONS:
-            # A shape the scan could not read proceeds with a warning unless the text shows an API write.
+            # A shape the scan could not read proceeds with a warning only when its text cannot build a gh or API call.
             hard = thread_write_hard(command)
             if hard:
                 reason = hard
-            else:
+            elif not could_build_api_call(command):
                 warn('S1', f'the review-thread guard could not read this command. Rule: {reason}. Reply to and '
                            'resolve review threads only through `skills/babysit/scripts/thread_reply.py`.')
                 reason = None
@@ -5699,6 +5733,9 @@ def checks(data):
         if grant_custody_denied == 'hard':
             deny(RECEIPT_CUSTODY)
         if grant_custody_denied:
+            # An unresolved word proceeds with a warning only when no hidden program can hide behind it.
+            if obfuscated_shell(str(tin.get('command', ''))):
+                deny(OBFUSCATED_COMMAND)
             warn('S2', CUSTODY_ADVISORY)
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')

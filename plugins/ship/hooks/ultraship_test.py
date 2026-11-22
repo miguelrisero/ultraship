@@ -666,10 +666,9 @@ class ReceiptCustodyTests(unittest.TestCase):
         ):
             with self.subTest(form=form):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
-        # Reading or printing the hook path runs no hook code.
-        for command in (f'printf %s {installed}', f'cat < {installed}'):
-            with self.subTest(command=command):
-                self.assert_account_command_allowed(command, caller='')
+        # A pure text read of the hook runs no hook code; any other command that names it stays refused.
+        self.assert_account_command_allowed(f'cat < {installed}', caller='')
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': f'printf %s {installed}'}})
         self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': "echo ultraship 'unfinished"}})
         with patch.object(ultraship, 'nested_work_exceeded', return_value=True):
             self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': 'echo ultraship'}})
@@ -802,10 +801,11 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_account_command_allowed(command)
 
-    def test_grant_custody_warns_on_hook_names_after_an_unresolved_path_segment(self):
-        for command in ('ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py', 'cat ./hoo$x/ultraship.py'):
-            with self.subTest(command=command):
-                self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': command}})
+    def test_grant_custody_handles_hook_names_after_an_unresolved_path_segment(self):
+        self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {
+            'command': 'ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py'}})
+        # The hook name appears, so the unresolved word stays fail-closed.
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'cat ./hoo$x/ultraship.py'}})
 
     def test_grant_custody_allows_complete_brace_group_and_literal_shell_code(self):
         for command in ('{ echo a; echo b; }', "bash -c 'label=sample; echo \"$label\"'"):

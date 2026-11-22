@@ -1332,7 +1332,7 @@ class HookTests(unittest.TestCase):
              'gh api write outside the helper'),
             ("gh api graphql -f query='query{viewer{login}} mutation{deleteIssue(input:{issueId:\"x\"}){clientMutationId}}' -F id=x",
              'gh api write outside the helper'),
-            (read + " -f query='query{viewer{id}}' -F id=x", None),
+            (read + " -f query='query{viewer{id}}' -F id=x", 'gh api write outside the helper'),
             ("gh api graphql -F query=@query.graphql -F id=x", 'opaque GraphQL query'),
             (read + ' --input payload.json -F id=x', 'opaque GraphQL query'),
             (read + ' -F id=@identifier.txt', None),
@@ -1930,10 +1930,6 @@ class HookTests(unittest.TestCase):
                 with self.subTest(case=case, caller=caller):
                     result = self.preflight_decision(shell, caller)
                     self.assert_guarded(result)
-                    if case == 'file output':
-                        # A redirect makes `git -C /` an ancestor write, so custody refuses it first.
-                        self.assertTrue(self.guard_text(result).startswith(ultraship.RECEIPT_CUSTODY))
-                        continue
                     self.assertIn(' Rule: unparsed shell syntax rule: No closing quotation.',
                                   self.guard_text(result))
 

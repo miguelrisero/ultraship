@@ -113,6 +113,36 @@ class PreciseMatcherTests(unittest.TestCase):
         self.assert_denied('gh pr view 1 | sed -n 1p; gh api -X POST repos/o/r/issues/1/comments -f body=$B',
                            start='Ship replies to and resolves review threads')
 
+    def test_fail_closed_1_unreadable_text_that_can_build_gh(self):
+        self.assert_denied("bash -c 'gh pr view 7'", start='Ship replies to and resolves review threads')
+        for command in ("printf '%s' $'\\x67h' | sh", 'X=1; eval "$CMD" pr comment 1 --body x'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='This command could run a program that it never names')
+
+    def test_fail_closed_2_graphql_extra_query_or_mutation_field(self):
+        for command in ("gh api graphql -f query='query{viewer{login}}' -f query='mutation{x}'",
+                        "gh api graphql -f query='query($m:String){viewer{login}}' -f m='mutation{x}'"):
+            with self.subTest(command=command):
+                self.assert_denied(command, 'ship:driver', 'Ship replies to and resolves review threads')
+
+    def test_fail_closed_3_state_root_expansions(self):
+        for command in ('cat ~/.local/state/ultraship/te*/key', 'cd "$XDG_STATE_HOME" && cat ultraship/x',
+                        'ls ~/.local/sta{te,x}/ultraship'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+
+    def test_fail_closed_4_hook_name_without_interpreter(self):
+        for command in (f'cp {PLUGIN}/hooks/ultraship.py ./copy.py', '$RUN hooks/ultraship.py pre',
+                        f'printf %s {PLUGIN}/hooks/ultraship.py'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+
+    def test_fail_closed_5_program_running_reader_options(self):
+        for command in ("sed 's/x/resolveReviewThread/e' notes.txt", 'rg --pre=sh resolveReviewThread notes.txt',
+                        'sort --compress-program=sh resolveReviewThread'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Ship replies to and resolves review threads')
+
     def reviewer_grep(self, **fields):
         return self.decide(agent_type='ship:reviewer--sol', tool='Grep',
                            tool_input={'pattern': 'needle', 'path': str(self.cwd / 'repo'), **fields})
