@@ -1885,10 +1885,27 @@ RUNTIME_SAFE = frozenset({
     'typeset', 'let', 'unset', 'set', 'shift', 'getopts'})
 # git configuration values that run no program; any other `-c` value can run one under any subcommand.
 SAFE_GIT_CONFIG = (r'http\.(?:[^=\s]*\.)?(?:sslVerify|followRedirects)=(?:true|false|initial)|credential\.helper='
-                   r'|core\.fsmonitor=false|push\.default=\w+|color\.[\w.]+=\w+|user\.(?:name|email)=[^\s$`]*')
-# curl options whose value can name a file to send.
-FILE_OPTIONS_CURL = frozenset({'-d', '--data', '--data-binary', '--data-urlencode', '--json', '-T', '--upload-file',
-                               '-K', '--config', '-H', '--header', '-F', '--form', '-b', '--cookie'})
+                   r'|core\.fsmonitor=false|push\.default=\w+|color\.[\w.]+=\w+|user\.(?:name|email)=[^\s$`]*'
+                   r'|remote\.[\w.-]+\.(?:push)?url=https://[^\s$`\\]*')
+# Git and pager environment values that run no program.
+SAFE_GIT_ENV = (r'GIT_CONFIG_NOSYSTEM=\w*|GIT_CONFIG_(?:GLOBAL|SYSTEM)=/dev/null|GIT_TERMINAL_PROMPT=0|GIT_ASKPASS='
+                r'|SSH_ASKPASS=|GIT_ALLOW_PROTOCOL=[\w:]+|GIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL|DATE)=[^$`;&|]*'
+                r'|(?:GIT_)?PAGER=cat|(?:GIT_)?EDITOR=true|GIT_OPTIONAL_LOCKS=0|GIT_LFS_SKIP_SMUDGE=1'
+                r'|GIT_CONFIG_COUNT=\d+|GIT_CONFIG_KEY_\d+=core\.pager|GIT_CONFIG_VALUE_\d+=cat')
+# Option values that name no local file, so they may hold a run-time value.
+GH_RUNTIME_OPTIONS = frozenset({'--jq', '-q', '--json', '--repo', '-R', '-f', '--raw-field', '--title', '-t', '--body',
+                                '-b', '--label', '-l', '--assignee', '-a', '--reviewer', '-r', '--search', '--head',
+                                '-H', '--base', '-B', '--template'})
+CURL_RUNTIME_OPTIONS = frozenset({'-H', '--header', '-X', '--request', '-A', '--user-agent', '-e', '--referer', '-u',
+                                  '--user', '-m', '--max-time', '--connect-timeout'})
+# git flags that take no value, so the next word is an operand.
+GIT_NO_VALUE_FLAGS = frozenset({'--', '--symref', '--exit-code', '--verify', '-q', '--quiet', '--abbrev-ref',
+                                '--symbolic-full-name', '--all', '--tags', '--heads', '--refs', '--get-url', '--porcelain',
+                                '--push', '--short', '-a', '--annotate', '-s', '--sign', '-f', '--force', '--no-ff',
+                                '--ff-only'})
+# git subcommands whose bare operands are refs, never local files.
+GIT_REF_SUBCOMMANDS = frozenset({'for-each-ref', 'show', 'cat-file', 'rev-list', 'update-ref', 'symbolic-ref', 'tag',
+                                 'merge', 'checkout', 'reset', 'cherry-pick', 'worktree'})
 SHELL_COMMAND_PREFIXES = {'!', 'if', 'elif', 'while', 'until', 'then', 'do', 'else', '{'}
 
 
@@ -5376,12 +5393,34 @@ def receipt_custody(data, read_search=False):
                           and not re.search(rf'(?:^|[;&|\s(])(?:read|mapfile|readarray|declare|let|getopts)[ \t]'
                                             rf'[^;&|\n]*\b{match[1]}\b|-v[ \t]*{match[1]}\b', custody_source)}
 
+            loop_words = {match[1]: match[2].split() for match in re.finditer(
+                r'(?:^|[;&|\s(])for[ \t]+([A-Za-z_]\w*)[ \t]+in\b([^;\n]*)', custody_source) if match[1] in loop_names}
+
+            def expand_variables(path):
+                # Each known value replaces its variable, so the path checks read what the shell will open.
+                results = [path]
+                for braced, plain in re.findall(r'\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))', path):
+                    name = braced or plain
+                    if name == 'HOME':
+                        values = [str(Path.home())]
+                    elif name in loop_words:
+                        values = loop_words[name]
+                    else:
+                        values = [value for value in (literal_value(name, len(custody_source)),
+                                                      None if other_binding(name) else os.environ.get(name))
+                                  if value is not None]
+                    if values:
+                        token = '${' + name + '}' if braced else '$' + name
+                        results = [result.replace(token, value, 1) for result in results for value in values][:64]
+                return results
+
             def run_time_word(raw_word):
                 # A word is unknown text unless every variable in it has one provable literal value, is a literal
                 # `for` name, or is an environment value outside every store.
                 # A `date` substitution with only a format, -u, -I or a literal -d value prints only a date.
-                expanded = re.sub(r"\$\(date(?:[ \t]+(?:\+[^\s$`()|;&<>'\"\\]*|'\+[^']*'|-u|-I\w*"
-                                  r"|-d[ \t]*(?:'[^']*'|[^\s$`()|;&<>'\"\\-][^\s$`()|;&<>'\"\\]*)))*[ \t]*\)", 'D', raw_word)
+                expanded = re.sub(r"\$\(date(?:[ \t]+(?:\+[^\s$`()|;&<>'\"\\{},*?\[]*|'\+[^']*'|-u|-I\w*"
+                                  r"|-d[ \t]*(?:'[^']*'|[^\s$`()|;&<>'\"\\{},*?\[-][^\s$`()|;&<>'\"\\{},*?\[]*)))*[ \t]*\)",
+                                  'D', raw_word)
                 expanded = re.sub(r"'[^']*'", '', expanded)
                 if ('`' in expanded or '$(' in expanded or re.search(r'\$\{(?![A-Za-z_]\w*\})', expanded)
                         or re.search(r'\$[0-9@*-]', expanded)):
@@ -5399,9 +5438,15 @@ def receipt_custody(data, read_search=False):
                         return True
                 return False
 
+            # A git, pager, editor or askpass variable can make a later program run a command, so only listed
+            # values pass, set inline or through export, declare, typeset, readonly, local or env.
+            for name, value in re.findall(r'(?:^|[;&|\s(\'"])((?:GIT_\w+|PAGER|EDITOR|VISUAL|SSH_ASKPASS|LESSOPEN|LESSCLOSE))'
+                                          r'\+?=("[^"]*"|\'[^\']*\'|[^\s;&|()]*)', custody_source):
+                if not re.fullmatch(SAFE_GIT_ENV, name + '=' + value.strip('"\'')):
+                    return 'hard'
             # Each `cd` or `pushd` target joins the folders a relative word can resolve against.
             # A target the scan cannot read could be any folder, so it is refused.
-            base, toplevel = data.get('cwd') or os.getcwd(), False
+            base = data.get('cwd') or os.getcwd()
             top_word = r'"?\$\(git rev-parse --show-toplevel\)(/[^\s;&|()"\'$`*?\[{\\]*)?"?'
             changes = list(re.finditer(r'(?:^|[;&|(\s])(?:cd|pushd)(?:[ \t]+(?:-[PLe@]+[ \t]+)*(?:--[ \t]+)?'
                                        rf'({top_word}|"[^"$`\\]*"|\'[^\']*\'|[^\s;&|()]+))?(?=[\s;&|()]|$)',
@@ -5569,27 +5614,33 @@ def receipt_custody(data, read_search=False):
                                    or name == 'tar' and re.match(r'-[^-]*T', word) for _, word, _, _ in segment):
                                 return 'hard'
                             # A run-time operand could name a store. Only a program that reads no named file may
-                            # take one anywhere; git takes one as a message or a ref, and gh and curl take one
-                            # except as a file option value that could start with `@`.
-                            file_options = {'gh': {'-F', '--field', '--input', '--body-file'},
-                                            'curl': FILE_OPTIONS_CURL}.get(name)
-                            value_ok = set()
+                            # take one anywhere. git takes one as a message, as a bare ref of a ref subcommand, or
+                            # as the folder of a names-only subcommand; gh as a listed option value or the api
+                            # endpoint; curl as a listed option value with a literal start, or an https URL.
+                            value_ok, positional, gh_sub = set(), 0, None
+                            git_refs = not git_opaque or sub in GIT_REF_SUBCOMMANDS
                             for (_, before, _, _), (raw_word, word, word_start, _) in zip(segment, segment[1:]):
-                                option, value = before, raw_word
-                                if word.startswith('--') and '=' in word:
-                                    option, value = word.split('=', 1)[0], raw_word.split('=', 1)[1]
-                                elif file_options and re.match(r'-[A-Za-z].', word) and word[:2] in file_options:
-                                    option, value = word[:2], raw_word[2:]
-                                if option in {'-F', '--field', '--form'}:
-                                    value = value.split('=', 1)[-1]
-                                if name == 'git' and option in {'-m', '--message'}:
+                                option = word.split('=', 1)[0] if word.startswith('--') and '=' in word else before
+                                value = raw_word.split('=', 1)[1] if word.startswith('--') and '=' in word else raw_word
+                                literal_start = re.match(r'["\']?([^$`"\']*)', value)[1]
+                                bare = not word.startswith('-') and (not before.startswith('-') or '=' in before
+                                                                     or before in GIT_NO_VALUE_FLAGS)
+                                if name == 'git' and (option in {'-m', '--message'} or bare and git_refs
+                                                      or not git_opaque and option in {'-C', '--git-dir', '--work-tree'}):
                                     value_ok.add(word_start)
-                                elif file_options is not None and (option not in file_options
-                                                                   or not re.match(r'["\']?(?:@|\$|`)', value)):
+                                elif name == 'gh':
+                                    if bare and gh_sub == 'api' and positional == 0:
+                                        value_ok.add(word_start)
+                                    if option in GH_RUNTIME_OPTIONS:
+                                        value_ok.add(word_start)
+                                    if bare:
+                                        positional += 1 if gh_sub else 0
+                                        gh_sub = gh_sub or word
+                                elif name == 'curl' and (
+                                        option in CURL_RUNTIME_OPTIONS and literal_start and not literal_start.startswith('@')
+                                        or bare and re.fullmatch(r'https?://[^/\s]+(?:/.*)?', literal_start or '-')):
                                     value_ok.add(word_start)
-                            runtime_safe = (name in RUNTIME_SAFE or name == 'git' and (not git_opaque or sub in {
-                                'for-each-ref', 'show', 'cat-file', 'rev-list', 'update-ref', 'symbolic-ref', 'tag',
-                                'merge', 'checkout', 'reset', 'cherry-pick', 'worktree'}))
+                            runtime_safe = name in RUNTIME_SAFE
                             seen_program = False
                             for _, word, word_start, _ in segment:
                                 seen_program = seen_program or bool(first) and word == first
@@ -5684,12 +5735,14 @@ def receipt_custody(data, read_search=False):
                             paths.extend(word[offset:] for offset in range(2, len(word)))
                         # The tokenizer separates an unquoted backtick from the preceding literal text.
                         backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
-                        for path in paths:
+                        for path in [expanded for path in paths for expanded in expand_variables(path)]:
                             path = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), path)
                             globbed = any(char in path for char in '*?[')
                             # A glob reaches a store or the hook folder unless the segment only lists it. After cd,
                             # the glob's own folder is unknown, so a match at any depth of a store path counts.
-                            if (receipt_path(path, ancestors=not listing[index] or recursive[index],
+                            # A resolved word inside any store reads it, whichever store it is.
+                            if (receipt_path(path, stores=receipt_paths)
+                                    or receipt_path(path, ancestors=not listing[index] or recursive[index],
                                              state_only=(not modifies_paths or data_segment[index])
                                              and not recursive[index], stores=grant_paths)
                                     or recursive[index] and receipt_path(path, ancestors=True, stores=receipt_paths)

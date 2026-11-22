@@ -111,8 +111,6 @@ PY"""
             'status=$(git -C "${worktree}" status --porcelain)',
             'status=$(GIT_OPTIONAL_LOCKS=0 git -C "$worktree" status --porcelain)',
             '{ :; head=$(git -C "$worktree" rev-parse HEAD); }',
-            'status=$(git -C "$worktree" status --porcelain); eval "$status"',
-            'status=$(git -C "$worktree" status --porcelain); bash -c "$status"',
             'status=$(git -C "$worktree" status --porcelain); "$status"',
             'status=$(git -C "$worktree" status --porcelain); $status',
             '''PATH='/attacker'; head=$(git -C "$worktree" rev-parse HEAD)''',
@@ -126,6 +124,11 @@ PY"""
             with self.subTest(command=command):
                 self.assertNotEqual(self.admission(literal).get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
                 self.assertNotEqual(self.admission(command).get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
+        # Command output run as code is a run-time value, so custody denies it even after a known folder.
+        for command in ('status=$(git -C "$worktree" status --porcelain); eval "$status"',
+                        'status=$(git -C "$worktree" status --porcelain); bash -c "$status"'):
+            with self.subTest(command=command):
+                self.assertEqual(self.admission(command).get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
 
     def test_running_a_value_needs_one_plain_git_read_binding(self):
         for command in (

@@ -90,8 +90,10 @@ class WriterFalsePublishTests(unittest.TestCase):
             "staged = subprocess.check_output(['git', 'rev-parse', f':{path}'], text=True)\n"
             "incoming = subprocess.check_output(['git', 'rev-parse', f'MERGE_HEAD:{path}'], text=True)\n"
             "print({'same': staged == incoming})\nPY")
+        # An unbound folder variable is a run-time value, so git with it is denied; a bound one passes.
+        self.assertDenied('git -C "$WT" diff --cached MERGE_HEAD -- docs/screens/onboarding.png')
         self.assertAdmitted(
-            'git -C "$WT" diff --cached MERGE_HEAD -- docs/screens/onboarding.png',
+            'WT=/w/lane; git -C "$WT" diff --cached MERGE_HEAD -- docs/screens/onboarding.png',
             'WT=/w/lane; git -C $WT ls-tree MERGE_HEAD -- docs/screens/onboarding.png',
             'WT=/w/lane; git -C $WT cat-file -p MERGE_HEAD:docs/screens/onboarding.png | wc -c')
 
@@ -162,7 +164,9 @@ class WriterFalsePublishTests(unittest.TestCase):
             'env', 'env -u X Y=1', 'command', 'exec', 'exec -a x', 'nice', 'nice -n 10', 'nohup', 'timeout 5',
             'timeout -s KILL 5m', 'xargs', 'xargs -I {} -n 1', 'sudo', 'sudo -u root', '/usr/bin/env',
             'sudo env', 'nohup nice -n 5')))
-        self.assertAdmitted('timeout 5 ls g*', 'env X=1 ls g*', 'xargs -n 1 grep -l g*', 'nohup cat g*.txt')
+        self.assertAdmitted('timeout 5 ls g*', 'env X=1 ls g*', 'nohup cat g*.txt')
+        # xargs gives its program words from standard input, which are run-time values.
+        self.assertDenied('xargs -n 1 grep -l g*')
 
     def test_git_alias_that_runs_a_shell_or_a_writer_stays_denied(self):
         self.assertDenied('git -c alias.x=push x', 'git -c alias.x=send-pack x origin HEAD:main',

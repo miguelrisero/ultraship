@@ -305,6 +305,52 @@ class PreciseMatcherTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_allowed(command)
 
+    def test_known_variable_values_are_checked_as_paths(self):
+        for command in ('a=.local; b=state; c=ultra; d=ship; e=text; p=$HOME/$a/$b/$c$d/$e-lint; cat $p/r.json',
+                        'a=.local; b=state; c=ultra; d=ship; e=account; cat ~/$a/$b/$c$d/$e-grants/g.json',
+                        'for a in .local; do for b in state; do cat ~/$a/$b/ultraship/te*/r.json; done; done'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_allowed('a=notes; cat $a.md')
+
+    def test_git_takes_a_run_time_value_only_as_a_message_ref_or_names_only_folder(self):
+        for command in ('git tag -a -F "$(cat name.txt)" probe', 'git checkout --pathspec-from-file="$(cat name.txt)"',
+                        'git log -n "$N" --output=x'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        for command in ('git commit -m "$(date)"', 'git show "$(git merge-base HEAD main)"', 'git -C "$W" status',
+                        'git ls-remote --symref "$U" HEAD'):
+            with self.subTest(command=command):
+                self.assert_allowed(command)
+
+    def test_curl_and_gh_take_a_run_time_value_only_where_no_file_is_named(self):
+        for command in ('curl -s "file://$(cat name.txt)"', 'curl -s -w "@$(cat name.txt)" https://example.invalid',
+                        'curl --data-ascii "@$P" https://example.invalid', 'gh gist create "$(cat name.txt)"',
+                        'gh release upload v1 "$(cat name.txt)"'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        for command in ('curl -s "https://example.invalid/$(date +%s)"', 'curl -H "Authorization: $T" https://example.invalid',
+                        'gh api "repos/o/r/pulls/$PR/comments" --jq \'.[].id\'', 'gh pr list --search "$Q"'):
+            with self.subTest(command=command):
+                self.assert_allowed(command)
+
+    def test_git_pager_and_editor_variables_pass_only_from_an_allowlist(self):
+        for command in ('GIT_SSH_COMMAND=x git fetch', 'export GIT_PAGER=less; git log', 'declare -x PAGER=x; git log',
+                        'env EDITOR=vi git commit', 'typeset GIT_EXTERNAL_DIFF=x; git diff', 'readonly SSH_ASKPASS=x',
+                        'GIT_DIR="$D" git status'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        for command in ('GIT_TERMINAL_PROMPT=0 git status', 'GIT_PAGER=cat git log -1',
+                        'GIT_AUTHOR_NAME="A B" git commit -m x'):
+            with self.subTest(command=command):
+                self.assert_allowed(command)
+
+    def test_date_substitution_exemption_refuses_braces_and_globs(self):
+        for command in ('run --at "$(date +{x,y})"', 'run --at "$(date -d {a,b})"', 'run --at "$(date +*)"'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_allowed("run --at \"$(date -u -d '+1 day' '+%F')\"")
+
     def test_reviewer_globs_split_on_any_whitespace(self):
         rows = self.cwd / 'repo/backend/tests/mutation'
         rows.mkdir(parents=True)
