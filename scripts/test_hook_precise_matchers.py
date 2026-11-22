@@ -179,7 +179,8 @@ class PreciseMatcherTests(unittest.TestCase):
         rows.mkdir(parents=True)
         (rows / 'rows.py').write_text('x')
         for glob in ('!tests/mutation', 'rows\\.py', '[^x]*', '/backend/**', '/rows.py',
-                     'a/**,backend/tests/mutation/**', '*.toml,*.py', '!**/tests/mutation/**,*.py'):
+                     'a/**,backend/tests/mutation/**', '*.toml,*.py', '!**/tests/mutation/**,*.py',
+                     '{!**/tests/mutation/**,x}', '{x,!**/tests/mutation/**}'):
             with self.subTest(glob=glob):
                 self.assertEqual(self.reviewer_grep(glob=glob).get('permissionDecision'), 'deny')
 

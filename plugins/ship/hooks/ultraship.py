@@ -5921,8 +5921,7 @@ def checks(data):
                 admitted = True
             base = tin['path'] if tool in ('Grep', 'Glob') and 'path' in tin else cwd
             for glob in globs:
-                # The Grep tool splits a glob on whitespace and commas.
-                for token in filter(None, re.split(r'[\s,]+', glob)):
+                for token in glob_pieces([glob]):
                     if re.search(r'(?:^|[{,!])[/~]|(?:^|[/{,!])\.\.(?:$|[/},])', token):
                         deny('Reviewers must pass globs relative to the search path: '
                              'no absolute or `~` glob and no `..` segment.')
@@ -5996,14 +5995,22 @@ def checks(data):
 ROW_EXCLUSION = '!**/tests/mutation/**'
 
 
+def glob_pieces(globs):
+    """Split globs as the Grep tool does: on whitespace, then on commas only in a piece without braces."""
+    pieces = []
+    for piece in ' '.join(globs).split():
+        # A brace piece stays whole, so a comma inside braces never makes a separate exclusion.
+        pieces += [piece] if '{' in piece or '}' in piece else [part for part in piece.split(',') if part]
+    return pieces
+
+
 def reviewer_row_folders(tin, tool, globs, row_folders, blocked, deadline):
     """Admit a search above row folders only when no row file can match it."""
     root = tin['path'].rstrip('/')
     # The exclusion glob is case-sensitive and relative to the search path, so it covers only plain, exact folders.
     exact = all(folder.startswith(root + '/') and os.path.realpath(folder) == folder
                 and re.search(r'(?:^|/)tests/mutation$', folder[len(root):]) for folder in row_folders)
-    # The Grep tool splits a glob on whitespace and commas, so each piece is checked on its own.
-    tokens = [token for token in re.split(r'[\s,]+', ' '.join(globs)) if token]
+    tokens = glob_pieces(globs)
     # A leading `/` anchors a ripgrep glob to the search root; fnmatch compares the rest.
     positives = [token.lstrip('/') for token in tokens if not token.startswith('!')]
     if tool == 'Grep' and not positives and exact:
