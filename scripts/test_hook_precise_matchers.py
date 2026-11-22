@@ -178,7 +178,8 @@ class PreciseMatcherTests(unittest.TestCase):
         rows = self.cwd / 'repo/backend/tests/mutation'
         rows.mkdir(parents=True)
         (rows / 'rows.py').write_text('x')
-        for glob in ('!tests/mutation', 'rows\\.py', '[^x]*', '/backend/**', '/rows.py'):
+        for glob in ('!tests/mutation', 'rows\\.py', '[^x]*', '/backend/**', '/rows.py',
+                     'a/**,backend/tests/mutation/**', '*.toml,*.py', '!**/tests/mutation/**,*.py'):
             with self.subTest(glob=glob):
                 self.assertEqual(self.reviewer_grep(glob=glob).get('permissionDecision'), 'deny')
 

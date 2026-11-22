@@ -5921,7 +5921,8 @@ def checks(data):
                 admitted = True
             base = tin['path'] if tool in ('Grep', 'Glob') and 'path' in tin else cwd
             for glob in globs:
-                for token in glob.split():
+                # The Grep tool splits a glob on whitespace and commas.
+                for token in filter(None, re.split(r'[\s,]+', glob)):
                     if re.search(r'(?:^|[{,!])[/~]|(?:^|[/{,!])\.\.(?:$|[/},])', token):
                         deny('Reviewers must pass globs relative to the search path: '
                              'no absolute or `~` glob and no `..` segment.')
@@ -6001,7 +6002,8 @@ def reviewer_row_folders(tin, tool, globs, row_folders, blocked, deadline):
     # The exclusion glob is case-sensitive and relative to the search path, so it covers only plain, exact folders.
     exact = all(folder.startswith(root + '/') and os.path.realpath(folder) == folder
                 and re.search(r'(?:^|/)tests/mutation$', folder[len(root):]) for folder in row_folders)
-    tokens = ' '.join(globs).split()
+    # The Grep tool splits a glob on whitespace and commas, so each piece is checked on its own.
+    tokens = [token for token in re.split(r'[\s,]+', ' '.join(globs)) if token]
     # A leading `/` anchors a ripgrep glob to the search root; fnmatch compares the rest.
     positives = [token.lstrip('/') for token in tokens if not token.startswith('!')]
     if tool == 'Grep' and not positives and exact:
