@@ -189,6 +189,72 @@ class PreciseMatcherTests(unittest.TestCase):
                     self.assert_denied(command, 'ship:driver')
         self.assert_allowed('cd repo && git status')
 
+    def test_any_program_but_a_listing_denies_a_parent_of_a_store(self):
+        for command in ('grep -d recurse . ~/.local', 'grep --directories=recurse . ~', 'grep --recur . ~/.local',
+                        'find ~/.local -type f', 'du -a ~/.local/state', 'tree ~/.local/state', 'ag . ~/.local',
+                        'ugrep . ~/.local', 'git grep --no-index . ~/.local', 'ls --recur ~/.local', 'ls -lR ~'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_allowed('ls -la ~/.local/state')
+
+    def test_cd_variable_resolves_only_through_one_earlier_literal(self):
+        for command in ('D=/tmp; D=~/.local/state/ultraship/text-lint; cd "$D" && cat key',
+                        'cd "$D" && cat key; D=/tmp',
+                        'D=/tmp; for D in ~/.local/state/ultraship/text-lint; do cd "$D"; cat key; done',
+                        'D=/tmp; read D; cd "$D" && cat key', 'D=/tmp; declare D; cd "$D" && cat key'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_allowed('D=/tmp/x; cd "$D" && git status')
+
+    def test_cdpath_makes_a_relative_cd_unreadable(self):
+        self.assert_denied('CDPATH=~/.local/state/ultraship cd text-lint && cat key',
+                           start='Only the text_lint hook reads or writes refusal receipts')
+        with patch.dict(os.environ, {'CDPATH': str(self.home / '.local/state/ultraship')}):
+            self.assert_denied('cd text-lint && cat key', start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_allowed('cd repo && git status')
+
+    def test_relative_cd_after_the_repository_top_folder_denies(self):
+        self.assert_denied('cd "$(git rev-parse --show-toplevel)" && cd .local/state/ultraship/text-lint && cat key',
+                           start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_allowed('cd "$(git rev-parse --show-toplevel)" && git status')
+
+    def test_cd_double_dash_reads_the_next_word(self):
+        for command in ('cd -- ~/.local/state/ultraship/text-lint && cat key', 'cd -- && cat key',
+                        'cd -- -x && cat key'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_allowed('cd -- repo && git status')
+        for command in ('cd -- .. && cd -- .local && cd -- state && cd -- ultraship && cd -- account-grants && cat key',
+                        'cd -P .. && cd -L .local/state/ultraship/text-lint && cat key',
+                        'CDPATH=.. cd .local && cd state && cd ultraship && cd account-grants && cat key'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+
+    def test_unparsable_text_with_a_path_or_directory_change_denies(self):
+        for command in ("cd ..; cd .local; cd state; cd ultraship; cd account-grants; cat key; cat <<'EOF'\nordinary\n",
+                        "cd ..; cat .lo*/st*/ul*/ac*/key; cat <<'EOF'\nordinary\n",
+                        "cat ../.local/state/ultraship/account-grants/key\necho 'x"):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+
+    def test_run_time_file_operand_denies(self):
+        for command in ("p=$(printf '%s/.%s/%s/%s/%s' .. local state ultraship account-grants key); cat \"$p\"",
+                        "cat \"$(printf '%s/.%s/%s/%s/%s' .. local state ultraship account-grants key)\"",
+                        'f=`cat name.txt`; head "$f"', 'cat `cat name.txt`'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_allowed('f=notes.md; cat "$f"')
+        self.assert_allowed("grep -e '$X' notes.md")
+
+    def test_reviewer_globs_split_on_any_whitespace(self):
+        rows = self.cwd / 'repo/backend/tests/mutation'
+        rows.mkdir(parents=True)
+        (rows / 'rows.py').write_text('x')
+        self.assertEqual(ultraship.glob_pieces(['a\tb,c\nd']), ['a', 'b', 'c', 'd'])
+        for glob in ('*.toml\t*.py', '!**/tests/mutation/**\n*.py', '*.toml\x0b../x'):
+            with self.subTest(glob=glob):
+                self.assertEqual(self.reviewer_grep(glob=glob).get('permissionDecision'), 'deny')
+
     def test_plugin_update_commands_name_ultraship_without_a_store(self):
         for command in ('claude plugin marketplace update ultraship', 'claude plugin update ship@ultraship'):
             with self.subTest(command=command):

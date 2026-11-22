@@ -581,7 +581,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assert_custody_denial({**event, 'agent_type': 'ship:writer--sol'})
         with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
             self.consume(self.account_words)
-        with patch.object(ultraship, 'pre', side_effect=RuntimeError):
+        with patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
             self.assert_custody_denial(event, ultraship.PRE_FAILED)
         with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
             self.consume(self.account_words)
@@ -722,7 +722,7 @@ class ReceiptCustodyTests(unittest.TestCase):
 
     def test_grant_custody_allows_ordinary_shell_and_exact_stop_commands(self):
         event = self.own_account_event()
-        for command in ('ls *.py', 'df -h /', 'ls ~', 'find / -name x',
+        for command in ('ls *.py', 'df -h /', 'ls ~', 'find . -name x',
                         f'cd {shlex.quote(str(self.cwd))} && git status',
                         f'cd {shlex.quote(str(self.cwd))} && uv run pytest'):
             with self.subTest(command=command):
@@ -1410,7 +1410,7 @@ class ReceiptCustodyTests(unittest.TestCase):
             for tool, tool_input in inputs:
                 output, errors = io.StringIO(), io.StringIO()
                 with self.subTest(caller=caller, tool=tool), \
-                        patch.object(ultraship, 'pre', side_effect=RuntimeError('pre failed')):
+                        patch.object(ultraship, 'pre_output', side_effect=RuntimeError('pre failed')):
                     with redirect_stdout(output), redirect_stderr(errors), self.assertRaises(SystemExit) as exit:
                         ultraship.guarded_pre({'cwd': str(self.cwd), 'agent_type': caller,
                                               'tool_name': tool, 'tool_input': tool_input})
@@ -1426,7 +1426,7 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_pre_error_denies_malformed_tool_names(self):
         """Catch malformed tool names escaping denial through an error in the custody fallback."""
         for tool in (None, 1, ['Read'], {'name': 'Read'}):
-            with self.subTest(tool=tool), patch.object(ultraship, 'pre', side_effect=RuntimeError('pre failed')):
+            with self.subTest(tool=tool), patch.object(ultraship, 'pre_output', side_effect=RuntimeError('pre failed')):
                 self.assert_custody_denial(
                     {'tool_name': tool, 'tool_input': {}},
                     'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
@@ -1459,7 +1459,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         for caller in ('ship:writer--sol', 'ship:driver', ''):
             for tool in ('Read', 'Grep', 'Glob', 'LSP', 'mcp__fff__grep', 'mcp__fff__multi_grep'):
                 with self.subTest(caller=caller, tool=tool), \
-                        patch.object(ultraship, 'pre', side_effect=RuntimeError('pre failed')), \
+                        patch.object(ultraship, 'pre_output', side_effect=RuntimeError('pre failed')), \
                         patch.object(ultraship, 'receipt_custody', side_effect=OSError('custody failed')):
                     self.assert_custody_denial({'agent_type': caller, 'tool_name': tool, 'tool_input': {}})
 
