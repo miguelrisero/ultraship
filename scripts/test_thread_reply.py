@@ -1334,7 +1334,7 @@ class HookTests(unittest.TestCase):
             ("gh api graphql -F query=@query.graphql -F id=x", 'opaque GraphQL query'),
             (read + ' --input payload.json -F id=x', 'opaque GraphQL query'),
             (read + ' -F id=@identifier.txt', 'gh api write outside the helper'),
-            (read + ' -F id="$ID"', None),
+            (read + ' -f id="$ID"', None),
             (read + ' -F id=$(cat identifier.txt)', 'review-thread guard parse failure'),
             (read + ' -F id=x -F id=y', None),
             (read + " -F 'id[]=x'", None),

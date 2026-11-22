@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -25,6 +26,7 @@ class PreciseMatcherTests(unittest.TestCase):
         self.cwd.mkdir()
         self.enterContext(patch.dict(os.environ, {'HOME': str(self.home)}))
         os.environ.pop('XDG_STATE_HOME', None)
+        os.environ.pop('CDPATH', None)
         self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(self.home))))
         self.enterContext(patch.object(ultraship, 'STATE', self.home / '.local/state/ultraship'))
 
@@ -87,7 +89,7 @@ class PreciseMatcherTests(unittest.TestCase):
                             "{reviewThreads(first:50){nodes{id}}}}}'", agent_type='ship:driver')
 
     def test_09_graphql_reads_with_variables(self):
-        for command in ('gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$THREAD"',
+        for command in ('gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -f id="$THREAD"',
                         "gh api graphql --paginate -f query='query($endCursor:String){viewer{repositories"
                         "(first:10,after:$endCursor){nodes{name}}}}'"):
             with self.subTest(command=command):
@@ -216,7 +218,6 @@ class PreciseMatcherTests(unittest.TestCase):
     def test_relative_cd_after_the_repository_top_folder_denies(self):
         self.assert_denied('cd "$(git rev-parse --show-toplevel)" && cd .local/state/ultraship/text-lint && cat key',
                            start='Only the text_lint hook reads or writes refusal receipts')
-        self.assert_allowed('cd "$(git rev-parse --show-toplevel)" && git status')
 
     def test_cd_double_dash_reads_the_next_word(self):
         for command in ('cd -- ~/.local/state/ultraship/text-lint && cat key', 'cd -- && cat key',
@@ -233,9 +234,29 @@ class PreciseMatcherTests(unittest.TestCase):
     def test_unparsable_text_with_a_path_or_directory_change_denies(self):
         for command in ("cd ..; cd .local; cd state; cd ultraship; cd account-grants; cat key; cat <<'EOF'\nordinary\n",
                         "cd ..; cat .lo*/st*/ul*/ac*/key; cat <<'EOF'\nordinary\n",
-                        "cat ../.local/state/ultraship/account-grants/key\necho 'x"):
+                        "cat ../.local/state/ultraship/account-grants/key\necho 'x",
+                        "grep -r SECRET ..\ncat <<'EOF'\nx\n", "grep -r SECRET ~\ncat <<'EOF'\nx\n"):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+
+    def test_quoted_two_word_and_cdpath_directory_changes_deny(self):
+        for command in ('"cd" ~/.local && "cd" state && "cd" ultraship && cat text-lint/key',
+                        '\\cd ~/.local && cat state/ultraship/text-lint/key', "c''d ~/.local && cat x",
+                        'cd ws .local && cd state && cd ultraship && cat text-lint/key',
+                        'cdpath=~/.local; cd state; cd ultraship; cat text-lint/key'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+
+    def test_quoted_literal_and_repository_top_cd_targets_are_read(self):
+        subprocess.run(['git', 'init', '-q', str(self.cwd)], check=True)
+        (self.cwd / 'backend').mkdir()
+        for command in ('cd "/tmp" && git status', "cd '/tmp/my dir' && ls",
+                        'cd "$(git rev-parse --show-toplevel)/backend" && uv run pytest -q',
+                        'cd "$(git rev-parse --show-toplevel)" && cd backend && uv run pytest -q'):
+            with self.subTest(command=command):
+                self.assert_allowed(command)
+        self.assert_denied('cd "$(git rev-parse --show-toplevel)" && cd ../.local/state/ultraship/text-lint && cat key',
+                           start='Only the text_lint hook reads or writes refusal receipts')
 
     def test_run_time_file_operand_denies(self):
         for command in ("p=$(printf '%s/.%s/%s/%s/%s' .. local state ultraship account-grants key); cat \"$p\"",
@@ -245,6 +266,35 @@ class PreciseMatcherTests(unittest.TestCase):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
         self.assert_allowed('f=notes.md; cat "$f"')
         self.assert_allowed("grep -e '$X' notes.md")
+
+    def test_run_time_values_need_one_provable_literal(self):
+        for command in ('p="x$(cat name.txt)"; cat "$p"', 'q=$(cat name.txt); p=$q; cat "$p"',
+                        'read p < name.txt; cat "$p"', 'mapfile p < name.txt; cat "$p"',
+                        'printf -v p %s x; cat "$p"', 'p=a; p+=b; cat "$p"', 'cat "$1"', 'cat "${p:-x}"',
+                        'cat name.txt | xargs cat', 'while read -r f; do cat "$f"; done < name.txt',
+                        'shuf "$(cat name.txt)"', 'p=$(cat name.txt); pr -t "$p"', 'sort --files0-from=list',
+                        'tar -T list -cf - ', 'gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$ID"', 'curl -d @"$p" x',
+                        'date -f "$(cat name.txt)"', 'bash "$(cat name.txt)"'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        for command in ('p=notes.md; cat "$p"', 'for f in a.md b.md; do cat "$f"; done',
+                        'git commit -m "$(date)"', 'gh pr view 7 --json title --jq "$Q"',
+                        'curl -H "Authorization: $T" https://example.invalid', 'run --deadline "$(date -u +%s)"',
+                        'echo "$(cat name.txt)"', 'git show "$(git merge-base HEAD main)"'):
+            with self.subTest(command=command):
+                self.assert_allowed(command)
+
+    def test_git_with_a_store_parent_or_unknown_folder_denies(self):
+        for command in ('git -C ~/.local/state grep --no-index x', 'git --work-tree=~/.local/state diff',
+                        'git --git-dir ~/.local/state show', 'git -C ~/.local stash -u',
+                        'git -C "$(cat name.txt)" grep --no-index x', 'git -C / ls-remote --upload-pack=x origin',
+                        'git -C ~ log --output=x', 'git -C ~ fetch --upload-pack=x origin'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_allowed('git -C / ls-remote --symref https://example.invalid/o/r.git HEAD')
+        for command in ('git -C repo status', 'git -C ~ status -uall', 'git -C ~ log -1', 'git -C "$W" status'):
+            with self.subTest(command=command):
+                self.assert_allowed(command)
 
     def test_reviewer_globs_split_on_any_whitespace(self):
         rows = self.cwd / 'repo/backend/tests/mutation'
