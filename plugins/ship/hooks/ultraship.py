@@ -1883,6 +1883,9 @@ RUNTIME_SAFE = frozenset({
     'echo', 'printf', 'test', '[', '[[', 'true', 'false', 'sleep', 'mkdir', 'touch', 'exit', 'return',
     'read', 'export', 'local', 'basename', 'dirname', 'cd', 'pushd', 'popd', 'kill', 'wait', 'case', 'declare',
     'typeset', 'let', 'unset', 'set', 'shift', 'getopts'})
+# git configuration values that run no program; any other `-c` value can run one under any subcommand.
+SAFE_GIT_CONFIG = (r'http\.(?:[^=\s]*\.)?(?:sslVerify|followRedirects)=(?:true|false|initial)|credential\.helper='
+                   r'|core\.fsmonitor=false|push\.default=\w+|color\.[\w.]+=\w+|user\.(?:name|email)=[^\s$`]*')
 # curl options whose value can name a file to send.
 FILE_OPTIONS_CURL = frozenset({'-d', '--data', '--data-binary', '--data-urlencode', '--json', '-T', '--upload-file',
                                '-K', '--config', '-H', '--header', '-F', '--form', '-b', '--cookie'})
@@ -5376,9 +5379,9 @@ def receipt_custody(data, read_search=False):
             def run_time_word(raw_word):
                 # A word is unknown text unless every variable in it has one provable literal value, is a literal
                 # `for` name, or is an environment value outside every store.
-                # A `date` substitution that reads no file prints only a date.
-                expanded = re.sub(r"\$\(date(?:[ \t]+(?:'[^']*'|(?!-f|--file)[^\s$`()|;&<>'\"\\]+))*[ \t]*\)", 'D',
-                                  raw_word)
+                # A `date` substitution with only a format, -u, -I or a literal -d value prints only a date.
+                expanded = re.sub(r"\$\(date(?:[ \t]+(?:\+[^\s$`()|;&<>'\"\\]*|'\+[^']*'|-u|-I\w*"
+                                  r"|-d[ \t]*(?:'[^']*'|[^\s$`()|;&<>'\"\\-][^\s$`()|;&<>'\"\\]*)))*[ \t]*\)", 'D', raw_word)
                 expanded = re.sub(r"'[^']*'", '', expanded)
                 if ('`' in expanded or '$(' in expanded or re.search(r'\$\{(?![A-Za-z_]\w*\})', expanded)
                         or re.search(r'\$[0-9@*-]', expanded)):
@@ -5543,7 +5546,16 @@ def receipt_custody(data, read_search=False):
                                     sub = sub or word
                             # These subcommands show names, refs or committed history; any other one, or an
                             # upload-pack program, can read file text below a parent folder of a store.
-                            git_opaque = name == 'git' and (sub not in {
+                            # A configuration value can make git run a program under any subcommand.
+                            configs = [word[2:] if word.startswith('-c') and word != '-c' else word
+                                       for (_, before, _, _), (_, word, _, _) in zip([(None, '', 0, 0), *segment], segment)
+                                       if before == '-c' or word.startswith('-c') and word != '-c']
+                            git_opaque = name == 'git' and (any(
+                                word.startswith('--config-env') or re.match(r'GIT_CONFIG', word)
+                                and not re.fullmatch(r'GIT_CONFIG_NOSYSTEM=\w*|GIT_CONFIG_(?:GLOBAL|SYSTEM)=/dev/null', word)
+                                for _, word, _, _ in segment)
+                                or not all(re.fullmatch(SAFE_GIT_CONFIG, config, re.I) for config in configs)
+                                or sub not in {
                                 'status', 'rev-parse', 'branch', 'log', 'switch', 'ls-remote', 'describe',
                                 'merge-base', 'show-ref', 'remote', 'fetch', 'push'} or any(
                                 word.startswith(('--upload-pack', '--receive-pack', '--output'))

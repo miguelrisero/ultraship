@@ -274,12 +274,15 @@ class PreciseMatcherTests(unittest.TestCase):
                         'cat name.txt | xargs cat', 'while read -r f; do cat "$f"; done < name.txt',
                         'shuf "$(cat name.txt)"', 'p=$(cat name.txt); pr -t "$p"', 'sort --files0-from=list',
                         'tar -T list -cf - ', 'gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$ID"', 'curl -d @"$p" x',
-                        'date -f "$(cat name.txt)"', 'bash "$(cat name.txt)"'):
+                        'date -f "$(cat name.txt)"', 'bash "$(cat name.txt)"', 'run --at "$(date -rname.txt)"',
+                        'run --at "$(date -uf name.txt)"', 'run --at "$(date -r name.txt +%s)"',
+                        'run --at "$(date --file=name.txt)"'):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
         for command in ('p=notes.md; cat "$p"', 'for f in a.md b.md; do cat "$f"; done',
                         'git commit -m "$(date)"', 'gh pr view 7 --json title --jq "$Q"',
                         'curl -H "Authorization: $T" https://example.invalid', 'run --deadline "$(date -u +%s)"',
+                        "run --deadline \"$(date -u -d '+600 sec' +%s)\"", 'run --at "$(date -Iseconds)"',
                         'echo "$(cat name.txt)"', 'git show "$(git merge-base HEAD main)"'):
             with self.subTest(command=command):
                 self.assert_allowed(command)
@@ -288,11 +291,17 @@ class PreciseMatcherTests(unittest.TestCase):
         for command in ('git -C ~/.local/state grep --no-index x', 'git --work-tree=~/.local/state diff',
                         'git --git-dir ~/.local/state show', 'git -C ~/.local stash -u',
                         'git -C "$(cat name.txt)" grep --no-index x', 'git -C / ls-remote --upload-pack=x origin',
-                        'git -C ~ log --output=x', 'git -C ~ fetch --upload-pack=x origin'):
+                        'git -C ~ log --output=x', 'git -C ~ fetch --upload-pack=x origin',
+                        'git -C ~ -c core.fsmonitor=x status', 'git -C ~ -calias.st=x status'):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
         self.assert_allowed('git -C / ls-remote --symref https://example.invalid/o/r.git HEAD')
-        for command in ('git -C repo status', 'git -C ~ status -uall', 'git -C ~ log -1', 'git -C "$W" status'):
+        for command in ('git -C ~ --config-env=core.pager=X log', 'GIT_CONFIG_COUNT=1 git -C ~ status',
+                        'GIT_CONFIG_GLOBAL=cfg git -C ~ status'):
+            with self.subTest(command=command):
+                self.assert_denied(command)
+        for command in ('git -C repo status', 'git -C ~ status -uall', 'git -C ~ log -1', 'git -C "$W" status',
+                        'git -C ~ -c credential.helper= status'):
             with self.subTest(command=command):
                 self.assert_allowed(command)
 
