@@ -1144,10 +1144,8 @@ esac
 
 class HookTests(unittest.TestCase):
     def assert_guarded(self, result):
-        """The guard denies the call, or lets an unreadable shape proceed with an S1 warning."""
-        self.assertTrue(result.get('permissionDecision') == 'deny'
-                        or ('permissionDecision' not in result
-                            and 'S1: ' in result.get('additionalContext', '')), result)
+        """Every guarded shape is denied; a warning is never enough for a review-thread write shape."""
+        self.assertEqual(result.get('permissionDecision'), 'deny', result)
 
     def guard_text(self, result):
         return result.get('permissionDecisionReason') or result.get('additionalContext', '')
@@ -1335,7 +1333,7 @@ class HookTests(unittest.TestCase):
             (read + " -f query='query{viewer{id}}' -F id=x", 'gh api write outside the helper'),
             ("gh api graphql -F query=@query.graphql -F id=x", 'opaque GraphQL query'),
             (read + ' --input payload.json -F id=x', 'opaque GraphQL query'),
-            (read + ' -F id=@identifier.txt', None),
+            (read + ' -F id=@identifier.txt', 'gh api write outside the helper'),
             (read + ' -F id="$ID"', None),
             (read + ' -F id=$(cat identifier.txt)', 'review-thread guard parse failure'),
             (read + ' -F id=x -F id=y', None),

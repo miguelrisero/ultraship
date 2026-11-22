@@ -71,8 +71,11 @@ class PreciseMatcherTests(unittest.TestCase):
     def test_06_diff_piped_to_awk(self):
         self.assert_allowed(r"gh pr diff 214 --repo miguelrisero/ultraship | awk '/ultraship\.py$/' | head")
 
-    def test_07_loop_with_unresolved_operand_warns(self):
-        self.assert_allowed('for r in a b; do python3 -I $J sample "$r" 7; done', advisory=True)
+    def test_07_loop_with_unresolved_interpreter_operand_denies(self):
+        # The variable could hold the hook path, so an unresolved interpreter operand stays fail-closed.
+        self.assert_denied('for r in a b; do python3 -I $J sample "$r" 7; done',
+                           start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_allowed('for r in a b; do python3 -I tools/sample.py "$r" 7; done')
 
     def test_08_integration_make_warns(self):
         command = ('env -i HOME=/home/user PATH="$UVBIN:/usr/bin:/bin" make api-test-integration '
@@ -117,7 +120,8 @@ class PreciseMatcherTests(unittest.TestCase):
         self.assert_denied("bash -c 'gh pr view 7'", start='Ship replies to and resolves review threads')
         for command in ("printf '%s' $'\\x67h' | sh", 'X=1; eval "$CMD" pr comment 1 --body x'):
             with self.subTest(command=command):
-                self.assert_denied(command, start='This command could run a program that it never names')
+                # Custody or the obfuscation rule may refuse first; either way the call is denied.
+                self.assert_denied(command)
 
     def test_fail_closed_2_graphql_extra_query_or_mutation_field(self):
         for command in ("gh api graphql -f query='query{viewer{login}}' -f query='mutation{x}'",
@@ -139,9 +143,43 @@ class PreciseMatcherTests(unittest.TestCase):
 
     def test_fail_closed_5_program_running_reader_options(self):
         for command in ("sed 's/x/resolveReviewThread/e' notes.txt", 'rg --pre=sh resolveReviewThread notes.txt',
-                        'sort --compress-program=sh resolveReviewThread'):
+                        'sort --compress-program=sh resolveReviewThread', 'sort --compress-prog=sh resolveReviewThread',
+                        'git grep --open-f resolveReviewThread', 'git grep -nO resolveReviewThread',
+                        'rg --hostname-bin=sh resolveReviewThread notes.txt'):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Ship replies to and resolves review threads')
+
+    def test_fail_closed_review_round_two(self):
+        custody = 'Only the text_lint hook reads or writes refusal receipts'
+        for command in ('H=$HOME/.claude/plugins/cache/x/ship/1/hooks/ultra; python3 "${H}ship.py" pre',
+                        "python3 \"$(find ~/.claude/plugins/cache -name 'ultra*.py' | head -n1)\" pre",
+                        'ls ~/.local/state/ultraship; cat "$_/text-lint/key"',
+                        'P=$HOME/.local/state/ultra; cat "${P}ship/text-lint/key"',
+                        f'cp {PLUGIN}/hooks/ultraship.py {PLUGIN}/hooks/u.py && python3 {PLUGIN}/hooks/u.py pre'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start=custody)
+        self.assert_denied("gh api graphql -f query='query($id:ID!){node(id:$id){id}}' -F id=@notes.txt",
+                           'ship:driver', 'Ship replies to and resolves review threads')
+
+    def test_reviewer_row_globs_that_can_reach_rows_deny(self):
+        rows = self.cwd / 'repo/backend/tests/mutation'
+        rows.mkdir(parents=True)
+        (rows / 'rows.py').write_text('x')
+        for glob in ('!tests/mutation', 'rows\\.py'):
+            with self.subTest(glob=glob):
+                self.assertEqual(self.reviewer_grep(glob=glob).get('permissionDecision'), 'deny')
+
+    def test_grant_refusal_after_checks_prints_one_document(self):
+        output = io.StringIO()
+        event = {'cwd': str(self.cwd), 'session_id': 'precise', 'agent_type': '', 'tool_name': 'Bash',
+                 'tool_input': {'command': 'ls ~/.local/state/ultraship/'}}
+        with (patch.object(ultraship, 'pre_output', return_value={'hookEventName': 'PreToolUse',
+                                                                  'additionalContext': 'S2: x'}),
+              patch.object(ultraship, 'issue_' + 'account_grant', side_effect=lambda _: ultraship.deny('refused')),
+              redirect_stdout(output), redirect_stderr(io.StringIO())):
+            with self.assertRaises(SystemExit):
+                ultraship.guarded_pre(event)
+        self.assertEqual(json.loads(output.getvalue())['hookSpecificOutput']['permissionDecision'], 'deny')
 
     def reviewer_grep(self, **fields):
         return self.decide(agent_type='ship:reviewer--sol', tool='Grep',

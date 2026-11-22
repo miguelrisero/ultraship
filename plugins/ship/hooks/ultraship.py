@@ -4439,8 +4439,8 @@ def text_search_only(command):
     """True when every segment is a plain text reader with no substitution, heredoc or redirect."""
     if re.search(r'\$\(|`|<<|>|<\(', command):
         return False
-    # sed is absent because its `e`, `w` and `s///e` commands run programs or write files.
-    readers = {'grep', 'egrep', 'fgrep', 'rg', 'awk', 'head', 'tail', 'cat', 'wc', 'sort', 'uniq', 'cut'}
+    # sed, sort and uniq are absent: sed and sort options can run programs, and sed and uniq can write files.
+    readers = {'grep', 'egrep', 'fgrep', 'rg', 'awk', 'head', 'tail', 'cat', 'wc', 'cut'}
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
         lexer.whitespace, lexer.whitespace_split, lexer.commenters = ' \t\r', True, ''
@@ -4461,14 +4461,46 @@ def text_search_only(command):
         if any(char in word for word in words for char in '()'):
             return False
         # Read-only Git and GitHub CLI views print text and start no other program.
-        if (words[:2] == ['git', 'grep'] and not any(word.startswith(('-O', '--open')) for word in words)
-                or words[:3] in (['gh', 'pr', 'diff'], ['gh', 'pr', 'view']) and '--web' not in words):
-            continue
-        if (words[0] not in readers
-                or words[0] == 'awk' and any(token in word for word in words
-                                             for token in ('system', 'getline', '|', '>'))
-                or words[0] == 'rg' and any(word.startswith('--pre') for word in words)
-                or words[0] == 'sort' and any(word.startswith('--compress') for word in words)):
+        program = ('git grep' if words[:2] == ['git', 'grep']
+                   else 'gh pr' if words[:3] in (['gh', 'pr', 'diff'], ['gh', 'pr', 'view']) else words[0])
+        if (program not in readers | set(READER_OPTIONS)
+                or program == 'awk' and any(token in word for word in words
+                                            for token in ('system', 'getline', '|', '>'))
+                or not reader_options_known(program, words[len(program.split()) + (program == 'gh pr'):])):
+            return False
+    return True
+
+
+# Long options that start no program and write no file. An option outside the set, including any GNU
+# abbreviation of a listed one, makes the command something other than a text search.
+READER_OPTIONS = {
+    'rg': ({'--line-number', '--ignore-case', '--smart-case', '--case-sensitive', '--files-with-matches',
+            '--files-without-match', '--count', '--count-matches', '--word-regexp', '--fixed-strings', '--regexp',
+            '--glob', '--iglob', '--type', '--type-not', '--hidden', '--no-ignore', '--context', '--after-context',
+            '--before-context', '--invert-match', '--max-count', '--max-depth', '--no-heading', '--heading',
+            '--with-filename', '--no-filename', '--multiline', '--only-matching', '--files', '--color', '--json',
+            '--column', '--no-messages', '--vimgrep', '--null', '--trim', '--sort'}, 'z'),
+    'git grep': ({'--line-number', '--ignore-case', '--word-regexp', '--fixed-strings', '--extended-regexp',
+                  '--basic-regexp', '--perl-regexp', '--files-with-matches', '--files-without-match', '--name-only',
+                  '--count', '--cached', '--untracked', '--no-index', '--invert-match', '--max-depth', '--context',
+                  '--after-context', '--before-context', '--function-context', '--show-function', '--heading',
+                  '--break', '--full-name', '--null', '--only-matching', '--quiet', '--all-match', '--and', '--or',
+                  '--not', '--color', '--no-color', '--column', '--recurse-submodules'}, 'O'),
+    'gh pr': ({'--repo', '--json', '--jq', '--template', '--comments', '--name-only', '--patch', '--color'}, 'w'),
+}
+
+
+def reader_options_known(program, words):
+    """True when every option of a text reader is known to start no program and write no file."""
+    if program not in READER_OPTIONS:
+        return True
+    long_options, unsafe_letters = READER_OPTIONS[program]
+    for word in words:
+        if word == '--':
+            break
+        if word.startswith('--') and word.split('=', 1)[0] not in long_options:
+            return False
+        if re.match(r'-[^-]', word) and any(letter in word for letter in unsafe_letters):
             return False
     return True
 
@@ -4731,7 +4763,9 @@ def review_thread_scan(command, normalized, data_mode):
                         field_count += 1
                         inputs = inputs or option == '--input'
                         query_fields += option_value.startswith('query=')
-                        field_mutation = field_mutation or 'mutation' in option_value.casefold()
+                        # A typed `@file` value uploads a local file, so it also blocks the read admission.
+                        field_mutation = (field_mutation or 'mutation' in option_value.casefold()
+                                          or option not in ('-f', '--raw-field') and '=@' in option_value)
                         static_read = static_read and attached is None
                         if option_value.startswith('query='):
                             static_read = static_read and query is None and option in ('-f', '--raw-field')
@@ -5259,7 +5293,9 @@ def receipt_custody(data, read_search=False):
                                  or hook_folder in normalized(masked_source))
 
             def unread():
-                return 'hard' if mentions_hook else 'soft'
+                # Unreadable text proceeds only when it names no hook and holds no expansion or hidden program.
+                return ('hard' if mentions_hook or obfuscated_shell(custody_source)
+                        or re.search(r'[$`]', custody_source) else 'soft')
 
             # 'hard' means the command runs, imports or changes the hook or names a store; 'soft' means a word
             # stayed unresolved where no hook name appears, so the call proceeds with an advisory warning.
@@ -5338,12 +5374,11 @@ def receipt_custody(data, read_search=False):
                                 if (len(arguments) < 2
                                         or not re.fullmatch(r'(?!-)[A-Za-z0-9_./-]+\.[cm]?js', arguments[1][0])
                                         or (len(arguments) > 2 and arguments[2][0] not in {';', '&', '|', ')', '\n'})):
-                                    verdict = 'soft'
+                                    return 'hard'
                                 continue
                             kind, operand, offset = program_operand(base, interpreter, [token[1] for token in arguments])
                             if kind == 'unknown':
-                                verdict = 'soft'
-                                continue
+                                return 'hard'
                             if operand >= len(arguments):
                                 continue
                             arg_raw, arg, _, _ = arguments[operand]
@@ -5359,8 +5394,9 @@ def receipt_custody(data, read_search=False):
                                 return 'hard'
                             if kind == 'c' and base in SHELL_INTERPRETERS and re.fullmatch("'[^']*'", arg_raw):
                                 continue
+                            # An unresolved interpreter operand could name the hook, so it stays fail-closed.
                             if not account_words and unresolved_program(arg_raw, arg, code=kind == 'c'):
-                                verdict = 'soft'
+                                return 'hard'
                     for index, (raw_word, word, _, end) in enumerate(tokens):
                         paths = [word]
                         attached = word.partition('=')[2]
@@ -5544,7 +5580,8 @@ def row_reanchor_gate(data, command):
         deny(reason + unmet + 'the row file is regular and the subject is repository-relative.')
 
 
-def pre(data):
+def pre_output(data):
+    """Run the checks and return the hook output; a refusal exits inside the checks."""
     WARNINGS.clear()
     UPDATED_INPUT.clear()
     checks(data)
@@ -5554,7 +5591,12 @@ def pre(data):
                       updatedInput={**(data.get('tool_input') or {}), **UPDATED_INPUT})
     if WARNINGS:
         output['additionalContext'] = ' '.join(WARNINGS)
-    if len(output) > 1:
+    return output if len(output) > 1 else None
+
+
+def pre(data):
+    output = pre_output(data)
+    if output:
         print(json.dumps({'hookSpecificOutput': output}))
 
 
@@ -5943,11 +5985,12 @@ def reviewer_row_folders(tin, tool, globs, row_folders, blocked, deadline):
             UPDATED_INPUT['glob'] = ROW_EXCLUSION
             warn('S3', f'the search path holds protected mutation rows, so the hook added the glob `{ROW_EXCLUSION}`.')
             return
-        if any(re.fullmatch(r'!(?:\*\*/)?tests/mutation(?:/\*\*)?/?', token) for token in tokens):
+        # A glob with a slash anchors to the search root, so only the `**/` form excludes nested row folders.
+        if any(re.fullmatch(r'!\*\*/tests/mutation(?:/\*\*)?/?', token) for token in tokens):
             return
         deny(blocked + f' Add `{ROW_EXCLUSION}` to the glob.')
-    # fnmatch has no brace sets, so a brace glob counts as a match.
-    if not positives or any('{' in token for token in positives):
+    # fnmatch has no brace sets or backslash escapes, so either counts as a match.
+    if not positives or any(char in token for token in positives for char in '{\\'):
         deny(blocked)
     count = 0
     for folder in row_folders:
@@ -6366,8 +6409,11 @@ def compact(data):
 def guarded_pre(data):
     """Deny every tool for every caller when `pre` raises an exception."""
     try:
-        pre(data)
+        output = pre_output(data)
         issue_account_grant(data)
+        # Print once, after every step that can still refuse.
+        if output:
+            print(json.dumps({'hookSpecificOutput': output}))
     except Exception:
         traceback.print_exc()
         try:
