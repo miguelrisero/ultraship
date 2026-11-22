@@ -1890,7 +1890,8 @@ SAFE_GIT_CONFIG = (r'http\.(?:[^=\s]*\.)?(?:sslVerify|followRedirects)=(?:true|f
 # Git and pager environment values that run no program.
 SAFE_GIT_ENV = (r'GIT_CONFIG_NOSYSTEM=\w*|GIT_CONFIG_(?:GLOBAL|SYSTEM)=/dev/null|GIT_TERMINAL_PROMPT=0|GIT_ASKPASS='
                 r'|SSH_ASKPASS=|GIT_ALLOW_PROTOCOL=[\w:]+|GIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL|DATE)=[^$`;&|]*'
-                r'|(?:GIT_)?PAGER=cat|(?:GIT_)?EDITOR=true|GIT_OPTIONAL_LOCKS=0|GIT_LFS_SKIP_SMUDGE=1'
+                r'|(?:GIT_)?PAGER=cat|(?:GIT_|GIT_SEQUENCE_)?EDITOR=(?:true|:)|(?:EDITOR|VISUAL)=(?:vim?|nano|emacs)'
+                r'|GIT_TRACE\w*=(?:0|1|true|false)|GIT_OPTIONAL_LOCKS=0|GIT_LFS_SKIP_SMUDGE=1'
                 r'|GIT_CONFIG_COUNT=\d+|GIT_CONFIG_KEY_\d+=core\.pager|GIT_CONFIG_VALUE_\d+=cat')
 # Option values that name no local file, so they may hold a run-time value.
 GH_RUNTIME_OPTIONS = frozenset({'--jq', '-q', '--json', '--repo', '-R', '-f', '--raw-field', '--title', '-t', '--body',
@@ -1905,7 +1906,9 @@ GIT_NO_VALUE_FLAGS = frozenset({'--', '--symref', '--exit-code', '--verify', '-q
                                 '--ff-only'})
 # git subcommands whose bare operands are refs, never local files.
 GIT_REF_SUBCOMMANDS = frozenset({'for-each-ref', 'show', 'cat-file', 'rev-list', 'update-ref', 'symbolic-ref', 'tag',
-                                 'merge', 'checkout', 'reset', 'cherry-pick', 'worktree'})
+                                 'merge', 'checkout', 'reset', 'cherry-pick', 'worktree', 'diff'})
+# gh command groups whose positional words are numbers, branches or names, never local files.
+GH_NAME_GROUPS = frozenset({'pr', 'issue', 'run', 'workflow', 'label', 'search', 'browse'})
 SHELL_COMMAND_PREFIXES = {'!', 'if', 'elif', 'while', 'until', 'then', 'do', 'else', '{'}
 
 
@@ -5362,7 +5365,8 @@ def receipt_custody(data, read_search=False):
                 # A variable resolves only through one literal assignment before its use, with no other binding.
                 # An assignment from other variables resolves when each of them does.
                 bindings = list(re.finditer(rf'(?:^|[;&|\s(\'"]){name}\+?=', custody_source))
-                literal = re.search(rf'(?:^|[;&|\s(\'"]){name}=("[^"`\\]*"|[^\s;&|()`\'"\\]+)(?=[;&|\s\'"]|$)',
+                # A quote right after the value joins more text to it, so the value is not literal then.
+                literal = re.search(rf'(?:^|[;&|\s(\'"]){name}=("[^"`\\]*"|[^\s;&|()`\'"\\]+)(?=[;&|\s]|$)',
                                     custody_source)
                 if (depth > 4 or len(bindings) != 1 or not literal or literal.start() > before
                         or other_binding(name)):
@@ -5382,7 +5386,18 @@ def receipt_custody(data, read_search=False):
             def other_binding(name):
                 return re.search(rf'(?:^|[;&|\s(\'"])(?:read|for|export|declare|local|typeset|readonly|mapfile|let'
                                  rf'|readarray|unset|getopts|select)[ \t][^;&|\n]*\b{name}\b'
-                                 rf'|printf[ \t]+(?:-[^v\s]+[ \t]+)*-v[ \t]*{name}\b', custody_source)
+                                 rf'|printf[ \t]+(?:-[^v\s]+[ \t]+)*-v[ \t]*[\'"]?{name}\b', custody_source)
+
+            # A command that sets HOME again changes `~` and `$HOME`, so the scan cannot resolve them there.
+            # `HOME="$HOME"` keeps the value, as `env -i` callers write it.
+            if (re.search(r'(?:^|[;&|\s(\'"])HOME(?:\+=|=(?!"?\$\{?HOME\}?"?(?:[\s;&|)]|$)))|(?:^|[;&|\s(])(?:read|export|declare|local|typeset|readonly|unset'
+                          r'|mapfile|readarray|getopts|for|select)[ \t][^;&|\n]*?(?<![$\w{])HOME\b(?!\})'
+                          r'|-v[ \t]*[\'"]?HOME\b', custody_source)) and re.search(
+                    r'~|\$\{?HOME\b', custody_source):
+                return 'hard'
+            # The shell sets these itself, so the hook's own value says nothing about the command's value.
+            shell_managed = {'_', 'PWD', 'OLDPWD', 'REPLY', 'OPTARG', 'OPTIND', 'RANDOM', 'LINENO', 'SECONDS',
+                             'BASHPID', 'PPID', 'DIRSTACK', 'PIPESTATUS', 'BASH_REMATCH', 'MAPFILE', 'BASH_COMMAND'}
 
             # A `for` name over literal words takes only those words, which the scan checks as paths.
             loop_names = {match[1] for match in re.finditer(r'(?:^|[;&|\s(])for[ \t]+([A-Za-z_]\w*)[ \t]+in\b([^;\n]*)',
@@ -5391,7 +5406,7 @@ def receipt_custody(data, read_search=False):
                           and len(re.findall(rf'(?:^|[;&|\s(])(?:for[ \t]+)?{match[1]}\b(?:\+?=|[ \t]+in\b)',
                                              custody_source)) == 1
                           and not re.search(rf'(?:^|[;&|\s(])(?:read|mapfile|readarray|declare|let|getopts)[ \t]'
-                                            rf'[^;&|\n]*\b{match[1]}\b|-v[ \t]*{match[1]}\b', custody_source)}
+                                            rf'[^;&|\n]*\b{match[1]}\b|-v[ \t]*[\'"]?{match[1]}\b', custody_source)}
 
             loop_words = {match[1]: match[2].split() for match in re.finditer(
                 r'(?:^|[;&|\s(])for[ \t]+([A-Za-z_]\w*)[ \t]+in\b([^;\n]*)', custody_source) if match[1] in loop_names}
@@ -5407,7 +5422,8 @@ def receipt_custody(data, read_search=False):
                         values = loop_words[name]
                     else:
                         values = [value for value in (literal_value(name, len(custody_source)),
-                                                      None if other_binding(name) else os.environ.get(name))
+                                                      None if other_binding(name) or name in shell_managed
+                                                      else os.environ.get(name))
                                   if value is not None]
                     if values:
                         token = '${' + name + '}' if braced else '$' + name
@@ -5421,8 +5437,10 @@ def receipt_custody(data, read_search=False):
                 expanded = re.sub(r"\$\(date(?:[ \t]+(?:\+[^\s$`()|;&<>'\"\\{},*?\[]*|'\+[^']*'|-u|-I\w*"
                                   r"|-d[ \t]*(?:'[^']*'|[^\s$`()|;&<>'\"\\{},*?\[-][^\s$`()|;&<>'\"\\{},*?\[]*)))*[ \t]*\)",
                                   'D', raw_word)
+                # The repository top folder is never a store.
+                expanded = expanded.replace('$(git rev-parse --show-toplevel)', 'D')
                 expanded = re.sub(r"'[^']*'", '', expanded)
-                if ('`' in expanded or '$(' in expanded or re.search(r'\$\{(?![A-Za-z_]\w*\})', expanded)
+                if re.search(r'\$\{?_\b', expanded) or ('`' in expanded or '$(' in expanded or re.search(r'\$\{(?![A-Za-z_]\w*\})', expanded)
                         or re.search(r'\$[0-9@*-]', expanded)):
                     return True
                 for name in re.findall(r'\$\{?([A-Za-z_]\w*)', expanded):
@@ -5432,7 +5450,7 @@ def receipt_custody(data, read_search=False):
                         other_binding(name) or re.search(rf'(?:^|[;&|\s(]){name}\+?=', custody_source))
                     if trusted or name in loop_names or literal_value(name, use.start() if use else 0):
                         continue
-                    value = os.environ.get(name)
+                    value = None if name in shell_managed else os.environ.get(name)
                     if (value is None or other_binding(name) or re.search(rf'(?:^|[;&|\s(]){name}\+?=', custody_source)
                             or receipt_path(value, ancestors=True, stores=receipt_paths | grant_paths)):
                         return True
@@ -5440,7 +5458,8 @@ def receipt_custody(data, read_search=False):
 
             # A git, pager, editor or askpass variable can make a later program run a command, so only listed
             # values pass, set inline or through export, declare, typeset, readonly, local or env.
-            for name, value in re.findall(r'(?:^|[;&|\s(\'"])((?:GIT_\w+|PAGER|EDITOR|VISUAL|SSH_ASKPASS|LESSOPEN|LESSCLOSE))'
+            for name, value in re.findall(r'(?:^|[;&|\s(])(?:(?:export|declare|typeset|readonly|local|env)'
+                                          r'(?:[ \t]+-\w+)*[ \t]+[\'"]?)?((?:GIT_\w+|PAGER|EDITOR|VISUAL|SSH_ASKPASS|LESSOPEN|LESSCLOSE))'
                                           r'\+?=("[^"]*"|\'[^\']*\'|[^\s;&|()]*)', custody_source):
                 if not re.fullmatch(SAFE_GIT_ENV, name + '=' + value.strip('"\'')):
                     return 'hard'
@@ -5519,7 +5538,7 @@ def receipt_custody(data, read_search=False):
                     # the scan does not follow.
                     plain = list(shell_without_redirections(tokens))
                     for index, (raw_word, word, word_start, _) in enumerate(plain):
-                        if word in {'cd', 'pushd', 'popd'} and raw_word != word:
+                        if word in {'cd', 'pushd', 'popd'} and raw_word != word and word_start in positions:
                             return 'hard'
                         if word in {'cd', 'pushd'} and word_start in positions:
                             operands = []
@@ -5618,7 +5637,8 @@ def receipt_custody(data, read_search=False):
                             # as the folder of a names-only subcommand; gh as a listed option value or the api
                             # endpoint; curl as a listed option value with a literal start, or an https URL.
                             value_ok, positional, gh_sub = set(), 0, None
-                            git_refs = not git_opaque or sub in GIT_REF_SUBCOMMANDS
+                            git_refs = (not git_opaque or sub in GIT_REF_SUBCOMMANDS) and not any(
+                                word.startswith('--no-index') for _, word, _, _ in segment)
                             for (_, before, _, _), (raw_word, word, word_start, _) in zip(segment, segment[1:]):
                                 option = word.split('=', 1)[0] if word.startswith('--') and '=' in word else before
                                 value = raw_word.split('=', 1)[1] if word.startswith('--') and '=' in word else raw_word
@@ -5629,7 +5649,7 @@ def receipt_custody(data, read_search=False):
                                                       or not git_opaque and option in {'-C', '--git-dir', '--work-tree'}):
                                     value_ok.add(word_start)
                                 elif name == 'gh':
-                                    if bare and gh_sub == 'api' and positional == 0:
+                                    if bare and gh_sub == 'api' and positional == 0 or bare and gh_sub in GH_NAME_GROUPS:
                                         value_ok.add(word_start)
                                     if option in GH_RUNTIME_OPTIONS:
                                         value_ok.add(word_start)

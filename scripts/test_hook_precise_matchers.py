@@ -313,6 +313,30 @@ class PreciseMatcherTests(unittest.TestCase):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
         self.assert_allowed('a=notes; cat $a.md')
 
+    def test_values_the_scan_cannot_prove_deny(self):
+        for command in ("d=.loc'al'; u=ultra'ship'; t=text'-lint'; cat ~/$d/state/$u/$t/x",
+                        'd=.loc"al"; cat ~/$d/state/ultraship/text-lint/x',
+                        'HOME=~/.local; u=ultraship; t=text-lint; cat $HOME/state/$u/$t/x',
+                        'HOME=~/.local cat ~/state/ultraship/text-lint/x',
+                        'd=x; printf -v "d" %s .local; u=ultraship; t=text-lint; cat ~/$d/state/$u/$t/x',
+                        "d=x; printf -v 'd' %s .local; echo forged > ~/$d/state/ultraship/text-lint/x",
+                        'd=.local; u=ultraship; t=text-lint; true ~/$d; cat $_/state/$u/$t/x',
+                        'cd ~/.local && cat $PWD/state/ultraship/text-lint/x'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+
+    def test_harmless_commands_main_allows_still_pass(self):
+        for command in ('gh pr view "$(git branch --show-current)" --json state',
+                        'git diff "$(git merge-base HEAD origin/main)"',
+                        'git -C "$(git rev-parse --show-toplevel)" status --short',
+                        'GIT_SEQUENCE_EDITOR=: git rebase -i HEAD~3', 'GIT_TRACE=1 git fetch origin',
+                        'export EDITOR=vim', "grep -rn 'GIT_DIR=' src", 'grep -n "cd" Makefile',
+                        'env -i HOME=/tmp/h PATH="/usr/bin:/bin" make lint'):
+            with self.subTest(command=command):
+                self.assert_allowed(command)
+        self.assert_denied('git diff --no-index "$(cat name.txt)" /dev/null',
+                           start='Only the text_lint hook reads or writes refusal receipts')
+
     def test_git_takes_a_run_time_value_only_as_a_message_ref_or_names_only_folder(self):
         for command in ('git tag -a -F "$(cat name.txt)" probe', 'git checkout --pathspec-from-file="$(cat name.txt)"',
                         'git log -n "$N" --output=x'):
@@ -336,7 +360,7 @@ class PreciseMatcherTests(unittest.TestCase):
 
     def test_git_pager_and_editor_variables_pass_only_from_an_allowlist(self):
         for command in ('GIT_SSH_COMMAND=x git fetch', 'export GIT_PAGER=less; git log', 'declare -x PAGER=x; git log',
-                        'env EDITOR=vi git commit', 'typeset GIT_EXTERNAL_DIFF=x; git diff', 'readonly SSH_ASKPASS=x',
+                        'env EDITOR=ed git commit', 'typeset GIT_EXTERNAL_DIFF=x; git diff', 'readonly SSH_ASKPASS=x',
                         'GIT_DIR="$D" git status'):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
