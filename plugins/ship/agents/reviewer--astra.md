@@ -49,6 +49,7 @@ Confirm that the decision authorizes this native edit of only `old` and `new`.
 Compare only the admitted base and frozen-head row extents.
 Match both applied values exactly to the approved values.
 Confirm the identical mutant operation and designated test.
+Shared anchor proof for native exact-pair edits and earlier test-only parent rows:
 Require a passing anchor guard run on the head that the driver will publish.
 Require both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count in the brief.
 Match the run's head SHA to the frozen review head and the draft PR head.
@@ -92,9 +93,10 @@ Require a single parent for the squash.
 Verify the complete test-only path inventory and the changed hunk in the local first-parent diff.
 Check both paths for renames and copies.
 Trace that hunk to the exact designated selector, relevant cases and claim.
-Verify the test, fixture and helper identities at the squash, row base and frozen head.
-Check the path and blob ID of each applicable file.
-Verify the subject blob at the first parent, squash, row base and frozen head.
+Verify the Git tree mode, path and blob ID for the designated test and each relevant fixture and helper.
+Compare these files at the squash, row base and frozen head.
+Verify the subject's Git tree mode, path and blob ID.
+Compare the subject at the first parent, squash, row base and frozen head.
 Confirm that the complete row base-to-head diff contains only the approved new rows.
 Read only the admitted row sections and verify that each new ID is absent at the base.
 Use the base lookup or verified absence of the file described above.
@@ -104,7 +106,7 @@ Match the decision to the writer, repository, lane, authorized draft, row base, 
 Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.
 Require zero row re-anchor tool admissions and runs.
 Require exact-head anchor CI with matching trees, row selection and failure on count mismatch.
-Apply the anchor evidence rules above, including the match to the draft head.
+Apply the shared anchor proof above, including the match to the draft head.
 Require direct or inferred proof of the exact approved anchor count for each row.
 Require evidence that the designated assertion passes on the original and fails on the exact approved mutant.
 Use a source trace or evidence from separately admitted execution.
