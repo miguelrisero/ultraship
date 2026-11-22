@@ -13,7 +13,8 @@ class ModelRoutingTests(unittest.TestCase):
     def test_astra_and_luna_reviewer_names_pin_their_declared_models(self):
         for seat, model in (('reviewer--astra', 'gpt-6.2-astra'),
                             ('verifier--astra', 'gpt-6.2-astra'),
-                            ('reviewer--luna', 'gpt-6-luna')):
+                            ('reviewer--luna', 'gpt-6-luna'),
+                            ('reviewer--neon', 'gemini-4-neon')):
             with self.subTest(seat=seat):
                 path = ROOT / 'plugins/ship/agents' / (seat + '.md')
                 fields = checks.frontmatter(path.read_text())
@@ -36,6 +37,11 @@ class ModelRoutingTests(unittest.TestCase):
         panels = (ROOT / 'plugins/ship/skills/panel/references/panels.md').read_text()
         self.assertIn('`reviewer--fable`, `reviewer--luna`', panels)
         self.assertIn('`reviewer--astra` takes the seat', panels)
+        self.assertIn('Google (`neon`)', panels)
+        self.assertIn('| `ship:reviewer--neon` | `gemini-4-neon` | high |', roster)
+        neon = checks.frontmatter((ROOT / 'plugins/ship/agents/reviewer--neon.md').read_text())
+        self.assertNotIn('Bash', neon['tools'])
+        self.assertNotIn('Edit', neon['tools'])
         for path in (ROOT / 'plugins/ship/agents').glob('*.md'):
             if path.stem.endswith('--fable52'):
                 continue

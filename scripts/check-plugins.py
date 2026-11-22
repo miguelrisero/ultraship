@@ -9,7 +9,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = {
     'gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6-luna',
-    'claude-fable-5-2', 'claude-opus-5-5', 'claude-sonnet-5-5',
+    'claude-fable-5-2', 'claude-opus-5-5', 'claude-sonnet-5-5', 'gemini-4-neon',
     'inherit',
 }
 EFFORTS = {'low', 'medium', 'high', 'xhigh', 'max'}
