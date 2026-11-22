@@ -84,11 +84,11 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The anchor guard fails a removed row without a `[[retired]]` entry.',
                 "the writer adds rows for the PR's own new code, each with a claim, a designated test, a subject and a mutant.",
                 'Each new row ID must be absent at the base; the recorded base/head diff shows it. A new row needs no failing CI.',
-                'A test-only follow-up PR may also add rows for code that a named earlier merged PR added, when the CoC grants it.',
+                'A test-only follow-up PR may also add rows for code that a named earlier merged PR added or changed, when the CoC grants it.',
                 "Its diff changes no subject code, and the parent's merge commit is an ancestor of the recorded base.",
                 "Its PR body names the parent PR URL, the parent's full merge commit SHA and the CoC decision file by absolute path and SHA256.",
                 'Each such row keeps the identical mutant edit that the decision file names and passes the review in step 8.',
-                "The parent PR's merged diff must add each such row's subject file and guarded line.",
+                "The parent PR's merged diff must change each such row's subject file and add or change its guarded line.",
                 'The driver confirms that `gh pr view <parent PR URL> --json mergeCommit` returns the named merge commit SHA.',
                 "The driver supplies a local diff of those subject files from that merge commit's first parent to the merge commit.",
                 'The driver records both SHAs and that lookup result in the reviewer brief.',
@@ -128,7 +128,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 creation = route.split('\n4. Add:', 1)[1].split('\n5. Restore:', 1)[0]
                 earlier_code, marker, parent = creation.partition('   Earlier test-only parent:')
                 self.assertTrue(marker, 'Step 4 needs a separate route for an earlier test-only merge.')
-                self.assertIn("The parent PR's merged diff must add each such row's subject file and guarded line.", earlier_code)
+                self.assertIn("The parent PR's merged diff must change each such row's subject file and add or change its guarded line.", earlier_code)
                 for requirement in (
                     'Require the parent PR to be merged in the same repository as the row PR.',
                     'Match the recorded merge commit to the full squash SHA in the row PR base history.',
@@ -342,7 +342,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'When the brief records the verified base commit and a root-level `git ls-tree` result with exit status 0 and empty output, use that proof in place of the grep.',
                 'Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.',
                 'For an added row in a test-only follow-up PR, confirm that the PR changes no subject code and that the mutant matches the CoC decision file that the brief names.',
-                "For each such row, confirm from the parent PR's merged diff that the parent added the row's subject file and guarded line.",
+                "For each such row, confirm from the parent PR's merged diff that the parent changed the row's subject file and added or changed its guarded line.",
                 "Use only the driver's local parent diff from the merge commit's first parent to the merge commit, with the merge commit lookup result that the brief records.",
                 'Block approval if that diff is missing or unbound.',
                 "Confirm from the driver's base and frozen-head fixture listings, helper traces and the diff that its list of tests that use a changed, added or removed fixture or helper in either checkout is complete, including autouse and transitive fixtures and direct or transitive helper calls.",
