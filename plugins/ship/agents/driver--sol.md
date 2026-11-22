@@ -67,8 +67,10 @@ A lane re-anchors, retires or adds the protected mutation rows that its own diff
 Authority: the owner's global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.
 Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.
 
-1. Admit the writer with the [row re-anchor tool admission record](../skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
-2. Re-anchor: the writer runs the sanctioned re-anchor tool once per row, then commits the row file alone.
+1. Select the route for each row before any tool admission or tool run.
+   For tool re-anchor or restoration only: Admit the writer with the [row re-anchor tool admission record](../skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
+   For a CoC-approved native exact-pair edit, use zero row re-anchor tool admissions and zero row re-anchor tool runs.
+2. Tool re-anchor: the writer runs the sanctioned re-anchor tool once per row, then commits the row file alone.
    The tool derives the paired `old` and `new` fields from the subject's new source text and keeps the identical mutant.
    It refuses a change to any other field, and it prints no row text.
    The writer's worktree has one user. No other command runs there while the tool runs.
@@ -118,7 +120,8 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The driver lists the decision file under `Readable files` in the reviewer brief.
    The driver verifies the decision against the applying writer, repository, lane, PR, row file, row ID, source commit and exact edit.
 7. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
-   The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.
+   Reuse the existing authorized draft for CI and reviewer admission.
+   If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.
    Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
    For a CoC-approved native exact-pair edit, the driver supplies content-free evidence from the anchor guard at that draft head.
    The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.
@@ -157,6 +160,10 @@ A narrowed claim keeps the same designated test and the same mutant. It claims l
 Send a widened or otherwise changed claim to the CoC. The CoC approves it only with a current task-specific owner event.
 A CoC approval is a frozen decision file named by absolute path and SHA256.
 It binds the row ID, the source commit, the fields and their replacement values.
+Before verifying a PR-bound decision, require the verified URL of an existing, authorized draft PR for the same repository and lane.
+Keep the row pending if that draft identity is missing or unverified.
+Draft creation still requires separate authority.
+Match the PR URL in the decision to that draft.
 The writer verifies its SHA256 and bindings before the edit. The driver verifies them again at the frozen head and records the result in the reviewer brief.
 The writer applies only those fields with native Edit and `replace_all=false`, then commits the row file alone.
 Step 8 reviews that row, and a follow-up row guards any new code.

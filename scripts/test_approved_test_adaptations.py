@@ -92,7 +92,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The driver confirms that `gh pr view <parent PR URL> --json mergeCommit` returns the named merge commit SHA.',
                 "The driver supplies a local diff of those subject files from that merge commit's first parent to the merge commit.",
                 'The driver records both SHAs and that lookup result in the reviewer brief.',
-                'The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.',
+                'If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.',
                 'Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.',
                 'The driver marks the draft ready only after the review in step 8 passes at the exact head.',
                 'one independent reviewer confirms that every changed, retired, restored or added row is not weaker.',
@@ -130,6 +130,37 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     copy = section((SHIP / name).read_text(), heading).rstrip('\n')
                     self.assertEqual(canonical, copy.replace('](../skills/ship/references/', '](references/'))
 
+    def test_lane_owned_route_selection_precedes_tool_admission_and_run(self):
+        for name in ROUTE_CARRIERS:
+            with self.subTest(path=name):
+                route = section((SHIP / name).read_text(), '### Lane-owned row route')
+                selection = '1. Select the route for each row before any tool admission or tool run.'
+                self.assertTrue(selection in route, 'Each row needs a route before tool admission or execution.')
+                admission = 'For tool re-anchor or restoration only: Admit the writer with the [row re-anchor tool admission record]'
+                native = 'For a CoC-approved native exact-pair edit, use zero row re-anchor tool admissions and zero row re-anchor tool runs.'
+                tool_run = '2. Tool re-anchor: the writer runs the sanctioned re-anchor tool once per row'
+                self.assertEqual(route.count('[row re-anchor tool admission record]'), 1)
+                self.assertLess(route.index(selection), route.index(admission))
+                self.assertLess(route.index(admission), route.index(native))
+                self.assertLess(route.index(native), route.index(tool_run))
+
+    def test_pr_bound_decision_requires_draft_before_verification_and_native_edit(self):
+        for name in ROUTE_CARRIERS:
+            with self.subTest(path=name):
+                route = section((SHIP / name).read_text(), '### Lane-owned row route')
+                draft = 'Before verifying a PR-bound decision, require the verified URL of an existing, authorized draft PR for the same repository and lane.'
+                self.assertTrue(draft in route, 'A PR-bound decision needs a verified, authorized draft identity before verification.')
+                hold = 'Keep the row pending if that draft identity is missing or unverified.'
+                binding = 'Match the PR URL in the decision to that draft.'
+                self.assertIn('Draft creation still requires separate authority.', route)
+                self.assertIn('Reuse the existing authorized draft for CI and reviewer admission.', route)
+                verification = 'The writer verifies its SHA256 and bindings before the edit.'
+                frozen = 'The driver verifies them again at the frozen head and records the result in the reviewer brief.'
+                edit = 'The writer applies only those fields with native Edit and `replace_all=false`'
+                order = [route.index(rule) for rule in (draft, hold, binding, verification, edit)]
+                self.assertEqual(order, sorted(order))
+                self.assertIn(frozen, route)
+
     def test_native_exact_pair_handoff_requires_draft_and_row_counts(self):
         for name in ROUTE_CARRIERS:
             with self.subTest(path=name):
@@ -141,7 +172,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 )
                 ci = route.split('\n7. CI:', 1)[1].split('\n8. Review:', 1)[0]
                 review = route.split('\n8. Review:', 1)[1].split('\n9. ', 1)[0]
-                self.assertIn('The driver opens the PR as a draft, so CI runs and the reviewer admission record can name the PR.', ci)
+                self.assertIn('If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.', ci)
                 self.assertIn('The driver marks the draft ready only after the review in step 8 passes at the exact head.', review)
                 self.assertIn('For a CoC-approved native exact-pair edit, the driver names the frozen decision path, SHA256 and verification result in the reviewer brief.', records)
                 self.assertIn('The driver lists the decision file under `Readable files` in the reviewer brief.', records)
