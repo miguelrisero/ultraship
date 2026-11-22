@@ -121,6 +121,67 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 with self.subTest(path=name, requirement=requirement):
                     self.assertIn(requirement, route)
 
+    def test_test_only_parent_requires_exact_test_and_existing_subject(self):
+        for name in ROUTE_CARRIERS:
+            with self.subTest(path=name):
+                route = section((SHIP / name).read_text(), '### Lane-owned row route')
+                creation = route.split('\n4. Add:', 1)[1].split('\n5. Restore:', 1)[0]
+                earlier_code, marker, parent = creation.partition('   Earlier test-only parent:')
+                self.assertTrue(marker, 'Step 4 needs a separate route for an earlier test-only merge.')
+                self.assertIn("The parent PR's merged diff must add each such row's subject file and guarded line.", earlier_code)
+                for requirement in (
+                    'Require the parent PR to be merged in the same repository as the row PR.',
+                    'Match the recorded merge commit to the full squash SHA in the row PR base history.',
+                    'Require the squash to have one parent.',
+                    'Verify the complete changed-path inventory in the local first-parent diff.',
+                    'Require every changed path to contain only tests, test-only fixtures or test-only helpers.',
+                    'Tie a changed hunk to the exact designated test selector and relevant cases for each row.',
+                    'Match the paths and blob IDs of the designated test and all relevant fixtures and helpers at the squash, row base and frozen head.',
+                    'Match the existing subject path and blob ID at the first parent, squash, row base and frozen head.',
+                    'Limit the complete row base-to-head diff to the approved new rows.',
+                    'Admit no row re-anchor tool and run none.',
+                    'Keep live proof under separate execution admission and GO.',
+                ):
+                    self.assertIn(requirement, parent)
+                approval = (
+                    'Require an existing authorized draft for the same repository and lane.',
+                    'Verify the frozen CoC decision by absolute path and SHA256 before any protected insertion.',
+                    'Bind it to the writer, repository, lane, draft URL, row base, parent PR URL and full squash SHA.',
+                    'Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.',
+                    'Use native Edit with `replace_all=false` for the authorized insertion.',
+                    'At the frozen head, the driver verifies the decision digest and bindings again against the applied rows.',
+                )
+                for rule in approval:
+                    self.assertIn(rule, parent)
+                positions = [parent.index(rule) for rule in approval]
+                self.assertEqual(positions, sorted(positions))
+
+    def test_test_only_parent_review_binds_diff_row_and_anchor_evidence(self):
+        for name in REVIEWERS:
+            with self.subTest(path=name):
+                route = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
+                marker = 'For an added row on the earlier test-only parent route,'
+                self.assertTrue(marker in route, 'Review needs separate evidence for an earlier test-only merge.')
+                parent = route.split(marker, 1)[1].split('\n\n', 1)[0]
+                for requirement in (
+                    'verify the same-repository merge lookup and full squash SHA in the row base history.',
+                    'Verify the complete test-only path inventory and the changed hunk in the local first-parent diff.',
+                    'Trace that hunk to the exact designated selector, relevant cases and claim.',
+                    'Verify the test, fixture and helper identities at the squash, row base and frozen head.',
+                    'Verify the subject blob at the first parent, squash, row base and frozen head.',
+                    'Confirm that the complete row base-to-head diff contains only the approved new rows.',
+                    'Read only the admitted row sections and verify that each new ID is absent at the base.',
+                    'Require the frozen decision by absolute path and SHA256.',
+                    "Require the driver's digest and binding verification at the frozen head.",
+                    'Match the decision to the writer, repository, lane, authorized draft, row base, parent PR and full squash SHA.',
+                    'Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.',
+                    'Require exact-head anchor CI with matching trees, row selection and failure on count mismatch.',
+                    'Require direct or inferred proof of the exact approved anchor count for each row.',
+                    'Require evidence that the designated assertion passes on the original and fails on the exact approved mutant.',
+                    'Keep live proof under separate execution admission and GO.',
+                ):
+                    self.assertIn(requirement, parent)
+
     def test_lane_owned_route_and_review_copies_match(self):
         for names, heading in ((ROUTE_CARRIERS, '### Lane-owned row route'),
                                ([f'agents/{name}' for name in REVIEWERS], '## Lane-owned row review')):
