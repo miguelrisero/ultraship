@@ -224,7 +224,7 @@ class StopEvidenceStateTests(unittest.TestCase):
 
 class StopAccountingGrantTests(unittest.TestCase):
     def test_printed_commands_work_through_the_hook_and_cli(self):
-        for form in ('account', 'account-auto', '--fail-unparsed'):
+        for form in ('account', 'account-auto', '--fail-unparsed', 'driver-batch'):
             with self.subTest(form=form), tempfile.TemporaryDirectory() as temporary:
                 base = Path(temporary).resolve() / 'with spaces'
                 state = base / 'state'
@@ -255,7 +255,14 @@ class StopAccountingGrantTests(unittest.TestCase):
                     identifier = '11111111-1111-1111-1111-111111111111'
                     result = {'id': identifier, 'v': 2, 'agent_id': 'seat', 'ledger': str(home),
                               'run': ledger.run_identity(0, start), 'agent_transcript_path': str(transcript)}
-                    owed.write_text('\t'.join(['100', 'ship:reviewer--sol', str(base), json.dumps(result)]) + '\n')
+                    notices = [result]
+                    if form == 'driver-batch':
+                        second = transcript.with_name('agent-second.jsonl')
+                        second.write_bytes(transcript.read_bytes())
+                        notices.append({**result, 'id': '22222222-2222-2222-2222-222222222222',
+                                        'agent_id': 'second', 'agent_transcript_path': str(second)})
+                    owed.write_text(''.join('\t'.join(['100', 'ship:reviewer--sol', str(base), json.dumps(record)]) + '\n'
+                                            for record in notices))
                     output = io.StringIO()
                     with contextlib.redirect_stdout(output):
                         hook.stop(data)
@@ -272,12 +279,16 @@ class StopAccountingGrantTests(unittest.TestCase):
                         if form == '--fail-unparsed':
                             command = command.replace(' account-auto ', ' account-auto --fail-unparsed ', 1)
                     event = {**data, 'tool_name': 'Bash', 'tool_input': {'command': command}}
+                    if form == 'driver-batch':
+                        event['agent_type'] = 'ship:driver'
                     words = shlex.split(command)
                     with mock.patch.object(sys, 'argv', words[1:]), \
                             mock.patch.object(ledger.time, 'time_ns', return_value=100_000_000_000), \
-                            contextlib.redirect_stdout(io.StringIO()):
+                            contextlib.redirect_stdout(io.StringIO()) as accounting:
                         hook.guarded_pre(event)
                         ledger.main(words[2:])
+                        if form == 'driver-batch':
+                            self.assertIn('2 accounted, 0 pending', accounting.getvalue())
                         after = home.read_bytes()
                         with self.assertRaisesRegex(SystemExit, 'requires a fresh grant'):
                             ledger.main(words[2:])
@@ -290,6 +301,23 @@ class StopAccountingGrantTests(unittest.TestCase):
                     self.assertEqual(row[4], 'fail' if form == '--fail-unparsed' else 'pass')
                     self.assertEqual(row[3], '0' * 40 if form == '--fail-unparsed' else (
                         'abcdef1' if form == 'account' else 'ab' * 20))
+                    if form == 'driver-batch':
+                        pending = owed.read_bytes()
+                        failure = io.StringIO()
+                        with mock.patch.object(ledger, 'publish', side_effect=OSError('receipt write failed')) as publish, \
+                                contextlib.redirect_stdout(failure):
+                            hook.stop(data)
+                        publish.assert_called_once()
+                        self.assertFalse((state / 'accounted.json').exists())
+                        self.assertEqual(owed.read_bytes(), pending)
+                        retry = io.StringIO()
+                        with mock.patch.object(sys, 'argv', words[1:]), contextlib.redirect_stdout(retry):
+                            hook.guarded_pre(event)
+                            ledger.main(words[2:])
+                        self.assertEqual(retry.getvalue(),
+                                         '2 recorded and awaiting Stop\n0 accounted, 0 pending\n')
+                        self.assertEqual(home.read_bytes(), after)
+                        self.assertEqual(owed.read_bytes(), pending)
                     output = io.StringIO()
                     with contextlib.redirect_stdout(output):
                         hook.stop(data)
