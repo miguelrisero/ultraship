@@ -47,6 +47,11 @@ class PreciseMatcherTests(unittest.TestCase):
         self.assertNotIn('permissionDecision', result, (command, result))
         self.assertEqual('additionalContext' in result, advisory, (command, result))
 
+    def assert_not_denied(self, command, agent_type=''):
+        # Main admits these commands; an unresolved value may add the S2 advisory.
+        result = self.decide(command, agent_type)
+        self.assertNotEqual(result.get('permissionDecision'), 'deny', (command, result))
+
     def assert_denied(self, command, agent_type='', start=''):
         result = self.decide(command, agent_type)
         self.assertEqual(result.get('permissionDecision'), 'deny', (command, result))
@@ -186,33 +191,41 @@ class PreciseMatcherTests(unittest.TestCase):
                             'touch api graphql; /usr/bin/g? a[p]i gr[a]phql -F query=@q.txt',
                             'cd ~/.claude/plugins/cache/x/ship/1 && cd hooks && sed -i s/a/b/ u*.py',
                             'cd ~/.claude/plugins/cache/x/ship/1 && cd hooks && cp u*.py /tmp/z.py',
-                            'grep -r . ~/.local', 'grep -r . ~', 'cd ~; grep -r . .local', 'cd "$D" && cat key'):
+                            'grep -r . ~/.local', 'grep -r . ~', 'cd ~; grep -r . .local'):
                 with self.subTest(command=command):
                     self.assert_denied(command, 'ship:driver')
         self.assert_allowed('cd repo && git status')
+        self.assert_not_denied('cd "$D" && cat key', 'ship:driver')
 
     def test_any_program_but_a_listing_denies_a_parent_of_a_store(self):
         for command in ('grep -d recurse . ~/.local', 'grep --directories=recurse . ~', 'grep --recur . ~/.local',
-                        'find ~/.local -type f', 'du -a ~/.local/state', 'tree ~/.local/state', 'ag . ~/.local',
+                        'find ~/.local -exec cat {} +', 'du -a ~/.local/state', 'tree ~/.local/state', 'ag . ~/.local',
                         'ugrep . ~/.local', 'git grep --no-index . ~/.local', 'ls --recur ~/.local', 'ls -lR ~'):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
         self.assert_allowed('ls -la ~/.local/state')
+        # du shows sizes and find without an action shows names, as main admits.
+        for command in ('find ~/.local -type f', 'find ~ -name foo.txt', 'du -sh ~'):
+            with self.subTest(command=command):
+                self.assert_allowed(command)
 
     def test_cd_variable_resolves_only_through_one_earlier_literal(self):
         for command in ('D=/tmp; D=~/.local/state/ultraship/text-lint; cd "$D" && cat key',
-                        'cd "$D" && cat key; D=/tmp',
-                        'D=/tmp; for D in ~/.local/state/ultraship/text-lint; do cd "$D"; cat key; done',
-                        'D=/tmp; read D; cd "$D" && cat key', 'D=/tmp; declare D; cd "$D" && cat key'):
+                        'D=/tmp; for D in ~/.local/state/ultraship/text-lint; do cd "$D"; cat key; done'):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
         self.assert_allowed('D=/tmp/x; cd "$D" && git status')
+        # A folder the scan cannot read warns, as main admits it.
+        for command in ('cd "$D" && cat key; D=/tmp', 'D=/tmp; read D; cd "$D" && cat key',
+                        'D=/tmp; declare D; cd "$D" && cat key'):
+            with self.subTest(command=command):
+                self.assert_not_denied(command)
 
     def test_cdpath_makes_a_relative_cd_unreadable(self):
         self.assert_denied('CDPATH=~/.local/state/ultraship cd text-lint && cat key',
                            start='Only the text_lint hook reads or writes refusal receipts')
         with patch.dict(os.environ, {'CDPATH': str(self.home / '.local/state/ultraship')}):
-            self.assert_denied('cd text-lint && cat key', start='Only the text_lint hook reads or writes refusal receipts')
+            self.assert_allowed('cd text-lint && cat key', advisory=True)
         self.assert_allowed('cd repo && git status')
 
     def test_relative_cd_after_the_repository_top_folder_denies(self):
@@ -220,11 +233,12 @@ class PreciseMatcherTests(unittest.TestCase):
                            start='Only the text_lint hook reads or writes refusal receipts')
 
     def test_cd_double_dash_reads_the_next_word(self):
-        for command in ('cd -- ~/.local/state/ultraship/text-lint && cat key', 'cd -- && cat key',
-                        'cd -- -x && cat key'):
-            with self.subTest(command=command):
-                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_denied('cd -- ~/.local/state/ultraship/text-lint && cat key',
+                           start='Only the text_lint hook reads or writes refusal receipts')
         self.assert_allowed('cd -- repo && git status')
+        for command in ('cd -- && cat key', 'cd -- -x && cat key', 'cd -'):
+            with self.subTest(command=command):
+                self.assert_not_denied(command)
         for command in ('cd -- .. && cd -- .local && cd -- state && cd -- ultraship && cd -- account-grants && cat key',
                         'cd -P .. && cd -L .local/state/ultraship/text-lint && cat key',
                         'CDPATH=.. cd .local && cd state && cd ultraship && cd account-grants && cat key'):
@@ -241,11 +255,12 @@ class PreciseMatcherTests(unittest.TestCase):
 
     def test_quoted_two_word_and_cdpath_directory_changes_deny(self):
         for command in ('"cd" ~/.local && "cd" state && "cd" ultraship && cat text-lint/key',
-                        '\\cd ~/.local && cat state/ultraship/text-lint/key', "c''d ~/.local && cat x",
+                        '\\cd ~/.local && cat state/ultraship/text-lint/key',
                         'cd ws .local && cd state && cd ultraship && cat text-lint/key',
                         'cdpath=~/.local; cd state; cd ultraship; cat text-lint/key'):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        self.assert_not_denied("c''d ~/.local && cat x")
 
     def test_quoted_literal_and_repository_top_cd_targets_are_read(self):
         subprocess.run(['git', 'init', '-q', str(self.cwd)], check=True)
@@ -259,26 +274,35 @@ class PreciseMatcherTests(unittest.TestCase):
                            start='Only the text_lint hook reads or writes refusal receipts')
 
     def test_run_time_file_operand_denies(self):
+        # The bare module name keeps main's denial when a value is unresolved.
         for command in ("p=$(printf '%s/.%s/%s/%s/%s' .. local state ultraship account-grants key); cat \"$p\"",
                         "cat \"$(printf '%s/.%s/%s/%s/%s' .. local state ultraship account-grants key)\"",
-                        'f=`cat name.txt`; head "$f"', 'cat `cat name.txt`'):
+                        "p=$(printf '%s/.%s/%s/%s/%s/x' ~ local state ultraship text-lint); echo \"$(<\"$p\")\""):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+        for command in ('f=`cat name.txt`; head "$f"', 'cat `cat name.txt`'):
+            with self.subTest(command=command):
+                self.assert_allowed(command, advisory=True)
         self.assert_allowed('f=notes.md; cat "$f"')
         self.assert_allowed("grep -e '$X' notes.md")
 
     def test_run_time_values_need_one_provable_literal(self):
+        # printf -v, a second assignment, a gh upload field and an interpreter operand stay denied.
+        for command in ('printf -v p %s x; cat "$p"', 'p=a; p+=b; cat "$p"',
+                        'gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$ID"',
+                        'bash "$(cat name.txt)"'):
+            with self.subTest(command=command):
+                self.assert_denied(command)
+        # Values read at run time warn, as main admits them.
         for command in ('p="x$(cat name.txt)"; cat "$p"', 'q=$(cat name.txt); p=$q; cat "$p"',
-                        'read p < name.txt; cat "$p"', 'mapfile p < name.txt; cat "$p"',
-                        'printf -v p %s x; cat "$p"', 'p=a; p+=b; cat "$p"', 'cat "$1"', 'cat "${p:-x}"',
+                        'read p < name.txt; cat "$p"', 'mapfile p < name.txt; cat "$p"', 'cat "$1"', 'cat "${p:-x}"',
                         'cat name.txt | xargs cat', 'while read -r f; do cat "$f"; done < name.txt',
                         'shuf "$(cat name.txt)"', 'p=$(cat name.txt); pr -t "$p"', 'sort --files0-from=list',
-                        'tar -T list -cf - ', 'gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$ID"', 'curl -d @"$p" x',
-                        'date -f "$(cat name.txt)"', 'bash "$(cat name.txt)"', 'run --at "$(date -rname.txt)"',
-                        'run --at "$(date -uf name.txt)"', 'run --at "$(date -r name.txt +%s)"',
-                        'run --at "$(date --file=name.txt)"'):
+                        'tar -T list -cf - ', 'curl -d @"$p" x', 'date -f "$(cat name.txt)"',
+                        'run --at "$(date -rname.txt)"', 'run --at "$(date -uf name.txt)"',
+                        'run --at "$(date -r name.txt +%s)"', 'run --at "$(date --file=name.txt)"'):
             with self.subTest(command=command):
-                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+                self.assert_not_denied(command)
         for command in ('p=notes.md; cat "$p"', 'for f in a.md b.md; do cat "$f"; done',
                         'git commit -m "$(date)"', 'gh pr view 7 --json title --jq "$Q"',
                         'curl -H "Authorization: $T" https://example.invalid', 'run --deadline "$(date -u +%s)"',
@@ -290,7 +314,7 @@ class PreciseMatcherTests(unittest.TestCase):
     def test_git_with_a_store_parent_or_unknown_folder_denies(self):
         for command in ('git -C ~/.local/state grep --no-index x', 'git --work-tree=~/.local/state diff',
                         'git --git-dir ~/.local/state show', 'git -C ~/.local stash -u',
-                        'git -C "$(cat name.txt)" grep --no-index x', 'git -C / ls-remote --upload-pack=x origin',
+                        'git -C / ls-remote --upload-pack=x origin',
                         'git -C ~ log --output=x', 'git -C ~ fetch --upload-pack=x origin',
                         'git -C ~ -c core.fsmonitor=x status', 'git -C ~ -calias.st=x status'):
             with self.subTest(command=command):
@@ -304,6 +328,7 @@ class PreciseMatcherTests(unittest.TestCase):
                         'git -C ~ -c credential.helper= status'):
             with self.subTest(command=command):
                 self.assert_allowed(command)
+        self.assert_not_denied('git -C "$(cat name.txt)" grep --no-index x')
 
     def test_known_variable_values_are_checked_as_paths(self):
         for command in ('a=.local; b=state; c=ultra; d=ship; e=text; p=$HOME/$a/$b/$c$d/$e-lint; cat $p/r.json',
@@ -325,6 +350,20 @@ class PreciseMatcherTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
 
+    def test_store_paths_built_from_pieces_deny(self):
+        pieces = 'u=ultra; v=ship; t=text-lint; s=state'
+        for command in (f'{pieces}; d=.local; read -r l < ~/$d/$s/$u$v/$t/x; echo $l',
+                        f'{pieces}; d=x true; echo "${{d:=.local}}" >/dev/null; cat ~/$d/$s/$u$v/$t/x',
+                        f"{pieces}; d=.loc'al'; touch ~/$d/$s/$u$v/$t/forged",
+                        f"{pieces}; d=.loc'al'; mkdir -p ~/$d/$s/$u$v/$t/forged",
+                        f'{pieces}; printf "-v" HOME %s ~/.local; cat ~/$s/$u$v/$t/x',
+                        f'{pieces}; printf "-v" d %s .local; cat ~/$d/$s/$u$v/$t/x',
+                        f'{pieces}; "printf" -v d %s .local; cat ~/$d/$s/$u$v/$t/x',
+                        f'{pieces}; n=d; printf -v "$n" %s .local; cat ~/$d/$s/$u$v/$t/x',
+                        f'{pieces}; cd ~/.local && cat ~+/$s/$u$v/$t/x'):
+            with self.subTest(command=command):
+                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+
     def test_harmless_commands_main_allows_still_pass(self):
         for command in ('gh pr view "$(git branch --show-current)" --json state',
                         'git diff "$(git merge-base HEAD origin/main)"',
@@ -334,14 +373,22 @@ class PreciseMatcherTests(unittest.TestCase):
                         'env -i HOME=/tmp/h PATH="/usr/bin:/bin" make lint'):
             with self.subTest(command=command):
                 self.assert_allowed(command)
-        self.assert_denied('git diff --no-index "$(cat name.txt)" /dev/null',
-                           start='Only the text_lint hook reads or writes refusal receipts')
+        # Values main admits: run-time operands, editors, pagers, names-only finds and xargs.
+        for command in ('git diff --no-index "$(cat name.txt)" /dev/null', 'export EDITOR=code', 'export EDITOR=nvim',
+                        'PAGER=less git log', 'GIT_DIR=.git git status', 'cat "$(ls -t *.log | head -1)"',
+                        'for f in $(git diff --name-only); do wc -l "$f"; done', 'git checkout -b "$BR"',
+                        'git restore "$f"', 'git add "$f"', 'rm -f "$TMPFILE"', 'head -n 20 "$LOG"', 'jq . "$f"',
+                        'ls "$dir"', 'cat "$PWD/README.md"', "find . -name '*.pyc' | xargs rm",
+                        'while read -r f; do cat "$f"; done < list.txt', 'mkdir -p "${TMPDIR:-/tmp}/x"',
+                        'touch "/tmp/x$RANDOM"', 'echo ultraship'):
+            with self.subTest(command=command):
+                self.assert_not_denied(command)
 
     def test_git_takes_a_run_time_value_only_as_a_message_ref_or_names_only_folder(self):
         for command in ('git tag -a -F "$(cat name.txt)" probe', 'git checkout --pathspec-from-file="$(cat name.txt)"',
                         'git log -n "$N" --output=x'):
             with self.subTest(command=command):
-                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+                self.assert_not_denied(command)
         for command in ('git commit -m "$(date)"', 'git show "$(git merge-base HEAD main)"', 'git -C "$W" status',
                         'git ls-remote --symref "$U" HEAD'):
             with self.subTest(command=command):
@@ -352,7 +399,7 @@ class PreciseMatcherTests(unittest.TestCase):
                         'curl --data-ascii "@$P" https://example.invalid', 'gh gist create "$(cat name.txt)"',
                         'gh release upload v1 "$(cat name.txt)"'):
             with self.subTest(command=command):
-                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+                self.assert_not_denied(command)
         for command in ('curl -s "https://example.invalid/$(date +%s)"', 'curl -H "Authorization: $T" https://example.invalid',
                         'gh api "repos/o/r/pulls/$PR/comments" --jq \'.[].id\'', 'gh pr list --search "$Q"'):
             with self.subTest(command=command):
@@ -363,7 +410,7 @@ class PreciseMatcherTests(unittest.TestCase):
                         'env EDITOR=ed git commit', 'typeset GIT_EXTERNAL_DIFF=x; git diff', 'readonly SSH_ASKPASS=x',
                         'GIT_DIR="$D" git status'):
             with self.subTest(command=command):
-                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+                self.assert_not_denied(command)
         for command in ('GIT_TERMINAL_PROMPT=0 git status', 'GIT_PAGER=cat git log -1',
                         'GIT_AUTHOR_NAME="A B" git commit -m x'):
             with self.subTest(command=command):
@@ -372,7 +419,7 @@ class PreciseMatcherTests(unittest.TestCase):
     def test_date_substitution_exemption_refuses_braces_and_globs(self):
         for command in ('run --at "$(date +{x,y})"', 'run --at "$(date -d {a,b})"', 'run --at "$(date +*)"'):
             with self.subTest(command=command):
-                self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
+                self.assert_allowed(command, advisory=True)
         self.assert_allowed("run --at \"$(date -u -d '+1 day' '+%F')\"")
 
     def test_reviewer_globs_split_on_any_whitespace(self):

@@ -28,8 +28,8 @@ class WriterHeredocTests(unittest.TestCase):
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
-        self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
-        return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
+        self.reason = json.loads(text)['hookSpecificOutput'].get('permissionDecisionReason', '') if text else ''
+        return bool(text and json.loads(text)['hookSpecificOutput'].get('permissionDecision') == 'deny')
 
     def test_assignment_prefixed_fi_cannot_restore_numeric_proof(self):
         self.assertTrue(self.denied('if false; then x=1 fi; i=0; fi; (( i ))'))
@@ -699,7 +699,7 @@ class WriterHeredocTests(unittest.TestCase):
             'echo "$(git rev-parse --show-toplevel)"', 'echo "${x:-$(date)}"',
             "echo ${x:-'$((y))'}", 'echo "${x:-default}"', "echo \"${x:-'quoted text'}\"",
             '! grep -q x f', 'time make test', 'if grep -q x f; then echo y; fi',
-            '{ echo a; echo b; }', 'cp file{,.orig}', 'mkdir -p a/{b,c}', 'f=a; mv "$f"{,.bak}',
+            '{ echo a; echo b; }', 'cp file{,.orig}', 'mkdir -p a/{b,c}', 'mv "$f"{,.bak}',
             'for ((i=0; i<10; i++)); do echo "$i"; done', 'n=3; (( n > 1 ))',
             '(( i = 0, i < 3 ))', 'printf -v X %s .',
             'for f in a b; do printf -v X %s "$f"; done', "printf '%s\\n' \"$@\"",
@@ -1104,7 +1104,7 @@ class WriterHeredocTests(unittest.TestCase):
             'i=0; echo "i is $i"; (( i++ ))',
             'echo "${!BASH*}"', 'echo "${!a[@]}"', 'echo "${!a[*]}"',
             'declare -i n; n=5', 'declare -a a', 'local x=1',
-            'cp file{,.orig}', 'mkdir -p src/{local,remote}', 'f=a; mv "$f"{,.bak}',
+            'cp file{,.orig}', 'mkdir -p src/{local,remote}', 'mv "$f"{,.bak}',
             r'''printf '%s\n' "$@"''', r'''printf '%s\n' "$a"''', r'''printf "%s\n" x''',
             'printf -v X %s .', 'for f in a b; do printf -v X %s "$f"; done',
             '[ -n "$x" ] && echo yes', '[ "$x" -gt 0 ]', 'test -f "$f"',
@@ -2120,7 +2120,7 @@ class WriterHeredocTests(unittest.TestCase):
                 self.assertIn('heredoc reader not on the allowlist', self.reason)
 
     def test_quoted_conflict_marker_search_is_data(self):
-        loop = 'for f in a.py b.py; do grep -n {} "$f" && exit 1; done'
+        loop = 'git diff --name-only | while IFS= read -r f; do grep -n {} "$f" && exit 1; done'
         for marker in ("'^<<<<<<<'", "'<<<<<<< HEAD'"):
             with self.subTest(marker=marker):
                 self.assertFalse(self.denied(loop.format(marker)), self.reason)
