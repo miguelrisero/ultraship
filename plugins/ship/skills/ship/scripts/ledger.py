@@ -340,20 +340,50 @@ def ledger_path(cwd='.'):
     legacy = common / 'ship' / 'ledger' / f'{branch}.tsv'
     if common.is_relative_to(root):
         return contained(legacy, root)
-    workspace = root.parent
+    managed = None
+    for parent in root.parents:
+        if parent.name == '.scratch':
+            break
+        if parent.parent.name == '.bettercoding-workspaces':
+            managed = parent
+            break
+    workspace = managed or root.parent
     scratch = contained(workspace / '.scratch', workspace)
-    if not scratch.is_dir() or scratch.is_relative_to(root):
+    if workspace.name == '.bettercoding-workspaces' or scratch.is_relative_to(root):
         raise ValueError('Cannot identify a workspace scratch directory; set SHIP_LEDGER_DIR to an absolute permitted directory')
-    if common.is_relative_to(workspace):
-        return contained(legacy, workspace)
     identity = hashlib.sha256(str(root).encode()).hexdigest()
-    directory = contained(scratch / 'ship-ledgers' / identity, scratch)
-    if directory.is_relative_to(root):
-        raise ValueError('Ledger directory enters checkout; set SHIP_LEDGER_DIR to an absolute permitted directory')
-    directory.mkdir(parents=True, exist_ok=True)
-    path = contained(directory / f'{branch}.tsv', directory)
-    for suffix in ('.lock', '.import.json'):
-        contained(path.with_suffix(suffix), directory)
+
+    def local_path(folder):
+        directory = contained(folder / 'ship-ledgers' / identity, folder)
+        path = contained(directory / f'{branch}.tsv', directory)
+        for suffix in ('.lock', '.import.json'):
+            contained(path.with_suffix(suffix), directory)
+        return path
+
+    path = local_path(scratch)
+    candidates = [path]
+    parent_uses_common = False
+    if workspace != root.parent:
+        parent_scratch = contained(root.parent / '.scratch', root.parent)
+        if parent_scratch.is_dir() and not parent_scratch.is_relative_to(root):
+            if common.is_relative_to(root.parent):
+                parent_uses_common = True
+            else:
+                candidates.append(local_path(parent_scratch))
+    existing = [candidate for candidate in candidates
+                if candidate.exists() or candidate.with_suffix('.import.json').exists()]
+    if len(existing) > 1:
+        raise ValueError('Multiple workspace ledger homes contain evidence; set SHIP_LEDGER_DIR to an absolute permitted directory')
+    if existing:
+        path = existing[0]
+    elif parent_uses_common:
+        return contained(legacy, root.parent)
+    elif not scratch.is_dir():
+        raise ValueError('Cannot identify a workspace scratch directory; set SHIP_LEDGER_DIR to an absolute permitted directory')
+    elif common.is_relative_to(workspace):
+        return contained(legacy, workspace)
+    # New imports share one home even if the immediate parent gains a scratch directory.
+    path.parent.mkdir(parents=True, exist_ok=True)
     import_legacy(path, legacy)
     return path
 
@@ -550,7 +580,7 @@ def load_receipts(path, *, root_fd=None):
 
 def account_auto(pending, entries, receipts, *, fail_unparsed=False):
     budgets = {}
-    accounted = remaining = already = 0
+    accounted = remaining = already = awaiting = 0
     for fields in (line.split('\t') for line in entries if line):
         identifier = 'unknown'
         try:
@@ -584,7 +614,13 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
             else:
                 row = next((r for r in history if accounting_row(r, key, run)), None)
             if row is not None:
-                named, sha, verdict = row[2:5]
+                if len(row) < 5:
+                    raise ValueError('accounting record is incomplete')
+                if key in receipts:
+                    already += 1
+                else:
+                    awaiting += 1
+                continue
             else:
                 source = result.get('agent_transcript_path')
                 if not source:
@@ -645,15 +681,13 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
         except ValueError as exc:
             reason = str(exc)
         else:
-            if key in receipts:
-                # A Stop receipt already covers this result, so it is not news on this run.
-                already += 1
-                continue
             print(f'accounted {identifier} {named} {sha} {verdict}')
             accounted += 1
             continue
         print(f'pending {identifier} {reason}')
         remaining += 1
+    if awaiting:
+        print(f'{awaiting} recorded and awaiting Stop')
     if already:
         print(f'{already} accounted at an earlier Stop')
     print(f'{accounted} accounted, {remaining} pending')

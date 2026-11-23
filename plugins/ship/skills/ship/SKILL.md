@@ -138,7 +138,7 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto --fail-unparsed "<p
 
 For these failures, the command records `fail` with SHA `0000000000000000000000000000000000000000`. The row names the transcript path, the epoch and the reason. It grants no pipeline step, review or completion evidence. All binding and accounting checks still apply. Other failures stay pending. Results with a clear commit and verdict keep their normal outcomes.
 
-Run Stop to publish the receipts.
+Run Stop to publish the receipts. `account-auto` reports new ledger records, existing records that await Stop, and records with a Stop receipt separately.
 
 When an accounted result is bound to another result's row, move its credit with:
 
@@ -150,7 +150,7 @@ The line is the 1-based line of the correct review row in the bound ledger file,
 
 `correct-binding` also accepts the result's own `account-result` row. Run Stop to publish the result's receipt before using `correct-binding`.
 
-A linked checkout with an external common Git directory uses its existing parent `.scratch/ship-ledgers` with checkout and branch isolation. First use imports the legacy branch history and open run once, with canonical path and SHA256 provenance. The sole driver must hold run custody and retire old writers before import; old legacy writers can race the snapshot. Import needs legacy read permission and local write permission. All subsequent access uses the local ledger. Full checkouts retain the common-directory default. Ambiguous layouts require an absolute `SHIP_LEDGER_DIR`; the override directly contains branch files. See [ledger storage and permissions](../../README.md#hooks).
+A linked checkout with an external common Git directory uses an existing workspace `.scratch/ship-ledgers` with checkout and branch isolation. The resolver uses the managed workspace root for a nested checkout and preserves a sole existing local snapshot. First use imports the legacy branch history and open run once, with canonical path and SHA256 provenance. The sole driver must hold run custody and retire old writers before import; old legacy writers can race the snapshot. Import needs legacy read permission and local write permission. All subsequent access uses the local ledger. Full checkouts retain the common-directory default. Ambiguous layouts require an absolute `SHIP_LEDGER_DIR`; the override directly contains branch files. See [ledger storage and permissions](../../README.md#hooks).
 
 ## Completion gate
 

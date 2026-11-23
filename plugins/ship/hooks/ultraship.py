@@ -5226,6 +5226,12 @@ def receipt_custody(data, read_search=False):
         raw = str(tin.get('command', ''))
         joined = raw.replace('\\\n', '')
         account_command = normalized(joined)
+        # A leading literal search pattern is data. Keep the full command for path and executable checks.
+        search = re.match(r"[ \t]*rg[ \t]+-n[ \t]+('[A-Za-z0-9_][A-Za-z0-9_.|:-]*')"
+                          r"(?:[ \t]+(?!-)[A-Za-z0-9_./-]+)+"
+                          r"(?:[ \t]+-g[ \t]+'[A-Za-z0-9_.*-]+')*[ \t]*(?=;|\n?$)", raw)
+        search_account_command = (normalized((raw[:search.start(1)] + raw[search.end(1):]).replace('\\\n', ''))
+                                  if search else account_command)
         literal = r'''(?:'[^'\x00\r\n]*'|"[^"$`\\!\x00\r\n]*")'''
         display = re.fullmatch(
             r"[ \t]*(?:echo|printf[ \t]+'%s\\n')[ \t]+("
@@ -6091,7 +6097,7 @@ def receipt_custody(data, read_search=False):
             return False
 
         if (receipt_text(path_command)
-                or ('ledger.py' in account_command and 'account-auto' in account_command
+                or ('ledger.py' in search_account_command and 'account-auto' in search_account_command
                     and not own_account_call(data, raw) and not plain_reader(raw))
                 or any(receipt_path(word) for word in words)
                 or ancestor_operand()

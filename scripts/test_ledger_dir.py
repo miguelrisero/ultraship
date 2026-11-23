@@ -499,6 +499,107 @@ class LedgerDirTests(unittest.TestCase):
         self.assertIn('run-1 /board', self.cli('status').stdout)
         self.assertIn('run-1 /board', self.hook('compact'))
 
+    def test_nested_managed_checkout_binds_stop_to_workspace_ledger(self):
+        workspace = self.base / '.bettercoding-workspaces' / 'managed'
+        scratch = workspace / '.scratch'
+        scratch.mkdir(parents=True)
+        self.checkout = workspace / 'lanes' / 'nested'
+        self.checkout.parent.mkdir()
+        self.git(self.common, 'worktree', 'add', '-q', '-b', 'nested', str(self.checkout))
+        path = self.cli('path')
+        self.assertEqual(path.returncode, 0, path.stderr)
+        home = Path(path.stdout.strip())
+        self.assertEqual(home, scratch / 'ship-ledgers' / hashlib.sha256(
+            str(self.checkout).encode()).hexdigest() / 'nested.tsv')
+        self.assertEqual(self.cli('run-start', 'light', 'nested-run').returncode, 0)
+        (self.checkout.parent / '.scratch').mkdir()
+        self.assertEqual(self.cli('path').stdout.strip(), str(home))
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='nested-seat')
+        owed = self.base / 'state/ultraship/owed/s1.tsv'
+        result = json.loads(owed.read_text().strip().split('\t')[3])
+        self.assertEqual(result['ledger'], str(home))
+        self.assertEqual(result['run'], ledger.run_identity(0, ledger.rows(home)[0]))
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol@nested-seat',
+                                  'sha', 'pass').returncode, 0)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+        competing = self.checkout.parent / '.scratch' / home.relative_to(scratch)
+        competing.parent.mkdir(parents=True)
+        competing.write_bytes(b'other ledger\n')
+        saved = home.read_bytes()
+        refused = self.cli('path')
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('Multiple workspace ledger homes contain evidence', refused.stderr)
+        self.assertEqual(home.read_bytes(), saved)
+        self.assertEqual(competing.read_bytes(), b'other ledger\n')
+
+    def test_nested_checkout_does_not_search_above_managed_workspace(self):
+        container = self.base / '.bettercoding-workspaces'
+        checkout = container / 'managed' / 'lanes' / 'nested'
+        checkout.parent.mkdir(parents=True)
+        (container / '.scratch').mkdir()
+        self.git(self.common, 'worktree', 'add', '-q', '-b', 'isolated', str(checkout))
+        result = self.cli('path', cwd=checkout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('SHIP_LEDGER_DIR', result.stderr)
+        self.assertFalse((container / '.scratch/ship-ledgers').exists())
+
+    def test_nested_checkout_preserves_snapshot_when_common_git_is_in_workspace(self):
+        workspace = self.base / '.bettercoding-workspaces' / 'managed'
+        scratch = workspace / '.scratch'
+        scratch.mkdir(parents=True)
+        common = workspace / 'primary'
+        self.common.rename(common)
+        checkout = workspace / 'lanes' / 'nested'
+        checkout.parent.mkdir()
+        self.git(common, 'worktree', 'add', '-q', '-b', 'nested', str(checkout))
+        legacy = common / '.git/ship/ledger/nested.tsv'
+        legacy.write_bytes(self.history)
+        path = self.cli('path', cwd=checkout)
+        self.assertEqual(path.returncode, 0, path.stderr)
+        self.assertEqual(path.stdout.strip(), str(legacy))
+        self.assertFalse((scratch / 'ship-ledgers').exists())
+
+        old_home = checkout.parent / '.scratch/ship-ledgers' / hashlib.sha256(str(checkout).encode()).hexdigest()
+        old_home.mkdir(parents=True)
+        snapshot = old_home / legacy.name
+        snapshot.write_bytes(self.history)
+        snapshot.with_suffix('.import.json').write_text('{}')
+        path = self.cli('path', cwd=checkout)
+        self.assertEqual(path.returncode, 0, path.stderr)
+        self.assertEqual(path.stdout.strip(), str(snapshot))
+        self.assertEqual(legacy.read_bytes(), self.history)
+        scratch.rmdir()
+        path = self.cli('path', cwd=checkout)
+        self.assertEqual(path.returncode, 0, path.stderr)
+        self.assertEqual(path.stdout.strip(), str(snapshot))
+
+    def test_nested_checkout_uses_common_ledger_with_only_parent_scratch(self):
+        workspace = self.base / '.bettercoding-workspaces' / 'managed'
+        parent = workspace / 'lanes'
+        (parent / '.scratch').mkdir(parents=True)
+        common = parent / 'primary'
+        self.common.rename(common)
+        checkout = parent / 'nested'
+        self.git(common, 'worktree', 'add', '-q', '-b', 'nested', str(checkout))
+        legacy = common / '.git/ship/ledger/nested.tsv'
+        legacy.write_bytes(self.history)
+        path = self.cli('path', cwd=checkout)
+        self.assertEqual(path.returncode, 0, path.stderr)
+        self.assertEqual(path.stdout.strip(), str(legacy))
+        self.assertFalse((workspace / '.scratch').exists())
+        self.assertFalse((parent / '.scratch/ship-ledgers').exists())
+
+    def test_checkout_named_scratch_cannot_store_ledger_inside_itself(self):
+        workspace = self.base / '.bettercoding-workspaces' / 'managed'
+        workspace.mkdir(parents=True)
+        checkout = workspace / '.scratch'
+        self.git(self.common, 'worktree', 'add', '-q', '-b', 'scratch', str(checkout))
+        result = self.cli('path', cwd=checkout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('SHIP_LEDGER_DIR', result.stderr)
+        self.assertFalse((checkout / 'ship-ledgers').exists())
+
     def test_cooperating_first_users_publish_one_snapshot(self):
         users = [subprocess.Popen([sys.executable, str(LEDGER), 'path'], cwd=self.checkout,
                                   env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1095,9 +1196,12 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(note['evidence'], f'{transcript} at {datetime.fromtimestamp(epoch, timezone.utc).isoformat()}: pass')
         transcript.unlink()
         saved = home.read_bytes()
-        self.assertEqual(self.cli('account-auto', str(owed)).stdout, expected)
+        self.assertEqual(self.cli('account-auto', str(owed)).stdout,
+                         '1 recorded and awaiting Stop\n0 accounted, 0 pending\n')
+        self.assertEqual(home.read_bytes(), saved)
         pending = owed.read_bytes()
         self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
         owed.write_bytes(pending)
         # Once a Stop receipt covers the result, a later run counts it instead of listing it as accounted again.
         self.assertEqual(self.cli('account-auto', str(owed)).stdout, '1 accounted at an earlier Stop\n0 accounted, 0 pending\n')
