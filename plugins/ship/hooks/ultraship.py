@@ -1366,12 +1366,14 @@ def grep_data_token(tokens, index):
     return cursor < index and tokens[cursor][0] == 'grep'
 
 
-def nested_shell_strings(tokens, text=None, include_env=True):
+def nested_shell_strings(tokens, text=None, include_env=True, *, data_starts=()):
     """Keep the identity of each argument that a shell or string wrapper can execute."""
     if text is not None:
         for body in shell_substitution_bodies(text):
             yield ('', body, 0, len(text))
     for index, token in enumerate(tokens):
+        if token[2] in data_starts:
+            continue
         name = os.path.basename(token[1])
         if name not in STRING_WRAPPERS or name == 'env' and not include_env:
             continue
@@ -4966,7 +4968,8 @@ SHELL_SPECIAL_NAMES = {'PATH', 'path', 'IFS', 'HOME', 'PWD', 'OLDPWD', 'CDPATH',
                        'ZDOTDIR', 'FPATH', 'fpath', 'PS4', 'PROMPT_COMMAND', 'SHELLOPTS', 'BASHOPTS', '_', 'REPLY',
                        'reply', 'argv', 'match', 'mbegin', 'mend', 'RANDOM', 'SECONDS', 'LINENO', 'BASHPID', 'UID',
                        'EUID', 'PPID', 'GROUPS', 'FUNCNAME', 'status', 'pipestatus', 'signals', 'options', 'SRANDOM',
-                       'SHLVL', 'OPTIND', 'OPTARG', 'HISTCMD', 'ERRNO', 'TTYIDLE', 'COLUMNS', 'LINES'}
+                       'SHLVL', 'OPTIND', 'OPTARG', 'HISTCMD', 'ERRNO', 'TTYIDLE', 'COLUMNS', 'LINES',
+                       'CLAUDE_PLUGIN_ROOT', 'CLAUDE_SKILL_DIR'}
 # Programs that keep the shell's directory, variables and options, so a bound path means the same file after them.
 PLAIN_PROGRAMS = {'bash', 'sh', 'python3', 'python', 'node', 'sha256sum', 'cat', 'head', 'tail', 'grep', 'wc', 'ls',
                   'stat', 'echo', 'true'}
@@ -5257,16 +5260,21 @@ def receipt_custody(data, read_search=False):
                         lambda match: os.environ.get(match[1] or match[2], ''), word)
                  for word in raw_words]
 
-        def names_ledger():
-            def cached_ledger(path, root):
-                return (path.is_relative_to(root)
-                        and path.relative_to(root).parts[1:] == ('skills', 'ship', 'scripts', 'ledger.py'))
+        def ledger_path(path):
+            script = ledger_script().resolve()
+            config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+            cache = (config / 'plugins/cache/ultraship/ship').absolute()
+            canonical_cache = cache.resolve()
+            path = path.absolute()
+            canonical = path.resolve()
+            return canonical == script or any(
+                target.is_relative_to(root)
+                and target.relative_to(root).parts[1:] == ('skills', 'ship', 'scripts', 'ledger.py')
+                for target, root in ((path, cache), (path.parent.resolve() / path.name, canonical_cache),
+                                     (canonical, canonical_cache)))
 
+        def names_ledger():
             try:
-                script = ledger_script().resolve()
-                config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
-                cache_path = (config / 'plugins/cache/ultraship/ship').absolute()
-                cache = cache_path.resolve()
                 cwd = Path(data.get('cwd') or os.getcwd())
                 pending, seen = [joined, literal_bindings_resolved(joined, cwd_path)], set()
                 while pending:
@@ -5288,17 +5296,7 @@ def receipt_custody(data, read_search=False):
                         if raw_word in {'(', ')', '`'}:
                             continue
                         word = re.sub(r'^\$(?:\{HOME\}|HOME(?=/|$))', lambda _: str(Path.home()), word)
-                        path = cwd / Path(word).expanduser()
-                        saw_ledger = saw_ledger or cached_ledger(path.absolute(), cache_path)
-                        saw_ledger = saw_ledger or cached_ledger(path.parent.resolve() / path.name, cache)
-                        try:
-                            path = path.resolve(strict=True)
-                        except OSError as exc:
-                            if (not isinstance(exc, (FileNotFoundError, NotADirectoryError, PermissionError))
-                                    and exc.errno != errno.ENAMETOOLONG):
-                                raise
-                            path = path.resolve()
-                        saw_ledger = saw_ledger or path == script or cached_ledger(path, cache)
+                        saw_ledger = saw_ledger or ledger_path(cwd / Path(word).expanduser())
                     pending.extend(token[1] for token in nested_shell_strings(tokens, text))
             except ValueError:
                 return 'ledger' in account_command
@@ -5927,8 +5925,62 @@ def receipt_custody(data, read_search=False):
                                 return 'hard'
                             if kind == 'c' and base in SHELL_INTERPRETERS and re.fullmatch("'[^']*'", arg_raw):
                                 continue
-                            # An unresolved interpreter operand could name the hook, so it stays fail-closed.
-                            if not account_words and unresolved_program(arg_raw, arg, code=kind == 'c'):
+                            if account_words:
+                                continue
+                            # An expansion in a directory can change the script just as an expanded filename can.
+                            if kind == 'script' and interpreter == 'python' and unresolved_shell_word(arg_raw):
+                                ledger_reads = {'path', 'status', 'gaps'}
+                                sub = arguments[operand + 1:operand + 2]
+                                read_ledger = bool(sub and sub[0][0] in ledger_reads)
+                                harness_ledger = '"${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/ledger.py"'
+                                if arg_raw == harness_ledger:
+                                    root = os.environ.get('CLAUDE_PLUGIN_ROOT', '')
+                                    if (not read_ledger or not re.fullmatch(
+                                            r'[ \t]*python3[ \t]+' + re.escape(harness_ledger)
+                                            + r'[ \t]+(?:path|status|gaps)[ \t]*\n?', raw)
+                                            or not os.path.isabs(root)
+                                            or Path(root).resolve() != hook.parent.parent):
+                                        return 'hard'
+                                    script = str(Path(root) / 'skills/ship/scripts/ledger.py')
+                                    if not ledger_path(Path(script)):
+                                        return 'hard'
+                                elif arg_raw == '"${CLAUDE_SKILL_DIR}/scripts/thread_reply.py"':
+                                    skill = Path(os.environ.get('CLAUDE_SKILL_DIR', ''))
+                                    expected = hook.parent.parent / 'skills/babysit'
+                                    if not skill.is_absolute() or skill.resolve() != expected:
+                                        return 'hard'
+                                    target = skill / 'scripts/thread_reply.py'
+                                    if target.resolve() != expected / 'scripts/thread_reply.py' or not regular_file(target):
+                                        return 'hard'
+                                    safe_word = r'''(?:[A-Za-z0-9_./@+=-]+|'[A-Za-z0-9_./@+= -]+'|"[A-Za-z0-9_./@+= -]+")'''
+                                    # A bare leading `=` can expand in zsh.
+                                    page_cursor = r'''(?:(?!=)[A-Za-z0-9_./@+=-]+|'[A-Za-z0-9_./@+=: -]+'|"[A-Za-z0-9_./@+=: -]+")'''
+                                    pr_thread = (r'[ \t]+https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*'
+                                                 r'[ \t]+PRRT_[A-Za-z0-9_-]+')
+                                    action = (r'(?:(?:read|resolve)' + pr_thread + r'|reply' + pr_thread + r'[ \t]+' + safe_word
+                                              + r'|page[ \t]+[1-9][0-9]{0,9}(?:[ \t]+' + page_cursor + r')?)')
+                                    if not re.fullmatch(r'[ \t]*python3[ \t]+' + re.escape(arg_raw)
+                                                        + r'[ \t]+' + action + r'[ \t]*\n?', raw):
+                                        return 'hard'
+                                    script = str(target)
+                                else:
+                                    _, _, name_start, _ = names[index]
+                                    _, _, _, arg_end = arguments[operand]
+                                    prefix = text[:name_start].removeprefix('set -eu\n')
+                                    head = prefix + text[name_start:arg_end]
+                                    expanded = literal_bindings_resolved(head, cwd_path)
+                                    if expanded == head:
+                                        return 'hard'
+                                    script_raw, script, _, _ = shell_raw_words(expanded)[-1]
+                                    if unresolved_shell_word(script_raw):
+                                        return 'hard'
+                                if (not script.startswith('/') or receipt_path(script, ancestors=True)
+                                        or installed_hook in resolved(script)
+                                        or hook_name.search(os.path.basename(normalized(script)))):
+                                    return 'hard'
+                                if ledger_path(Path(script)) and not read_ledger:
+                                    deny(ACCOUNT_CUSTODY)
+                            elif unresolved_program(arg_raw, arg, code=kind == 'c'):
                                 return 'hard'
                     ticks = 0
                     for index, (raw_word, word, word_start, end) in enumerate(tokens):
@@ -5986,10 +6038,35 @@ def receipt_custody(data, read_search=False):
                                         or (raw_word != cache_operand
                                             and expands_to_hook(raw_word + backtick, path + backtick))))):
                                 verdict = 'soft'
+                    # Only a complete probe through managed executables supplies browser data.
+                    browser_data = set()
+                    if (not any(char.isspace() and char not in ' \t\n' for char in text)
+                            and not shell_defines_function(tokens, positions)
+                            and not any(word in {'alias', 'source', '.', 'eval', 'function'} and start in positions
+                                        for _, word, start, _ in tokens)):
+                        segment = []
+                        for token in [*tokens, ('\n', '\n', 0, 0)]:
+                            if token[0] not in {';', '&', '|', '(', ')', '`', '\n'} or (
+                                    token[0] == '&' and segment and segment[-1][0] == '>'
+                                    and segment[-1][3] == token[2]):
+                                segment.append(token)
+                                continue
+                            raw_args = [word[0] for word in segment]
+                            browser = '/usr/local/bin/agent-browser'
+                            if (len(raw_args) >= 5 and segment[0][2] in positions
+                                    and raw_args[0] == '/usr/bin/timeout'
+                                    and re.fullmatch(r'[1-9][0-9]*', raw_args[1])
+                                    and raw_args[2:5] == [browser, 'eval',
+                                        '"JSON.stringify([...document.images].map(i=>i.naturalWidth))"']
+                                    and (raw_args[5:] == [] or raw_args[5:] == ['2', '>', '&', '1']
+                                         and all(a[3] == b[2] for a, b in zip(segment[5:], segment[6:])))
+                                    and trusted_executable(browser) and trusted_executable(raw_args[0])):
+                                browser_data.add(segment[3][2])
+                            segment = []
                     # An unresolved word after a search pattern is search data; resolved nested code keeps its scan.
-                    data_starts = {token[2] for index, token in enumerate(tokens) if grep_data_token(tokens, index)}
-                    pending.extend(token[1] for token in nested_shell_strings(tokens, text)
-                                   if not (token[2] in data_starts and unresolved_shell_word(token[1])))
+                    search_data = {token[2] for index, token in enumerate(tokens) if grep_data_token(tokens, index)}
+                    pending.extend(token[1] for token in nested_shell_strings(tokens, text, data_starts=browser_data)
+                                   if not (token[2] in search_data and unresolved_shell_word(token[1])))
             except (OSError, RuntimeError, ValueError):
                 return unread()
             # Main denies the bare module name anywhere; an unresolved command keeps that denial.
@@ -6060,6 +6137,26 @@ def protected_row_path(value):
 def regular_file(path):
     try:
         return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def trusted_executable(name):
+    """Check the executable and every directory that can replace it."""
+    path = Path(name)
+    if not path.is_absolute() or '..' in path.parts:
+        return False
+    try:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111:
+            return False
+        for entry in (path, *path.parents):
+            info = entry.lstat()
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                return False
+            if entry != path and not stat.S_ISDIR(info.st_mode):
+                return False
+        return True
     except OSError:
         return False
 

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 from subprocess import Popen
 import subprocess
 import sys
@@ -271,6 +272,52 @@ def read_comments(thread, repository, number):
     return comments
 
 
+MAX_REPLY_BYTES = 64 * 1024
+REPLY_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+REPLY_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY
+
+
+def read_reply_body(path):
+    cwd = Path.cwd()
+    for base, prefixes in (('.', ('.scratch/', './.scratch/', str(cwd / '.scratch') + '/')),
+                           ('..', ('../.scratch/', str(cwd.parent / '.scratch') + '/'))):
+        prefix = next((prefix for prefix in prefixes if path.startswith(prefix)), None)
+        if prefix:
+            break
+    else:
+        raise ValueError('expected a reply draft in .scratch in the current directory or its parent')
+    parts = path[len(prefix):].split('/')
+    if any(part in ('', '.', '..') for part in parts):
+        raise ValueError('invalid reply draft path')
+
+    try:
+        directory = os.open(base, REPLY_DIRECTORY_FLAGS)
+        try:
+            for part in ('.scratch', *parts[:-1]):
+                child = os.open(part, REPLY_DIRECTORY_FLAGS, dir_fd=directory)
+                os.close(directory)
+                directory = child
+            fd = os.open(parts[-1], REPLY_FILE_FLAGS, dir_fd=directory)
+        finally:
+            os.close(directory)
+
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1:
+                raise ValueError('expected a regular reply draft owned by the current user with one link')
+            if info.st_size > MAX_REPLY_BYTES:
+                raise ValueError('reply draft exceeds 64 KiB')
+            with os.fdopen(fd, 'rb', closefd=False) as draft:
+                data = draft.read(MAX_REPLY_BYTES + 1)
+        finally:
+            os.close(fd)
+        if len(data) > MAX_REPLY_BYTES:
+            raise ValueError('reply draft exceeds 64 KiB')
+        return data.decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
+    except (OSError, UnicodeDecodeError):
+        raise ValueError('cannot open or read the UTF-8 reply draft') from None
+
+
 def main(arguments):
     if arguments and arguments[0] == 'page':
         try:
@@ -295,7 +342,7 @@ def main(arguments):
             raise ValueError('invalid PR URL')
         if not re.fullmatch(r'PRRT_[A-Za-z0-9_-]+', thread):
             raise ValueError('invalid thread ID')
-        body = Path(arguments[3]).read_text(encoding='utf-8') if action == 'reply' else None
+        body = read_reply_body(arguments[3]) if action == 'reply' else None
         if body is not None and not body.strip():
             raise ValueError('empty reply body')
         repository = match[1] + '/' + match[2]

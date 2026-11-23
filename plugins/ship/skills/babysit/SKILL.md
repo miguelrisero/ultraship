@@ -45,7 +45,9 @@ Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) durin
 5. **Fix.** Collect every failing check and every unresolved thread before the fix. Send all `real` items to `ship:writer--sol` as one batch. Rerun the affected tests, unless the brief bans local test execution; then CI reruns them. Push once for the round. Never push a partial batch.
 6. **Answer every thread.** Reply with the fix commit or the refuting evidence, then resolve the thread.
    Take each thread ID only from `threads.sh` output for this PR; never build or guess one.
-   Put the reply text in a file under the run scratch directory.
+   Save the reply as a UTF-8 file under `.scratch/` in the physical current directory or under `../.scratch/`.
+   Use a regular file that you own, with one link and at most 64 KiB.
+   Use a path with no symbolic links.
    The helper reads the thread from GitHub and refuses unless it belongs to this PR's repository and number.
    The ship hook refuses raw review-thread mutations and REST review-comment replies.
    If the guard refuses a compound discovery and PR read, keep the work pending. Run each permitted step in its own call.
