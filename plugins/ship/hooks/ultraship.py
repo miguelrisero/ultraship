@@ -5405,7 +5405,6 @@ def receipt_custody(data, read_search=False):
                              'BASHPID', 'PPID', 'DIRSTACK', 'PIPESTATUS', 'BASH_REMATCH', 'MAPFILE', 'BASH_COMMAND'}
             numeric_names = {'OPTIND', 'RANDOM', 'LINENO', 'SECONDS', 'BASHPID', 'PPID'}
             moves = re.search(r'(?:^|[;&|(\s])(?:cd|pushd|popd)(?=[\s;&|()]|$)', custody_source)
-            unprovable = {'_', 'PWD', 'OLDPWD', 'DIRSTACK'} if moves else {'_'}
 
             # A `for` name over literal words takes only those words, which the scan checks as paths.
             loop_names = {match[1] for match in re.finditer(r'(?:^|[;&|\s(])for[ \t]+([A-Za-z_]\w*)[ \t]+in\b([^;\n]*)',
@@ -5426,8 +5425,9 @@ def receipt_custody(data, read_search=False):
                     name = braced or plain
                     if name == 'HOME':
                         values = [str(Path.home())]
-                    elif name == 'PWD' and not moves:
-                        values = [data.get('cwd') or os.getcwd()]
+                    elif name == 'PWD' or name == 'OLDPWD' and moves:
+                        # After a directory change, PWD and OLDPWD are the working folder or a folder a cd entered.
+                        values = [data.get('cwd') or os.getcwd(), *(cd_bases if moves else [])]
                     elif name in loop_words:
                         values = loop_words[name]
                     else:
@@ -5458,24 +5458,30 @@ def receipt_custody(data, read_search=False):
                         or re.search(r'\$[0-9@*-]', expanded)):
                     return 'soft'
                 unknown = False
+                # An unprovable value matters where the word also holds a folder step or starts at HOME; a bare
+                # variable or a file-name pattern such as "log-$ts.txt" warns, as main admits it.
+                structure = re.search(r'/|^~', re.sub(r'\$\{?[A-Za-z_]\w*\}?', '', expanded.strip('"')))
                 for name in re.findall(r'\$\{?([A-Za-z_]\w*)', expanded):
                     use = re.search(rf'\$\{{?{name}\b', custody_source)
                     # Claude Code sets the plugin folder names; a command that binds one makes it unknown.
                     trusted = name in {'HOME', 'CLAUDE_SKILL_DIR', 'CLAUDE_PLUGIN_ROOT', 'CLAUDE_PROJECT_DIR'} and not (
                         other_binding(name) or re.search(rf'(?:^|[;&|\s(]){name}\+?=', custody_source))
                     if (trusted or name in loop_names or name in numeric_names or name in git_bound
-                            or name == 'PWD' and not moves or literal_value(name, use.start() if use else 0)):
+                            or name == 'PWD' or name == 'OLDPWD' and moves
+                            or literal_value(name, use.start() if use else 0)):
                         continue
                     value = None if name in shell_managed else os.environ.get(name)
                     # A value with no expansion that the scan still could not prove, such as split quotes, a second
                     # assignment or a prefix assignment, may spell a store path; so may printf -v.
                     literal_binding = re.search(rf'(?:^|[;&|\s(\'"]){name}\+?=(?:"[^"$`]*"|\'[^\']*\'|[^\s;&|()$`\'"])*'
                                                 r'(?=[\s;&|()]|$)', custody_source)
-                    if (name in unprovable or printf_unknown or name in printf_names or literal_binding or re.search(rf'\$\{{{name}:?=', custody_source)
+                    unproven = (printf_unknown or name in printf_names or literal_binding
+                                or re.search(rf'\$\{{{name}:?=', custody_source))
+                    if (structure and unproven
                             or value is not None and receipt_path(value, ancestors=True, stores=receipt_paths | grant_paths)):
                         return 'hard'
                     # A name the command never binds and the environment lacks is empty, as main treats it.
-                    if other_binding(name) or re.search(rf'(?:^|[;&|\s(]){name}\+?=', custody_source):
+                    if unproven or other_binding(name) or re.search(rf'(?:^|[;&|\s(]){name}\+?=', custody_source):
                         unknown = 'soft'
                 return unknown
 

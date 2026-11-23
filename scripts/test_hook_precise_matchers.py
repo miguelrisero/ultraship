@@ -294,14 +294,14 @@ class PreciseMatcherTests(unittest.TestCase):
         self.assert_allowed("grep -e '$X' notes.md")
 
     def test_run_time_values_need_one_provable_literal(self):
-        # printf -v, a second assignment, a gh upload field and an interpreter operand stay denied.
-        for command in ('printf -v p %s x; cat "$p"', 'p=a; p+=b; cat "$p"',
-                        'gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$ID"',
+        # A gh upload field and an interpreter operand stay denied.
+        for command in ('gh api graphql -f query=\'query($id:ID!){node(id:$id){id}}\' -F id="$ID"',
                         'bash "$(cat name.txt)"'):
             with self.subTest(command=command):
                 self.assert_denied(command)
         # Values read at run time warn, as main admits them.
-        for command in ('p="x$(cat name.txt)"; cat "$p"', 'q=$(cat name.txt); p=$q; cat "$p"',
+        for command in ('printf -v p %s x; cat "$p"', 'p=a; p+=b; cat "$p"',
+                        'p="x$(cat name.txt)"; cat "$p"', 'q=$(cat name.txt); p=$q; cat "$p"',
                         'read p < name.txt; cat "$p"', 'mapfile p < name.txt; cat "$p"', 'cat "$1"', 'cat "${p:-x}"',
                         'cat name.txt | xargs cat', 'while read -r f; do cat "$f"; done < name.txt',
                         'shuf "$(cat name.txt)"', 'p=$(cat name.txt); pr -t "$p"', 'sort --files0-from=list',
@@ -368,6 +368,8 @@ class PreciseMatcherTests(unittest.TestCase):
                         f'{pieces}; "printf" -v d %s .local; cat ~/$d/$s/$u$v/$t/x',
                         f'{pieces}; n=d; printf -v "$n" %s .local; cat ~/$d/$s/$u$v/$t/x',
                         f'{pieces}; cd ~/.local && cat ~+/$s/$u$v/$t/x',
+                        f'{pieces}; cd ~/.local && cat "$PWD/$s/$u$v/$t/x"',
+                        f'{pieces}; cd ~/.local && cd /tmp && cat "$OLDPWD/$s/$u$v/$t/x"',
                         f'{pieces}; d=.local; echo x > ~/$d/$s/$u$v/$t/x # printf -v',
                         f'{pieces}; d=.local; printf -v z %s q; echo x >> ~/$d/$s/$u$v/$t/x',
                         f'{pieces}; printf -v d %s .local; echo x >> ~/$d/$s/$u$v/$t/x',
@@ -391,7 +393,11 @@ class PreciseMatcherTests(unittest.TestCase):
                         'git restore "$f"', 'git add "$f"', 'rm -f "$TMPFILE"', 'head -n 20 "$LOG"', 'jq . "$f"',
                         'ls "$dir"', 'cat "$PWD/README.md"', "find . -name '*.pyc' | xargs rm",
                         'while read -r f; do cat "$f"; done < list.txt', 'mkdir -p "${TMPDIR:-/tmp}/x"',
-                        'touch "/tmp/x$RANDOM"', 'echo ultraship'):
+                        'touch "/tmp/x$RANDOM"', 'echo ultraship',
+                        'printf -v ts "%(%F)T" -1; echo x > "log-$ts.txt"', 'cd sub && echo x > "$PWD/o"',
+                        'out=a.log; out=b.log; make > "$out"', 'out=a; out+=.log; make > "$out"',
+                        'log=build.log make > "$log"', 'cd build && make > "$OLDPWD/build.log"',
+                        'cd sub && cat "$PWD/o"', 'printf -v out %s.log; make > "$out"'):
             with self.subTest(command=command):
                 self.assert_not_denied(command)
 
