@@ -4932,6 +4932,155 @@ def thread_command_config(command):
     return False
 
 
+# Readers that start no program, named exactly, so every word they receive is data.
+# `rg` stays out: its configuration file can add `--pre` outside the command text.
+DATA_READERS = {'grep', 'cat', 'head', 'tail', 'wc', 'cut', 'tr', 'uniq', 'echo'}
+# Short option clusters and file filters; this leaves out a grep that runs filters, decompressors or a pager,
+# and `-R`, which follows links below a folder.
+DATA_READER_OPTION = re.compile(r'-[A-PS-Za-y0-9]+|--|--(?:include|exclude|exclude-dir)=[^\s=]*', re.ASCII)
+
+
+def reads_data_only(command):
+    """Whether one pipeline of plain readers takes only literal words, with no file redirect or program option."""
+    text = command.removesuffix('\n')
+    # Only a whole `/dev/null` or descriptor redirect stays; quotes or expansions in any other one keep the refusal.
+    unredirected = re.sub(r'[ \t]\d?>>?/dev/null(?=[ \t|]|$)|[ \t]\d?>&\d(?=[ \t|]|$)', ' ', text)
+    if ('\n' in text or any(char.isspace() and char not in ' \t' for char in text)
+            or re.search(r'[$`"\\{}*?\[\]<>#]', outside_single_quotes(unredirected))):
+        return False
+    try:
+        tokens = list(shell_without_redirections(shell_raw_words(text, require_complete=True)))
+    except ValueError:
+        return False
+    positions = shell_command_positions(tokens)
+    return bool(positions) and all(
+        word in DATA_READERS if start in positions
+        else raw == '|' and (index + 1 == len(tokens) or tokens[index + 1][0] != '|') if raw in {';', '&', '|', '(', ')'}
+        # An assignment such as `LD_PRELOAD=` can load code into a reader.
+        else not SHELL_ASSIGNMENT.match(raw) and (not word.startswith('-') or DATA_READER_OPTION.fullmatch(word))
+        for index, (raw, word, start, _) in enumerate(tokens))
+
+
+# Names the shell reads or ties to other state, so a literal value does not describe their effect.
+SHELL_SPECIAL_NAMES = {'PATH', 'path', 'IFS', 'HOME', 'PWD', 'OLDPWD', 'CDPATH', 'cdpath', 'ENV', 'BASH_ENV',
+                       'ZDOTDIR', 'FPATH', 'fpath', 'PS4', 'PROMPT_COMMAND', 'SHELLOPTS', 'BASHOPTS', '_', 'REPLY',
+                       'reply', 'argv', 'match', 'mbegin', 'mend', 'RANDOM', 'SECONDS', 'LINENO', 'BASHPID', 'UID',
+                       'EUID', 'PPID', 'GROUPS', 'FUNCNAME', 'status', 'pipestatus', 'signals', 'options', 'SRANDOM',
+                       'SHLVL', 'OPTIND', 'OPTARG', 'HISTCMD', 'ERRNO', 'TTYIDLE', 'COLUMNS', 'LINES'}
+# Programs that keep the shell's directory, variables and options, so a bound path means the same file after them.
+PLAIN_PROGRAMS = {'bash', 'sh', 'python3', 'python', 'node', 'sha256sum', 'cat', 'head', 'tail', 'grep', 'wc', 'ls',
+                  'stat', 'echo', 'true'}
+LITERAL_VALUE = re.compile(r'[\w./+,:@%=-]+', re.ASCII)
+
+
+def literal_bindings_resolved(command, cwd):
+    """Write each later double-quoted `$name` use of a name that one earlier top-level command binds to a literal word.
+
+    The result names the same files as the shell would, so path and hook-name checks read it as literal text.
+    A directory change, heredoc or anything uncertain leaves the command unchanged, so its uses stay unresolved."""
+    if '<<' in command:
+        return command
+    try:
+        tokens = shell_raw_words(command)
+    except ValueError:
+        return command
+    positions = shell_command_positions(tokens)
+    # Decoded words, so quoting such as `c'd'` still counts; sourced code can also change the directory.
+    if (any(value in {'cd', 'pushd', 'popd', 'eval', 'source', 'alias', 'trap'} for _, value, _, _ in tokens)
+            or any(value == '.' and start in positions for _, value, start, _ in tokens)
+            or sum(bool(SHELL_ASSIGNMENT.match(raw)) for raw, _, _, _ in tokens) > 16):
+        return command
+    # A command that sets HOME or PWD, or names it for `export`, `read` and the like, leaves `~`, `$HOME` and `$PWD` open.
+    home_changes = any(re.match(r'(?:HOME|PWD)\+?=', value) or value in {'HOME', 'PWD'} for _, value, _, _ in tokens)
+    compound = {'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done', 'case', 'esac',
+                'select', 'function', '{', '}', '!'}
+    bindings, previous, significant = {}, None, None
+    for index, (raw, _, start, end) in enumerate(tokens):
+        if raw in {'(', ')', '`'} or start in positions and raw in compound:
+            break
+        binding = re.fullmatch(r'([A-Za-z_][A-Za-z0-9_]*)=(.+)', raw, re.ASCII)
+        before, before_significant = previous, significant
+        previous = raw
+        significant = significant if raw == '\n' else raw
+        after = [token[0] for token in tokens[index + 1:index + 3]]
+        # A list item that always runs, ends before the next command, and stays in this shell;
+        # a newline after `|`, `||` or `&&` continues that list.
+        if (not binding or binding[1] in SHELL_SPECIAL_NAMES or re.match(r'(?:BASH|EPOCH|ZSH)', binding[1])
+                or before is not None and not (before == ';' or before == '\n' and before_significant not in {'|', '&'})
+                or not (not after or after[0] in {';', '\n'} or after == ['&', '&'])):
+            continue
+        value, quote = binding[2], ''
+        if home_changes and re.match(r'["\']?(?:~|\$\{?(?:HOME|PWD))', value):
+            continue
+        if len(value) > 1 and value[0] == value[-1] and value[0] in '"\'':
+            value, quote = value[1:-1], value[0]
+        base = None
+        if quote != "'":
+            # The prefix counts only before a slash or at the end; `${PWD}-x` names a sibling.
+            prefix = re.match(r'\$(?:\{(HOME|PWD)\}|(HOME|PWD)(?!\w))(?=/|$)', value, re.ASCII)
+            if prefix:
+                base = os.environ.get('HOME', '') if (prefix[1] or prefix[2]) == 'HOME' else cwd
+                value = value[prefix.end():]
+            elif not quote and (value == '~' or value.startswith('~/')):
+                base, value = os.environ.get('HOME', ''), value[1:]
+        # Only an absolute path names the same file for a command name lookup and after a wrapper changes directory.
+        # The HOME or working directory may hold spaces; it goes back inside double quotes, which keep it one word.
+        if base is None:
+            if not LITERAL_VALUE.fullmatch(value) or not value.startswith('/'):
+                continue
+        elif (not base.startswith('/') or re.search(r'["$`\\\n]', base)
+                or value and not LITERAL_VALUE.fullmatch(value)):
+            continue
+        else:
+            value = base + value
+        name = binding[1]
+        use = rf'\$(?:{name}(?!\w)|\{{{name}\}})'
+        # Any other mention, such as a use before the binding, `read`, `unset` or a second binding, drops the name.
+        rest = re.sub(r'[\'"\\]', '', re.sub(use, ' ', command[end:]))
+        if name not in bindings and not re.search(rf'(?<!\w){name}(?!\w)', re.sub(r'[\'"\\]', '', command[:start]) + ' ' + rest):
+            bindings[name] = (value, end)
+        else:
+            bindings[name] = None
+    bindings = {name: bound for name, bound in bindings.items() if bound}
+    if not bindings:
+        return command
+    # Only a plain command list takes a rewrite. Every command word is a listed program, a binding or a bound use.
+    # Past the bound uses there is no expansion, grouping, glob, comment, escape or redirect except `2>&1`,
+    # and no quoted word holds whitespace.
+    names = '|'.join(bindings)
+    plain = re.sub(rf'\$(?:\{{(?:{names}|HOME|PWD)\}}|(?:{names}|HOME|PWD)(?!\w))', '', command).replace('2>&1', '')
+    if (re.search(r'[$`{}()<>#\\!*?\[\]]', plain) or any(char.isspace() and char not in ' \t\n' for char in command)
+            or any(re.search(r'\s', value) for raw, value, _, _ in tokens if raw != '\n')
+            or any(start in positions and value not in PLAIN_PROGRAMS and not SHELL_ASSIGNMENT.match(raw)
+                   and not re.fullmatch(rf'"\$(?:{names}|\{{(?:{names})\}})"', raw) for raw, value, start, _ in tokens)):
+        return command
+    # One pass over the original words, so no rewrite can form or hide another use; comments are not words.
+    kept, cursor = [], 0
+    for raw, _, start, end in tokens:
+        kept.append(command[cursor:start])
+        quote, index = '', 0
+        while index < len(raw):
+            char = raw[index]
+            if char == '\\' and quote != "'":
+                kept.append(raw[index:index + 2])
+                index += 2
+                continue
+            if char in '\'"' and quote in ('', char):
+                quote = '' if quote else char
+            elif char == '$' and quote == '"':
+                use = re.match(r'\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})', raw[index:], re.ASCII)
+                bound = use and bindings.get(use[1] or use[2])
+                # zsh reads a following `[` as a subscript and `:` as a modifier, so those uses stay unresolved.
+                if bound and start + index > bound[1] and raw[index + use.end():index + use.end() + 1] not in ('[', ':'):
+                    kept.append(bound[0])
+                    index += use.end()
+                    continue
+            kept.append(char)
+            index += 1
+        cursor = end
+    return ''.join(kept) + command[cursor:]
+
+
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                    'Report the blocked scope to the driver.')
 ACCOUNT_CUSTODY = ('Use the exact Stop command for your session (account custody rule). '
@@ -5003,6 +5152,7 @@ def receipt_custody(data, read_search=False):
 
     # Folders that a `cd` or `pushd` in the command can enter; a relative word resolves against each of them too.
     cd_bases = []
+    cwd_path = os.path.abspath(data.get('cwd') or os.getcwd())
 
     def resolved(value):
         found = set()
@@ -5033,6 +5183,14 @@ def receipt_custody(data, read_search=False):
                        and (not state_only or any(candidate == root or candidate.startswith(root + '/')
                                                   for root in state_paths)))
                    for candidate in resolved(value) for store in stores)
+
+    def plain_reader(command):
+        """Plain readers whose operands, read recursively or not, stay outside the stores and their ancestors."""
+        if not reads_data_only(command):
+            return False
+        # `grep -r` with no file operand searches the working directory.
+        return not receipt_path(cwd_path, ancestors=True) and not any(
+            receipt_path(word, ancestors=True) for _, word, _, _ in shell_raw_words(command) if word and not word.startswith('-'))
 
     def strings(value):
         if isinstance(value, str):
@@ -5110,7 +5268,7 @@ def receipt_custody(data, read_search=False):
                 cache_path = (config / 'plugins/cache/ultraship/ship').absolute()
                 cache = cache_path.resolve()
                 cwd = Path(data.get('cwd') or os.getcwd())
-                pending, seen = [joined], set()
+                pending, seen = [joined, literal_bindings_resolved(joined, cwd_path)], set()
                 while pending:
                     text = shell_without_heredoc_bodies(pending.pop())
                     if text in seen:
@@ -5349,7 +5507,8 @@ def receipt_custody(data, read_search=False):
                     first == 'df' or read_only_git(words, [raw for raw, _, _, _ in parts], ending))
 
             comment = pr_comment_body_removed(raw)
-            custody_source = path_command if data_match else joined if comment == raw else comment
+            custody_source = literal_bindings_resolved(path_command if data_match else joined if comment == raw else comment,
+                                                       cwd_path)
             cache_operand = cache_listing[1] if cache_listing else None
             try:
                 masked_source = cat_heredoc_data(custody_source)
@@ -5856,7 +6015,7 @@ def receipt_custody(data, read_search=False):
 
         if (receipt_text(path_command)
                 or ('ledger.py' in account_command and 'account-auto' in account_command
-                    and not own_account_call(data, raw))
+                    and not own_account_call(data, raw) and not plain_reader(raw))
                 or any(receipt_path(word) for word in words)
                 or ancestor_operand()
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
@@ -5869,10 +6028,8 @@ def receipt_custody(data, read_search=False):
                        and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
                             or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
                        for word in raw_words)
-                # A literal text search starts no program, and an inert note body is file text.
-                or ('text_lint' in code_text and not (
-                    literal_search_shell(raw) and raw.split()[0] == 'grep'
-                    and '&&' not in raw.split() and not any(char.isspace() and char not in ' \t\n' for char in raw))
+                # A plain reader starts no program, and an inert note body is file text.
+                or ('text_lint' in code_text and not plain_reader(raw)
                     and (re.search(r'text_lint(\.py)?\s+hook\b', code_text) or any(token in code_text for token in
                          ('import', 'run_path', 'import_module', '__import__', 'spec_from_file_location', 'exec('))))
                 or receipt_path(data.get('cwd') or os.getcwd(), ancestors=True, state_only=True)):

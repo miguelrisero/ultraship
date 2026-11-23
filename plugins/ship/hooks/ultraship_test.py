@@ -1226,7 +1226,9 @@ class ReceiptCustodyTests(unittest.TestCase):
         commands = ("grep -rn 'Only the text_lint hook reads or writes refusal receipts (custody rule).' .",
                     "grep -n 'text_lint.py hook' file.py",
                     "grep -rn 'import text_lint' .",
-                    "grep -rn 'text_lint hook' sub")
+                    "grep -rn 'text_lint hook' sub",
+                    "grep -rn 'a && b text_lint hook' .",
+                    "grep -rln 'text_lint hook' ~/.claude/plugins/cache 2>/dev/null | head -20")
         for caller in ('', 'ship:driver', 'ship:writer--sol'):
             for command in commands:
                 with self.subTest(caller=caller, command=command):
@@ -1236,6 +1238,71 @@ class ReceiptCustodyTests(unittest.TestCase):
                             {'cwd': str(self.cwd), 'agent_type': caller, 'tool_name': 'Bash',
                              'tool_input': {'command': command}}))
                     self.assertEqual(output.getvalue(), '')
+
+    def test_lane_commands_with_custody_words_and_literal_variables_are_allowed(self):
+        receipts = '.scratch/coc/receipts'
+        # A binding resolves only to an absolute path; `$PWD` gives one.
+        bound = '$PWD/.scratch/coc/receipts'
+        commands = (
+            f"grep -rln {shlex.quote(ultraship.RECEIPT_CUSTODY)} ~/.claude/plugins/cache 2>/dev/null | head -20",
+            f'L={bound}/teams-scoped-tests.sh; bash -n "$L" && sha256sum "$L"',
+            'UV="$PWD/.scratch/uv-0.12.7/bin/uv"; python3 -m pip install --target .scratch/uv-0.12.7'
+            ' .scratch/wheels/uv-0.12.7-py3-none-manylinux_2_17_x86_64.whl && "$UV" --version',
+            f'LAUNCH={bound}/credit-replay.sh\nbash -n "$LAUNCH" && bash "$LAUNCH" 2>&1 | tail -20',
+            f'H="{bound}/format_recovery.py"\npython3 "$H" {receipts}/recovery.json',
+            f'tail -20 {receipts}/ledger.py-account-auto.txt',
+        )
+        for caller in ('', 'ship:driver--sol'):
+            for command in commands:
+                with self.subTest(caller=caller, command=command):
+                    self.assert_account_command_allowed(command, caller=caller)
+
+    def test_literal_variables_keep_store_ledger_and_hook_refusals(self):
+        (self.cwd / 'hook-alias').symlink_to(HOOK)
+        (self.cwd / 'ledger.py').symlink_to(LEDGER)
+        store = shlex.quote(str(self.store))
+        grants = shlex.quote(str(self.ledger.grant_store().parent.parent.parent))
+        for command in (f'S={store}; cat "$S"/key', f'S={store}; echo forged > "$S/key"',
+                        'L="$PWD/ledger.py"; python3 "$L" account-auto pending.tsv',
+                        'H=./hook-alias; python3 "$H" pre', 'H="$PWD/hook-alias"; python3 "$H" pre',
+                        'H="$PWD/hook-alias"; "$H" pre', 'H=./hook-alias; env -C . python3 "$H" pre',
+                        'A=./hook-; B=alias; python3 "$A$B" pre',
+                        f'D={grants}; rm -rf "$D"', 'D=~/.local; rm -rf "$D"'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+        self.assert_account_custody_denial('L="$PWD/ledger.py"; python3 "$L" account pending.tsv x')
+
+    def test_only_a_binding_that_always_runs_first_resolves_a_variable(self):
+        for command in ('true && H=./x.py; python3 "$H"', 'true ||\nH=./x.py; python3 "$H"', 'python3 "$H"; H=./x.py',
+                        'H=./x.py python3 "$H"', 'H=./a.py; H=./b.py; python3 "$H"', 'H=./x.py & python3 "$H"',
+                        'H=./x.py | python3 "$H"', 'H=$(echo ./x.py); python3 "$H"', 'H=./x*.py; python3 "$H"',
+                        'IFS=/; python3 "$IFS"', 'if true; then H=./x.py; fi; python3 "$H"',
+                        'export H=./x.py; python3 "$H"', "cat <<'EOF'\nH=./x.py\nEOF\npython3 \"$H\"",
+                        'H=./x.py; python3 "${H:-y}"', 'H=./x.py; python3 $H', 'H=./x.py; python3 "$H[1,-2]"',
+                        'H=./x.py; python3 "$H:h"', 'H=./x.py; cd sub; python3 "$H"',
+                        "H=./x.py; c'd' sub; python3 \"$H\"", 'HOME=/tmp; H=~/x.py; python3 "$H"',
+                        'H="${PWD}-x/a.py"; python3 "$H"', '. ./env.sh; H=./x.py; python3 "$H"',
+                        'source ./env.sh; H=./x.py; python3 "$H"',
+                        'PWD=/tmp; H="$PWD/a.py"; python3 "$H"', 'H=alias; "$H" x',
+                        'chdir /tmp; H="$PWD/a.py"; python3 "$H"', 'H=/a.py; python3 "$$H"',
+                        'a=F; FO=/ok.py; declare "${a}O=/x.py"; python3 "$FO"', 'repeat 0 { H=/a.py; }; python3 "$H"',
+                        'H=/a.py; python3 "${${H}:t}"', 'H=/a.py\x0b; python3 "$H"', 'H=/a.py; bash -c "cat $H"',
+                        'RANDOM=/a.py; python3 "$RANDOM"', 'H=/a.py # note\npython3 "$H"',
+                        'for f in ./a.sh; do bash "$f"; done', 'bash -n "$f"'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+
+    def test_text_lint_and_ledger_words_reach_a_program_only_through_readers(self):
+        for command in ("grep 'text_lint hook' notes.md | sh", "grep 'text_lint hook' notes.md | xargs python3",
+                        "rg --pre=python3 'text_lint hook' .", "rg {--pre=python3,x} 'text_lint hook' .",
+                        "grep 'text_lint hook' *", 'grep -rn "text_lint hook $(date)" .',
+                        "printf -v 'a[1]' 'text_lint hook'", "grep 'text_lint hook' x >'./out'/dev/null",
+                        "cat ledger.py-account-auto.txt | python3 -", "echo 'import text_lint' | python3 -",
+                        "LD_PRELOAD=./x.so grep 'text_lint hook' .", "grep 'text_lint hook' . || python3 -",
+                        "grep -R 'text_lint hook' .", "grep -rR 'text_lint hook' .",
+                        "grep x notes.md # note \\\npython3 text_lint.py hook", "grep 'x' notes.md #text_lint hook"):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
     def test_scratch_append_with_custody_message(self):
         self.assert_account_command_allowed(
@@ -1263,6 +1330,26 @@ class ReceiptCustodyTests(unittest.TestCase):
         installed.parent.mkdir(parents=True)
         with patch.object(ultraship, '__file__', str(installed)):
             self.assert_account_command_allowed('ls -d ~/.claude/plugins/cache/ultraship/ship/*', caller='')
+
+    def test_reader_in_a_folder_that_holds_a_store_keeps_its_refusal(self):
+        self.store.mkdir(parents=True)
+        for command in ("grep -rn 'text_lint hook' | head", "grep -rn 'text_lint hook' ."):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'cwd': str(self.store.parent.parent), 'tool_name': 'Bash',
+                                            'tool_input': {'command': command}})
+
+    def test_a_binding_under_a_working_directory_with_spaces_resolves(self):
+        spaced = self.cwd / 'with spaces'
+        spaced.mkdir()
+        (spaced / 'hook-alias').symlink_to(HOOK)
+        command = 'L="$PWD/.scratch/coc/receipts/teams-scoped-tests.sh"; bash -n "$L" && sha256sum "$L"'
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertIsNone(ultraship.guarded_pre({'cwd': str(spaced), 'agent_type': '', 'tool_name': 'Bash',
+                                                     'tool_input': {'command': command}}))
+        self.assertEqual(output.getvalue(), '')
+        self.assert_custody_denial({'cwd': str(spaced), 'tool_name': 'Bash',
+                                    'tool_input': {'command': 'H="$PWD/hook-alias"; python3 "$H" pre'}})
 
     def test_print_state_root(self):
         self.assert_account_command_allowed("printf '%s\\n' \"${XDG_STATE_HOME:-$HOME/.local/state}\"", caller='')
@@ -1300,7 +1387,6 @@ class ReceiptCustodyTests(unittest.TestCase):
                     "cd sub && grep -rn 'text_lint hook' .",
                     "find . -name x && grep -rn 'text_lint hook' .",
                     "grep -rn 'text_lint hook' . && ls .",
-                    "grep -rn 'a && b text_lint hook' .",
                     'ls text_lint.py hook',
                     "find . -name 'text_lint hook'",
                     'grep\xa0/usr/bin/python3 ' + script + ' hook',
