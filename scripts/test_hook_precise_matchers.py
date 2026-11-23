@@ -27,6 +27,9 @@ class PreciseMatcherTests(unittest.TestCase):
         self.enterContext(patch.dict(os.environ, {'HOME': str(self.home)}))
         os.environ.pop('XDG_STATE_HOME', None)
         os.environ.pop('CDPATH', None)
+        # The cases name these variables; a value exported by the runner must not change them.
+        for name in ('TMPFILE', 'LOG', 'f', 'dir', 'BR', 'D', 'p', 'P', 'ID', 'N', 'W', 'T', 'Q', 'PR', 'U'):
+            os.environ.pop(name, None)
         self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(self.home))))
         self.enterContext(patch.object(ultraship, 'STATE', self.home / '.local/state/ultraship'))
 
@@ -176,7 +179,10 @@ class PreciseMatcherTests(unittest.TestCase):
         installed = self.home / '.claude/plugins/cache/x/ship/1/hooks/ultraship.py'
         with patch.object(ultraship, '__file__', str(installed)):
             for command in ("sed -i 's/^/#/' ~/.claude/plugins/cache/*/ship/*/hooks/u*.py",
-                            'cp ~/.claude/plugins/cache/*/ship/*/hooks/u*.py z.py && python3 z.py pre'):
+                            'cp ~/.claude/plugins/cache/*/ship/*/hooks/u*.py z.py && python3 z.py pre',
+                            'h=$(ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py); cp /tmp/evil.py "$h"',
+                            'sed -i s/a/b/ $(ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py)',
+                            'h=$(ls -d ~/.claude/plugins/cache/*/ship/*/hooks); cp /tmp/e "$h/"'):
                 with self.subTest(command=command):
                     self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
             self.assert_allowed('ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py', advisory=True)
@@ -205,7 +211,8 @@ class PreciseMatcherTests(unittest.TestCase):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
         self.assert_allowed('ls -la ~/.local/state')
         # du shows sizes and find without an action shows names, as main admits.
-        for command in ('find ~/.local -type f', 'find ~ -name foo.txt', 'du -sh ~'):
+        for command in ('find ~/.local -type f', 'find ~ -name foo.txt', 'du -sh ~', "find ~ -name '*.md' -print",
+                        'find ~ -type d -name node_modules -prune', "find ~ -maxdepth 1 -printf '%f\\n'"):
             with self.subTest(command=command):
                 self.assert_allowed(command)
 
@@ -360,7 +367,11 @@ class PreciseMatcherTests(unittest.TestCase):
                         f'{pieces}; printf "-v" d %s .local; cat ~/$d/$s/$u$v/$t/x',
                         f'{pieces}; "printf" -v d %s .local; cat ~/$d/$s/$u$v/$t/x',
                         f'{pieces}; n=d; printf -v "$n" %s .local; cat ~/$d/$s/$u$v/$t/x',
-                        f'{pieces}; cd ~/.local && cat ~+/$s/$u$v/$t/x'):
+                        f'{pieces}; cd ~/.local && cat ~+/$s/$u$v/$t/x',
+                        f'{pieces}; d=.local; echo x > ~/$d/$s/$u$v/$t/x # printf -v',
+                        f'{pieces}; d=.local; printf -v z %s q; echo x >> ~/$d/$s/$u$v/$t/x',
+                        f'{pieces}; printf -v d %s .local; echo x >> ~/$d/$s/$u$v/$t/x',
+                        f"{pieces}; d=.loc'al'; echo x > ~/$d/$s/$u$v/$t/x"):
             with self.subTest(command=command):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
 

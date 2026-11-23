@@ -5370,7 +5370,7 @@ def receipt_custody(data, read_search=False):
                                     custody_source)
                 prefix = literal and re.match(r'[ \t]+(?![;&|\n]|[A-Za-z_]\w*\+?=)\S', custody_source[literal.end():])
                 if (depth > 4 or len(bindings) != 1 or not literal or literal.start() > before or prefix
-                        or other_binding(name) or printf_v):
+                        or other_binding(name) or printf_unknown or name in printf_names):
                     return None
                 value = literal[1][1:-1] if literal[1].startswith('"') else literal[1]
                 names = re.findall(r'\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))', value)
@@ -5390,12 +5390,14 @@ def receipt_custody(data, read_search=False):
                                  rf'|printf[ \t]+(?:-[^v\s]+[ \t]+)*-v[ \t]*[\'"]?{name}\b|\$\{{{name}:?=', custody_source)
 
             unquoted = re.sub(r'[\'"\\]', '', custody_source)
-            printf_v = re.search(r'printf\b[^;&|\n]*?(?<![\w-])-v', unquoted)
+            printf_targets = re.findall(r'printf\b[^;&|\n]*?(?<![\w-])-v[ \t]*(\S*)', unquoted)
+            printf_names = {target for target in printf_targets if re.fullmatch(r'[A-Za-z_]\w*', target)}
+            printf_unknown = len(printf_names) < len(set(printf_targets))
             # A command that sets HOME again changes `~` and `$HOME`, so the scan cannot resolve them there.
             # `HOME="$HOME"` keeps the value, as `env -i` callers write it.
             if (re.search(r'(?:^|[;&|\s(\'"])HOME(?:\+=|=(?!"?\$\{?HOME\}?"?(?:[\s;&|)]|$)))|(?:^|[;&|\s(])(?:read|export|declare|local|typeset|readonly|unset'
                           r'|mapfile|readarray|getopts|for|select)[ \t][^;&|\n]*?(?<![$\w{])HOME\b(?!\})'
-                          r'|-v[ \t]*[\'"]?HOME\b', custody_source) or printf_v and re.search(r'-v[ \t]*HOME\b', unquoted)) and re.search(
+                          r'|-v[ \t]*[\'"]?HOME\b', custody_source) or 'HOME' in printf_names) and re.search(
                     r'~|\$\{?HOME\b', custody_source):
                 return 'hard'
             # The shell sets these itself, so the hook's own value says nothing about the command's value.
@@ -5469,7 +5471,7 @@ def receipt_custody(data, read_search=False):
                     # assignment or a prefix assignment, may spell a store path; so may printf -v.
                     literal_binding = re.search(rf'(?:^|[;&|\s(\'"]){name}\+?=(?:"[^"$`]*"|\'[^\']*\'|[^\s;&|()$`\'"])*'
                                                 r'(?=[\s;&|()]|$)', custody_source)
-                    if (name in unprovable or printf_v or literal_binding or re.search(rf'\$\{{{name}:?=', custody_source)
+                    if (name in unprovable or printf_unknown or name in printf_names or literal_binding or re.search(rf'\$\{{{name}:?=', custody_source)
                             or value is not None and receipt_path(value, ancestors=True, stores=receipt_paths | grant_paths)):
                         return 'hard'
                     # A name the command never binds and the environment lacks is empty, as main treats it.
@@ -5549,7 +5551,7 @@ def receipt_custody(data, read_search=False):
             # `$(<file)` reads a file with no program word, so an unresolved file there is unknown text.
             if re.search(r'\$\(\s*<\s*["\']?[^\s)]*[$`]', custody_source):
                 verdict = 'soft'
-            module_word = False
+            module_word = hook_glob = writes = False
             try:
                 while pending:
                     source = pending.pop()
@@ -5588,6 +5590,7 @@ def receipt_custody(data, read_search=False):
                                              for index, (_, word, start, _) in enumerate(executable) if start in positions)
                                       or any(word.partition('=')[0] in program_options.get(command, ())
                                              for command in commands for _, word, _, _ in tokens))
+                    writes = writes or modifies_paths
                     changes_dir = re.search(r'(?:^|[;&|(\s])(?:cd|pushd)(?=\s|$)', text) is not None
                     data_segment, listing, recursive, opaque, reader, segment = [], [], [], [], [], []
                     git_values, file_values = set(), set()
@@ -5611,7 +5614,7 @@ def receipt_custody(data, read_search=False):
                                 r'|-\w*a\w*|--archive' if name in {'cp', 'rsync', 'scp'} else '')
                             enters = (name in {'rg', 'tar', 'zip', '7z', 'rsync', 'tree', 'ag', 'ack', 'ugrep', 'fd'}
                                       or name == 'find' and any(word in find_actions for _, word, _, _ in segment)
-                                      or any(re.fullmatch(flags, word)
+                                      or name != 'find' and any(re.fullmatch(flags, word)
                                              or (letters and re.match(rf'-[^-]*[{letters}]', word))
                                              or (prefixes and re.match(rf'--[{prefixes}]', word))
                                              for _, word, _, _ in segment))
@@ -5776,6 +5779,8 @@ def receipt_custody(data, read_search=False):
                             if unknown == 'hard' or word_start in file_values and re.search(r'[$`]', raw_word):
                                 return 'hard'
                             verdict = verdict or unknown
+                        if index and tokens[index - 1][0] in {'>', '<'} and run_time_word(raw_word) == 'hard':
+                            return 'hard'
                         paths = [word]
                         attached = word.partition('=')[2]
                         if attached:
@@ -5806,6 +5811,7 @@ def receipt_custody(data, read_search=False):
                                     or globbed and not listing[index] and glob_prefix(path, stores={hook_folder})
                                     or (modifies_paths and installed_hook in resolved(path))):
                                 return 'hard'
+                            hook_glob = hook_glob or globbed and glob_prefix(path, stores={hook_folder})
                             if ((globbed and glob_prefix(path, stores={hook_folder}))
                                     or (index != evidence_index and (
                                         # The module name matters only where an interpreter could import it.
@@ -5822,7 +5828,7 @@ def receipt_custody(data, read_search=False):
             except (OSError, RuntimeError, ValueError):
                 return unread()
             # Main denies the bare module name anywhere; an unresolved command keeps that denial.
-            return 'hard' if verdict and (mentions_hook or module_word) else verdict
+            return 'hard' if verdict and (mentions_hook or module_word or hook_glob and writes) else verdict
 
         try:
             code_text = normalized(cat_heredoc_data(path_command))
