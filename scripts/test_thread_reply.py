@@ -283,9 +283,12 @@ class HelperTests(unittest.TestCase):
         return (words + (['-f', 'body=' + body] if body is not None else [])
                 + (['-f', 'after=' + after] if after is not None else []))
 
-    def run_helper(self, responses, action='reply', pr=PR, thread=THREAD, body='@done\nEvidence: café'):
+    def run_helper(self, responses, action='reply', pr=PR, thread=THREAD, body='@done\nEvidence: café', draft=None):
         with tempfile.TemporaryDirectory() as directory:
-            folder = Path(directory)
+            folder = Path(directory).resolve()
+            cwd = folder / 'workspace' / 'repo'
+            scratch = cwd / '.scratch'
+            scratch.mkdir(parents=True)
             stub = folder / 'gh'
             stub.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
 from pathlib import Path
@@ -304,17 +307,92 @@ sys.exit(response['code'])
             canned = folder / 'responses.json'
             canned.write_text(json.dumps([{'stdout': value if isinstance(value, str) else json.dumps(value),
                                           'code': code} for value, code in responses]))
-            body_file = folder / 'body.txt'
+            body_file = scratch / 'body.txt'
             body_file.write_text(body, encoding='utf-8')
-            arguments = [sys.executable, str(HELPER), action, pr, thread]
+            arguments = [sys.executable, '-B', str(HELPER), action, pr, thread]
             if action == 'reply':
-                arguments.append(str(body_file))
-            result = subprocess.run(arguments, text=True, capture_output=True, cwd=directory,
+                arguments.append(str(draft(cwd, body_file) if draft else body_file))
+            result = subprocess.run(arguments, text=True, capture_output=True, cwd=cwd, timeout=5,
                                     env={**os.environ, 'PATH': directory, 'GH_TEST_LOG': str(log),
                                          'GH_TEST_RESPONSES': str(canned)})
             calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
-            self.assertFalse((folder / SENTINEL_FILE).exists())
+            self.assertFalse((cwd / SENTINEL_FILE).exists())
             return result, calls
+
+    def test_reply_accepts_a_draft_in_either_scratch_tree(self):
+        def parent_draft(cwd, source):
+            target = cwd.parent / '.scratch/runs/body.txt'
+            target.parent.mkdir(parents=True)
+            target.write_bytes(source.read_bytes())
+            return '../.scratch/runs/body.txt'
+
+        body = 'é' * 32768
+        responses = [(self.lookup(), 0), ({'data': {
+            'addPullRequestReviewThreadReply': {'comment': {'url': COMMENT}}}}, 0)]
+        for draft in (lambda cwd, source: source.relative_to(cwd), parent_draft):
+            result, calls = self.run_helper(responses, body=body, draft=draft)
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, COMMENT + '\n', ''))
+            self.assertEqual(calls, [self.call(LOOKUP), self.call(REPLY, body)])
+
+    def test_reply_refuses_unsafe_drafts_before_github_access(self):
+        def make_draft(cwd, source, kind):
+            target = source.with_name('synthetic.txt')
+            if kind == 'outside':
+                target = cwd / target.name
+                target.write_text('synthetic draft', encoding='utf-8')
+            elif kind == 'traversal':
+                return '.scratch/../.scratch/body.txt'
+            elif kind == 'ancestor':
+                target = cwd.parent.parent / '.scratch' / target.name
+                target.parent.mkdir()
+                target.write_text('synthetic draft', encoding='utf-8')
+            elif kind == 'final link':
+                target.symlink_to(source)
+            elif kind == 'directory link':
+                target.symlink_to(source.parent, target_is_directory=True)
+                target /= source.name
+            elif kind == 'cwd alias':
+                alias = cwd.parent / 'alias'
+                alias.symlink_to(cwd, target_is_directory=True)
+                target = alias / source.relative_to(cwd)
+            elif kind == 'scratch link':
+                scratch = source.parent
+                moved = scratch.rename(scratch.with_name('other'))
+                scratch.symlink_to(moved, target_is_directory=True)
+                target = source
+            elif kind == 'hard link':
+                os.link(source, target)
+            elif kind == 'directory':
+                target.mkdir()
+            elif kind == 'fifo':
+                os.mkfifo(target)
+            elif kind == 'oversize':
+                target.write_bytes(b'x' * 65537)
+            elif kind == 'encoding':
+                target.write_bytes(b'\xff')
+            return target
+
+        for kind in ('outside', 'traversal', 'ancestor', 'final link', 'directory link', 'cwd alias',
+                     'scratch link', 'hard link', 'directory', 'fifo', 'oversize', 'encoding'):
+            with self.subTest(kind=kind):
+                result, calls = self.run_helper([], draft=lambda cwd, source: make_draft(cwd, source, kind))
+                self.assertEqual((result.returncode, result.stdout, calls), (2, '', []))
+                self.assertTrue(result.stderr.startswith('refused: '), result.stderr)
+                self.assertNotIn('synthetic.txt', result.stderr)
+
+    def test_reply_checks_open_file_owner_and_caps_the_read(self):
+        with tempfile.TemporaryDirectory() as directory, contextlib.chdir(directory):
+            draft = Path('.scratch/body.txt')
+            draft.parent.mkdir()
+            draft.write_bytes(b'x' * 65537)
+            info = draft.stat()
+            cases = ((info.st_uid + 1, 'owned by the current user'),
+                     (info.st_uid, 'exceeds 64 KiB'))
+            for owner, reason in cases:
+                with self.subTest(reason=reason), patch.object(page_helper.os, 'fstat', return_value=Mock(
+                        st_uid=owner, st_mode=info.st_mode, st_nlink=info.st_nlink, st_size=1)):
+                    with self.assertRaisesRegex(ValueError, reason):
+                        page_helper.read_reply_body(str(draft))
 
     def test_reply_checks_ownership_before_sending_raw_body(self):
         body = '@done\nEvidence: café'
@@ -1161,18 +1239,48 @@ class HookTests(unittest.TestCase):
         text = output.getvalue()
         return json.loads(text)['hookSpecificOutput'] if text else {}
 
+    @patch.dict(os.environ, {'CLAUDE_SKILL_DIR': str(HELPER.parent.parent)})
     def test_documented_read_command_is_admitted_for_main_and_driver(self):
         command = 'python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" read https://github.com/o/r/pull/7 PRRT_kwDOabc'
         for agent_type in ('ship:driver', ''):
             with self.subTest(agent_type=agent_type):
                 self.assertEqual(self.decision(command, agent_type), {})
 
+    @patch.dict(os.environ, {'CLAUDE_SKILL_DIR': str(HELPER.parent.parent)})
     def test_fixed_page_action_is_admitted_for_main_and_driver(self):
-        for cursor in ('', ' cursor/+==', " '@cursor/+=='"):
+        for cursor in ('', ' cursor/+==', " '@cursor/+=='", " 'cursor:opaque/+=='", ' "cursor:opaque/+=="'):
             command = 'python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" page 7' + cursor
             for caller in ('', 'ship:driver'):
                 with self.subTest(cursor=cursor, caller=caller):
                     self.assertEqual(self.decision(command, caller), {})
+
+    @patch.dict(os.environ, {'CLAUDE_SKILL_DIR': str(HELPER.parent.parent)})
+    def test_page_cursor_keeps_expansions_and_compound_forms_refused(self):
+        command = 'python3 "${CLAUDE_SKILL_DIR}/scripts/thread_reply.py" page 7 '
+        cases = ('"$CURSOR"', '"$(printf x)"', '`printf x`', 'cursor:*', 'cursor:{a,b}', '=printf',
+                 "'cursor:'opaque", "'cursor:opaque/+==' extra", "'cursor:opaque/+==' > output.txt",
+                 "'cursor:opaque/+==' && true", "'cursor:opaque/+=='\ntrue")
+        for caller in ('', 'ship:driver'):
+            for suffix in cases:
+                with self.subTest(suffix=suffix, caller=caller):
+                    self.assert_guarded(self.decision(command + suffix, caller))
+
+    def test_documented_reply_command_is_admitted_for_main_and_driver(self):
+        command = f'python3 "${{CLAUDE_SKILL_DIR}}/scripts/thread_reply.py" reply {PR} {THREAD} "/work/lane/.scratch/reply body.md"'
+        with patch.dict(os.environ, {'CLAUDE_SKILL_DIR': str(HELPER.parent.parent)}):
+            for caller in ('', 'ship:driver'):
+                with self.subTest(caller=caller):
+                    self.assertEqual(self.decision(command, caller), {})
+
+    def test_harness_review_helper_rejects_an_unverified_skill_root(self):
+        command = f'python3 "${{CLAUDE_SKILL_DIR}}/scripts/thread_reply.py" read {PR} {THREAD}'
+        for root in ('', str(HELPER.parent.parent.parent / 'ship')):
+            with self.subTest(root=root), patch.dict(os.environ, {'CLAUDE_SKILL_DIR': root}):
+                self.assert_guarded(self.decision(command, ''))
+        with patch.dict(os.environ, {'CLAUDE_SKILL_DIR': str(HELPER.parent.parent)}):
+            for candidate in (f'{command} > output.txt', f'{command}; printf "%s" done'):
+                with self.subTest(candidate=candidate):
+                    self.assert_guarded(self.decision(candidate, ''))
 
     def test_refuse_forms_for_every_caller(self):
         for agent_type in ('', 'ship:driver', 'ship:writer--sol'):
@@ -1215,6 +1323,7 @@ class HookTests(unittest.TestCase):
                 if not caller:
                     self.assertIn('If the brief names no superior, report it here.', reason)
 
+    @patch.dict(os.environ, {'CLAUDE_SKILL_DIR': str(HELPER.parent.parent)})
     def test_admit_forms_for_main_and_driver(self):
         for agent_type in ('', 'ship:driver'):
             for command in ADMIT:

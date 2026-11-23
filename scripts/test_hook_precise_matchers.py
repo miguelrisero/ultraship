@@ -28,7 +28,8 @@ class PreciseMatcherTests(unittest.TestCase):
         os.environ.pop('XDG_STATE_HOME', None)
         os.environ.pop('CDPATH', None)
         # The cases name these variables; a value exported by the runner must not change them.
-        for name in ('TMPFILE', 'LOG', 'f', 'dir', 'BR', 'D', 'p', 'P', 'ID', 'N', 'W', 'T', 'Q', 'PR', 'U'):
+        for name in ('TMPFILE', 'LOG', 'f', 'dir', 'BR', 'D', 'p', 'P', 'ID', 'N', 'W', 'T', 'Q', 'PR', 'U',
+                     'F', 'source_dir', 'pinned_script', 'snapshot'):
             os.environ.pop(name, None)
         self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(self.home))))
         self.enterContext(patch.object(ultraship, 'STATE', self.home / '.local/state/ultraship'))
@@ -400,6 +401,111 @@ class PreciseMatcherTests(unittest.TestCase):
                         'cd sub && cat "$PWD/o"', 'printf -v out %s.log; make > "$out"'):
             with self.subTest(command=command):
                 self.assert_not_denied(command)
+
+    def test_browser_image_check_requires_a_complete_managed_invocation(self):
+        short_tmp = self.home / ('bc-' + '1' * 32)
+        short_tmp.mkdir()
+        browser = '/usr/local/bin/agent-browser'
+        timeout = '/usr/bin/timeout'
+        expression = '"JSON.stringify([...document.images].map(i=>i.naturalWidth))"'
+        command = (f'T={short_tmp}; cd $T && {timeout} 60 {browser} open '
+                   f'"file://$T/pptx_check.html" >/dev/null 2>&1; {timeout} 30 {browser} eval '
+                   f'{expression} 2>&1 | tail -1; {timeout} 20 {browser} close >/dev/null 2>&1')
+        for agent_type in ('', 'ship:driver'):
+            with self.subTest(agent_type=agent_type):
+                with patch.object(ultraship, 'trusted_executable', side_effect={browser, timeout}.__contains__):
+                    self.assert_not_denied(command, agent_type)
+                    self.assert_denied(command.replace(browser, 'agent-browser'), agent_type)
+                    self.assert_denied(command.replace(timeout, 'timeout'), agent_type)
+                    self.assert_denied(command.replace(expression, f'{expression} extra'), agent_type)
+                    self.assert_denied(command.replace(expression, f'{expression} '), agent_type)
+                for untrusted in (browser, timeout):
+                    with self.subTest(untrusted=untrusted), patch.object(
+                            ultraship, 'trusted_executable', side_effect=lambda path: path != untrusted):
+                        self.assert_denied(command, agent_type)
+
+    def test_managed_executable_checks_file_and_each_parent(self):
+        executable = Path('/managed/bin/probe')
+        stats = {entry: SimpleNamespace(st_uid=0, st_mode=0o40755) for entry in executable.parents}
+        stats[executable] = SimpleNamespace(st_uid=0, st_mode=0o100755)
+        with patch.object(Path, 'lstat', autospec=True, side_effect=stats.__getitem__):
+            self.assertTrue(ultraship.trusted_executable(str(executable)))
+            for entry in stats:
+                original = stats[entry]
+                for owner, mode in ((1, original.st_mode), (0, original.st_mode | 0o020),
+                                    (0, original.st_mode | 0o002), (0, 0o120755)):
+                    with self.subTest(entry=entry, owner=owner, mode=mode):
+                        stats[entry] = SimpleNamespace(st_uid=owner, st_mode=mode)
+                        self.assertFalse(ultraship.trusted_executable(str(executable)))
+                stats[entry] = original
+
+    def test_html_report_uses_bundled_reader_and_keeps_inline_refusal(self):
+        report = self.cwd / '.scratch/refactor/voice-b-teammate-review.html'
+        helper = PLUGIN / 'skills/ship/scripts/read-scratch-report.py'
+        python = Path(ultraship.sys.executable).resolve()
+        command = f'{python} -I -S {helper} refactor/{report.name}'
+        for agent_type in ('', 'ship:driver', 'ship:writer--sol'):
+            with self.subTest(agent_type=agent_type):
+                self.assert_not_denied(command, agent_type)
+                for interpreter in ('python3', f'{python} -I -S'):
+                    inline = (f'F={report}; {interpreter} -c '
+                              '''"import re,sys,html; t=open('$F').read(); t=re.sub(r'data:image/[^\\\"]+','IMG',t); s=html.unescape(t); print(s[:5000])"''')
+                    self.assert_denied(inline, agent_type)
+
+    def test_gate_snapshot_commands_are_not_denied(self):
+        command = (
+            'set -eu\n'
+            'source_dir="$PWD/../better-plugin-mutation-gate/plugins/chief-of-chiefs"\n'
+            'pinned_script="$PWD/../better-plugin-mutation-gate/scripts/pin-helper-sha.py"\n'
+            'python3 -B "$pinned_script" --check\n'
+            'snapshot=$(mktemp -d "$PWD/../.scratch/b28-retest.XXXXXXXX")\n'
+            'mkdir -p "$snapshot/plugin/skills/run/scripts" "$snapshot/plugin/skills/run/references" '
+            '"$snapshot/plugin/tests" "$snapshot/tmp" "$snapshot/home"\n'
+            'cp -- "$source_dir/skills/run/scripts/gate-b28.sh" "$source_dir/skills/run/scripts/gate_child.py" '
+            '"$source_dir/skills/run/scripts/slot_gate.sh" "$snapshot/plugin/skills/run/scripts/"\n'
+            'cp -- "$source_dir/skills/run/references/launcher-step1.md" "$snapshot/plugin/skills/run/references/"\n'
+            'cp -- "$source_dir/tests/test_gate_child_identity.py" "$source_dir/tests/test_launcher_step1.py" '
+            '"$source_dir/tests/test_mutation_gate.py" "$source_dir/tests/test_slot_gate.py" "$snapshot/plugin/tests/"\n'
+            'git -C ../better-plugin-mutation-gate rev-parse HEAD > "$snapshot/base"\n'
+            'sha256sum "$snapshot/plugin/skills/run/scripts/gate-b28.sh" "$snapshot/plugin/skills/run/scripts/gate_child.py" '
+            '"$snapshot/plugin/skills/run/scripts/slot_gate.sh" "$snapshot/plugin/tests/test_mutation_gate.py" '
+            '"$snapshot/plugin/tests/test_slot_gate.py" | tee "$snapshot/checksums"\n'
+            'printf \'%s\\n\' "$snapshot"'
+        )
+        for agent_type in ('', 'ship:driver'):
+            with self.subTest(agent_type=agent_type):
+                self.assert_not_denied(command, agent_type)
+
+    def test_bound_ledger_path_keeps_exact_call_requirement(self):
+        ledger = self.cwd / 'accounting-helper.py'
+        with patch.object(ultraship, 'ledger_script', return_value=ledger):
+            for binding, target in ((f'P={ledger}', '"$P"'), (f'P={ledger.parent}', '"$P/accounting-helper.py"')):
+                command = f'set -eu\n{binding}\npython3 {target} {{subcommand}}\nprintf "%s" "done"'
+                for agent_type in ('', 'ship:driver'):
+                    with self.subTest(target=target, agent_type=agent_type):
+                        self.assert_denied(command.format(subcommand='account-auto'), agent_type,
+                                           'Use the exact Stop command for your session')
+                        for subcommand in ('path', 'status', 'gaps'):
+                            self.assert_not_denied(command.format(subcommand=subcommand), agent_type)
+                self.assert_denied(command.format(subcommand='account-auto'), 'ship:writer--sol')
+
+    def test_harness_ledger_reads_require_the_active_plugin_root(self):
+        base = 'python3 "${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/ledger.py"'
+        with patch.dict(os.environ, {'CLAUDE_PLUGIN_ROOT': str(PLUGIN)}):
+            for agent_type in ('', 'ship:driver'):
+                for subcommand in ('path', 'status', 'gaps'):
+                    with self.subTest(agent_type=agent_type, subcommand=subcommand):
+                        self.assert_not_denied(f'{base} {subcommand}', agent_type)
+                self.assert_denied(f'{base} account-auto', agent_type)
+                self.assert_denied(f'CLAUDE_PLUGIN_ROOT={self.cwd}; {base} status', agent_type)
+        with patch.dict(os.environ, {'CLAUDE_PLUGIN_ROOT': str(self.cwd)}):
+            self.assert_denied(f'{base} status')
+
+    def test_synthetic_receipt_write_is_denied(self):
+        command = 'printf test > ~/.local/state/ultraship/text-lint/receipts/' + '0' * 32 + '.json'
+        for agent_type in ('', 'ship:driver'):
+            with self.subTest(agent_type=agent_type):
+                self.assert_denied(command, agent_type, 'Only the text_lint hook reads or writes refusal receipts')
 
     def test_git_takes_a_run_time_value_only_as_a_message_ref_or_names_only_folder(self):
         for command in ('git tag -a -F "$(cat name.txt)" probe', 'git checkout --pathspec-from-file="$(cat name.txt)"',
