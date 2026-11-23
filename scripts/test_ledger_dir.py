@@ -1099,7 +1099,16 @@ class LedgerDirTests(unittest.TestCase):
         pending = owed.read_bytes()
         self.assertEqual(self.hook('stop'), '')
         owed.write_bytes(pending)
-        self.assertEqual(self.cli('account-auto', str(owed)).stdout, expected)
+        # Once a Stop receipt covers the result, a later run counts it instead of listing it as accounted again.
+        self.assertEqual(self.cli('account-auto', str(owed)).stdout, '1 accounted at an earlier Stop\n0 accounted, 0 pending\n')
+        self.assertEqual(home.read_bytes(), saved)
+        # A result without evidence stays listed as pending beside it.
+        fields = pending.decode().rstrip('\n').split('\t')
+        bare = {**json.loads(fields[3]), 'id': 'no-evidence'}
+        del bare['agent_transcript_path']
+        owed.write_bytes(pending + '\t'.join(fields[:3] + [json.dumps(bare)]).encode() + b'\n')
+        self.assertEqual(self.cli('account-auto', str(owed)).stdout,
+                         'pending no-evidence no transcript\n1 accounted at an earlier Stop\n0 accounted, 1 pending\n')
         self.assertEqual(home.read_bytes(), saved)
 
     def test_account_auto_requires_own_canonical_transcript_path(self):

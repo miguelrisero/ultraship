@@ -550,7 +550,7 @@ def load_receipts(path, *, root_fd=None):
 
 def account_auto(pending, entries, receipts, *, fail_unparsed=False):
     budgets = {}
-    accounted = remaining = 0
+    accounted = remaining = already = 0
     for fields in (line.split('\t') for line in entries if line):
         identifier = 'unknown'
         try:
@@ -645,11 +645,17 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
         except ValueError as exc:
             reason = str(exc)
         else:
+            if key in receipts:
+                # A Stop receipt already covers this result, so it is not news on this run.
+                already += 1
+                continue
             print(f'accounted {identifier} {named} {sha} {verdict}')
             accounted += 1
             continue
         print(f'pending {identifier} {reason}')
         remaining += 1
+    if already:
+        print(f'{already} accounted at an earlier Stop')
     print(f'{accounted} accounted, {remaining} pending')
 
 
