@@ -420,6 +420,18 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assertEqual(result['permissionDecision'], 'deny')
         self.assertEqual(result['permissionDecisionReason'].split('\n', 1)[0], reason)
 
+    def assert_custody_warning(self, event):
+        """The call proceeds with an advisory S2 warning and no permission decision."""
+        output = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(io.StringIO()):
+            try:
+                ultraship.guarded_pre({'cwd': str(self.cwd), **event})
+            except SystemExit:
+                self.fail(output.getvalue())
+        result = json.loads(output.getvalue())['hookSpecificOutput']
+        self.assertNotIn('permissionDecision', result)
+        self.assertTrue(result['additionalContext'].startswith('S2: '), result)
+
     def prepare_owed(self, event):
         pending = ultraship.owed_file(event)
         pending.parent.mkdir(parents=True, exist_ok=True)
@@ -569,7 +581,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assert_custody_denial({**event, 'agent_type': 'ship:writer--sol'})
         with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
             self.consume(self.account_words)
-        with patch.object(ultraship, 'pre', side_effect=RuntimeError):
+        with patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
             self.assert_custody_denial(event, ultraship.PRE_FAILED)
         with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
             self.consume(self.account_words)
@@ -582,10 +594,12 @@ class ReceiptCustodyTests(unittest.TestCase):
         hook_alias = self.cwd / 'hook-alias'
         hook_alias.symlink_to(HOOK)
         for command in (f'cat {shlex.quote(str(path / "example"))}', "cat 'alias to store/example'",
-                        f'ls {path.parent}/acc*/*', f'ls {path.parent}',
+                        f'ls {path.parent}/acc*/*',
                         f'python3 {shlex.quote(str(HOOK))} pre', 'python3 ./hook-alias pre'):
             with self.subTest(command=command):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+        # Listing a parent folder of the store reads no store file.
+        self.assert_account_command_allowed(f'ls {path.parent}', caller='')
         for tool, key, value in (('Read', 'file_path', str(alias / 'example')),
                                  ('Write', 'file_path', str(alias / 'example')),
                                  ('Grep', 'path', str(path.parent)),
@@ -631,8 +645,6 @@ class ReceiptCustodyTests(unittest.TestCase):
         copy.touch()
         for form, command in (
                 ('installed path without mode', f'python3 {installed}'),
-                ('installed path as data', f'printf %s {installed}'),
-                ('installed path as redirect', f'cat < {installed}'),
                 ('variable mode with redirect', f'python3 {installed} "$MODE" < input.json'),
                 ('relative installed path', f'python3 {shlex.quote(relative)} stop'),
                 ('alias with interpreter path', 'env /usr/bin/python3 ./named-entry stop'),
@@ -651,12 +663,17 @@ class ReceiptCustodyTests(unittest.TestCase):
                 ('import target', "python3 -c 'import importlib; importlib.import_module(\"ultraship\")'"),
                 ('issuer symbol', 'python3 -c "print(issue_account_grant)"'),
                 ('grant writer symbol', 'python3 -c "print(_issue_grant)"'),
-                ('unparsed hook reference', "echo ultraship 'unfinished"),
         ):
             with self.subTest(form=form):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+        # A pure text read of the hook runs no hook code; any other command that names it stays refused.
+        self.assert_account_command_allowed(f'cat < {installed}', caller='')
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': f'printf %s {installed}'}})
+        self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': "echo ultraship 'unfinished"}})
         with patch.object(ultraship, 'nested_work_exceeded', return_value=True):
-            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'echo ultraship'}})
+            self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': 'echo ultraship'}})
+            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+                'command': f'python3 {installed} pre'}})
 
     def test_grant_custody_denies_hook_path_expansions(self):
         installed = Path.home() / 'plugin with spaces/hooks/ultraship.py'
@@ -677,26 +694,26 @@ class ReceiptCustodyTests(unittest.TestCase):
             self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
                 'command': f'python3 {shlex.quote(str(installed.parent.parent))}/{{hooks,docs}}/{{ultra,other}}ship.py'}})
 
-    def test_grant_custody_denies_glob_in_noninterpreter_argument(self):
+    def test_grant_custody_warns_on_glob_in_noninterpreter_argument(self):
         installed = Path.home() / 'plugin/hooks/ultraship.py'
         with patch.object(ultraship, '__file__', str(installed)):
-            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+            self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {
                 'command': f'ls {shlex.quote(str(installed.parent.parent))}/hoo?s/ultra*.py'}})
 
-    def test_grant_custody_denies_braces_in_noninterpreter_argument(self):
-        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {
+    def test_grant_custody_warns_on_braces_in_noninterpreter_argument(self):
+        self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {
             'command': 'ls ./plugin/{hooks,docs}/{ultra,other}ship.py'}})
 
-    def test_grant_custody_denies_cwd_relative_hook_glob(self):
+    def test_grant_custody_warns_on_cwd_relative_hook_glob(self):
         plugin = self.cwd / 'plugin'
         with patch.object(ultraship, '__file__', str(plugin / 'hooks/ultraship.py')):
-            self.assert_custody_denial({'cwd': str(plugin), 'tool_name': 'Bash',
+            self.assert_custody_warning({'cwd': str(plugin), 'tool_name': 'Bash',
                                        'tool_input': {'command': 'ls [h]ooks/ultra*.py'}})
 
-    def test_grant_custody_denies_hook_glob_without_literal_prefix(self):
+    def test_grant_custody_warns_on_hook_glob_without_literal_prefix(self):
         plugin = self.cwd / 'plugin'
         with patch.object(ultraship, '__file__', str(plugin / 'hooks/ultraship.py')):
-            self.assert_custody_denial({'cwd': str(plugin), 'tool_name': 'Bash',
+            self.assert_custody_warning({'cwd': str(plugin), 'tool_name': 'Bash',
                                        'tool_input': {'command': 'ls */ultra*.py'}})
 
     def test_grant_custody_denies_literal_hook_after_directory_change(self):
@@ -705,7 +722,7 @@ class ReceiptCustodyTests(unittest.TestCase):
 
     def test_grant_custody_allows_ordinary_shell_and_exact_stop_commands(self):
         event = self.own_account_event()
-        for command in ('ls *.py', 'df -h /', 'ls ~', 'find / -name x',
+        for command in ('ls *.py', 'df -h /', 'ls ~', 'find . -name x',
                         f'cd {shlex.quote(str(self.cwd))} && git status',
                         f'cd {shlex.quote(str(self.cwd))} && uv run pytest'):
             with self.subTest(command=command):
@@ -739,21 +756,21 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_grant_custody_treats_find_name_as_data(self):
         self.assert_account_command_allowed("find ./scripts -name 'uv' -print", caller='ship:writer--sol')
 
-    def test_grant_custody_denies_uncertain_commands_without_custody_words(self):
-        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': "echo 'unfinished"}})
+    def test_grant_custody_warns_on_uncertain_commands_without_custody_words(self):
+        self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': "echo 'unfinished"}})
         with patch.object(ultraship, 'nested_work_exceeded', return_value=True):
-            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'echo ordinary'}})
+            self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': 'echo ordinary'}})
 
-    def test_grant_custody_denies_unclosed_group(self):
-        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': '(echo ordinary'}})
+    def test_grant_custody_warns_on_unclosed_group(self):
+        self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': '(echo ordinary'}})
 
-    def test_grant_custody_denies_unterminated_heredoc(self):
-        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': "cat <<'EOF'\nordinary\n"}})
+    def test_grant_custody_warns_on_unterminated_heredoc(self):
+        self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': "cat <<'EOF'\nordinary\n"}})
 
-    def test_grant_custody_denies_open_braces_and_empty_delimiter_heredoc(self):
+    def test_grant_custody_warns_on_open_braces_and_empty_delimiter_heredoc(self):
         for command in ('{ echo ordinary;', "cat <<''\nordinary\n", 'cat <<""\nordinary\n'):
             with self.subTest(command=command):
-                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+                self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
     def test_grant_custody_allows_plain_repository_source_commands(self):
         source = 'plugins/ship/hooks/ultraship.py'
@@ -784,10 +801,11 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_account_command_allowed(command)
 
-    def test_grant_custody_denies_hook_names_after_an_unresolved_path_segment(self):
-        for command in ('ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py', 'cat ./hoo$x/ultraship.py'):
-            with self.subTest(command=command):
-                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
+    def test_grant_custody_handles_hook_names_after_an_unresolved_path_segment(self):
+        self.assert_custody_warning({'tool_name': 'Bash', 'tool_input': {
+            'command': 'ls ~/.claude/plugins/cache/*/ship/*/hooks/u*.py'}})
+        # The hook name appears, so the unresolved word stays fail-closed.
+        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'cat ./hoo$x/ultraship.py'}})
 
     def test_grant_custody_allows_complete_brace_group_and_literal_shell_code(self):
         for command in ('{ echo a; echo b; }', "bash -c 'label=sample; echo \"$label\"'"):
@@ -801,7 +819,8 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
-    def test_grant_custody_checks_interpreter_operands_after_value_options(self):
+    def test_grant_custody_denies_interpreter_operands_after_value_options(self):
+        # An unresolved interpreter operand or an unknown interpreter option could run the hook.
         for command in ('bash -o pipefail -c "$BODY"', 'uv run --with sample "$SCRIPT"',
                         'bash --unknown-option sample.sh', 'uv run --unknown-option sample.py'):
             with self.subTest(command=command):
@@ -1477,7 +1496,7 @@ class ReceiptCustodyTests(unittest.TestCase):
             for tool, tool_input in inputs:
                 output, errors = io.StringIO(), io.StringIO()
                 with self.subTest(caller=caller, tool=tool), \
-                        patch.object(ultraship, 'pre', side_effect=RuntimeError('pre failed')):
+                        patch.object(ultraship, 'pre_output', side_effect=RuntimeError('pre failed')):
                     with redirect_stdout(output), redirect_stderr(errors), self.assertRaises(SystemExit) as exit:
                         ultraship.guarded_pre({'cwd': str(self.cwd), 'agent_type': caller,
                                               'tool_name': tool, 'tool_input': tool_input})
@@ -1493,7 +1512,7 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_pre_error_denies_malformed_tool_names(self):
         """Catch malformed tool names escaping denial through an error in the custody fallback."""
         for tool in (None, 1, ['Read'], {'name': 'Read'}):
-            with self.subTest(tool=tool), patch.object(ultraship, 'pre', side_effect=RuntimeError('pre failed')):
+            with self.subTest(tool=tool), patch.object(ultraship, 'pre_output', side_effect=RuntimeError('pre failed')):
                 self.assert_custody_denial(
                     {'tool_name': tool, 'tool_input': {}},
                     'The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
@@ -1526,7 +1545,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         for caller in ('ship:writer--sol', 'ship:driver', ''):
             for tool in ('Read', 'Grep', 'Glob', 'LSP', 'mcp__fff__grep', 'mcp__fff__multi_grep'):
                 with self.subTest(caller=caller, tool=tool), \
-                        patch.object(ultraship, 'pre', side_effect=RuntimeError('pre failed')), \
+                        patch.object(ultraship, 'pre_output', side_effect=RuntimeError('pre failed')), \
                         patch.object(ultraship, 'receipt_custody', side_effect=OSError('custody failed')):
                     self.assert_custody_denial({'agent_type': caller, 'tool_name': tool, 'tool_input': {}})
 

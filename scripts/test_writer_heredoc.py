@@ -28,8 +28,8 @@ class WriterHeredocTests(unittest.TestCase):
             except SystemExit as error:
                 self.assertEqual(error.code, 0)
         text = output.getvalue()
-        self.reason = json.loads(text)['hookSpecificOutput']['permissionDecisionReason'] if text else ''
-        return bool(text and json.loads(text)['hookSpecificOutput']['permissionDecision'] == 'deny')
+        self.reason = json.loads(text)['hookSpecificOutput'].get('permissionDecisionReason', '') if text else ''
+        return bool(text and json.loads(text)['hookSpecificOutput'].get('permissionDecision') == 'deny')
 
     def test_assignment_prefixed_fi_cannot_restore_numeric_proof(self):
         self.assertTrue(self.denied('if false; then x=1 fi; i=0; fi; (( i ))'))
