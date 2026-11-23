@@ -64,6 +64,24 @@ class PreciseMatcherTests(unittest.TestCase):
     def test_01_grep_names_helper(self):
         self.assert_allowed(f'grep -rn "thread_reply" {PLUGIN}/skills/')
 
+    def test_ship_ledger_source_search_then_worktree_count(self):
+        skill = self.home / '.claude/plugins/cache/ultraship/ship/1.15.32/skills/ship'
+        command = (f"rg -n 'SHIP_LEDGER_DIR|ledger.py|ledger.sh|account-auto' "
+                   f"{skill}/SKILL.md {skill}/scripts -g '*.sh' -g '*.py' -g 'SKILL.md'; "
+                   f"git -C {self.cwd}/browser-8564-wt worktree list --porcelain | grep -c '^worktree '")
+        self.assert_not_denied(command, 'ship:driver')
+        self.assert_denied(command + ' > ~/.local/state/ultraship/text-lint/key',
+                           'ship:driver', ultraship.RECEIPT_CUSTODY)
+
+    def test_json_report_has_a_bounded_read_route(self):
+        relative = 'slides-lab/l1/v6-field-patch.json'
+        report = self.cwd / '.scratch' / relative
+        command = (f'cd {self.cwd}/.scratch/coc/rows && P={report} && sha256sum $P | cut -c1-64 '
+                   '&& python3 -c "import json;p=json.load(open(\'$P\'));print(json.dumps(p,indent=1)[:3000])"')
+        self.assert_denied(command, start=ultraship.RECEIPT_CUSTODY)
+        reader = PLUGIN / 'skills/ship/scripts/read-scratch-report.py'
+        self.assert_allowed(f'/usr/bin/python3 -I -S {reader} {relative}')
+
     def test_02_build_then_node_test(self):
         self.assert_allowed('npm run build && node --test scripts/test-service-examples.mjs')
 
