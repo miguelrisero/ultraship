@@ -290,9 +290,16 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    Its PR body names the parent PR URL, the parent's full merge commit SHA and the CoC decision file by absolute path and SHA256.
    Each such row keeps the identical mutant edit that the decision file names and passes the review in step 8.
    The parent PR's merged diff must change each such row's subject file and add or change its guarded line.
+   Each such subject file has the same Git blob ID at the parent's merge commit and at the recorded base.
+   The CoC decision file names the parent PR URL and the parent's full merge commit SHA.
+   Hold the row when the parent diff did not add or change its guarded line.
+   Hold the row when the subject file's blob IDs at the merge commit and at the base differ.
    The driver confirms that `gh pr view <parent PR URL> --json mergeCommit` returns the named merge commit SHA.
    The driver supplies a local diff of those subject files from that merge commit's first parent to the merge commit.
    The driver records both SHAs and that lookup result in the reviewer brief.
+   The driver also records each such subject file's blob ID at the merge commit and at the base.
+   The driver records the parent PR URL that it passed to that lookup in the reviewer brief.
+   The driver copies the parent PR URL and merge commit SHA from the row PR body into the reviewer brief.
 
    Earlier test-only parent: add rows for existing subject code when a named earlier PR changed the designated tests.
    Require the parent PR to be merged in the same repository as the row PR.
