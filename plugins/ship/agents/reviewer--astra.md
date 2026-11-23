@@ -85,6 +85,11 @@ Confirm its claim, designated test, subject and mutant, and that the test detect
 Earlier-code parent route:
 For an added row in a test-only follow-up PR, confirm that the PR changes no subject code and that the mutant matches the CoC decision file that the brief names.
 For each such row, confirm from the parent PR's merged diff that the parent changed the row's subject file and added or changed its guarded line.
+Confirm from the brief's blob IDs that each such subject file is unchanged from the parent's merge commit to the recorded base.
+Confirm that the CoC decision file names the parent PR URL and the parent's full merge commit SHA.
+Confirm that the lookup's parent PR URL and merge commit SHA match the CoC decision file and the PR body fields that the brief copies.
+Block approval when the parent diff did not add or change a guarded line.
+Block approval when the subject file's blob IDs at the merge commit and at the base differ.
 Use only the driver's local parent diff from the merge commit's first parent to the merge commit, with the merge commit lookup result that the brief records.
 Block approval if that diff is missing or unbound.
 
