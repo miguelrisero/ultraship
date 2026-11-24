@@ -378,11 +378,12 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The driver marks the draft ready only after the review in step 8 passes at the exact head.
    Not weaker means the same test and the same mutant intent with the same claim or a CoC-approved narrowed claim, or a replacement that guards as tightly.
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
-   The driver supplies read-only checkouts at the base and the frozen head. The admission record lists the row file in each checkout.
+   The driver supplies read-only checkouts at the base and the frozen head. Admit each copy only when it contains an approved extent for that review.
    The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.
    For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
    From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.
    The driver then admits only the head copy.
+   For each added row, the driver supplies the [added row ID proof](references/owner-decisions.md#added-row-id-proof) and admits its exact head extent.
    At the base and the frozen head, the driver records the test runner's fixture listing, such as `pytest --fixtures-per-test`.
    From both listings, the driver lists each test that uses a changed, added or removed fixture, directly, transitively or through an autouse fixture.
    For each changed, added or removed helper, the driver traces its callers in both checkouts, directly and transitively, and adds each test that reaches it.

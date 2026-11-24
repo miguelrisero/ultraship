@@ -97,11 +97,13 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The driver marks the draft ready only after the review in step 8 passes at the exact head.',
                 'one independent reviewer confirms that every changed, retired, restored or added row is not weaker.',
                 'The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record]',
-                'The driver supplies read-only checkouts at the base and the frozen head. The admission record lists the row file in each checkout.',
+                'The driver supplies read-only checkouts at the base and the frozen head. Admit each copy only when it contains an approved extent for that review.',
                 'The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.',
                 'For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.',
                 'From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.',
                 'The driver then admits only the head copy.',
+                '#added-row-id-proof)',
+                'its exact head extent.',
                 "At the base and the frozen head, the driver records the test runner's fixture listing, such as `pytest --fixtures-per-test`.",
                 'From both listings, the driver lists each test that uses a changed, added or removed fixture, directly, transitively or through an autouse fixture.',
                 'For each changed, added or removed helper, the driver traces its callers in both checkouts, directly and transitively, and adds each test that reaches it.',
@@ -218,6 +220,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     'Compare the subject at the first parent, squash, row base and frozen head.',
                     'Confirm that the complete row base-to-head diff contains only the approved new rows.',
                     'Read only the admitted row sections and verify that each new ID is absent at the base.',
+                    'Use the added row ID proof described above.',
                     'Require the frozen decision by absolute path and SHA256.',
                     "Require the driver's digest and binding verification at the frozen head.",
                     'Match the decision to the writer, repository, lane, authorized draft, row base, parent PR and full squash SHA.',
@@ -238,7 +241,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             for name in names[1:]:
                 with self.subTest(path=name):
                     copy = section((SHIP / name).read_text(), heading).rstrip('\n')
-                    self.assertEqual(canonical, copy.replace('](../skills/ship/references/', '](references/'))
+                    if heading == '### Lane-owned row route':
+                        copy = copy.replace('](../skills/ship/references/', '](references/')
+                    self.assertEqual(canonical, copy)
 
     def test_lane_owned_route_selection_precedes_tool_admission_and_run(self):
         for name in ROUTE_CARRIERS:
@@ -353,6 +358,29 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 ):
                     self.assertTrue(requirement in native, requirement)
 
+    def test_added_row_id_proof_keeps_count_evidence_and_read_admission_separate(self):
+        reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        proof = section(reference, '## Added row ID proof')
+        for requirement in (
+            'The CoC freezes a count receipt from an authorized producer.',
+            'draft PR URL, lane, exact row ID and repository-relative row path',
+            'full base and head commit SHAs, their tree SHAs and each existing row file blob',
+            'Require zero matches at the base and one at the head.',
+            'Require evidence that the row format makes the count complete and excludes matches inside values or comments.',
+            'Require exit status 0 and empty output for the exact row path.',
+            'Verify that the admitted head copy matches the recorded blob and that the extent contains only the approved row.',
+            'The driver verifies the producer\'s authority, the receipt digest, all bindings and the exact frozen head before dispatch.',
+            'Admit only the head copy for an added-row review.',
+            'List a base copy only for a separately approved extent of an existing row under review.',
+            'reads only the approved head extent through a separate driver admission',
+            'Use no reviewer Grep for those counts.',
+            'A receipt grants zero tool access.',
+        ):
+            self.assertIn(requirement, proof)
+        for name in REVIEWERS:
+            route = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
+            self.assertNotIn('grep the base copy', route)
+
     def test_lane_owned_review_pins_independence_scope_and_all_row_verdicts(self):
         for name in REVIEWERS:
             text = (SHIP / 'agents' / name).read_text()
@@ -371,9 +399,10 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.',
                 'For each retired row, confirm that the PR deletes the guarded code and that its `[[retired]]` table names a `replacement` row.',
                 'Confirm that the replacement row guards the new code at least as tightly as the retired row guarded the old code.',
-                'Read each row in the base checkout and the frozen-head checkout that the admission record lists, at the base and head line ranges.',
-                'For each added row, grep the base copy of the row file for its ID and confirm zero matches.',
-                'When the brief records the verified base commit and a root-level `git ls-tree` result with exit status 0 and empty output, use that proof in place of the grep.',
+                'For each existing row under review, read only its admitted extent at the base and frozen head.',
+                'For each added row, use the [added row ID proof]',
+                'Read only the admitted head extent for the added row.',
+                'Block approval if the proof or the head extent is missing, stale or mismatched.',
                 'Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.',
                 'For an added row in a test-only follow-up PR, confirm that the PR changes no subject code and that the mutant matches the CoC decision file that the brief names.',
                 "For each such row, confirm from the parent PR's merged diff that the parent changed the row's subject file and added or changed its guarded line.",

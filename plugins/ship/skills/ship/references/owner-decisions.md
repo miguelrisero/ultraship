@@ -246,6 +246,30 @@ Glob, LSP, and every other read under `tests/mutation` stay denied.
 The reviewer reads only the named row lines.
 The hook denies Write, Edit, and NotebookEdit to both record folders for every agent except the driver and the main session. For Bash it only checks the command text.
 
+## Added row ID proof
+
+Use this proof for each added row in the lane-owned row review, including the earlier-code parent route.
+The CoC freezes a count receipt from an authorized producer. Record the producer and include no row text.
+Bind the receipt to the repository, draft PR URL, lane, exact row ID and repository-relative row path.
+Record the full base and head commit SHAs, their tree SHAs and each existing row file blob.
+Record the canonical path of the frozen head copy and the approved first and last lines for the added row.
+Require a successful exact whole-line `id = "<ID>"` count against each bound blob.
+Require evidence that the row format makes the count complete and excludes matches inside values or comments.
+Keep the proof pending if the producer cannot verify that condition within its existing read authority.
+Require zero matches at the base and one at the head.
+For a missing base file, use the verified base commit and a root-level `git ls-tree` result.
+Require exit status 0 and empty output for the exact row path.
+Record base file absence in place of the base blob and count. Keep the head blob and count.
+
+The driver verifies the producer's authority, the receipt digest, all bindings and the exact frozen head before dispatch.
+Verify that the admitted head copy matches the recorded blob and that the extent contains only the approved row.
+List the receipt's absolute path under `Readable files` in the review brief. Include its SHA256 and the driver's verification result.
+Admit only the head copy for an added-row review. List a base copy only for a separately approved extent of an existing row under review.
+The reviewer checks the receipt against the brief and reads only the approved head extent through a separate driver admission.
+The reviewer uses the receipt for base absence and head uniqueness. Use no reviewer Grep for those counts.
+A receipt grants zero tool access. Keep the protected read restrictions and all other review evidence requirements.
+Block approval if any proof, binding, extent or admission is missing, stale, ambiguous or mismatched.
+
 ## Row re-anchor tool admission record
 
 Use this record to admit the sanctioned re-anchor command on the lane-owned row route.

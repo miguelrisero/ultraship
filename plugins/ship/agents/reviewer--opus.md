@@ -106,9 +106,10 @@ Confirm that restored_rows in each entry equals the number of approved row IDs i
 Refuse a restored row outside that scope.
 Confirm from the brief's commit list that only the lane's own unmerged commits changed the row file after the merge base.
 Read the row lines at the merge base and the frozen head. Confirm that they are equal, or that only a re-anchor changed the paired fields.
-Read each row in the base checkout and the frozen-head checkout that the admission record lists, at the base and head line ranges.
-For each added row, grep the base copy of the row file for its ID and confirm zero matches.
-When the brief records the verified base commit and a root-level `git ls-tree` result with exit status 0 and empty output, use that proof in place of the grep.
+For each existing row under review, read only its admitted extent at the base and frozen head.
+For each added row, use the [added row ID proof](../skills/ship/references/owner-decisions.md#added-row-id-proof) to verify base absence and head uniqueness.
+Read only the admitted head extent for the added row.
+Block approval if the proof or the head extent is missing, stale or mismatched.
 Confirm its claim, designated test, subject and mutant, and that the test detects the claimed violation.
 
 Earlier-code parent route:
@@ -133,7 +134,7 @@ Verify the subject's Git tree mode, path and blob ID.
 Compare the subject at the first parent, squash, row base and frozen head.
 Confirm that the complete row base-to-head diff contains only the approved new rows.
 Read only the admitted row sections and verify that each new ID is absent at the base.
-Use the base lookup or verified absence of the file described above.
+Use the added row ID proof described above.
 Require the frozen decision by absolute path and SHA256.
 Require the driver's digest and binding verification at the frozen head.
 Match the decision to the writer, repository, lane, authorized draft, row base, parent PR and full squash SHA.
