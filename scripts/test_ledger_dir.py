@@ -1622,6 +1622,269 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(auto.stdout.splitlines(), [
             f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} pass", '1 accounted, 0 pending'])
 
+    def assert_auto_outcomes(self, cases, *flags):
+        """Each case is (name, final text, outcome); the outcome is `<sha> <verdict>` or a pending reason."""
+        for name, text, outcome in cases:
+            with self.subTest(case=name):
+                owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', text)])
+                before = self.resolve().read_bytes()
+                auto = self.cli('account-auto', *flags, str(owed))
+                owed.write_text('')
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                if outcome.startswith('expected one '):
+                    self.assertEqual(auto.stdout.splitlines(),
+                                     [f"pending {result['id']} {outcome}", '0 accounted, 1 pending'])
+                    self.assertEqual(self.resolve().read_bytes(), before)
+                else:
+                    self.assertEqual(auto.stdout.splitlines(), [
+                        f"accounted {result['id']} ship:reviewer--sol@reviewer {outcome}", '1 accounted, 0 pending'])
+                    self.assertEqual(ledger.rows(self.resolve())[-1][3:5], outcome.split(' '))
+
+    def test_account_auto_binds_the_frozen_commit_among_quoted_commits(self):
+        sha, base, head = 'ab' * 20, 'cd' * 20, 'ef' * 20
+        self.assert_auto_outcomes((
+            ('list', f'- Base: `{base}`\n- Author head: `{head}`\n- Frozen commit: `{sha}`\n\nVerdict: PASS',
+             f'{sha} pass'),
+            ('table', f'| Base | `{base}` |\n| Frozen commit | `{sha.upper()}` |\n\nVerdict: findings',
+             f'{sha} findings'),
+            ('sentence', f'Reviewed frozen `{sha}` against `{base}`.\nVerdict: PASS', f'{sha} pass'),
+            ('key', f'base: {base}\nfrozen_commit: {sha}\nVerdict: FAIL', f'{sha} fail'),
+            ('joined label', f'Author head and frozen final commit: `{sha}`; parent `{base}`.\nVerdict: PASS',
+             f'{sha} pass'),
+            ('repeated frozen commit', f'Frozen head: `{sha}`. Base `{base}`.\nNo findings at frozen head {sha}.\n'
+                                       'Verdict: PASS', f'{sha} pass'),
+            ('no frozen label', f'Base: `{base}`\nHead: `{sha}`\nVerdict: PASS', 'expected one commit'),
+            ('two frozen commits', f'Frozen commit: `{sha}`\nFrozen head: `{head}`\nVerdict: PASS',
+             'expected one commit'),
+            ('frozen label far from the commit',
+             f'The frozen review of this long branch covers `{sha}` and `{base}`.\nVerdict: PASS',
+             'expected one commit'),
+            ('short frozen commit', f'Frozen commit: `{sha[:12]}`\nVerdict: PASS', 'expected one commit'),
+        ))
+
+    def test_account_auto_binds_the_final_verdict_line_after_earlier_rounds(self):
+        sha = 'ab' * 20
+        self.assert_auto_outcomes((
+            ('earlier round label', f'Verdict: findings in round 1.\n\nRound 2 closes both.\n\nVerdict: PASS {sha}',
+             f'{sha} pass'),
+            ('same outcome twice', f'VERDICT: FAIL\n\nTwo gaps at {sha}.\n\nUnchecked: tests.\n'
+                                   'Verdict: findings — two gaps', f'{sha} findings'),
+            ('verdicts in prose', f'The round 1 verdict was findings.\nMy verdict: fail earlier.\n'
+                                  f'Verdict: PASS {sha}', f'{sha} pass'),
+            ('text after the last label', f'Verdict: PASS\n\nVerdict: FAIL\nThe tests did not run. {sha}',
+             'expected one verdict'),
+            ('two labels close the result', f'Verdict: FAIL {sha}\n\nOVERALL: PASS\nVerdict: PASS',
+             'expected one verdict'),
+            ('mixed final label', f'Verdict: findings\n\nVerdict: PASS with findings {sha}', 'expected one verdict'),
+            ('unknown final label', f'Verdict: FAIL\n\nVerdict: undecided {sha}', 'expected one verdict'),
+        ))
+
+    def test_account_auto_binds_a_bare_final_verdict_line(self):
+        sha = 'ab' * 20
+        self.assert_auto_outcomes((
+            ('bold word and commit', f'The copies keep every refusal.\n\n**PASS** — `{sha}`.', f'{sha} pass'),
+            ('word alone', f'No findings at `{sha}`.\n\nPASS', f'{sha} pass'),
+            ('lower case word alone', f'Read-only review at `{sha}`.\nfindings', f'{sha} findings'),
+            ('bracketed outcome', f'Fix read at `{sha}`.\n**FAIL (`findings`) — two gaps remain.**',
+             f'{sha} findings'),
+            ('fail with counts', f'Frozen commit `{sha}`.\nFAIL — P0: 0, P1: 3', f'{sha} fail'),
+            ('hyphen', f'Review of {sha}.\nPASS - every check holds', f'{sha} pass'),
+            ('blocked label', f'Verdict: blocked. The review needs a snapshot at {sha}.', f'{sha} blocked'),
+            ('bare blocked', f'Review of {sha}.\n**blocked** — the read hook denied access.', f'{sha} blocked'),
+            ('pass with a blocked scope', f'Verdict: PASS at {sha}. One blocked scope: the Git read.', f'{sha} pass'),
+            ('verdict on the first line only', f'**FAIL** — at `{sha}`.\n\nDetails follow.', 'expected one verdict'),
+            ('prose', f'Review of {sha}.\nPass 2 covered the tests.', 'expected one verdict'),
+            ('word without a separator', f'Review of {sha}.\nfailing tests remain', 'expected one verdict'),
+            ('heading with a colon', f'Review of {sha}.\nFindings: 2', 'expected one verdict'),
+            ('heading with no finding', f'Review of {sha}.\nFindings — none', 'expected one verdict'),
+            ('pass with no findings', f'Review of {sha}.\nPASS — no findings', 'expected one verdict'),
+            ('check list', f'Review of {sha}.\n- PASS — check 1\n- FAIL — check 2', 'expected one verdict'),
+            ('blocked then pass', f'Review of {sha}.\nblocked — the earlier pass stands', 'expected one verdict'),
+        ))
+
+    def merged_origin(self, *subjects):
+        """Give the checkout an `origin` whose default branch has one commit per subject; return the commits."""
+        self.git(self.common, 'remote', 'add', 'origin', 'https://github.com/acme/widgets.git')
+        commits = []
+        for subject in subjects:
+            self.git(self.common, '-c', 'user.name=t', '-c', 'user.email=t@t',
+                     'commit', '-q', '--allow-empty', '-m', subject)
+            commits.append(self.git(self.common, 'rev-parse', 'HEAD'))
+        self.git(self.common, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        return commits
+
+    def test_retire_merged_records_local_merge_proof_and_clears_stop(self):
+        merged, tip = self.merged_origin('feat: widget (#12)', 'chore: later')
+        url, ref = 'https://github.com/acme/widgets/pull/12', 'refs/remotes/origin/main'
+        for name, text, reason, proof in (
+            ('pull request', f'Two findings remain on {url}.', 'expected one commit',
+             f'{url} is commit {merged} on {ref} at {tip}'),
+            ('commit', f'Frozen commit: `{merged}`. Two gaps remain.', 'expected one verdict',
+             f'commit {merged} is an ancestor of {ref} at {tip}'),
+        ):
+            with self.subTest(proof=name):
+                owed, transcript, result, epoch = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', text)])
+                home = self.resolve()
+                before = home.read_bytes()
+                plain = self.cli('account-auto', str(owed))
+                self.assertEqual(plain.stdout.splitlines(),
+                                 [f"pending {result['id']} {reason}", '0 accounted, 1 pending'])
+                self.assertEqual(home.read_bytes(), before)
+                self.assertIn('"decision": "block"', self.hook('stop'))
+                retire = self.cli('account-auto', '--retire-merged', str(owed))
+                self.assertEqual(retire.returncode, 0, retire.stderr)
+                self.assertEqual(retire.stdout.splitlines(), [
+                    f"retired {result['id']} ship:reviewer--sol@reviewer {merged} {reason}; merged: {proof}",
+                    '1 retired as merged', '0 accounted, 0 pending'])
+                row = ledger.rows(home)[-1]
+                self.assertEqual(row[1:5], ['account-result', 'ship:reviewer--sol@reviewer', merged, 'retired'])
+                note = json.loads(row[5])
+                self.assertEqual(note['step'], 'retired')
+                when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+                self.assertEqual(note['evidence'], f'{transcript} at {when}: {reason}; merged: {proof}')
+                self.assertEqual(self.cli('account-auto', '--retire-merged', str(owed)).stdout,
+                                 '1 recorded and awaiting Stop\n0 accounted, 0 pending\n')
+                self.assertEqual(self.hook('stop'), '')
+                self.assertEqual(owed.read_bytes(), b'')
+
+    def test_retire_merged_leaves_a_result_without_merge_proof_owed(self):
+        base, *_ = self.merged_origin('feat: widget (#12)', 'fix: gadget (#13)', 'docs: mention (#14) in passing')
+        self.git(self.checkout, '-c', 'user.name=t', '-c', 'user.email=t@t',
+                 'commit', '-q', '--allow-empty', '-m', 'wip')
+        unmerged = self.git(self.checkout, 'rev-parse', 'HEAD')
+        pull = 'https://github.com/acme/widgets/pull/'
+        for name, text, reason in (
+            ('unlabelled commit on the default branch', f'Diff against base `{base}`. Two gaps remain.',
+             'expected one verdict'),
+            ('unmerged frozen commit', f'Frozen commit: `{unmerged}`. Two gaps remain.', 'expected one verdict'),
+            ('open pull request', f'Findings remain on {pull}99.', 'expected one commit'),
+            ('other repository', 'Findings remain on https://github.com/acme/gadgets/pull/12.', 'expected one commit'),
+            ('two pull requests', f'Findings remain on {pull}12 and {pull}13.', 'expected one commit'),
+            ('number inside a subject', f'Findings remain on {pull}14.', 'expected one commit'),
+            ('no named subject', 'ready', 'expected one commit'),
+        ):
+            with self.subTest(case=name):
+                owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', text)])
+                home = self.resolve()
+                before = home.read_bytes()
+                retire = self.cli('account-auto', '--retire-merged', str(owed))
+                self.assertEqual(retire.returncode, 0, retire.stderr)
+                self.assertEqual(retire.stdout.splitlines(),
+                                 [f"pending {result['id']} {reason}", '0 accounted, 1 pending'])
+                self.assertEqual(home.read_bytes(), before)
+                self.assertIn(result['id'], json.loads(self.hook('stop'))['reason'])
+                owed.write_text('')
+
+    def test_retire_merged_needs_a_remote_default_branch(self):
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', 'Findings remain on https://github.com/acme/widgets/pull/12.')])
+        before = self.resolve().read_bytes()
+        retire = self.cli('account-auto', '--retire-merged', str(owed))
+        self.assertEqual(retire.stdout.splitlines(),
+                         [f"pending {result['id']} expected one commit", '0 accounted, 1 pending'])
+        self.assertEqual(self.resolve().read_bytes(), before)
+
+    def test_retire_merged_binds_a_clear_result_with_its_own_verdict(self):
+        self.merged_origin('feat: widget (#12)')
+        sha = 'ab' * 20
+        self.assert_auto_outcomes((
+            ('clear', f'https://github.com/acme/widgets/pull/12\nVerdict: findings {sha}', f'{sha} findings'),
+        ), '--retire-merged')
+
+    def test_stop_blocks_a_bindable_result_until_account_auto_binds_it(self):
+        sha = 'ab' * 20
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Base `{"cd" * 20}`. Frozen commit `{sha}`.\n\n**PASS**')])
+        pending = owed.read_bytes()
+        blocked = json.loads(self.hook('stop'))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn(result['id'], blocked['reason'])
+        self.assertIn('--retire-merged', blocked['reason'])
+        self.assertEqual(owed.read_bytes(), pending)
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.stdout.splitlines(), [
+            f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} pass", '1 accounted, 0 pending'])
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+
+    def test_stop_blocks_only_on_the_result_that_stays_owed(self):
+        self.merged_origin('feat: widget (#12)')
+        owed, _, retired, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', 'Findings remain on https://github.com/acme/widgets/pull/12.')])
+        _, _, kept, _ = self.auto_owed(None)
+        retire = self.cli('account-auto', '--retire-merged', str(owed))
+        self.assertEqual(retire.stdout.splitlines()[1:],
+                         [f"pending {kept['id']} no transcript", '1 retired as merged', '0 accounted, 1 pending'])
+        blocked = json.loads(self.hook('stop'))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn(kept['id'], blocked['reason'])
+        self.assertNotIn(retired['id'], blocked['reason'])
+        receipts = json.loads((owed.parent.parent / 'accounted.json').read_bytes())
+        self.assertEqual([json.loads(key)[2] for key in receipts], [retired['id']])
+
+    def test_account_auto_reports_records_whose_reviewer_rows_sit_in_a_ledger_stop_cannot_resolve(self):
+        """Records retained without `ledger` and `run` stay pending, even when a ledger names their reviewers."""
+        self.merged_origin('feat: widget (#12)')
+        sha = 'ab' * 20
+        owed, transcript, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'),
+            (-1, 'assistant', f'https://github.com/acme/widgets/pull/12\nFrozen commit: `{sha}`\n\nVerdict: PASS')])
+        resolved = {key: value for key, value in result.items() if key not in ('ledger', 'run')}
+        elsewhere = {**resolved, 'id': 'row-in-another-ledger', 'agent_id': 'other',
+                     'agent_transcript_path': str(transcript.with_name('agent-other.jsonl'))}
+        transcript.with_name('agent-other.jsonl').write_bytes(transcript.read_bytes())
+        owed.write_text(''.join(f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(record)}\n'
+                                for record in (resolved, elsewhere)))
+        # One reviewer row is in the ledger of the recorded checkout; the other is in an override directory.
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol@reviewer', sha, 'pass').returncode, 0)
+        override = {**self.env, 'SHIP_LEDGER_DIR': str(self.base / 'override')}
+        self.assertEqual(self.cli('run-start', 'light', 'run-2', env=override).returncode, 0)
+        self.assertEqual(self.cli('append', 'deep-review', 'ship:reviewer--sol@other', sha, 'pass',
+                                  env=override).returncode, 0)
+        paths = (owed, self.resolve(), self.base / 'override/feat__nested__x.tsv')
+        before = [path.read_bytes() for path in paths]
+        for flags in ((), ('--retire-merged',), ('--fail-unparsed',)):
+            with self.subTest(flags=flags):
+                auto = self.cli('account-auto', *flags, str(owed))
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                *records, total = auto.stdout.splitlines()
+                self.assertEqual([record.partition(' ')[0] for record in records], ['orphaned', 'orphaned'])
+                self.assertEqual([json.loads(record.partition(' ')[2])['reason'] for record in records],
+                                 ['original ledger and run binding is missing'] * 2)
+                self.assertEqual(total, '0 accounted, 2 pending')
+                self.assertEqual([path.read_bytes() for path in paths], before)
+        # Stop binds the row it can resolve from the recorded working directory and keeps the other record.
+        blocked = json.loads(self.hook('stop'))
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn('row-in-another-ledger ship:reviewer--sol@other', blocked['reason'])
+        self.assertNotIn(result['id'], blocked['reason'])
+        receipts = json.loads((owed.parent.parent / 'accounted.json').read_bytes())
+        self.assertEqual([json.loads(key)[2] for key in receipts], [result['id']])
+        self.assertEqual([path.read_bytes() for path in paths], before)
+
+    def test_account_records_a_retirement_from_the_recorded_pull_request_state(self):
+        owed, _, result, _ = self.auto_owed(None)
+        evidence = 'https://github.com/acme/gadgets/pull/7 state MERGED, merge commit ' + 'ab' * 20
+        record = self.cli('account', str(owed), result['id'], 'retired', 'ship:reviewer--sol',
+                          'ab' * 20, 'retired', evidence)
+        self.assertEqual(record.returncode, 0, record.stderr)
+        row = ledger.rows(self.resolve())[-1]
+        self.assertEqual(row[1:5], ['account-result', 'ship:reviewer--sol@reviewer', 'ab' * 20, 'retired'])
+        self.assertEqual((json.loads(row[5])['step'], json.loads(row[5])['evidence']), ('retired', evidence))
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+
+    def test_account_auto_skill_defines_clear_results_and_merge_proof(self):
+        skill = (LEDGER.parent.parent / 'SKILL.md').read_text()
+        guidance = skill.split('Use the Stop diagnostic\'s `account-auto` command', 1)[1].split('`correct-binding`', 1)[0]
+        for phrase in ('names one subject commit and has one verdict line', 'label exactly one of them as frozen',
+                       'its closing paragraph has no other label line', 'a bare verdict line',
+                       'It records `blocked` when `blocked` is the first word.', 'account-auto --retire-merged',
+                       'is an ancestor of the remote default branch', 'names exactly one GitHub pull request URL',
+                       'It states no review verdict', 'A result without proof stays pending.'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, guidance)
+
     def test_account_auto_preserves_account_run_refusal_and_continues(self):
         sha = 'ab' * 20
         owed, _, invalid, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: FAIL {sha}')])

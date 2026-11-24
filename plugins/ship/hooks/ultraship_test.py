@@ -984,6 +984,26 @@ class ReceiptCustodyTests(unittest.TestCase):
                 self.assert_custody_denial({**driver, 'tool_input': {'command': shlex.join(invalid)}})
         self.assert_custody_denial({**driver, 'agent_type': 'ship:writer--sol', 'tool_input': {'command': command}})
 
+    def test_retire_merged_requires_exact_own_driver_call(self):
+        event = self.own_account_event()
+        driver = {**event, 'agent_type': 'ship:driver--sol'}
+        prefix = [*self.account_words[:2], 'account-auto']
+        owed = str(ultraship.owed_file(driver))
+        words = [*prefix, '--retire-merged', owed]
+        command = shlex.join(words)
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            self.assertIsNone(ultraship.guarded_pre(
+                {'cwd': str(self.cwd), **driver, 'tool_input': {'command': command}}))
+        self.assertEqual(output.getvalue(), '')
+        # The ledger tool accepts the grant only for this exact flag and path.
+        self.consume(words)
+        for invalid in ([*words[:-1], str(Path(owed).with_name('sibling.tsv'))],
+                        [*words, 'extra'], [*prefix, owed, '--retire-merged'],
+                        [*prefix, '--retire-merged', '--fail-unparsed', owed], [*prefix, '--retire', owed]):
+            with self.subTest(command=invalid):
+                self.assert_custody_denial({**driver, 'tool_input': {'command': shlex.join(invalid)}})
+        self.assert_custody_denial({**driver, 'agent_type': 'ship:writer--sol', 'tool_input': {'command': command}})
+
     def test_correct_binding_requires_exact_own_command(self):
         event = {'session_id': 's1', 'tool_name': 'Bash'}
         self.enterContext(patch.object(ultraship, 'STATE', self.state / 'ultraship'))

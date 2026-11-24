@@ -116,15 +116,17 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto "<pending.tsv>"
 
 The ship hook issues a single-use grant for the exact accounting command and the caller's session. The grant expires after 15 minutes. An identical call while the grant is live reuses it and keeps its issue time. Run a fresh tool call if the grant expires or the command fails. Use the literal script and pending paths from the Stop diagnostic in every accounting command.
 
-Run the command alone on one line. Start exactly one line in the review result with `Verdict:` or `OVERALL:`. The label permits leading whitespace and Markdown markers, as in `**OVERALL:** PASS`. The command matches labels and whole verdict words without regard to case.
+Run the command alone on one line. A result is clear when it names one subject commit and has one verdict line. A label line starts with `Verdict:` or `OVERALL:`. The label permits leading whitespace and Markdown markers, as in `**OVERALL:** PASS`. The command matches labels and whole verdict words without regard to case.
+
+A result with one label line uses that line. A result with several label lines is clear only when its last non-empty line is a label line and its closing paragraph has no other label line. Label lines above the closing paragraph count as earlier rounds. A result with no label line is clear only when its last non-empty line is a bare verdict line: a verdict word, then the line end, a dash or an opening bracket, as in `**PASS** — <sha>` or `FAIL (findings)`. A second bare verdict line in the closing paragraph leaves the result pending. A bare `findings` line with `none`, `no`, `zero` or `0` states no verdict.
 
 The command reads the transcript at an absolute path without symlinks, ending in `<session>/subagents/agent-<agent-id>.jsonl`. The recorded path must match its normalized and resolved forms. A path with `.` or `..` segments or repeated slashes leaves the result pending. The session matches the pending file's stem. The agent ID matches the recorded result.
 
-The review turn must contain exactly one distinct 40-digit hexadecimal commit SHA. The command counts SHAs between Markdown underscores or backticks. A SHA has no adjacent hexadecimal digits.
+A review turn with exactly one distinct 40-digit hexadecimal commit SHA names that commit as its subject. A review turn that quotes several SHAs must label exactly one of them as frozen: the word `frozen`, at most three label words, then the SHA, as in `Frozen commit: <sha>` or `frozen head <sha>`. Base, head and parent SHAs without that label are quotes. Several SHAs with zero or several frozen SHAs leave the result pending with `expected one commit`. A shorter SHA never names the subject. The command counts SHAs between Markdown underscores or backticks. A SHA has no adjacent hexadecimal digits.
 
-The command strips Markdown markers and whitespace from the value on the label line. The first word must be a verdict word. The command recognizes `pass` as positive and `fail`, `failed`, `fails`, `failing`, `failure`, and `findings` as negative. A `pass` value permits only one verdict word and excludes negations: `not`, `no`, `never`, `without`, and words ending in `n't`. The command records `findings` for a negative value that contains `findings`, or `fail` for other negative values.
+The command strips Markdown markers and whitespace from the value on the verdict line. The first word must be a verdict word. The command recognizes `pass` as positive and `fail`, `failed`, `fails`, `failing`, `failure`, and `findings` as negative. A `pass` value permits only one verdict word and excludes negations: `not`, `no`, `never`, `without`, and words ending in `n't`. The command records `findings` for a negative value that contains `findings`, or `fail` for other negative values. It records `blocked` when `blocked` is the first word. Every other shape leaves the result pending with `expected one verdict`.
 
-The command requires exactly one `run-start` row that matches the recorded run before it accepts a receipt or an `account-result` row. The receipt must name the same ledger and run. The receipt row must follow the recorded `run-start`. The first `run-end` or next `run-start`, if present, ends the range. The result's own `account-result` row can also satisfy the receipt outside that range. The plain `account-auto <pending.tsv>` form leaves the result pending if any required evidence is missing or differs. The plain form also leaves it pending if the verdict label repeats or the verdict value mixes positive and negative words.
+The command requires exactly one `run-start` row that matches the recorded run before it accepts a receipt or an `account-result` row. The receipt must name the same ledger and run. The receipt row must follow the recorded `run-start`. The first `run-end` or next `run-start`, if present, ends the range. The result's own `account-result` row can also satisfy the receipt outside that range. The plain `account-auto <pending.tsv>` form leaves the result pending if any required evidence is missing or differs. The plain form also leaves it pending if the closing paragraph repeats the verdict label or the verdict value mixes positive and negative words.
 
 Use `--fail-unparsed` to account for legacy results with a bound transcript and one of three parse failures:
 
@@ -137,6 +139,21 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto --fail-unparsed "<p
 - `transcript parse error`
 
 For these failures, the command records `fail` with SHA `0000000000000000000000000000000000000000`. The row names the transcript path, the epoch and the reason. It grants no pipeline step, review or completion evidence. All binding and accounting checks still apply. Other failures stay pending. Results with a clear commit and verdict keep their normal outcomes.
+
+Use `--retire-merged` to retire unclear results whose reviewed work is on the remote default branch:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto --retire-merged "<pending.tsv>"
+```
+
+The command first accounts for every clear result with its own verdict. For a result that stays pending with `expected one commit` or `expected one verdict`, it reads local Git data in the result's recorded working directory. It never contacts GitHub. The remote default branch is `refs/remotes/origin/HEAD`, or `refs/remotes/origin/main` when that ref is absent. One of two proofs retires the result:
+
+- The result labels exactly one commit as frozen, and that commit is an ancestor of the remote default branch. An unlabelled commit can be the base, so it proves no merge.
+- The result names exactly one GitHub pull request URL, the URL names the `origin` repository, and a commit subject on the remote default branch ends with `(#<number>)` or starts with `Merge pull request #<number>`.
+
+The command appends an `account-result` record with step `retired` and verdict `retired`. The record names the proof commit, the proof, the branch tip, the transcript path and the epoch. It states no review verdict and grants no pipeline step, review or completion evidence. A result without proof stays pending. Fetch `origin` first when the merge is recent.
+
+For a merge that only GitHub records, such as a rebase merge or a pull request in another repository, read the pull request state. Then record the result with `account`: use step `retired`, verdict `retired`, the merge commit SHA, and the pull request URL and state as evidence.
 
 Run Stop to publish the receipts. `account-auto` reports new ledger records, existing records that await Stop, and records with a Stop receipt separately.
 

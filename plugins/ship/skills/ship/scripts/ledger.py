@@ -30,7 +30,7 @@ USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py run-start <full|light> <run-id> [board-path]
        ledger.py append <step> <agent>[@<agent-id>] <sha> <verdict> [note]
        ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
-       ledger.py account-auto [--fail-unparsed] <pending.tsv>
+       ledger.py account-auto [--fail-unparsed | --retire-merged] <pending.tsv>
        ledger.py correct-binding <pending.tsv> <result-id> <ledger-line> <reason>"""
 MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
 ACCOUNT_COMMANDS = ('account', 'account-auto', 'correct-binding')
@@ -45,7 +45,7 @@ def account_pending_arg(argv):
         return None
     cmd, args = argv[0], argv[1:]
     if cmd == 'account-auto':
-        if len(args) == 2 and args[0] == '--fail-unparsed':
+        if len(args) == 2 and args[0] in ('--fail-unparsed', '--retire-merged'):
             return args[1]
         if len(args) == 1:
             return args[0]
@@ -578,9 +578,100 @@ def load_receipts(path, *, root_fd=None):
         return {}
 
 
-def account_auto(pending, entries, receipts, *, fail_unparsed=False):
-    budgets = {}
-    accounted = remaining = already = awaiting = 0
+COMMIT = r'(?<![0-9a-fA-F])([0-9a-fA-F]{40})(?![0-9a-fA-F])'
+# A frozen label is the word, up to three label words, then the SHA: "Frozen commit: `<sha>`".
+FROZEN_COMMIT = re.compile(r'\bfrozen(?:[ _]+(?![0-9a-fA-F]{40})[A-Za-z]+){0,3}?[\s:|`*=_-]*' + COMMIT, re.I)
+VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
+# A bare verdict line is a verdict word, then the line end, a dash or a bracket: "**FAIL** — two findings".
+BARE_VERDICT = re.compile(
+    r'^[\s*>#_`-]*((?:pass|fail(?:ed|s|ing|ure)?|findings|blocked)\b[*_`]*(?:\s*$|\s*[—–(]|\s+-\s).*)', re.I)
+VERDICT_WORDS = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
+PULL_REQUEST = re.compile(r'https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)')
+
+
+def subject_commit(text):
+    """Return the one commit a review names, or among several the one it labels frozen."""
+    commits = {match[1].lower() for match in re.finditer(COMMIT, text)}
+    if len(commits) > 1:
+        commits = {match[1].lower() for match in FROZEN_COMMIT.finditer(text)}
+    if len(commits) != 1:
+        raise ValueError('expected one commit')
+    return commits.pop()
+
+
+def final_verdict(text):
+    """Return the verdict of the one verdict line: the only label line, or the single line that ends the review."""
+    lines = [line for line in text.splitlines() if line.strip()]
+    labels = [match[1] for line in lines if (match := VERDICT_LABEL.match(line))]
+    bare = not labels
+    if len(labels) != 1:
+        # Label lines above the closing paragraph are earlier rounds; a bare verdict counts only as the last line.
+        pattern = BARE_VERDICT if bare else VERDICT_LABEL
+        labels = [match[1] for line in re.split(r'\n\s*\n', text.strip())[-1].splitlines()
+                  if (match := pattern.match(line))]
+        if len(labels) != 1 or not pattern.match(lines[-1]):
+            raise ValueError('expected one verdict')
+    words = [word for token in re.findall(r"\w+(?:['’]\w+)*", labels[0].lower()) if (word := token.strip('_'))]
+    if not words or words[0] not in VERDICT_WORDS | {'blocked'}:
+        raise ValueError('expected one verdict')
+    # "Findings — none" is a heading with no finding, so it states no verdict.
+    if bare and words[0] == 'findings' and any(word in ('none', 'no', 'zero', '0') for word in words[1:]):
+        raise ValueError('expected one verdict')
+    if 'pass' in words and (words[0] != 'pass' or any(
+            word in VERDICT_WORDS or word in ('not', 'no', 'never', 'without')
+            or word.endswith(("n't", 'n’t')) for word in words[1:])):
+        raise ValueError('expected one verdict')
+    return ('pass' if words[0] == 'pass' else 'blocked' if words[0] == 'blocked'
+            else 'findings' if 'findings' in words else 'fail')
+
+
+def merged_state(cwd):
+    """Read the remote default branch of `cwd` once: its ref, tip, GitHub repository and merged pull requests."""
+    try:
+        try:
+            ref = git(cwd, 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD')
+        except subprocess.CalledProcessError:
+            ref = 'refs/remotes/origin/main'
+        tip = git(cwd, 'rev-parse', '--verify', ref + '^{commit}')
+        slug = re.search(r'github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$', git(cwd, 'remote', 'get-url', 'origin'))
+        pulls = {}
+        # shortcut: a pull request counts as merged when a default-branch subject ends with "(#N)" or starts with
+        # "Merge pull request #N"; rebase merges carry no number, so read the recorded PR state if they are used.
+        for line in git(cwd, 'log', '--format=%H %s', tip).splitlines():
+            sha, _, subject = line.partition(' ')
+            number = re.search(r'\(#(\d+)\)$', subject) or re.match(r'Merge pull request #(\d+) ', subject)
+            if number:
+                pulls.setdefault(number[1], sha)
+    except (subprocess.CalledProcessError, OSError, UnicodeError):
+        return None
+    return ref, tip, slug[1].lower() if slug else None, pulls
+
+
+def merged_proof(cwd, text, states):
+    """Return (sha, proof) when local git shows the review's frozen commit or one pull request on the default branch."""
+    if cwd not in states:
+        states[cwd] = merged_state(cwd)
+    if states[cwd] is None:
+        return None
+    ref, tip, slug, pulls = states[cwd]
+    # An unlabelled commit can be the base, which is on the default branch before any merge.
+    frozen = {match[1].lower() for match in FROZEN_COMMIT.finditer(text)}
+    if len(frozen) == 1 and subprocess.run(['git', '-C', cwd, 'merge-base', '--is-ancestor', *frozen, tip],
+                                           capture_output=True).returncode == 0:
+        sha = frozen.pop()
+        return sha, f'commit {sha} is an ancestor of {ref} at {tip}'
+    named = {(match[1].lower(), match[2]) for match in PULL_REQUEST.finditer(text)}
+    if len(named) == 1:
+        repository, number = named.pop()
+        if repository == slug and number in pulls:
+            return pulls[number], (f'https://github.com/{repository}/pull/{number} is commit {pulls[number]} '
+                                   f'on {ref} at {tip}')
+    return None
+
+
+def account_auto(pending, entries, receipts, *, fail_unparsed=False, retire_merged=False):
+    budgets, merges = {}, {}
+    accounted = retired = remaining = already = awaiting = 0
     for fields in (line.split('\t') for line in entries if line):
         identifier = 'unknown'
         try:
@@ -649,39 +740,29 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
                     raise ValueError('transcript path does not match the recorded agent and session')
                 epoch = int(epoch)
                 when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+                step = 'review'
                 try:
                     text = final_turn_text(path, epoch, budgets)
                     if not text:
                         raise ValueError('no final turn text')
-                    commits = re.finditer(r'(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])', text)
-                    first = next(commits, None)
-                    if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
-                        raise ValueError('expected one commit')
-                    sha = first[0].lower()
-                    label_pattern = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
-                    labels = (match[1] for line in text.splitlines() if (match := label_pattern.match(line)))
-                    label = next(labels, None)
-                    if label is None or next(labels, None) is not None:
-                        raise ValueError('expected one verdict')
-                    words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower())
-                             if (word := token.strip('_'))]
-                    verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
-                    if not words or words[0] not in verdict_words:
-                        raise ValueError('expected one verdict')
-                    if 'pass' in words and (words[0] != 'pass' or any(
-                            word in verdict_words or word in ('not', 'no', 'never', 'without')
-                            or word.endswith(("n't", 'n’t')) for word in words[1:])):
-                        raise ValueError('expected one verdict')
-                    verdict = 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
+                    sha = subject_commit(text)
+                    verdict = final_verdict(text)
                 except ValueError as exc:
                     reason = str(exc)
-                    if not fail_unparsed or reason not in (
+                    proof = (merged_proof(cwd, text, merges) if retire_merged and reason in (
+                        'expected one commit', 'expected one verdict') else None)
+                    if proof:
+                        # A retired row records the merge proof; it never states a review verdict.
+                        step = verdict = 'retired'
+                        sha, reason = proof[0], f'{reason}; merged: {proof[1]}'
+                    elif not fail_unparsed or reason not in (
                             'expected one commit', 'expected one verdict', 'transcript parse error'):
                         raise
-                    sha, verdict = '0' * 40, 'fail'
+                    else:
+                        sha, verdict = '0' * 40, 'fail'
                 else:
                     reason = verdict
-                account(pending, identifier, 'review', agent, sha, verdict, f'{source} at {when}: {reason}',
+                account(pending, identifier, step, agent, sha, verdict, f'{source} at {when}: {reason}',
                         entries=entries)
                 named = f'{agent}@{result["agent_id"]}' if result.get('agent_id') else agent
         except (json.JSONDecodeError, UnicodeError, OverflowError, RecursionError):
@@ -691,11 +772,17 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
         except ValueError as exc:
             reason = str(exc)
         else:
-            print(f'accounted {identifier} {named} {sha} {verdict}')
-            accounted += 1
+            if verdict == 'retired':
+                print(f'retired {identifier} {named} {sha} {reason}')
+                retired += 1
+            else:
+                print(f'accounted {identifier} {named} {sha} {verdict}')
+                accounted += 1
             continue
         print(f'pending {identifier} {reason}')
         remaining += 1
+    if retired:
+        print(f'{retired} retired as merged')
     if awaiting:
         print(f'{awaiting} recorded and awaiting Stop')
     if already:
@@ -811,7 +898,8 @@ def main(argv):
                     with locked_receipts(root_fd):
                         account_auto(pending, source.read().splitlines(),
                                      load_receipts(root / 'accounted.json', root_fd=root_fd),
-                                     fail_unparsed=len(args) == 2)
+                                     fail_unparsed=args[0] == '--fail-unparsed' and len(args) == 2,
+                                     retire_merged=args[0] == '--retire-merged' and len(args) == 2)
         except OSError:
             sys.exit('Accounting evidence is unavailable. Run the exact command again.')
         except ValueError as exc:
