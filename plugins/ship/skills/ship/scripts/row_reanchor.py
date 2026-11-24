@@ -419,7 +419,8 @@ def run(args):
         # The tool enters the receipt directory later, so a relative PATH entry resolves to the program here.
         program = shutil.which('git')
         require(program is not None, 'git executable not found')
-        program = os.path.join(os.getcwd(), program)  # unnormalized: `link/..` keeps its meaning
+        if not os.path.isabs(program):
+            program = os.path.join(os.getcwd(), program)  # unnormalized: `link/..` keeps its meaning
 
     def git(operation, *words, not_ancestor=None):
         try:

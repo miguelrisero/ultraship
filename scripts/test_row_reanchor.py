@@ -218,7 +218,7 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(output.splitlines()[-1], f'record={receipts / "row-auth.json"}')
         # A program outside PATH never stands in for a missing `git`.
         decoy = launch / 'git'
-        decoy.write_text(f'#!/bin/sh\ntouch {marker}\nexit 1\n')
+        decoy.write_text(f'#!/bin/sh\n: > {marker}\nexit 1\n')  # a builtin, so the marker needs no PATH
         decoy.chmod(0o755)
         self.invoke(2, 'git executable not found', cwd=launch, path=str(self.root / 'missing'),
                     **{'receipt-dir': str(receipts)})
