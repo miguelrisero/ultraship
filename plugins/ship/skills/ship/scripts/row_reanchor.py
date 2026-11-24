@@ -535,7 +535,8 @@ def run(args):
             record_output = 'none'
         else:
             merge_record(stored, identity, entry, check_worktree)
-            require(os.path.samestat(os.stat(record), os.stat(stored)), 'record path must name the written record')
+            require(stored is record or os.path.samestat(os.stat(record), os.stat(stored)),
+                    'record path must name the written record')
             record_output = str(record)
     print('PASS')
     for key, value in {'schema': 1, **identity, **entry, 'base_span_lines': len(lines(base_values['old'])),
