@@ -7076,8 +7076,8 @@ def stop(data):
               'Run this command alone on one line with the evidence in single quotes. Never invent review evidence. '
               f'For results with clear transcript evidence, run `python3 {shlex.quote(str(ledger_script()))} '
               f'account-auto {shlex.quote(str(path))}` alone on one line. '
-              'Add `--retire-merged` before the path to retire each unclear result whose frozen commit or '
-              'one named pull request is on the remote default branch. Use `--close-unparsed` in its place to '
+              'Add `--retire-merged` before the path to retire each unclear result whose frozen commit '
+              'is on the remote default branch. Use `--close-unparsed` in its place to '
               'also close each result that stays unclear with a `no-evidence` record; it states no commit and '
               'no verdict.'}))
 

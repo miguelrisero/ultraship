@@ -1668,6 +1668,12 @@ class LedgerDirTests(unittest.TestCase):
             ('negated label with two spaces', f'Reviewed head: `{sha}`\nNot  frozen commit: `{base}`\nVerdict: PASS',
              'expected one commit'),
             ('unfrozen label', f'Head: `{sha}`\nUnfrozen commit: `{base}`\nVerdict: PASS', 'expected one commit'),
+            ('negation behind Markdown', f'Reviewed head: `{sha}`\nNot **frozen commit:** `{base}`\nVerdict: PASS',
+             'expected one commit'),
+            ('negation earlier in the line', f'Head `{sha}`. This is not the frozen commit: `{base}`.\nVerdict: PASS',
+             'expected one commit'),
+            ('negation on another line', f'The base `{base}` is not reviewed.\nFrozen commit: `{sha}`\nVerdict: PASS',
+             f'{sha} pass'),
         ))
 
     def test_account_auto_binds_the_final_verdict_line_after_earlier_rounds(self):
@@ -1721,12 +1727,13 @@ class LedgerDirTests(unittest.TestCase):
             ('lazy list continuation', f'Reviewed {sha}.\n\n- FAIL — overall review\nPASS — lint',
              'expected one verdict'),
             ('indented word', f'Review of {sha}.\n\n    PASS', 'expected one verdict'),
+            ('list above the verdict', f'Reviewed {sha}. The review found a defect.\n\n- Lint status:\nPASS — lint only',
+             'expected one verdict'),
+            ('quote above the verdict', f'Reviewed {sha}.\n\n> the earlier report\nPASS', 'expected one verdict'),
         ))
 
-    def merged_origin(self, *subjects, url='https://github.com/acme/widgets.git'):
-        """Give the checkout an `origin` whose default branch has one commit per subject; return the commits."""
-        if url:
-            self.git(self.common, 'remote', 'add', 'origin', url)
+    def merged_origin(self, *subjects):
+        """Give the checkout an `origin/main` with one commit per subject; return the commits."""
         commits = []
         for subject in subjects:
             self.git(self.common, '-c', 'user.name=t', '-c', 'user.email=t@t',
@@ -1735,57 +1742,71 @@ class LedgerDirTests(unittest.TestCase):
         self.git(self.common, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
         return commits
 
-    def test_retire_merged_records_local_merge_proof_and_clears_stop(self):
-        merged, tip = self.merged_origin('feat: widget (#12)', 'chore: later')
-        url, ref = 'https://github.com/acme/widgets/pull/12', 'refs/remotes/origin/main'
-        for name, text, reason, proof in (
-            ('pull request', f'Two findings remain on {url}.', 'expected one commit',
-             f'{url} is commit {merged} on {ref} at {tip}'),
-            ('commit', f'Frozen commit: `{merged}`. Two gaps remain.', 'expected one verdict',
-             f'commit {merged} is an ancestor of {ref} at {tip}'),
-        ):
-            with self.subTest(proof=name):
-                owed, transcript, result, epoch = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', text)])
-                home = self.resolve()
-                before = home.read_bytes()
-                plain = self.cli('account-auto', str(owed))
-                self.assertEqual(plain.stdout.splitlines(),
-                                 [f"pending {result['id']} {reason}", '0 accounted, 1 pending'])
-                self.assertEqual(home.read_bytes(), before)
-                self.assertIn('"decision": "block"', self.hook('stop'))
-                retire = self.cli('account-auto', '--retire-merged', str(owed))
-                self.assertEqual(retire.returncode, 0, retire.stderr)
-                self.assertEqual(retire.stdout.splitlines(), [
-                    f"retired {result['id']} ship:reviewer--sol@reviewer {merged} {reason}; merged: {proof}",
-                    '1 retired as merged', '0 accounted, 0 pending'])
-                row = ledger.rows(home)[-1]
-                self.assertEqual(row[1:5], ['account-result', 'ship:reviewer--sol@reviewer', merged, 'retired'])
-                note = json.loads(row[5])
-                self.assertEqual(note['step'], 'retired')
-                when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
-                self.assertEqual(note['evidence'], f'{transcript} at {when}: {reason}; merged: {proof}')
-                self.assertEqual(self.cli('account-auto', '--retire-merged', str(owed)).stdout,
-                                 '1 recorded and awaiting Stop\n0 accounted, 0 pending\n')
-                self.assertEqual(self.hook('stop'), '')
-                self.assertEqual(owed.read_bytes(), b'')
-
-    def test_retire_merged_leaves_a_result_without_merge_proof_owed(self):
-        base, *_ = self.merged_origin('feat: widget (#12)', 'fix: gadget (#13)', 'docs: mention (#14) in passing')
+    def unmerged_commit(self):
         self.git(self.checkout, '-c', 'user.name=t', '-c', 'user.email=t@t',
                  'commit', '-q', '--allow-empty', '-m', 'wip')
-        unmerged = self.git(self.checkout, 'rev-parse', 'HEAD')
-        pull = 'https://github.com/acme/widgets/pull/'
-        for name, text, reason in (
-            ('unlabelled commit on the default branch', f'Diff against base `{base}`. Two gaps remain.',
-             'expected one verdict'),
-            ('unmerged frozen commit', f'Frozen commit: `{unmerged}`. Two gaps remain.', 'expected one verdict'),
-            ('open pull request', f'Findings remain on {pull}99.', 'expected one commit'),
-            ('other repository', 'Findings remain on https://github.com/acme/gadgets/pull/12.', 'expected one commit'),
-            ('two pull requests', f'Findings remain on {pull}12 and {pull}13.', 'expected one commit'),
-            ('number inside a subject', f'Findings remain on {pull}14.', 'expected one commit'),
-            ('longer path segment', f'Findings remain on {pull}12draft.', 'expected one commit'),
-            ('hyphenated path segment', f'Findings remain on {pull}12-draft.', 'expected one commit'),
-            ('no named subject', 'ready', 'expected one commit'),
+        return self.git(self.checkout, 'rev-parse', 'HEAD')
+
+    def test_retire_merged_records_local_merge_proof_and_clears_stop(self):
+        merged, tip = self.merged_origin('feat: widget (#12)', 'chore: later')
+        reason = 'expected one verdict'
+        proof = f'commit {merged} is an ancestor of refs/remotes/origin/main at {tip}'
+        owed, transcript, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Frozen commit: `{merged}`. Two gaps remain.')])
+        home = self.resolve()
+        before = home.read_bytes()
+        plain = self.cli('account-auto', str(owed))
+        self.assertEqual(plain.stdout.splitlines(), [f"pending {result['id']} {reason}", '0 accounted, 1 pending'])
+        self.assertEqual(home.read_bytes(), before)
+        self.assertIn('"decision": "block"', self.hook('stop'))
+        retire = self.cli('account-auto', '--retire-merged', str(owed))
+        self.assertEqual(retire.returncode, 0, retire.stderr)
+        self.assertEqual(retire.stdout.splitlines(), [
+            f"retired {result['id']} ship:reviewer--sol@reviewer {merged} {reason}; merged: {proof}",
+            '1 retired as merged', '0 accounted, 0 pending'])
+        row = ledger.rows(home)[-1]
+        self.assertEqual(row[1:5], ['account-result', 'ship:reviewer--sol@reviewer', merged, 'retired'])
+        note = json.loads(row[5])
+        self.assertEqual(note['step'], 'retired')
+        when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+        self.assertEqual(note['evidence'], f'{transcript} at {when}: {reason}; merged: {proof}')
+        self.assertEqual(self.cli('account-auto', '--retire-merged', str(owed)).stdout,
+                         '1 recorded and awaiting Stop\n0 accounted, 0 pending\n')
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+
+    def assert_retire_merged_outcome(self, text, proof, *, env=None):
+        """`proof` is `<sha> <proof text>` for a retired result, or None for a result that stays pending."""
+        owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', text)])
+        before = self.resolve().read_bytes()
+        retire = self.cli('account-auto', '--retire-merged', str(owed), env=env)
+        owed.write_text('')
+        self.assertEqual(retire.returncode, 0, retire.stderr)
+        first = retire.stdout.splitlines()[0]
+        if proof is None:
+            self.assertTrue(first.startswith(f"pending {result['id']} expected one "), first)
+            self.assertEqual(self.resolve().read_bytes(), before)
+        else:
+            sha, _, shown = proof.partition(' ')
+            self.assertTrue(first.startswith(f"retired {result['id']} ship:reviewer--sol@reviewer {sha} "), first)
+            self.assertTrue(first.endswith(f'merged: {shown}'), first)
+
+    def test_retire_merged_leaves_a_result_without_merge_proof_owed(self):
+        base, merged = self.merged_origin('feat: widget (#12)', 'fix: gadget (#13)')
+        unmerged = self.unmerged_commit()
+        self.git(self.common, '-c', 'user.name=t', '-c', 'user.email=t@t', 'tag', '-a', '-m', 'release', 'v1', merged)
+        tag = self.git(self.common, 'rev-parse', 'refs/tags/v1')
+        self.assertNotEqual(tag, merged)
+        for name, text in (
+            ('unlabelled commit on the default branch', f'Diff against base `{base}`. Two gaps remain.'),
+            ('unmerged frozen commit', f'Frozen commit: `{unmerged}`. Two gaps remain.'),
+            ('two frozen commits', f'Frozen commit: `{base}`. Frozen head: `{merged}`. Two gaps remain.'),
+            ('negated label', f'Head `{unmerged}`.\nNot **frozen commit:** `{base}`\nTwo gaps remain.'),
+            ('negation earlier in the line', f'This is not the frozen commit: `{base}`. Two gaps remain.'),
+            ('annotated tag', f'Frozen commit: `{tag}`. Two gaps remain.'),
+            ('missing object', f'Frozen commit: `{"ef" * 20}`. Two gaps remain.'),
+            ('pull request with a matching subject', 'Findings remain on https://github.com/acme/widgets/pull/12.'),
+            ('no named subject', 'ready'),
         ):
             with self.subTest(case=name):
                 owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', text)])
@@ -1793,116 +1814,55 @@ class LedgerDirTests(unittest.TestCase):
                 before = home.read_bytes()
                 retire = self.cli('account-auto', '--retire-merged', str(owed))
                 self.assertEqual(retire.returncode, 0, retire.stderr)
-                self.assertEqual(retire.stdout.splitlines(),
-                                 [f"pending {result['id']} {reason}", '0 accounted, 1 pending'])
+                pending, total = retire.stdout.splitlines()
+                self.assertTrue(pending.startswith(f"pending {result['id']} expected one "), pending)
+                self.assertEqual(total, '0 accounted, 1 pending')
                 self.assertEqual(home.read_bytes(), before)
                 self.assertIn(result['id'], json.loads(self.hook('stop'))['reason'])
                 owed.write_text('')
 
-    def test_retire_merged_needs_a_remote_default_branch(self):
-        owed, _, result, _ = self.auto_owed([
-            (-2, 'user', 'Review.'), (-1, 'assistant', 'Findings remain on https://github.com/acme/widgets/pull/12.')])
-        before = self.resolve().read_bytes()
-        retire = self.cli('account-auto', '--retire-merged', str(owed))
-        self.assertEqual(retire.stdout.splitlines(),
-                         [f"pending {result['id']} expected one commit", '0 accounted, 1 pending'])
-        self.assertEqual(self.resolve().read_bytes(), before)
-
-    def assert_retire_merged_outcome(self, text, proof, *, env=None):
-        """`proof` is `<sha> <proof text>` for a retired result, or None for a result that stays pending."""
-        owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', text)])
-        retire = self.cli('account-auto', '--retire-merged', str(owed), env=env)
-        owed.write_text('')
-        self.assertEqual(retire.returncode, 0, retire.stderr)
-        first = retire.stdout.splitlines()[0]
-        if proof is None:
-            self.assertTrue(first.startswith(f"pending {result['id']} expected one "), first)
-        else:
-            sha, _, shown = proof.partition(' ')
-            self.assertTrue(first.startswith(f"retired {result['id']} ship:reviewer--sol@reviewer {sha} "), first)
-            self.assertTrue(first.endswith(f'merged: {shown}'), first)
-
     def test_retire_merged_reads_only_the_remote_default_branch(self):
         merged, = self.merged_origin('feat: widget (#12)')
         root = self.git(self.common, 'rev-list', '--max-parents=0', 'HEAD')
-        # Only `origin/trunk` and the local `main` hold the merge commit.
+        text = f'Frozen commit: `{merged}`. Two gaps remain.'
+        with self.subTest('no remote default branch'):
+            self.git(self.common, 'update-ref', '-d', 'refs/remotes/origin/main')
+            self.assert_retire_merged_outcome(text, None)
+        with self.subTest('a tag with the name of the branch'):
+            self.git(self.common, 'update-ref', 'refs/tags/refs/remotes/origin/main', merged)
+            self.assert_retire_merged_outcome(text, None)
+        with self.subTest('a symbolic branch'):
+            self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/main', 'refs/heads/main')
+            self.assert_retire_merged_outcome(text, None)
+            self.git(self.common, 'symbolic-ref', '--delete', 'refs/remotes/origin/main')
+        # Only `origin/trunk` and the local `main` hold the commit.
         self.git(self.common, 'update-ref', 'refs/remotes/origin/trunk', merged)
         self.git(self.common, 'update-ref', 'refs/remotes/origin/main', root)
-        url = 'https://github.com/acme/widgets/pull/12'
         for target, ref in (('refs/remotes/origin/trunk', 'refs/remotes/origin/trunk'), ('refs/heads/main', None)):
             with self.subTest(default=target):
                 self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/HEAD', target)
                 self.assert_retire_merged_outcome(
-                    f'Findings remain on {url}.', ref and f'{merged} {url} is commit {merged} on {ref} at {merged}')
-                self.assert_retire_merged_outcome(
-                    f'Frozen commit: `{merged}`. Two gaps remain.',
-                    ref and f'{merged} commit {merged} is an ancestor of {ref} at {merged}')
-
-    def test_retire_merged_requires_the_github_origin_for_a_pull_request(self):
-        url = 'https://github.com/acme/widgets/pull/12'
-        for origin in ('https://mirror-github.com/acme/widgets.git', 'https://github.com.example.net/acme/widgets.git',
-                       'https://example.net/cache/github.com/acme/widgets.git', None):
-            with self.subTest(origin=origin):
-                merged, = self.merged_origin('feat: widget (#12)', url=origin)
-                tip = f'refs/remotes/origin/main at {merged}'
-                self.assert_retire_merged_outcome(f'Findings remain on {url}.', None)
-                # The frozen commit needs no origin URL: its proof is ancestry alone.
-                self.assert_retire_merged_outcome(f'Frozen commit: `{merged}`. Two gaps remain.',
-                                                  f'{merged} commit {merged} is an ancestor of {tip}')
-                if origin:
-                    self.git(self.common, 'remote', 'remove', 'origin')
+                    text, ref and f'{merged} commit {merged} is an ancestor of {ref} at {merged}')
 
     def test_retire_merged_ignores_inherited_git_overrides(self):
         merged, = self.merged_origin('feat: widget (#12)')
-        url = 'https://github.com/acme/widgets/pull/12'
         self.assert_retire_merged_outcome(
-            f'Findings remain on {url}.',
-            f'{merged} {url} is commit {merged} on refs/remotes/origin/main at {merged}',
+            f'Frozen commit: `{merged}`. Two gaps remain.',
+            f'{merged} commit {merged} is an ancestor of refs/remotes/origin/main at {merged}',
             env={**self.env, 'GIT_DIR': str(self.base / 'missing.git')})
 
-    def test_retire_merged_keeps_a_result_pending_when_git_exceeds_its_deadline(self):
-        self.merged_origin('feat: widget (#12)')
-        expired = subprocess.TimeoutExpired(['git'], ledger.MERGE_GIT_SECONDS)
-        with mock.patch.object(ledger, 'merge_git', side_effect=expired):
-            self.assert_retire_merged_outcome('Findings remain on https://github.com/acme/widgets/pull/12.', None)
-
-    def test_retire_merged_refuses_a_symbolic_default_branch(self):
+    def test_retire_merged_keeps_a_result_pending_when_a_git_read_is_late(self):
         merged, = self.merged_origin('feat: widget (#12)')
-        self.git(self.common, 'update-ref', '-d', 'refs/remotes/origin/main')
-        self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/main', 'refs/heads/main')
-        self.assert_retire_merged_outcome('Findings remain on https://github.com/acme/widgets/pull/12.', None)
-        self.assert_retire_merged_outcome(f'Frozen commit: `{merged}`. Two gaps remain.', None)
-
-    def test_retire_merged_reads_first_parent_subjects_as_whole_records(self):
-        identity = ('-c', 'user.name=t', '-c', 'user.email=t@t')
-        self.git(self.common, 'checkout', '-q', '-b', 'side')
-        self.git(self.common, *identity, 'commit', '-q', '--allow-empty', '-m', 'feat: inner (#15)')
-        self.git(self.common, 'checkout', '-q', 'main')
-        self.git(self.common, *identity, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #16', 'side')
-        merge = self.git(self.common, 'rev-parse', 'HEAD')
-        tip, = self.merged_origin(f'docs: example {"ab" * 20} Merge pull request #17')
-        pull = 'https://github.com/acme/widgets/pull/'
-        self.assert_retire_merged_outcome(
-            f'Findings remain on {pull}16.', f'{merge} {pull}16 is commit {merge} on refs/remotes/origin/main at {tip}')
-        for number in ('15', '17'):
-            with self.subTest(number=number):
-                self.assert_retire_merged_outcome(f'Findings remain on {pull}{number}.', None)
-
-    def test_retire_merged_keeps_a_result_pending_when_the_ancestry_read_is_late(self):
-        self.merged_origin('feat: widget (#12)')
-        self.git(self.checkout, '-c', 'user.name=t', '-c', 'user.email=t@t',
-                 'commit', '-q', '--allow-empty', '-m', 'wip')
-        unmerged = self.git(self.checkout, 'rev-parse', 'HEAD')
         read = ledger.merge_git
+        for late in ('for-each-ref', 'rev-parse', 'merge-base'):
+            with self.subTest(late=late):
+                def bounded(cwd, *args, late=late):
+                    if args[0] == late:
+                        raise subprocess.TimeoutExpired(['git'], ledger.MERGE_GIT_SECONDS)
+                    return read(cwd, *args)
 
-        def late(cwd, *args):
-            if 'merge-base' in args:
-                raise subprocess.TimeoutExpired(['git'], ledger.MERGE_GIT_SECONDS)
-            return read(cwd, *args)
-
-        with mock.patch.object(ledger, 'merge_git', side_effect=late):
-            self.assert_retire_merged_outcome(
-                f'Frozen commit: `{unmerged}`. Compare https://github.com/acme/widgets/pull/12.', None)
+                with mock.patch.object(ledger, 'merge_git', side_effect=bounded):
+                    self.assert_retire_merged_outcome(f'Frozen commit: `{merged}`. Two gaps remain.', None)
 
     def test_merge_git_bounds_each_read_and_drops_git_overrides(self):
         done = SimpleNamespace(stdout='value\n')
@@ -1963,22 +1923,31 @@ class LedgerDirTests(unittest.TestCase):
 
     def test_close_unparsed_prefers_a_verdict_and_a_merge_proof(self):
         merged, = self.merged_origin('feat: widget (#12)')
-        sha, url = 'ab' * 20, 'https://github.com/acme/widgets/pull/12'
-        self.assert_auto_outcomes((('clear', f'{url}\nVerdict: findings {sha}', f'{sha} findings'),),
+        sha = 'ab' * 20
+        self.assert_auto_outcomes((('clear', f'Frozen commit: `{merged}`\nVerdict: findings', f'{merged} findings'),),
                                   '--close-unparsed')
-        owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'Gaps remain on {url}.')])
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Frozen commit: `{merged}`. Two gaps remain.')])
         closed = self.cli('account-auto', '--close-unparsed', str(owed))
         self.assertEqual(closed.stdout.splitlines(), [
-            f"retired {result['id']} ship:reviewer--sol@reviewer {merged} expected one commit; merged: "
-            f'{url} is commit {merged} on refs/remotes/origin/main at {merged}',
+            f"retired {result['id']} ship:reviewer--sol@reviewer {merged} expected one verdict; merged: "
+            f'commit {merged} is an ancestor of refs/remotes/origin/main at {merged}',
             '1 retired as merged', '0 accounted, 0 pending'])
         self.assertEqual(ledger.rows(self.resolve())[-1][3:5], [merged, 'retired'])
+        owed.write_text('')
+        # A pull request URL is no merge proof, so the result closes with no evidence.
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Gaps remain on https://github.com/acme/widgets/pull/12 at {sha}.')])
+        closed = self.cli('account-auto', '--close-unparsed', str(owed))
+        self.assertEqual(closed.stdout.splitlines()[0],
+                         f"closed {result['id']} ship:reviewer--sol@reviewer - expected one verdict; "
+                         'closed without review evidence')
+        self.assertEqual(ledger.rows(self.resolve())[-1][3:5], ['-', 'no-evidence'])
 
     def test_retire_merged_binds_a_clear_result_with_its_own_verdict(self):
-        self.merged_origin('feat: widget (#12)')
-        sha = 'ab' * 20
+        merged, = self.merged_origin('feat: widget (#12)')
         self.assert_auto_outcomes((
-            ('clear', f'https://github.com/acme/widgets/pull/12\nVerdict: findings {sha}', f'{sha} findings'),
+            ('clear', f'Frozen commit: `{merged}`\nVerdict: findings', f'{merged} findings'),
         ), '--retire-merged')
 
     def test_stop_blocks_a_bindable_result_until_account_auto_binds_it(self):
@@ -1998,9 +1967,9 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(owed.read_bytes(), b'')
 
     def test_stop_blocks_only_on_the_result_that_stays_owed(self):
-        self.merged_origin('feat: widget (#12)')
+        merged, = self.merged_origin('feat: widget (#12)')
         owed, _, retired, _ = self.auto_owed([
-            (-2, 'user', 'Review.'), (-1, 'assistant', 'Findings remain on https://github.com/acme/widgets/pull/12.')])
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Frozen commit: `{merged}`. Two gaps remain.')])
         _, _, kept, _ = self.auto_owed(None)
         retire = self.cli('account-auto', '--retire-merged', str(owed))
         self.assertEqual(retire.stdout.splitlines()[1:],
@@ -2014,11 +1983,9 @@ class LedgerDirTests(unittest.TestCase):
 
     def test_account_auto_reports_records_whose_reviewer_rows_sit_in_a_ledger_stop_cannot_resolve(self):
         """Records retained without `ledger` and `run` stay pending, even when a ledger names their reviewers."""
-        self.merged_origin('feat: widget (#12)')
-        sha = 'ab' * 20
+        sha, = self.merged_origin('feat: widget (#12)')
         owed, transcript, result, epoch = self.auto_owed([
-            (-2, 'user', 'Review.'),
-            (-1, 'assistant', f'https://github.com/acme/widgets/pull/12\nFrozen commit: `{sha}`\n\nVerdict: PASS')])
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Frozen commit: `{sha}`\n\nVerdict: PASS')])
         resolved = {key: value for key, value in result.items() if key not in ('ledger', 'run')}
         elsewhere = {**resolved, 'id': 'row-in-another-ledger', 'agent_id': 'other',
                      'agent_transcript_path': str(transcript.with_name('agent-other.jsonl'))}
@@ -2070,7 +2037,7 @@ class LedgerDirTests(unittest.TestCase):
         for phrase in ('names one subject commit and has one verdict line', 'label exactly one of them as frozen',
                        'its closing paragraph has no other label line', 'a bare verdict line',
                        'It records `blocked` when `blocked` is the first word.', 'account-auto --retire-merged',
-                       'is an ancestor of the remote default branch', 'names exactly one GitHub pull request URL',
+                       'is an ancestor of the remote default branch', 'A pull request URL is no proof',
                        'It states no review verdict', 'A result without proof stays pending.',
                        'account-auto --close-unparsed', 'verdict `no-evidence`', 'It states no commit and no verdict.'):
             with self.subTest(phrase=phrase):
