@@ -590,6 +590,16 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
             result = json.loads(raw)
             identifier = result['id']
             key = json.dumps([str(pending), cwd, identifier])
+            if result.get('v') == 2 and ('ledger' not in result or 'run' not in result) and key not in receipts:
+                # This diagnostic is never a ledger row or a Stop receipt.
+                agent_id = result.get('agent_id')
+                print('orphaned ' + json.dumps({
+                    'id': identifier, 'agent': f'{agent}@{agent_id}' if agent_id else agent, 'sha': '',
+                    'transcript': result.get('agent_transcript_path'),
+                    'reason': 'original ledger and run binding is missing',
+                }))
+                remaining += 1
+                continue
             home = Path(result['ledger'])
             if not home.is_absolute() or home.resolve() != home:
                 raise ValueError('recorded ledger must be an absolute path without symlinks')

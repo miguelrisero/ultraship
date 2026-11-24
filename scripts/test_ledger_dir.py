@@ -1172,6 +1172,86 @@ class LedgerDirTests(unittest.TestCase):
         self.assertIn('1 accounted, 0 pending\n', result.stdout)
         self.assertEqual(ledger.rows(home)[-1][1], 'account-result')
 
+    def test_account_auto_reports_unbound_result_without_review_credit(self):
+        sha = 'ab' * 20
+        owed, transcript, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: PASS {sha}')])
+        orphan = {key: value for key, value in result.items() if key not in ('ledger', 'run')}
+        owed.write_text(f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(orphan)}\n')
+        receipt = owed.parent.parent / 'accounted.json'
+        home = self.resolve()
+        before = (owed.read_bytes(), home.read_bytes())
+
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        record, total = auto.stdout.splitlines()
+        kind, _, evidence = record.partition(' ')
+        self.assertEqual(kind, 'orphaned', auto.stdout)
+        self.assertEqual(json.loads(evidence), {
+            'id': result['id'], 'agent': 'ship:reviewer--sol@reviewer', 'sha': '',
+            'transcript': str(transcript), 'reason': 'original ledger and run binding is missing',
+        })
+        self.assertEqual(total, '0 accounted, 1 pending')
+        self.assertEqual(self.cli('account-auto', str(owed)).stdout, auto.stdout)
+        self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+        self.assertFalse(receipt.exists())
+        self.assertIn('"decision": "block"', self.hook('stop'))
+        self.assertEqual(owed.read_bytes(), before[0])
+        self.assertFalse(receipt.exists())
+
+    def test_account_auto_distinguishes_missing_bindings_from_invalid_data_and_receipts(self):
+        owed, _, result, epoch = self.auto_owed(None)
+        home = self.resolve()
+        receipt = owed.parent.parent / 'accounted.json'
+        key = json.dumps([str(owed), str(self.checkout), result['id']])
+        for field, saved, invalid in (('ledger', False, False), ('run', False, False),
+                                      ('ledger', True, False), ('ledger', False, True)):
+            with self.subTest(field=field, receipt=saved, invalid=invalid):
+                notice = result.copy()
+                if invalid:
+                    notice[field] = 0
+                else:
+                    del notice[field]
+                owed.write_text(f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(notice)}\n')
+                history = ledger.rows(home)
+                receipt.write_text(json.dumps({key: [str(home), result['run'],
+                    ledger.run_identity(1, history[1])]} if saved else {}))
+                paths = (owed, home, receipt)
+                before = tuple(path.read_bytes() for path in paths)
+                auto = self.cli('account-auto', '--fail-unparsed', str(owed))
+                self.assertEqual(auto.returncode, 0, auto.stderr)
+                status = 'pending' if invalid or saved else 'orphaned'
+                self.assertTrue(auto.stdout.startswith(status + ' '), auto.stdout)
+                self.assertTrue(auto.stdout.endswith('0 accounted, 1 pending\n'), auto.stdout)
+                self.assertEqual(tuple(path.read_bytes() for path in paths), before)
+
+    def test_account_auto_recovers_recorded_run_in_mixed_queue(self):
+        sha = 'ab' * 20
+        owed, transcript, unbound, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: FINDINGS {sha}')])
+        del unbound['ledger'], unbound['run']
+        owed.write_text(f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(unbound)}\n')
+        _, _, bound, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Verdict: FINDINGS {sha}')])
+        home = self.resolve()
+        pending = owed.read_bytes()
+
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        orphan, recorded, count = auto.stdout.splitlines()
+        self.assertEqual(json.loads(orphan.removeprefix('orphaned '))['transcript'], str(transcript))
+        self.assertEqual(recorded, f"accounted {bound['id']} ship:reviewer--sol@reviewer {sha} findings")
+        self.assertEqual(count, '1 accounted, 1 pending')
+        snapshot = home.read_bytes()
+        self.assertEqual(ledger.rows(home)[-1][3:5], [sha, 'findings'])
+        self.assertEqual(owed.read_bytes(), pending)
+        self.assertIn('1 recorded and awaiting Stop', self.cli('account-auto', str(owed)).stdout)
+        self.assertIn('"decision": "block"', self.hook('stop'))
+        self.assertEqual(owed.read_bytes(), pending)
+        self.assertEqual(home.read_bytes(), snapshot)
+        receipts = json.loads((owed.parent.parent / 'accounted.json').read_bytes())
+        self.assertEqual([json.loads(key)[2] for key in receipts], [bound['id']])
+
     def test_account_auto_uses_own_final_text_and_skips_existing_accounting(self):
         sha = 'ab' * 20
         owed, transcript, result, epoch = self.auto_owed([
