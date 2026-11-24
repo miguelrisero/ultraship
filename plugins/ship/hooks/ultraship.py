@@ -6242,6 +6242,20 @@ def protected_row_path(value):
     return canonical_row_path(value) and bool(re.search(PROTECTED_ROW, value, re.I))
 
 
+def link_free_path(value):
+    """Check each part with lstat, because a non-strict realpath returns a symlink loop unchanged."""
+    parts = value.split('/')[1:]
+    for count in range(1, len(parts) + 1):
+        try:
+            if stat.S_ISLNK(os.lstat('/' + '/'.join(parts[:count])).st_mode):
+                return False
+        except FileNotFoundError:
+            return count == len(parts)  # only the final part may be missing
+        except OSError:
+            return False
+    return True
+
+
 def regular_file(path):
     try:
         return stat.S_ISREG(os.lstat(path).st_mode)
@@ -6333,12 +6347,14 @@ def row_record(data, folder, workspace_fallback=False):
 def row_reanchor_gate(data, command):
     tool = str(Path(__file__).resolve().parents[1] / 'skills/ship/scripts/row_reanchor.py')
     form = ('python3 -I ' + tool
-            + ' --row-file <abs> --row-id <id> --subject <rel> --base <ref> --head <ref> [--restoration <commit>]')
+            + ' --row-file <abs> --row-id <id> --subject <rel> --base <ref> --head <ref> [--restoration <commit>]'
+            + ' [--receipt-dir <abs>]')
     reason = 'Row re-anchor gate requires exactly `' + form + '` and a matching driver-written row-reanchor admission record. '
     word = r'[A-Za-z0-9_./:@+,-]+'
+    # A restoration commit never starts with `-`, so an option name cannot stand in for it.
     match = re.fullmatch(r'python3 -I (' + word + r') --row-file (' + word + r') --row-id (' + word
                          + r') --subject (' + word + r') --base (' + word + r') --head (' + word
-                         + r')(?: --restoration ' + word + r')?', command)
+                         + r')(?: --restoration (?!-)' + word + r')?(?: --receipt-dir (' + word + r'))?', command)
     if not role(data, 'writer') or not match or match[1] != tool:
         deny(reason)
     fields, unmet = row_record(data, 'row-reanchor')
@@ -6349,6 +6365,18 @@ def row_reanchor_gate(data, command):
         deny(reason + unmet + '`row_file` and `row_id` match the canonical protected path and row ID.')
     if not regular_file(target) or match[4].startswith('/') or '..' in match[4].split('/'):
         deny(reason + unmet + 'the row file is regular and the subject is repository-relative.')
+    receipt = match[7]
+    if ('receipt_dir' in fields) != (receipt is not None) or fields.get('receipt_dir') != receipt:
+        deny(reason + unmet + "`receipt_dir` equals the command's receipt directory, "
+             'and is absent when the command has none.')
+    # The driver names the directory; these folders stay closed even to a directory the driver names.
+    if receipt is not None and (
+            not canonical_row_path(receipt) or not link_free_path(receipt)
+            or re.search(PROTECTED_ROW, receipt, re.I)
+            or any((receipt + '/').casefold().startswith(folder.casefold().rstrip('/') + '/')
+                   for folder in (os.path.dirname(target), os.path.realpath(STATE)))):
+        deny(reason + "The receipt directory is a canonical absolute path outside the row file's folder, "
+             'every protected row path and the ship state folder.')
 
 
 def pre_output(data):

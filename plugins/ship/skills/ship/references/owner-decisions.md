@@ -281,6 +281,7 @@ Use this record to admit the sanctioned re-anchor command on the lane-owned row 
 3. Write `${XDG_STATE_HOME:-~/.local/state}/ultraship/row-reanchor/<agent ID>.json` with native Write.
 4. Replace each filename character outside letters, digits, `_`, `.` and `-` with `_`.
 5. Include `pr` (the PR URL), `agent_id`, `row_file` (the canonical absolute protected path), `row_id` and `expires_at`.
+   Add `receipt_dir` only for a command that carries ` --receipt-dir`, with the same path.
 6. Set `expires_at` to `YYYY-MM-DDTHH:MM:SSZ`, UTC, later than now and at most 4 hours ahead.
 7. Run `chmod 600` on the record.
 8. Send the [row re-anchor tool brief](#row-re-anchor-tool-brief) with SendMessage.
@@ -302,6 +303,15 @@ Keep the route's authority, independent review, execution admission and publicat
 
 Use exactly `python3 -I <plugin root>/skills/ship/scripts/row_reanchor.py --row-file <absolute path> --row-id <id> --subject <repository-relative path> --base <ref> --head <ref>`.
 On the restore route, append ` --restoration <commit>` with the full restoration commit SHA.
+The tool writes its record `row-auth.json` and the lock under `ship/` in the worktree's Git directory.
+When the lane may write only inside its workspace, append ` --receipt-dir <absolute path>` last; the tool then writes both files in that directory.
+The hook admits the option only when the record's `receipt_dir` equals its value.
+The hook denies a command without the option when the record has `receipt_dir`.
+Name a canonical path with zero symlink components.
+Keep it outside the row file's folder, every protected row path and the hook state folder.
+The tool holds an exclusive lock on the row file's folder for each run, in both modes.
+That lock orders the runs that share a row folder, across receipt directories.
+Use one receipt directory for one worktree, so one record lists every re-anchored row.
 Use single spaces and unquoted arguments, with nothing before or after the command.
 The hook accepts only its own plugin's tool path for a writer with a matching record.
 
