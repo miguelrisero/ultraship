@@ -334,11 +334,12 @@ def folder_lock(folder):
 def receipt_directory(path):
     """Make the receipt directory the working directory through descriptors that follow no link."""
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    search = flags | getattr(os, 'O_PATH', 0)  # a parent may grant search without read
     home = os.open('.', os.O_RDONLY | os.O_DIRECTORY)
-    descriptors = [os.open('/', flags)]
+    descriptors = [os.open('/', search)]
     try:
         for part in path.parts[1:-1]:
-            descriptors.append(os.open(part, flags, dir_fd=descriptors[-1]))
+            descriptors.append(os.open(part, search, dir_fd=descriptors[-1]))
         try:
             os.mkdir(path.name, 0o700, dir_fd=descriptors[-1])
             created = True
@@ -534,6 +535,7 @@ def run(args):
             record_output = 'none'
         else:
             merge_record(stored, identity, entry, check_worktree)
+            require(os.path.samestat(os.stat(record), os.stat(stored)), 'record path must name the written record')
             record_output = str(record)
     print('PASS')
     for key, value in {'schema': 1, **identity, **entry, 'base_span_lines': len(lines(base_values['old'])),

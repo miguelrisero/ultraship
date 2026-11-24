@@ -168,26 +168,30 @@ class ToolTests(unittest.TestCase):
         self.setup_pair()
         self.invoke()
         self.head_sha = self.commit()
-        lane, guarded, home = self.root / 'lane', self.root / 'guarded', Path.cwd()
-        lane.mkdir()
-        guarded.mkdir()
-        folder_lock = reanchor.folder_lock
+        home = Path.cwd()
+        # The swap happens before the tool enters the receipt directory, then after it.
+        for swap_at, written in (('folder_lock', []), ('record_lock', ['receipts', 'row-auth.json', 'row-auth.lock'])):
+            with self.subTest(swap_at=swap_at):
+                lane, guarded, moved = (self.root / (name + '-' + swap_at) for name in ('lane', 'guarded', 'moved'))
+                lane.mkdir()
+                guarded.mkdir()
+                original = getattr(reanchor, swap_at)
 
-        @contextlib.contextmanager
-        def swap_then_lock(folder):
-            lane.rename(self.root / 'moved')
-            lane.symlink_to(guarded, target_is_directory=True)
-            with folder_lock(folder):
-                yield
+                @contextlib.contextmanager
+                def swap_then_continue(path):
+                    lane.rename(moved)
+                    lane.symlink_to(guarded, target_is_directory=True)
+                    with original(path):
+                        yield
 
-        args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt', base=self.base,
-                         head=self.head_sha, restoration=None, receipt_dir=str(lane / 'receipts'))
-        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
-                patch.object(reanchor, 'folder_lock', swap_then_lock), self.assertRaises(OSError):
-            reanchor.run(args)
-        self.assertEqual(list(guarded.iterdir()), [])
-        self.assertEqual(list((self.root / 'moved').iterdir()), [])
-        self.assertEqual(Path.cwd(), home)
+                args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt', base=self.base,
+                                 head=self.head_sha, restoration=None, receipt_dir=str(lane / 'receipts'))
+                with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
+                        patch.object(reanchor, swap_at, swap_then_continue), self.assertRaises(OSError):
+                    reanchor.run(args)
+                self.assertEqual(list(guarded.iterdir()), [])
+                self.assertEqual(sorted(path.name for path in moved.rglob('*')), written)
+                self.assertEqual(Path.cwd(), home)
 
     def test_printed_fields_match_the_record_entry(self):
         self.setup_pair(literal=True, extra='[row.mutant]\noperator = "replace"\n')
