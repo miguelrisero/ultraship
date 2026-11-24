@@ -411,6 +411,9 @@ Before verifying a PR-bound decision, require the verified URL of an existing, a
 Keep the row pending if that draft identity is missing or unverified.
 Draft creation still requires separate authority.
 Match the PR URL in the decision to that draft.
+Require the [shared decision preflight](references/row-decision.md) before dispatch when `old` alone changes and all three lines use bare YAML `version: X.Y.Z`.
+Check the old line, its replacement, and the unchanged mutant. Use the existing route for other cases.
+Use the same schema to check missing fields. Keep all authority and retry checks separate.
 The writer verifies its SHA256 and bindings before the edit. The driver verifies them again at the frozen head and records the result in the reviewer brief.
 The writer applies only those fields with native Edit and `replace_all=false`, then commits the row file alone.
 Step 8 reviews that row, and a follow-up row guards any new code.
