@@ -1685,6 +1685,10 @@ class LedgerDirTests(unittest.TestCase):
             ('label after fenced code', f'```text\nbase: {base}\n```\nFrozen commit: `{sha}`\nVerdict: PASS',
              f'{sha} pass'),
             ('frozen base', f'Reviewed head: `{sha}`\nFrozen base: `{base}`\nVerdict: PASS', 'expected one commit'),
+            ('only commit in fenced code', f'Reviewed {sha[:7]}.\n\n~~~text\nOld build: {base}\n~~~\n\nVerdict: PASS',
+             'expected one commit'),
+            ('label in a nested fence', f'Reviewed head: `{sha}`\n\n````markdown\n```text\nFrozen commit: {base}\n'
+                                        '```\n````\n\nVerdict: PASS', 'expected one commit'),
             ('label in indented code', f'Reviewed head: `{sha}`\n\nEarlier output:\n\n    Frozen commit: {base}\n\n'
                                        'Verdict: PASS', 'expected one commit'),
         ))

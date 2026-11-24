@@ -602,20 +602,26 @@ def prose(text):
     """Return `text` with every line of fenced code emptied, so an example states no label and no verdict."""
     lines, fence = [], ''
     for line in text.split('\n'):
-        marker = line.lstrip()[:3]
-        if marker in ('```', '~~~') and fence in ('', marker):
-            fence = '' if fence else marker
-            line = ''
+        marker = re.match(r' {0,3}(`{3,}|~{3,})', line)
+        if marker and not fence:
+            fence, line = marker[1], ''
+        elif marker and marker[1].startswith(fence) and line.strip() == marker[1]:
+            # Only a fence of the same character and at least the opening length closes the block.
+            fence, line = '', ''
         lines.append('' if fence else line)
     return '\n'.join(lines)
 
 
+def own_lines(text):
+    """Return the lines that the reviewer states: no fenced code, no quote and no indented code."""
+    return [line for line in prose(text).split('\n')
+            if not line.lstrip().startswith('>') and not line.startswith(('    ', '\t'))]
+
+
 def frozen_commits(text):
-    """Return the commits that a frozen label names outside quotes, fenced code and indented code."""
+    """Return the commits that a frozen label names in the reviewer's own lines."""
     commits = set()
-    for line in prose(text).split('\n'):
-        if line.lstrip().startswith('>') or line.startswith(('    ', '\t')):
-            continue
+    for line in own_lines(text):
         # Emphasis markers become spaces, so `_not_` reads as a word and each position stays.
         negation = NEGATION.search(re.sub(r'[*_`~]', ' ', line))
         for match in FROZEN_COMMIT.finditer(line):
@@ -629,6 +635,9 @@ def subject_commit(text):
     commits = {match[1].lower() for match in re.finditer(COMMIT, text)}
     if len(commits) > 1:
         commits = frozen_commits(text)
+    elif not re.search(COMMIT, prose(text)):
+        # A lone commit in fenced code is an example, so it names no subject.
+        commits = set()
     if len(commits) != 1:
         raise ValueError('expected one commit')
     return commits.pop()
