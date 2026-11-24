@@ -7,6 +7,15 @@ At any owner-dependent step, apply [owner decisions](owner-decisions.md). Record
 Require flaky-risk findings or explicit none with inspected scope in all direct, fallback, closing, babysit, delegated, and replacement review briefs.
 Code findings identify file, line, and mechanism; plan findings identify relevant evidence locations.
 
+<a id="security-review-triage"></a>**Security review triage.**
+
+Copy this guidance into every review brief, including verification and fix reads.
+Prioritize evidence of clear danger, a realistic attacker path, or harm to customer data, money, or secrets.
+Report uncertainty and missing evidence explicitly. Preserve existing severity definitions, blocking findings, and all merge gates.
+For a finding the applicable gates already permit deferring, give the reason and a concise hardening proposal.
+The driver records that follow-up in Linear through the authorized route and sends the ticket to the chief for batched owner review.
+Avoid another review round solely for deferred findings. Keep required fixes, independent review, and fix reads in force.
+
 Every initial, verification, and replacement brief lists permitted paths and exclusions.
 Apply this rule to every review dispatch, including slice, selection, fix-read, closing, and delegated review seats.
 Scope every search call to the permitted paths.

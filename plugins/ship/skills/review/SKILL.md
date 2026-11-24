@@ -69,6 +69,7 @@ Send named protected rows through the separate [lane-owned row review](../../age
 - Leave the Agent `model` field unset. On an unavailable seat, use the fallback chain in `${CLAUDE_PLUGIN_ROOT}/skills/ship/references/roster.md`.
 - Send all candidates, with their evidence, to one `ship:reviewer--sol` verification pass. It returns `CONFIRMED`, `PLAUSIBLE`, or `REFUTED` for each, per the verification rules in the reference.
 - Record requested agents, substitutions, and unavailable seats.
+- Copy [security review triage](../ship/references/pipeline.md#security-review-triage) into each seat and verification brief.
 - Require flaky-risk findings with file, line, and mechanism, or explicit none with inspected scope, in each seat and verification brief.
 
 Consolidate duplicate mechanisms. Before reporting, confirm that the reviewed SHA and diff fingerprint still match. Refresh affected evidence when they differ.
