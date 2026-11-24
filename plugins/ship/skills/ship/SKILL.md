@@ -140,6 +140,8 @@ For these failures, the command records `fail` with SHA `00000000000000000000000
 
 Run Stop to publish the receipts. `account-auto` reports new ledger records, existing records that await Stop, and records with a Stop receipt separately.
 
+For a retained v2 result that lacks the ledger or run field and has no Stop receipt, `account-auto` prints an `orphaned` diagnostic. It includes the result ID, agent, recorded transcript path, reason, and an empty SHA. The command leaves the result pending and gives it zero review credit. Stop still applies its existing matching rules. A fresh review with a new agent ID covers its own result only.
+
 When an accounted result is bound to another result's row, move its credit with:
 
 ```bash
