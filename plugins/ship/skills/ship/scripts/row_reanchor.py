@@ -2,7 +2,7 @@
 """Derive a row's paired fields while preserving its whole-file mutant hunks."""
 import argparse
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import difflib
 import fcntl
 import json
@@ -331,6 +331,31 @@ def folder_lock(folder):
 
 
 @contextmanager
+def receipt_directory(path):
+    """Make the receipt directory the working directory through descriptors that follow no link."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    home = os.open('.', os.O_RDONLY | os.O_DIRECTORY)
+    descriptors = [os.open('/', flags)]
+    try:
+        for part in path.parts[1:-1]:
+            descriptors.append(os.open(part, flags, dir_fd=descriptors[-1]))
+        try:
+            os.mkdir(path.name, 0o700, dir_fd=descriptors[-1])
+            created = True
+        except FileExistsError:
+            created = False
+        descriptors.append(os.open(path.name, flags, dir_fd=descriptors[-1]))
+        if created:
+            os.fchmod(descriptors[-1], 0o700)
+        os.fchdir(descriptors[-1])
+        yield
+    finally:
+        os.fchdir(home)
+        for descriptor in (home, *descriptors):
+            os.close(descriptor)
+
+
+@contextmanager
 def record_lock(path):
     try:
         path.parent.mkdir(mode=0o700)
@@ -398,15 +423,19 @@ def run(args):
     head_sha = commit_sha('resolve head commit', args.head)
     require(head_sha == git('read HEAD', 'rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
     receipt = getattr(args, 'receipt_dir', None)
+    enter_receipts = nullcontext()
     if receipt is None:
         record = Path(git('find record path', 'rev-parse', '--path-format=absolute', '--git-path',
                           'ship/row-auth.json').decode().rstrip('\n'))
+        stored = record
     else:
         # A lane that may write only inside its workspace keeps the record and its lock there.
         receipt_dir = Path(receipt)
         require(receipt_dir.is_absolute() and '..' not in receipt_dir.parts and receipt == receipt_dir.as_posix()
                 and os.path.realpath(receipt) == receipt, 'receipt directory must be absolute and canonical')
         record = receipt_dir / 'row-auth.json'
+        # Record I/O is relative to the entered directory, so a link that appears in the path later redirects nothing.
+        enter_receipts, stored = receipt_directory(receipt_dir), Path(record.name)
 
     def blob(operation, sha, path):
         return git(operation, 'cat-file', 'blob', sha + ':' + path)
@@ -495,7 +524,7 @@ def run(args):
                 'HEAD changed during ' + phase)
         require(row_file.read_bytes() == original, 'row file changed during ' + phase)
 
-    with folder_lock(row_file.parent), record_lock(record):
+    with folder_lock(row_file.parent), enter_receipts, record_lock(stored):
         check_worktree('derivation')
         if replacements:
             mode = stat.S_IMODE(row_file.stat().st_mode)
@@ -504,7 +533,7 @@ def run(args):
                 os.replace(stage, row_file)
             record_output = 'none'
         else:
-            merge_record(record, identity, entry, check_worktree)
+            merge_record(stored, identity, entry, check_worktree)
             record_output = str(record)
     print('PASS')
     for key, value in {'schema': 1, **identity, **entry, 'base_span_lines': len(lines(base_values['old'])),

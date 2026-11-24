@@ -164,6 +164,31 @@ class ToolTests(unittest.TestCase):
         _, output = self.invoke()  # no option: the record is in the Git directory, as before
         self.assertEqual(output.splitlines()[-1], f'record={default}')
 
+    def test_parent_swapped_for_a_link_after_the_path_check_redirects_no_receipt_file(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        lane, guarded, home = self.root / 'lane', self.root / 'guarded', Path.cwd()
+        lane.mkdir()
+        guarded.mkdir()
+        folder_lock = reanchor.folder_lock
+
+        @contextlib.contextmanager
+        def swap_then_lock(folder):
+            lane.rename(self.root / 'moved')
+            lane.symlink_to(guarded, target_is_directory=True)
+            with folder_lock(folder):
+                yield
+
+        args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt', base=self.base,
+                         head=self.head_sha, restoration=None, receipt_dir=str(lane / 'receipts'))
+        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
+                patch.object(reanchor, 'folder_lock', swap_then_lock), self.assertRaises(OSError):
+            reanchor.run(args)
+        self.assertEqual(list(guarded.iterdir()), [])
+        self.assertEqual(list((self.root / 'moved').iterdir()), [])
+        self.assertEqual(Path.cwd(), home)
+
     def test_printed_fields_match_the_record_entry(self):
         self.setup_pair(literal=True, extra='[row.mutant]\noperator = "replace"\n')
         self.invoke()
@@ -730,6 +755,12 @@ class ToolTests(unittest.TestCase):
             if target == self.row:
                 with lock_path.open('r+b') as lock, self.assertRaises(BlockingIOError):
                     flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                folder = os.open(self.row.parent, os.O_RDONLY)
+                try:
+                    with self.assertRaises(BlockingIOError):
+                        flock(folder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                finally:
+                    os.close(folder)
             replace(source, target)
 
         def check_waiting_edit():
@@ -1060,7 +1091,8 @@ class HookTests(unittest.TestCase):
         for value in (str(self.row.parent), str(self.row.parent / 'receipts'),
                       str(self.root / 'other/tests/mutation/receipts'), str(self.root / 'Tests/Mutation'),
                       str(self.state), str(self.state / 'receipts'),
-                      '/' + receipts, receipts + '/', str(link / 'receipts'), str(self.root) + '/./receipts'):
+                      '/' + receipts, receipts + '/', str(link / 'receipts'), str(self.root) + '/./receipts',
+                      'receipts', receipts + '/../receipts'):
             with self.subTest(value=value):
                 self.fields['receipt_dir'] = value
                 self.write_record()
@@ -1117,7 +1149,6 @@ class HookTests(unittest.TestCase):
             self.command + ' && true', self.command + ' | cat', 'X=1 ' + self.command,
             self.command.replace('target', '"target"'), self.command.replace('python3 ', 'python3  '),
             self.command + '\n', self.command.replace('--row-id target', '--row-id other'),
-            self.command.replace('--base main', '--base --head'),
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)

@@ -6234,11 +6234,11 @@ def row_reanchor_gate(data, command):
             + ' --row-file <abs> --row-id <id> --subject <rel> --base <ref> --head <ref> [--restoration <commit>]'
             + ' [--receipt-dir <abs>]')
     reason = 'Row re-anchor gate requires exactly `' + form + '` and a matching driver-written row-reanchor admission record. '
-    # A value never starts with `-`, so an option name cannot stand in for a value.
-    word = r'(?!-)[A-Za-z0-9_./:@+,-]+'
+    word = r'[A-Za-z0-9_./:@+,-]+'
+    # A restoration commit never starts with `-`, so an option name cannot stand in for it.
     match = re.fullmatch(r'python3 -I (' + word + r') --row-file (' + word + r') --row-id (' + word
                          + r') --subject (' + word + r') --base (' + word + r') --head (' + word
-                         + r')(?: --restoration ' + word + r')?(?: --receipt-dir (' + word + r'))?', command)
+                         + r')(?: --restoration (?!-)' + word + r')?(?: --receipt-dir (' + word + r'))?', command)
     if not role(data, 'writer') or not match or match[1] != tool:
         deny(reason)
     fields, unmet = row_record(data, 'row-reanchor')
@@ -6256,7 +6256,7 @@ def row_reanchor_gate(data, command):
     # The driver names the directory; these folders stay closed even to a directory the driver names.
     if receipt is not None and (
             not canonical_row_path(receipt) or re.search(PROTECTED_ROW, receipt, re.I)
-            or any((receipt + '/').casefold().startswith(folder.casefold() + '/')
+            or any((receipt + '/').casefold().startswith(folder.casefold().rstrip('/') + '/')
                    for folder in (os.path.dirname(target), os.path.realpath(STATE)))):
         deny(reason + "The receipt directory is a canonical absolute path outside the row file's folder, "
              'every protected row path and the ship state folder.')

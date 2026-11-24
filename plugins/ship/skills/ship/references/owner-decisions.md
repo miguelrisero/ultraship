@@ -306,7 +306,7 @@ The hook denies a command without the option when the record has `receipt_dir`.
 Name a canonical path with zero symlink components.
 Keep it outside the row file's folder, every protected row path and the hook state folder.
 The tool holds an exclusive lock on the row file's folder for each run, in both modes.
-That lock orders the runs on one worktree across receipt directories.
+That lock orders the runs that share a row folder, across receipt directories.
 Use one receipt directory for one worktree, so one record lists every re-anchored row.
 Use single spaces and unquoted arguments, with nothing before or after the command.
 The hook accepts only its own plugin's tool path for a writer with a matching record.
