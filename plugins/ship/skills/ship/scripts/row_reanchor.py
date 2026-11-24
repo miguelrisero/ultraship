@@ -320,9 +320,11 @@ def staged_bytes(path, data, mode, held=None):
         require(staged.read_bytes() == data, 'staged write read-back differs')
         yield staged
     finally:
-        staged.unlink(missing_ok=True)
-        for kept in held or ():
-            os.close(kept)
+        try:
+            staged.unlink(missing_ok=True)
+        finally:
+            for kept in held or ():
+                os.close(kept)
 
 
 @contextmanager
@@ -401,8 +403,8 @@ def merge_record(path, identity, entry, check_before_replace, named=None):
     with staged_bytes(path, data, 0o600, *(() if named is None else (held,))) as record_stage:
         check_before_replace('staged write')
         os.replace(record_stage, path)
-        # The open descriptor keeps the written inode, so a file put at the named path later is another file.
-        require(named is None or os.path.samestat(os.fstat(held[0]), os.stat(named)),
+        # The open descriptor keeps the written inode, so a file or link put at the named path later is another file.
+        require(named is None or os.path.samestat(os.fstat(held[0]), os.lstat(named)),
                 'record path must name the written record')
 
 
@@ -412,8 +414,12 @@ def run(args):
             and row_file.resolve() == row_file, 'row file must be absolute, regular and canonical without links')
 
     receipt = getattr(args, 'receipt_dir', None)
-    # The tool enters the receipt directory later, so a relative PATH entry resolves to the program here.
-    program = 'git' if receipt is None else os.path.abspath(shutil.which('git') or 'git')
+    program = 'git'
+    if receipt is not None:
+        # The tool enters the receipt directory later, so a relative PATH entry resolves to the program here.
+        program = shutil.which('git')
+        require(program is not None, 'git executable not found')
+        program = os.path.join(os.getcwd(), program)  # unnormalized: `link/..` keeps its meaning
 
     def git(operation, *words, not_ancestor=None):
         try:

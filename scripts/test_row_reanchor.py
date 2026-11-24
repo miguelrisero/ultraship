@@ -202,38 +202,59 @@ class ToolTests(unittest.TestCase):
         self.setup_pair()
         self.invoke()
         self.head_sha = self.commit()
-        launch = self.root / 'launch'
-        (launch / 'bin').mkdir(parents=True)
-        (launch / 'bin/git').symlink_to(shutil.which('git'))
+        launch, tools, marker = self.root / 'launch', self.root / 'tools', self.root / 'decoy-ran'
+        for folder in (launch / 'bin', tools / 'bin', tools / 'subdir'):
+            folder.mkdir(parents=True)
+        git = os.path.abspath(shutil.which('git'))
+        (launch / 'bin/git').symlink_to(git)
+        (launch / 'link').symlink_to(tools / 'subdir', target_is_directory=True)
         receipts = self.root / 'receipts'
         _, output = self.invoke(cwd=launch, path='bin', **{'receipt-dir': str(receipts)})
         self.assertEqual(output.splitlines()[-1], f'record={receipts / "row-auth.json"}')
+        # `link/../bin` names `tools/bin` through the link; a lexical cleanup would name `launch/bin`.
+        (launch / 'bin/git').unlink()
+        (tools / 'bin/git').symlink_to(git)
+        _, output = self.invoke(cwd=launch, path='link/../bin', **{'receipt-dir': str(receipts)})
+        self.assertEqual(output.splitlines()[-1], f'record={receipts / "row-auth.json"}')
+        # A program outside PATH never stands in for a missing `git`.
+        decoy = launch / 'git'
+        decoy.write_text(f'#!/bin/sh\ntouch {marker}\nexit 1\n')
+        decoy.chmod(0o755)
+        self.invoke(2, 'git executable not found', cwd=launch, path=str(self.root / 'missing'),
+                    **{'receipt-dir': str(receipts)})
+        self.assertFalse(marker.exists())
 
     def test_file_put_at_the_record_path_after_the_replace_gets_a_refusal(self):
         self.setup_pair()
         self.invoke()
         self.head_sha = self.commit()
-        receipts = self.root / 'receipts'
-        record = receipts / 'row-auth.json'
         replace = os.replace
+        for intrusion in ('file', 'link'):  # another file, then a link to the written record under another name
+            with self.subTest(intrusion=intrusion):
+                receipts = self.root / ('receipts-' + intrusion)
+                record = receipts / 'row-auth.json'
 
-        def replace_then_intrude(source, target):
-            replace(source, target)
-            if Path(target).name == record.name:
-                intruder = receipts / 'intruder'
-                intruder.write_text('{}')
-                replace(intruder, record)
+                def replace_then_intrude(source, target):
+                    replace(source, target)
+                    if Path(target).name == record.name:
+                        intruder = receipts / 'intruder'
+                        if intrusion == 'file':
+                            intruder.write_text('{}')
+                        else:
+                            replace(record, receipts / 'kept')
+                            intruder.symlink_to('kept')
+                        replace(intruder, record)
 
-        args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt', base=self.base,
-                         head=self.head_sha, restoration=None, receipt_dir=str(receipts))
-        output = io.StringIO()
-        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
-                patch.object(reanchor.os, 'replace', side_effect=replace_then_intrude), \
-                contextlib.redirect_stdout(output), \
-                self.assertRaisesRegex(reanchor.Refused, '^record path must name the written record$'):
-            reanchor.run(args)
-        self.assertEqual(output.getvalue(), '')
-        self.assertEqual(record.read_text(), '{}')
+                args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt', base=self.base,
+                                 head=self.head_sha, restoration=None, receipt_dir=str(receipts))
+                output = io.StringIO()
+                with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
+                        patch.object(reanchor.os, 'replace', side_effect=replace_then_intrude), \
+                        contextlib.redirect_stdout(output), \
+                        self.assertRaisesRegex(reanchor.Refused, '^record path must name the written record$'):
+                    reanchor.run(args)
+                self.assertEqual(output.getvalue(), '')
+                self.assertEqual(record.is_symlink(), intrusion == 'link')
 
     def test_printed_fields_match_the_record_entry(self):
         self.setup_pair(literal=True, extra='[row.mutant]\noperator = "replace"\n')
