@@ -1674,6 +1674,10 @@ class LedgerDirTests(unittest.TestCase):
              'expected one commit'),
             ('negation on another line', f'The base `{base}` is not reviewed.\nFrozen commit: `{sha}`\nVerdict: PASS',
              f'{sha} pass'),
+            ('negation after the commit', f'Frozen commit: `{sha}`, not `{base}`.\nVerdict: PASS', f'{sha} pass'),
+            ('negation inside the label', f'Reviewed head: `{sha}`\nFrozen commit is not `{base}`.\nVerdict: PASS',
+             'expected one commit'),
+            ('quoted label', f'Reviewed head: `{sha}`\n> Frozen commit: `{base}`\nVerdict: PASS', 'expected one commit'),
         ))
 
     def test_account_auto_binds_the_final_verdict_line_after_earlier_rounds(self):
@@ -1693,6 +1697,8 @@ class LedgerDirTests(unittest.TestCase):
             ('unknown final label', f'Verdict: FAIL\n\nVerdict: undecided {sha}', 'expected one verdict'),
             ('quoted final label', f'Verdict: findings {sha}\n\nEarlier report:\n> Verdict: PASS',
              'expected one verdict'),
+            ('indented final label', f'Reviewed {sha}.\nVerdict: findings\n\nExample from an earlier report:\n\n'
+                                     '    Verdict: PASS', 'expected one verdict'),
             ('blocked label with a pass', f'Verdict: blocked — the tests pass {sha}', 'expected one verdict'),
             ('pass or blocked', f'Verdict: PASS or BLOCKED {sha}', 'expected one verdict'),
             ('pass with a blocked scope', f'Verdict: PASS at {sha}. One blocked scope: the Git read.',
@@ -1733,7 +1739,8 @@ class LedgerDirTests(unittest.TestCase):
         ))
 
     def merged_origin(self, *subjects):
-        """Give the checkout an `origin/main` with one commit per subject; return the commits."""
+        """Give the checkout a GitHub `origin` and an `origin/main` with one commit per subject."""
+        self.git(self.common, 'remote', 'add', 'origin', 'https://github.com/acme/widgets.git')
         commits = []
         for subject in subjects:
             self.git(self.common, '-c', 'user.name=t', '-c', 'user.email=t@t',
@@ -1804,6 +1811,7 @@ class LedgerDirTests(unittest.TestCase):
             ('negated label', f'Head `{unmerged}`.\nNot **frozen commit:** `{base}`\nTwo gaps remain.'),
             ('negation earlier in the line', f'This is not the frozen commit: `{base}`. Two gaps remain.'),
             ('annotated tag', f'Frozen commit: `{tag}`. Two gaps remain.'),
+            ('negation inside the label', f'Head `{unmerged}`.\nFrozen commit is not `{base}`.\nTwo gaps remain.'),
             ('missing object', f'Frozen commit: `{"ef" * 20}`. Two gaps remain.'),
             ('pull request with a matching subject', 'Findings remain on https://github.com/acme/widgets/pull/12.'),
             ('no named subject', 'ready'),
@@ -1835,6 +1843,15 @@ class LedgerDirTests(unittest.TestCase):
             self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/main', 'refs/heads/main')
             self.assert_retire_merged_outcome(text, None)
             self.git(self.common, 'symbolic-ref', '--delete', 'refs/remotes/origin/main')
+        self.git(self.common, 'update-ref', 'refs/remotes/origin/main', merged)
+        with self.subTest('a dangling default'):
+            self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/gone')
+            self.assert_retire_merged_outcome(text, None)
+        with self.subTest('a symbolic chain'):
+            self.git(self.common, 'update-ref', 'refs/remotes/origin/trunk', merged)
+            self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/alias', 'refs/remotes/origin/trunk')
+            self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/alias')
+            self.assert_retire_merged_outcome(text, None)
         # Only `origin/trunk` and the local `main` hold the commit.
         self.git(self.common, 'update-ref', 'refs/remotes/origin/trunk', merged)
         self.git(self.common, 'update-ref', 'refs/remotes/origin/main', root)
@@ -1854,7 +1871,7 @@ class LedgerDirTests(unittest.TestCase):
     def test_retire_merged_keeps_a_result_pending_when_a_git_read_is_late(self):
         merged, = self.merged_origin('feat: widget (#12)')
         read = ledger.merge_git
-        for late in ('for-each-ref', 'rev-parse', 'merge-base'):
+        for late in ('symbolic-ref', 'for-each-ref', 'rev-parse', 'merge-base'):
             with self.subTest(late=late):
                 def bounded(cwd, *args, late=late):
                     if args[0] == late:
@@ -1874,7 +1891,7 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(options['timeout'], ledger.MERGE_GIT_SECONDS)
         self.assertTrue(options['check'])
         self.assertEqual({key: value for key, value in options['env'].items() if key.startswith('GIT_')},
-                         {'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_NO_LAZY_FETCH': '1'})
+                         {'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_NO_LAZY_FETCH': '1', 'GIT_GRAFT_FILE': os.devnull})
 
     def test_close_unparsed_records_no_evidence_and_clears_stop(self):
         sha = 'ab' * 20

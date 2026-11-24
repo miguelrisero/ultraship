@@ -583,7 +583,7 @@ COMMIT = r'(?<![0-9a-fA-F])([0-9a-fA-F]{40})(?![0-9a-fA-F])'
 # A frozen label is the word, up to three label words, then the SHA on the same line: "Frozen commit: `<sha>`".
 FROZEN_COMMIT = re.compile(
     r'(?<!\w)frozen(?:[ _]+(?![0-9a-fA-F]{40})[A-Za-z]+){0,3}?[ \t:|`*=_-]*' + COMMIT, re.I)
-# A negation before the label on its line, as in "Not **frozen commit:**", labels no subject.
+# A negation before the SHA on the label's line, as in "Not **frozen commit:**", labels no subject.
 NEGATION = re.compile(r"\b(?:not|non|never)\b|n['’]t\b", re.I)
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
 VERDICT_WORD = r'(?:pass|fail(?:ed|s|ing|ure)?|findings|blocked)\b'
@@ -598,10 +598,13 @@ MERGE_GIT_SECONDS = 60
 
 def frozen_commits(text):
     commits = set()
-    for match in FROZEN_COMMIT.finditer(text):
-        before = re.sub(r'[*_`~]', '', text[text.rfind('\n', 0, match.start()) + 1:match.start()])
-        if not NEGATION.search(before):
-            commits.add(match[1].lower())
+    for line in text.split('\n'):
+        if line.lstrip().startswith('>'):
+            continue
+        negation = NEGATION.search(line)
+        for match in FROZEN_COMMIT.finditer(line):
+            if not negation or negation.start() > match.start(1):
+                commits.add(match[1].lower())
     return commits
 
 
@@ -622,11 +625,11 @@ def final_verdict(text):
     bare = not labels
     if len(labels) != 1:
         # Label lines above the closing paragraph are earlier rounds; a bare verdict counts only as the last line.
-        # A quoted last line repeats another report, so it never decides between several labels.
+        # A quoted or indented last line repeats another report, so it never decides between several labels.
         closing = re.split(r'\n\s*\n', text.strip())[-1].splitlines()
         last = (BARE_VERDICT if bare else VERDICT_LABEL).match(lines[-1])
         rivals = sum(1 for line in closing if (VERDICT_RIVAL if bare else VERDICT_LABEL).match(line))
-        if not last or rivals != 1 or lines[-1].lstrip().startswith('>'):
+        if not last or rivals != 1 or lines[-1][:1].isspace() or lines[-1].startswith('>'):
             raise ValueError('expected one verdict')
         labels = [last[1]]
     words = [word for token in re.findall(r"\w+(?:['’]\w+)*", labels[0].lower()) if (word := token.strip('_'))]
@@ -644,18 +647,18 @@ def final_verdict(text):
 
 
 def merge_git(cwd, *args):
-    """Run one bounded local Git read without inherited Git overrides, replacement objects or lazy fetch."""
+    """Run one bounded local Git read without inherited overrides, replacement objects, grafts or lazy fetch."""
     env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
-    env.update(GIT_NO_REPLACE_OBJECTS='1', GIT_NO_LAZY_FETCH='1')
+    env.update(GIT_NO_REPLACE_OBJECTS='1', GIT_NO_LAZY_FETCH='1', GIT_GRAFT_FILE=os.devnull)
     return subprocess.run(['git', '-C', str(cwd), *args], capture_output=True, text=True, check=True,
-                          env=env, timeout=MERGE_GIT_SECONDS).stdout.strip()
+                          env=env, timeout=MERGE_GIT_SECONDS).stdout.removesuffix('\n')
 
 
 def tracking_ref(cwd, name):
     """Return (commit, symbolic target) of the ref with this exact name; Git revision lookup also tries tags."""
-    listing = merge_git(cwd, 'for-each-ref', '--format=%(refname) %(objecttype) %(objectname) %(symref)', name)
-    for line in listing.splitlines():
-        refname, kind, sha, target = (line.split(' ') + [''])[:4]
+    fields = '%(refname)%00%(objecttype)%00%(objectname)%00%(symref)'
+    for line in merge_git(cwd, 'for-each-ref', '--format=' + fields, name).split('\n'):
+        refname, kind, sha, target = (line.split('\0') + [''] * 3)[:4]
         if refname == name and kind == 'commit':
             return sha, target
     raise OSError('no such tracking ref')
@@ -664,14 +667,15 @@ def tracking_ref(cwd, name):
 def default_branch(cwd):
     """Return (ref, tip) of the plain `refs/remotes/origin/` branch that is the remote default."""
     try:
-        ref = tracking_ref(cwd, 'refs/remotes/origin/HEAD')[1]
-    except OSError:
-        ref = ''
-    if not ref.startswith('refs/remotes/origin/'):
+        ref = merge_git(cwd, 'symbolic-ref', '--no-recurse', '--quiet', 'refs/remotes/origin/HEAD')
+    except subprocess.CalledProcessError as error:
+        # Status 1 means that `origin/HEAD` is absent or plain; any other failure proves nothing.
+        if error.returncode != 1:
+            raise
         ref = 'refs/remotes/origin/main'
     tip, target = tracking_ref(cwd, ref)
-    if target:
-        raise OSError('the remote default branch is a symbolic ref')
+    if target or not ref.startswith('refs/remotes/origin/'):
+        raise OSError('the remote default branch is no plain tracking branch')
     return ref, tip
 
 
