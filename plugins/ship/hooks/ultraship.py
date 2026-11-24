@@ -5112,7 +5112,8 @@ def own_account_call(data, raw):
         return False
     pending = str(owed_file(data))
     if words[2] == 'account-auto':
-        return words if words[3:] in ([pending], ['--fail-unparsed', pending]) else False
+        flags = ('--fail-unparsed', '--retire-merged', '--close-unparsed')
+        return words if words[3:] in ([pending], *([flag, pending] for flag in flags)) else False
     if words[2] == 'correct-binding':
         if (len(words) == 7 and words[3] == pending
                 and re.fullmatch(r'(?:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}|legacy:[0-9a-f]{64})', words[4])
@@ -7102,7 +7103,11 @@ def stop(data):
               'this appends bookkeeping without reopening the run. '
               'Run this command alone on one line with the evidence in single quotes. Never invent review evidence. '
               f'For results with clear transcript evidence, run `python3 {shlex.quote(str(ledger_script()))} '
-              f'account-auto {shlex.quote(str(path))}` alone on one line.'}))
+              f'account-auto {shlex.quote(str(path))}` alone on one line. '
+              'Add `--retire-merged` before the path to retire each unclear result whose frozen commit '
+              'is on the remote default branch. Use `--close-unparsed` in its place to '
+              'also close each result that stays unclear with a `no-evidence` record; it states no commit and '
+              'no verdict.'}))
 
 
 def compact(data):
