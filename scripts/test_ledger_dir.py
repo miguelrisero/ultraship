@@ -1684,6 +1684,9 @@ class LedgerDirTests(unittest.TestCase):
              'expected one commit'),
             ('label after fenced code', f'```text\nbase: {base}\n```\nFrozen commit: `{sha}`\nVerdict: PASS',
              f'{sha} pass'),
+            ('frozen base', f'Reviewed head: `{sha}`\nFrozen base: `{base}`\nVerdict: PASS', 'expected one commit'),
+            ('label in indented code', f'Reviewed head: `{sha}`\n\nEarlier output:\n\n    Frozen commit: {base}\n\n'
+                                       'Verdict: PASS', 'expected one commit'),
         ))
 
     def test_account_auto_binds_the_final_verdict_line_after_earlier_rounds(self):
@@ -1707,6 +1710,10 @@ class LedgerDirTests(unittest.TestCase):
                                      '    Verdict: PASS', 'expected one verdict'),
             ('final label after a quote line', f'Reviewed {sha}.\nVerdict: findings\n\n> Earlier report:\nVerdict: PASS',
              'expected one verdict'),
+            ('final label in a list item', f'Reviewed {sha}.\nVerdict: findings\n\nLint result:\n- Verdict: PASS',
+             'expected one verdict'),
+            ('only label in fenced code', f'Reviewed {sha}.\n\n```\nVerdict: PASS\n```', 'expected one verdict'),
+            ('label before fenced code', f'Verdict: findings {sha}\n\n```\nVerdict: PASS\n```', f'{sha} findings'),
             ('blocked label with a pass', f'Verdict: blocked — the tests pass {sha}', 'expected one verdict'),
             ('pass or blocked', f'Verdict: PASS or BLOCKED {sha}', 'expected one verdict'),
             ('pass with a blocked scope', f'Verdict: PASS at {sha}. One blocked scope: the Git read.',

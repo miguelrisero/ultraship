@@ -580,9 +580,11 @@ def load_receipts(path, *, root_fd=None):
 
 
 COMMIT = r'(?<![0-9a-fA-F])([0-9a-fA-F]{40})(?![0-9a-fA-F])'
-# A frozen label is the word, up to three label words, then the SHA on the same line: "Frozen commit: `<sha>`".
+# A frozen label is the word, up to three subject words, then the SHA on the same line: "Frozen commit: `<sha>`".
+# "Frozen base" labels no subject.
 FROZEN_COMMIT = re.compile(
-    r'(?<!\w)frozen(?:[ _]+(?![0-9a-fA-F]{40})[A-Za-z]+){0,3}?[ \t:|`*=_-]*' + COMMIT, re.I)
+    r'(?<!\w)frozen(?:[ _]+(?:final|review|reviewed|subject|head|commit|sha|snapshot)){0,3}[ \t:|`*=_-]*' + COMMIT,
+    re.I)
 # A negation before the SHA on the label's line, as in "Not **frozen commit:**", labels no subject.
 NEGATION = re.compile(r"\b(?:not|non|never)\b|n['’]t\b", re.I)
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
@@ -596,19 +598,29 @@ VERDICT_WORDS = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findi
 MERGE_GIT_SECONDS = 60
 
 
-def frozen_commits(text):
-    """Return the commits that a frozen label names outside quotes and fenced code."""
-    commits, fence = set(), ''
+def prose(text):
+    """Return `text` with every line of fenced code emptied, so an example states no label and no verdict."""
+    lines, fence = [], ''
     for line in text.split('\n'):
         marker = line.lstrip()[:3]
         if marker in ('```', '~~~') and fence in ('', marker):
             fence = '' if fence else marker
-        elif not fence and not marker.startswith('>'):
-            # Emphasis markers become spaces, so `_not_` reads as a word and each position stays.
-            negation = NEGATION.search(re.sub(r'[*_`~]', ' ', line))
-            for match in FROZEN_COMMIT.finditer(line):
-                if not negation or negation.start() > match.start(1):
-                    commits.add(match[1].lower())
+            line = ''
+        lines.append('' if fence else line)
+    return '\n'.join(lines)
+
+
+def frozen_commits(text):
+    """Return the commits that a frozen label names outside quotes, fenced code and indented code."""
+    commits = set()
+    for line in prose(text).split('\n'):
+        if line.lstrip().startswith('>') or line.startswith(('    ', '\t')):
+            continue
+        # Emphasis markers become spaces, so `_not_` reads as a word and each position stays.
+        negation = NEGATION.search(re.sub(r'[*_`~]', ' ', line))
+        for match in FROZEN_COMMIT.finditer(line):
+            if not negation or negation.start() > match.start(1):
+                commits.add(match[1].lower())
     return commits
 
 
@@ -624,17 +636,20 @@ def subject_commit(text):
 
 def final_verdict(text):
     """Return the verdict of the one verdict line: the only label line, or the single line that ends the review."""
+    text = prose(text)
     lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError('expected one verdict')
     labels = [match[1] for line in lines if (match := VERDICT_LABEL.match(line))]
     bare = not labels
     if len(labels) != 1:
         # Label lines above the closing paragraph are earlier rounds; a bare verdict counts only as the last line.
-        # A quote in the closing paragraph or an indented last line repeats another report, so it never
-        # decides between several labels.
+        # Between several labels only a last line that starts with the label at the margin decides: a list
+        # item, an indented line or a closing paragraph with a quote repeats a check or another report.
         closing = re.split(r'\n\s*\n', text.strip())[-1].splitlines()
         last = (BARE_VERDICT if bare else VERDICT_LABEL).match(lines[-1])
         rivals = sum(1 for line in closing if (VERDICT_RIVAL if bare else VERDICT_LABEL).match(line))
-        if (not last or rivals != 1 or lines[-1][:1].isspace()
+        if (not last or rivals != 1 or not re.match(r'[*#_`]*[a-z]', lines[-1], re.I)
                 or any(line.lstrip().startswith('>') for line in closing)):
             raise ValueError('expected one verdict')
         labels = [last[1]]
