@@ -30,10 +30,11 @@ USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py run-start <full|light> <run-id> [board-path]
        ledger.py append <step> <agent>[@<agent-id>] <sha> <verdict> [note]
        ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
-       ledger.py account-auto [--fail-unparsed | --retire-merged] <pending.tsv>
+       ledger.py account-auto [--fail-unparsed | --retire-merged | --close-unparsed] <pending.tsv>
        ledger.py correct-binding <pending.tsv> <result-id> <ledger-line> <reason>"""
 MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
 ACCOUNT_COMMANDS = ('account', 'account-auto', 'correct-binding')
+AUTO_FLAGS = ('--fail-unparsed', '--retire-merged', '--close-unparsed')
 GRANT_LIFETIME_NS = 900_000_000_000
 GRANT_REFUSAL = 'Accounting requires a fresh grant from the ship hook. Run the exact command again.'
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -45,7 +46,7 @@ def account_pending_arg(argv):
         return None
     cmd, args = argv[0], argv[1:]
     if cmd == 'account-auto':
-        if len(args) == 2 and args[0] in ('--fail-unparsed', '--retire-merged'):
+        if len(args) == 2 and args[0] in AUTO_FLAGS:
             return args[1]
         if len(args) == 1:
             return args[0]
@@ -580,25 +581,36 @@ def load_receipts(path, *, root_fd=None):
 
 COMMIT = r'(?<![0-9a-fA-F])([0-9a-fA-F]{40})(?![0-9a-fA-F])'
 # A frozen label is the word, up to three label words, then the SHA on the same line: "Frozen commit: `<sha>`".
-# "Non-frozen" and "not frozen" are no labels.
 FROZEN_COMMIT = re.compile(
-    r'(?<![\w-])(?<!not )frozen(?:[ _]+(?![0-9a-fA-F]{40})[A-Za-z]+){0,3}?[ \t:|`*=_-]*' + COMMIT, re.I)
+    r'(?<!\w)frozen(?:[ _]+(?![0-9a-fA-F]{40})[A-Za-z]+){0,3}?[ \t:|`*=_-]*' + COMMIT, re.I)
+# "Not frozen", "non-frozen" and "unfrozen" label no subject.
+NEGATED_LABEL = re.compile(r'(?:\bnot|\bnon|\bun|\bnever)[ \t-]*$', re.I)
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
-# A bare verdict line is a verdict word, then the line end, a dash or "(": "**FAIL** — two findings".
-# A list item or a quote is no bare verdict line.
+VERDICT_WORD = r'(?:pass|fail(?:ed|s|ing|ure)?|findings|blocked)\b'
+# A bare verdict line starts at the margin with a verdict word, then the line end, a dash or "(":
+# "**FAIL** — two findings". A list item, a quote or an indented line is no bare verdict line.
 BARE_VERDICT = re.compile(
-    r'^(?!\s*(?:>|(?:[-*+]|\d+[.)])\s))[\s*#_`]*'
-    r'((?:pass|fail(?:ed|s|ing|ure)?|findings|blocked)\b[*_`]*(?:\s*$|\s*[—–(]|\s+-\s).*)', re.I)
+    r'^(?!(?:[-*+]|\d+[.)])\s)[*#_`]*(' + VERDICT_WORD + r'[*_`]*(?:\s*$|\s*[—–(]|\s+-\s).*)', re.I)
+# Any line that leads with a verdict word competes with the bare verdict line of its paragraph.
+VERDICT_LEAD = re.compile(r'^[\W\d_]*' + VERDICT_WORD, re.I)
 VERDICT_WORDS = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
-PULL_REQUEST = re.compile(r'https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)(?!\w)')
+PULL_REQUEST = re.compile(r'https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)(?![\w-])')
+GITHUB_ORIGIN = re.compile(
+    r'(?:https?://(?:[^/@\s]+@)?|ssh://git@|git@)github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?', re.I)
 MERGE_GIT_SECONDS = 60
+MERGE_LOG_COMMITS = 50000
+
+
+def frozen_commits(text):
+    return {match[1].lower() for match in FROZEN_COMMIT.finditer(text)
+            if not NEGATED_LABEL.search(text[max(0, match.start() - 12):match.start()])}
 
 
 def subject_commit(text):
     """Return the one commit a review names, or among several the one it labels frozen."""
     commits = {match[1].lower() for match in re.finditer(COMMIT, text)}
     if len(commits) > 1:
-        commits = {match[1].lower() for match in FROZEN_COMMIT.finditer(text)}
+        commits = frozen_commits(text)
     if len(commits) != 1:
         raise ValueError('expected one commit')
     return commits.pop()
@@ -612,11 +624,12 @@ def final_verdict(text):
     if len(labels) != 1:
         # Label lines above the closing paragraph are earlier rounds; a bare verdict counts only as the last line.
         # A quoted last line repeats another report, so it never decides between several labels.
-        pattern = BARE_VERDICT if bare else VERDICT_LABEL
-        labels = [match[1] for line in re.split(r'\n\s*\n', text.strip())[-1].splitlines()
-                  if (match := pattern.match(line))]
-        if len(labels) != 1 or not pattern.match(lines[-1]) or lines[-1].lstrip().startswith('>'):
+        closing = re.split(r'\n\s*\n', text.strip())[-1].splitlines()
+        last = (BARE_VERDICT if bare else VERDICT_LABEL).match(lines[-1])
+        rivals = sum(1 for line in closing if (VERDICT_LEAD if bare else VERDICT_LABEL).match(line))
+        if not last or rivals != 1 or lines[-1].lstrip().startswith('>'):
             raise ValueError('expected one verdict')
+        labels = [last[1]]
     words = [word for token in re.findall(r"\w+(?:['’]\w+)*", labels[0].lower()) if (word := token.strip('_'))]
     if not words or words[0] not in VERDICT_WORDS | {'blocked'}:
         raise ValueError('expected one verdict')
@@ -624,7 +637,7 @@ def final_verdict(text):
     if bare and words[0] == 'findings' and any(word in ('none', 'no', 'zero', '0') for word in words[1:]):
         raise ValueError('expected one verdict')
     if 'pass' in words and (words[0] != 'pass' or any(
-            word in VERDICT_WORDS or word in ('not', 'no', 'never', 'without')
+            word in VERDICT_WORDS or word in ('blocked', 'not', 'no', 'never', 'without')
             or word.endswith(("n't", 'n’t')) for word in words[1:])):
         raise ValueError('expected one verdict')
     return ('pass' if words[0] == 'pass' else 'blocked' if words[0] == 'blocked'
@@ -639,64 +652,75 @@ def merge_git(cwd, *args):
                           env=env, timeout=MERGE_GIT_SECONDS).stdout.strip()
 
 
-def merged_state(cwd):
-    """Read the remote default branch of `cwd` once: its ref, tip, GitHub repository and merged pull requests."""
+def default_branch(cwd):
+    """Return (ref, tip) of the plain `refs/remotes/origin/` branch that is the remote default."""
     try:
-        try:
-            ref = merge_git(cwd, 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD')
-        except subprocess.CalledProcessError:
-            ref = ''
-        if not ref.startswith('refs/remotes/origin/'):
-            ref = 'refs/remotes/origin/main'
-        tip = merge_git(cwd, 'rev-parse', '--verify', ref + '^{commit}')
-        try:
-            url = merge_git(cwd, 'remote', 'get-url', 'origin')
-        except subprocess.CalledProcessError:
-            url = ''
-        slug = re.search(r'(?:^|[/@])github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$', url)
-        pulls = {}
-        # shortcut: a pull request counts as merged when a first-parent subject of the default branch ends with
-        # "(#N)" or starts with "Merge pull request #N". Local Git holds no pull request record, so a direct push
-        # with that subject also counts, and a rebase merge never does; read the pull request state for those.
-        for line in merge_git(cwd, 'log', '--first-parent', '--format=%H %s', tip).splitlines():
-            sha, _, subject = line.partition(' ')
-            number = re.search(r'\(#(\d+)\)$', subject) or re.match(r'Merge pull request #(\d+)\b', subject)
-            if number:
-                pulls.setdefault(number[1], sha)
-    except (subprocess.SubprocessError, OSError, UnicodeError):
-        return None
-    return ref, tip, slug[1].lower() if slug else None, pulls
+        ref = merge_git(cwd, 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD')
+    except subprocess.CalledProcessError:
+        ref = ''
+    if not ref.startswith('refs/remotes/origin/'):
+        ref = 'refs/remotes/origin/main'
+    try:
+        merge_git(cwd, 'symbolic-ref', '--quiet', ref)
+    except subprocess.CalledProcessError:
+        return ref, merge_git(cwd, 'rev-parse', '--verify', ref + '^{commit}')
+    raise OSError('the remote default branch is a symbolic ref')
+
+
+def merged_pulls(cwd, tip):
+    """Return (repository, {number: commit}) for the pull requests that first-parent subjects of `tip` name."""
+    url = merge_git(cwd, 'remote', 'get-url', 'origin')
+    slug = GITHUB_ORIGIN.fullmatch(url)
+    pulls = {}
+    # shortcut: a pull request counts as merged when a first-parent subject of the default branch ends with
+    # "(#N)" or starts with "Merge pull request #N". Local Git holds no pull request record, so a direct push
+    # with that subject also counts, and a rebase merge never does; read the pull request state for those.
+    log = merge_git(cwd, 'log', '-z', '--first-parent', f'--max-count={MERGE_LOG_COMMITS}', '--format=%H %s', tip)
+    for record in log.split('\0'):
+        sha, _, subject = record.partition(' ')
+        number = re.search(r'\(#(\d+)\)$', subject) or re.match(r'Merge pull request #(\d+)\b', subject)
+        if number and re.fullmatch('[0-9a-f]{40}', sha):
+            pulls.setdefault(number[1], sha)
+    return slug[1].lower() if slug else None, pulls
 
 
 def merged_proof(cwd, text, states):
-    """Return (sha, proof) when local git shows the review's frozen commit or one pull request on the default branch."""
-    if cwd not in states:
-        states[cwd] = merged_state(cwd)
-    if states[cwd] is None:
-        return None
-    ref, tip, slug, pulls = states[cwd]
-    # An unlabelled commit can be the base, which is on the default branch before any merge.
-    frozen = {match[1].lower() for match in FROZEN_COMMIT.finditer(text)}
-    if len(frozen) == 1:
-        try:
-            merge_git(cwd, 'merge-base', '--is-ancestor', *frozen, tip)
-        except (subprocess.SubprocessError, OSError):
-            pass
-        else:
-            sha = frozen.pop()
-            return sha, f'commit {sha} is an ancestor of {ref} at {tip}'
-    named = {(match[1].lower(), match[2]) for match in PULL_REQUEST.finditer(text)}
-    if len(named) == 1:
-        repository, number = named.pop()
-        if repository == slug and number in pulls:
-            return pulls[number], (f'https://github.com/{repository}/pull/{number} is commit {pulls[number]} '
-                                   f'on {ref} at {tip}')
+    """Return (sha, proof) when local git shows the review's frozen commit or one pull request on the default branch.
+
+    A Git read that fails or exceeds its deadline proves nothing, so the result stays pending."""
+    try:
+        if cwd not in states:
+            states[cwd] = [*default_branch(cwd), None]
+        ref, tip, pulls = states[cwd]
+        # An unlabelled commit can be the base, which is on the default branch before any merge.
+        frozen = frozen_commits(text)
+        if len(frozen) == 1:
+            try:
+                merge_git(cwd, 'merge-base', '--is-ancestor', *frozen, tip)
+            except subprocess.CalledProcessError:
+                pass
+            else:
+                sha = frozen.pop()
+                return sha, f'commit {sha} is an ancestor of {ref} at {tip}'
+        named = {(match[1].lower(), match[2]) for match in PULL_REQUEST.finditer(text)}
+        if len(named) == 1:
+            if pulls is None:
+                pulls = states[cwd][2] = merged_pulls(cwd, tip)
+            repository, number = named.pop()
+            if repository == pulls[0] and number in pulls[1]:
+                sha = pulls[1][number]
+                return sha, f'https://github.com/{repository}/pull/{number} is commit {sha} on {ref} at {tip}'
+    except (subprocess.SubprocessError, OSError, UnicodeError):
+        pass
     return None
 
 
-def account_auto(pending, entries, receipts, *, fail_unparsed=False, retire_merged=False):
+def account_auto(pending, entries, receipts, *, flag=None):
+    """Account for each clear result; a flag selects one disposition for a result that stays unclear."""
+    unparsed = ('expected one commit', 'expected one verdict', 'transcript parse error')
     budgets, merges = {}, {}
-    accounted = retired = remaining = already = awaiting = 0
+    counts = dict.fromkeys(('accounted', 'retired', 'closed'), 0)
+    remaining = already = awaiting = 0
     for fields in (line.split('\t') for line in entries if line):
         identifier = 'unknown'
         try:
@@ -774,17 +798,20 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False, retire_merg
                     verdict = final_verdict(text)
                 except ValueError as exc:
                     reason = str(exc)
-                    proof = (merged_proof(cwd, text, merges) if retire_merged and reason in (
-                        'expected one commit', 'expected one verdict') else None)
+                    proof = (merged_proof(cwd, text, merges)
+                             if flag in ('--retire-merged', '--close-unparsed') and reason in unparsed[:2] else None)
                     if proof:
                         # A retired row records the merge proof; it never states a review verdict.
                         step = verdict = 'retired'
                         sha, reason = proof[0], f'{reason}; merged: {proof[1]}'
-                    elif not fail_unparsed or reason not in (
-                            'expected one commit', 'expected one verdict', 'transcript parse error'):
-                        raise
-                    else:
+                    elif flag == '--close-unparsed' and reason in unparsed:
+                        # A closed row records that the result holds no review evidence: no commit, no verdict.
+                        step, sha, verdict = 'closed', '-', 'no-evidence'
+                        reason += '; closed without review evidence'
+                    elif flag == '--fail-unparsed' and reason in unparsed:
                         sha, verdict = '0' * 40, 'fail'
+                    else:
+                        raise
                 else:
                     reason = verdict
                 account(pending, identifier, step, agent, sha, verdict, f'{source} at {when}: {reason}',
@@ -797,22 +824,23 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False, retire_merg
         except ValueError as exc:
             reason = str(exc)
         else:
-            if verdict == 'retired':
-                print(f'retired {identifier} {named} {sha} {reason}')
-                retired += 1
+            if step in counts:
+                print(f'{step} {identifier} {named} {sha} {reason}')
             else:
                 print(f'accounted {identifier} {named} {sha} {verdict}')
-                accounted += 1
+            counts[step if step in counts else 'accounted'] += 1
             continue
         print(f'pending {identifier} {reason}')
         remaining += 1
-    if retired:
-        print(f'{retired} retired as merged')
+    if counts['retired']:
+        print(f"{counts['retired']} retired as merged")
+    if counts['closed']:
+        print(f"{counts['closed']} closed without review evidence")
     if awaiting:
         print(f'{awaiting} recorded and awaiting Stop')
     if already:
         print(f'{already} accounted at an earlier Stop')
-    print(f'{accounted} accounted, {remaining} pending')
+    print(f"{counts['accounted']} accounted, {remaining} pending")
 
 
 def publish(path, value):
@@ -923,8 +951,7 @@ def main(argv):
                     with locked_receipts(root_fd):
                         account_auto(pending, source.read().splitlines(),
                                      load_receipts(root / 'accounted.json', root_fd=root_fd),
-                                     fail_unparsed=args[0] == '--fail-unparsed' and len(args) == 2,
-                                     retire_merged=args[0] == '--retire-merged' and len(args) == 2)
+                                     flag=args[0] if len(args) == 2 else None)
         except OSError:
             sys.exit('Accounting evidence is unavailable. Run the exact command again.')
         except ValueError as exc:

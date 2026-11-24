@@ -1665,6 +1665,9 @@ class LedgerDirTests(unittest.TestCase):
              'expected one commit'),
             ('non-frozen label', f'Non-frozen commit: `{base}`\nHead: `{sha}`\nVerdict: PASS', 'expected one commit'),
             ('negated label', f'Not frozen commit `{base}`; head `{sha}`.\nVerdict: PASS', 'expected one commit'),
+            ('negated label with two spaces', f'Reviewed head: `{sha}`\nNot  frozen commit: `{base}`\nVerdict: PASS',
+             'expected one commit'),
+            ('unfrozen label', f'Head: `{sha}`\nUnfrozen commit: `{base}`\nVerdict: PASS', 'expected one commit'),
         ))
 
     def test_account_auto_binds_the_final_verdict_line_after_earlier_rounds(self):
@@ -1685,6 +1688,9 @@ class LedgerDirTests(unittest.TestCase):
             ('quoted final label', f'Verdict: findings {sha}\n\nEarlier report:\n> Verdict: PASS',
              'expected one verdict'),
             ('blocked label with a pass', f'Verdict: blocked — the tests pass {sha}', 'expected one verdict'),
+            ('pass or blocked', f'Verdict: PASS or BLOCKED {sha}', 'expected one verdict'),
+            ('pass with a blocked scope', f'Verdict: PASS at {sha}. One blocked scope: the Git read.',
+             'expected one verdict'),
         ))
 
     def test_account_auto_binds_a_bare_final_verdict_line(self):
@@ -1699,7 +1705,6 @@ class LedgerDirTests(unittest.TestCase):
             ('hyphen', f'Review of {sha}.\nPASS - every check holds', f'{sha} pass'),
             ('blocked label', f'Verdict: blocked. The review needs a snapshot at {sha}.', f'{sha} blocked'),
             ('bare blocked', f'Review of {sha}.\n**blocked** — the read hook denied access.', f'{sha} blocked'),
-            ('pass with a blocked scope', f'Verdict: PASS at {sha}. One blocked scope: the Git read.', f'{sha} pass'),
             ('verdict on the first line only', f'**FAIL** — at `{sha}`.\n\nDetails follow.', 'expected one verdict'),
             ('prose', f'Review of {sha}.\nPass 2 covered the tests.', 'expected one verdict'),
             ('word without a separator', f'Review of {sha}.\nfailing tests remain', 'expected one verdict'),
@@ -1712,6 +1717,10 @@ class LedgerDirTests(unittest.TestCase):
             ('numbered item', f'The review of {sha} found a defect.\n\n1. PASS — lint', 'expected one verdict'),
             ('quoted word', f'The review of {sha} found a defect.\n\n> PASS', 'expected one verdict'),
             ('square bracket', f'Review of {sha}.\nPASS [checks complete]', 'expected one verdict'),
+            ('list continuation', f'Reviewed {sha}.\n\n- FAIL — overall review\n  PASS — lint', 'expected one verdict'),
+            ('lazy list continuation', f'Reviewed {sha}.\n\n- FAIL — overall review\nPASS — lint',
+             'expected one verdict'),
+            ('indented word', f'Review of {sha}.\n\n    PASS', 'expected one verdict'),
         ))
 
     def merged_origin(self, *subjects, url='https://github.com/acme/widgets.git'):
@@ -1775,6 +1784,7 @@ class LedgerDirTests(unittest.TestCase):
             ('two pull requests', f'Findings remain on {pull}12 and {pull}13.', 'expected one commit'),
             ('number inside a subject', f'Findings remain on {pull}14.', 'expected one commit'),
             ('longer path segment', f'Findings remain on {pull}12draft.', 'expected one commit'),
+            ('hyphenated path segment', f'Findings remain on {pull}12-draft.', 'expected one commit'),
             ('no named subject', 'ready', 'expected one commit'),
         ):
             with self.subTest(case=name):
@@ -1831,7 +1841,7 @@ class LedgerDirTests(unittest.TestCase):
     def test_retire_merged_requires_the_github_origin_for_a_pull_request(self):
         url = 'https://github.com/acme/widgets/pull/12'
         for origin in ('https://mirror-github.com/acme/widgets.git', 'https://github.com.example.net/acme/widgets.git',
-                       None):
+                       'https://example.net/cache/github.com/acme/widgets.git', None):
             with self.subTest(origin=origin):
                 merged, = self.merged_origin('feat: widget (#12)', url=origin)
                 tip = f'refs/remotes/origin/main at {merged}'
@@ -1855,6 +1865,114 @@ class LedgerDirTests(unittest.TestCase):
         expired = subprocess.TimeoutExpired(['git'], ledger.MERGE_GIT_SECONDS)
         with mock.patch.object(ledger, 'merge_git', side_effect=expired):
             self.assert_retire_merged_outcome('Findings remain on https://github.com/acme/widgets/pull/12.', None)
+
+    def test_retire_merged_refuses_a_symbolic_default_branch(self):
+        merged, = self.merged_origin('feat: widget (#12)')
+        self.git(self.common, 'update-ref', '-d', 'refs/remotes/origin/main')
+        self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/main', 'refs/heads/main')
+        self.assert_retire_merged_outcome('Findings remain on https://github.com/acme/widgets/pull/12.', None)
+        self.assert_retire_merged_outcome(f'Frozen commit: `{merged}`. Two gaps remain.', None)
+
+    def test_retire_merged_reads_first_parent_subjects_as_whole_records(self):
+        identity = ('-c', 'user.name=t', '-c', 'user.email=t@t')
+        self.git(self.common, 'checkout', '-q', '-b', 'side')
+        self.git(self.common, *identity, 'commit', '-q', '--allow-empty', '-m', 'feat: inner (#15)')
+        self.git(self.common, 'checkout', '-q', 'main')
+        self.git(self.common, *identity, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #16', 'side')
+        merge = self.git(self.common, 'rev-parse', 'HEAD')
+        tip, = self.merged_origin(f'docs: example {"ab" * 20} Merge pull request #17')
+        pull = 'https://github.com/acme/widgets/pull/'
+        self.assert_retire_merged_outcome(
+            f'Findings remain on {pull}16.', f'{merge} {pull}16 is commit {merge} on refs/remotes/origin/main at {tip}')
+        for number in ('15', '17'):
+            with self.subTest(number=number):
+                self.assert_retire_merged_outcome(f'Findings remain on {pull}{number}.', None)
+
+    def test_retire_merged_keeps_a_result_pending_when_the_ancestry_read_is_late(self):
+        self.merged_origin('feat: widget (#12)')
+        self.git(self.checkout, '-c', 'user.name=t', '-c', 'user.email=t@t',
+                 'commit', '-q', '--allow-empty', '-m', 'wip')
+        unmerged = self.git(self.checkout, 'rev-parse', 'HEAD')
+        read = ledger.merge_git
+
+        def late(cwd, *args):
+            if 'merge-base' in args:
+                raise subprocess.TimeoutExpired(['git'], ledger.MERGE_GIT_SECONDS)
+            return read(cwd, *args)
+
+        with mock.patch.object(ledger, 'merge_git', side_effect=late):
+            self.assert_retire_merged_outcome(
+                f'Frozen commit: `{unmerged}`. Compare https://github.com/acme/widgets/pull/12.', None)
+
+    def test_merge_git_bounds_each_read_and_drops_git_overrides(self):
+        done = SimpleNamespace(stdout='value\n')
+        with mock.patch.dict(os.environ, {'GIT_DIR': '/elsewhere', 'GIT_WORK_TREE': '/elsewhere'}), \
+                mock.patch.object(ledger.subprocess, 'run', return_value=done) as run:
+            self.assertEqual(ledger.merge_git('/repository', 'rev-parse', 'HEAD'), 'value')
+        (command,), options = run.call_args
+        self.assertEqual(command, ['git', '-C', '/repository', 'rev-parse', 'HEAD'])
+        self.assertEqual(options['timeout'], ledger.MERGE_GIT_SECONDS)
+        self.assertTrue(options['check'])
+        self.assertEqual({key: value for key, value in options['env'].items() if key.startswith('GIT_')},
+                         {'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_NO_LAZY_FETCH': '1'})
+
+    def test_close_unparsed_records_no_evidence_and_clears_stop(self):
+        sha = 'ab' * 20
+        for reason, text in (('expected one commit', 'ready'),
+                             ('expected one verdict', f'Reviewed {sha}. Two gaps remain.'),
+                             ('transcript parse error', None)):
+            with self.subTest(reason=reason):
+                owed, transcript, result, epoch = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', text or '')])
+                if text is None:
+                    transcript.write_text('{bad json\n')
+                home = self.resolve()
+                before = ledger.rows(home)
+                gaps = self.cli('gaps')
+                plain = self.cli('account-auto', str(owed))
+                self.assertEqual(plain.stdout.splitlines(),
+                                 [f"pending {result['id']} {reason}", '0 accounted, 1 pending'])
+                self.assertIn('--close-unparsed', json.loads(self.hook('stop'))['reason'])
+                closed = self.cli('account-auto', '--close-unparsed', str(owed))
+                self.assertEqual(closed.returncode, 0, closed.stderr)
+                note = f'{reason}; closed without review evidence'
+                self.assertEqual(closed.stdout.splitlines(), [
+                    f"closed {result['id']} ship:reviewer--sol@reviewer - {note}",
+                    '1 closed without review evidence', '0 accounted, 0 pending'])
+                *history, row = ledger.rows(home)
+                self.assertEqual(history, before)
+                self.assertEqual(row[1:5], ['account-result', 'ship:reviewer--sol@reviewer', '-', 'no-evidence'])
+                when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+                self.assertEqual((json.loads(row[5])['step'], json.loads(row[5])['evidence']),
+                                 ('closed', f'{transcript} at {when}: {note}'))
+                after = self.cli('gaps')
+                self.assertEqual((after.returncode, after.stdout), (gaps.returncode, gaps.stdout))
+                self.assertEqual(self.hook('stop'), '')
+                self.assertEqual(owed.read_bytes(), b'')
+
+    def test_close_unparsed_keeps_other_refusals_pending(self):
+        home = self.resolve()
+        for reason, entries in (('no final turn text', [(-2, 'user', 'Review.')]), ('no transcript', None)):
+            with self.subTest(reason=reason):
+                owed, _, result, _ = self.auto_owed(entries)
+                before = home.read_bytes()
+                closed = self.cli('account-auto', '--close-unparsed', str(owed))
+                owed.write_text('')
+                self.assertEqual(closed.stdout.splitlines(),
+                                 [f"pending {result['id']} {reason}", '0 accounted, 1 pending'])
+                self.assertEqual(home.read_bytes(), before)
+
+    def test_close_unparsed_prefers_a_verdict_and_a_merge_proof(self):
+        merged, = self.merged_origin('feat: widget (#12)')
+        sha, url = 'ab' * 20, 'https://github.com/acme/widgets/pull/12'
+        self.assert_auto_outcomes((('clear', f'{url}\nVerdict: findings {sha}', f'{sha} findings'),),
+                                  '--close-unparsed')
+        owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'Gaps remain on {url}.')])
+        closed = self.cli('account-auto', '--close-unparsed', str(owed))
+        self.assertEqual(closed.stdout.splitlines(), [
+            f"retired {result['id']} ship:reviewer--sol@reviewer {merged} expected one commit; merged: "
+            f'{url} is commit {merged} on refs/remotes/origin/main at {merged}',
+            '1 retired as merged', '0 accounted, 0 pending'])
+        self.assertEqual(ledger.rows(self.resolve())[-1][3:5], [merged, 'retired'])
 
     def test_retire_merged_binds_a_clear_result_with_its_own_verdict(self):
         self.merged_origin('feat: widget (#12)')
@@ -1915,7 +2033,7 @@ class LedgerDirTests(unittest.TestCase):
                                   env=override).returncode, 0)
         paths = (owed, self.resolve(), self.base / 'override/feat__nested__x.tsv')
         before = [path.read_bytes() for path in paths]
-        for flags in ((), ('--retire-merged',), ('--fail-unparsed',)):
+        for flags in ((), ('--retire-merged',), ('--close-unparsed',), ('--fail-unparsed',)):
             with self.subTest(flags=flags):
                 auto = self.cli('account-auto', *flags, str(owed))
                 self.assertEqual(auto.returncode, 0, auto.stderr)
@@ -1953,7 +2071,8 @@ class LedgerDirTests(unittest.TestCase):
                        'its closing paragraph has no other label line', 'a bare verdict line',
                        'It records `blocked` when `blocked` is the first word.', 'account-auto --retire-merged',
                        'is an ancestor of the remote default branch', 'names exactly one GitHub pull request URL',
-                       'It states no review verdict', 'A result without proof stays pending.'):
+                       'It states no review verdict', 'A result without proof stays pending.',
+                       'account-auto --close-unparsed', 'verdict `no-evidence`', 'It states no commit and no verdict.'):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, guidance)
 
