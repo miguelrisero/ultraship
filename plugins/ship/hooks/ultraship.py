@@ -5060,6 +5060,12 @@ def literal_bindings_resolved(command, cwd, batch=False):
         # reads, can change the program that a later word starts.
         if re.search(r'(?<!&)&(?!&)', plain):
             return command
+        # A loop sets its name with no assignment word, so the name is one that no shell or program reads.
+        if any(raw == 'for' and start in positions and not (
+                index + 2 < len(tokens) and re.fullmatch(r'[a-z][a-z0-9_]*', tokens[index + 1][0])
+                and tokens[index + 1][0] not in SHELL_SPECIAL_NAMES and tokens[index + 2][0] == 'in')
+               for index, (raw, _, start, _) in enumerate(tokens)):
+            return command
         lead = True
         for index, (raw, _, _, _) in enumerate(tokens):
             if lead and SHELL_ASSIGNMENT.match(raw):
@@ -5375,12 +5381,14 @@ def receipt_custody(data, read_search=False):
                 return True
             if tokens and tokens[-1][0] == '\n':
                 tokens = tokens[:-1]
-            # A leading `cd <literal folder> &&` only sets the folder the source path of `sed` or `diff` starts from.
+            # A leading `cd <literal folder> &&` only sets the folder the source path of `sed` starts from.
             moved = ('\\' not in raw and [token[0] for token in tokens[:1]] == ['cd']
                      and [token[0] for token in tokens[2:4]] == ['&', '&']
                      and tokens[2][3] == tokens[3][2]
                      and re.fullmatch(r'(?!-)(?:~/)?[\w./+,:@%=-]+', tokens[1][0], re.ASCII))
+            folder = cwd_path
             if moved:
+                folder = os.path.join(cwd_path, os.path.expanduser(tokens[1][1]))
                 tokens = tokens[4:]
             if any(token[0] in {';', '&', '|', '(', ')', '<', '>', '`', '\n'} or unresolved_shell_word(token[0])
                    for token in tokens):
@@ -5389,16 +5397,29 @@ def receipt_custody(data, read_search=False):
             if not words:
                 return False
             if words[0] == 'sed':
+                def clone_file(word):
+                    # A regular file inside a Git work tree, outside the plugin that runs this hook and outside the
+                    # folder that holds installed plugins. A repository at the home folder itself makes no clone.
+                    real = Path(os.path.realpath(os.path.join(folder, os.path.expanduser(word))))
+                    home = Path(os.path.realpath(os.path.expanduser('~')))
+                    config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or home / '.claude')
+                    return (real.is_file() and not real.is_relative_to(Path(__file__).resolve().parents[1])
+                            and not real.is_relative_to(Path(os.path.realpath(config / 'plugins')))
+                            and any((parent / '.git').exists() for parent in real.parents
+                                    if not home.is_relative_to(parent)))
+
                 # Only `-n` with one print range reads; any other sed script or option can write a file or run a program.
                 # A backslash could hide a line continuation, which changes the file name the shell opens.
                 return ('\\' not in raw and len(words) > 3 and words[1] == '-n'
                         and bool(re.fullmatch(r'[0-9]+(?:,[0-9]+)?p', words[2]))
-                        and not any(word.startswith('-') for word in words[3:]))
-            if words[0] == 'diff':
-                return all(not word.startswith('-') or word in ('--', '-u', '-U0') for word in words[1:])
-            # A repository can configure programs that git runs, so git takes its folder only through `-C`.
+                        and not any(word.startswith('-') for word in words[3:])
+                        and all(clone_file(word) for word in words[3:]))
+            # `diff` opens a file inside a folder operand, and a repository can configure programs that git runs,
+            # so only the `sed` form takes the `cd` prefix; git takes its folder through `-C`.
             if moved:
                 return False
+            if words[0] == 'diff':
+                return all(not word.startswith('-') or word in ('--', '-u', '-U0') for word in words[1:])
             if words[:2] == ['git', '-C']:
                 words = ['git', *words[3:]]
             return (words[:2] in (['git', 'add'], ['git', 'diff'], ['git', 'show'], ['git', 'status'])
@@ -5991,6 +6012,7 @@ def receipt_custody(data, read_search=False):
                                 sub = arguments[operand + 1:operand + 2]
                                 read_ledger = bool(sub and sub[0][0] in ledger_reads)
                                 harness_ledger = '"${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/ledger.py"'
+                                batched = False
                                 if arg_raw == harness_ledger:
                                     root = os.environ.get('CLAUDE_PLUGIN_ROOT', '')
                                     if (not read_ledger or not re.fullmatch(
@@ -6028,13 +6050,16 @@ def receipt_custody(data, read_search=False):
                                     head = prefix + text[name_start:arg_end]
                                     expanded = literal_bindings_resolved(head, cwd_path)
                                     script_raw, script, _, _ = shell_raw_words(expanded)[-1]
-                                    if expanded == head:
+                                    batched = expanded == head
+                                    if batched:
                                         # The complete command can prove the binding through a `for` loop or beside
                                         # plain reads of other variables; text after the use counts there.
-                                        # The words from the interpreter to its script stay literal, so no empty
-                                        # expansion can move the script to a later word.
-                                        if any(unresolved_shell_word(raw) for raw, _, _, _ in
-                                               (names[index], *arguments[:operand])):
+                                        # The interpreter is the word `python3`, and the script is one whole quoted
+                                        # variable. The words between them stay literal, so no empty expansion can
+                                        # move the script to a later word.
+                                        if (names[index][0] != 'python3' or not re.fullmatch(
+                                                r'"\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})"', arg_raw)
+                                                or any(unresolved_shell_word(raw) for raw, _, _, _ in arguments[:operand])):
                                             return 'hard'
                                         whole = shell_raw_words(literal_bindings_resolved(text, cwd_path, batch=True))
                                         if len(whole) != len(tokens):
@@ -6048,6 +6073,11 @@ def receipt_custody(data, read_search=False):
                                     return 'hard'
                                 if ledger_path(Path(script)) and not read_ledger:
                                     deny(ACCOUNT_CUSTODY)
+                                # Python runs `__main__.py` of a folder, and a copy of the receipt hook or of the
+                                # ledger keeps its file name, so a batch script is another regular `.py` file.
+                                if batched and (not script.endswith('.py') or not regular_file(script)
+                                                or os.path.basename(script).casefold() in {'text_lint.py', 'ledger.py'}):
+                                    return 'hard'
                             elif unresolved_program(arg_raw, arg, code=kind == 'c'):
                                 return 'hard'
                     ticks = 0

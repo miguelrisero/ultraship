@@ -779,15 +779,50 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_account_command_allowed(command, caller='ship:writer--sol')
 
-    def test_grant_custody_allows_a_line_range_read_of_hook_source_in_a_clone(self):
+    def clone_source(self):
+        """Make the working directory a Git work tree that holds a copy of the hook source."""
         source = 'plugins/ship/hooks/ultraship.py'
+        (self.cwd / '.git').mkdir()
+        (self.cwd / source).parent.mkdir(parents=True)
+        (self.cwd / source).write_text('print(1)\n')
+        return source
+
+    def test_grant_custody_allows_a_line_range_read_of_hook_source_in_a_clone(self):
+        source = self.clone_source()
         for caller in ('', 'general-purpose', 'ship:writer--sol'):
             for command in (f'sed -n 6231,6300p {source}', f"sed -n '6231,6300p' {source}", f'sed -n 5145p {source}',
-                            f'cd /repo && sed -n 6231,6300p {source}', f'cd ~/src/repo && sed -n 6231,6300p {source}',
-                            f'cd /repo && diff -u saved.py {source}',
+                            f'sed -n 1p {source} {source}',
+                            f'cd {shlex.quote(str(self.cwd))} && sed -n 6231,6300p {source}',
+                            'cd plugins/ship && sed -n 6231,6300p hooks/ultraship.py',
+                            f'cd ~/repo && sed -n 6231,6300p {source}',
                             f'git -C /repo diff --stat fa85be3 edf0871 -- {source}'):
                 with self.subTest(caller=caller, command=command):
                     self.assert_account_command_allowed(command, caller=caller)
+
+    def test_grant_custody_reads_hook_source_by_line_range_only_from_a_file_in_a_git_work_tree(self):
+        source = self.clone_source()
+        outside = Path(os.environ['HOME']) / 'plain/ultraship.py'
+        outside.parent.mkdir()
+        outside.write_text('print(1)\n')
+        (self.cwd / 'outside-alias.py').symlink_to(outside)
+        (self.cwd / 'plugin-alias').symlink_to(HOOK.parents[1])
+        # A repository at the home folder itself, such as one for dotfiles, makes no file below it a clone.
+        (Path(os.environ['HOME']) / '.git').mkdir()
+        installed = Path(os.environ['HOME']) / '.claude/plugins/marketplaces/ultraship'
+        (installed / '.git').mkdir(parents=True)
+        (installed / 'ultraship.py').write_text('print(1)\n')
+        for command in (f'sed -n 1p {shlex.quote(str(outside))}', f'sed -n 1p {source} outside-alias.py',
+                        f'cd {shlex.quote(str(outside.parent))} && sed -n 1p ultraship.py',
+                        'sed -n 1p ~/.claude/plugins/marketplaces/ultraship/ultraship.py',
+                        f'sed -n 1p {source} plugins/ship/hooks', 'sed -n 1p plugins/ship/hooks/missing/ultraship.py',
+                        f'sed -n 1p {source} plugin-alias/hooks/ultraship.py',
+                        'cd plugin-alias/hooks && sed -n 1p ultraship.py',
+                        # `diff` opens a file of the same name inside a folder operand, so it takes no `cd` prefix.
+                        f'cd {shlex.quote(str(self.cwd))} && diff -u saved.py {source}',
+                        'cd plugins/ship && diff -u hooks/ultraship.py ../..'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'agent_type': 'general-purpose', 'tool_name': 'Bash',
+                                            'tool_input': {'command': command}})
 
     def test_grant_custody_allows_a_search_of_found_ledger_copies_in_a_clone(self):
         for caller in ('', 'general-purpose'):
@@ -820,26 +855,30 @@ class ReceiptCustodyTests(unittest.TestCase):
                                                 'tool_input': {'command': command}})
 
     def test_grant_custody_denies_other_sed_forms_and_directory_changes_with_the_hook_name(self):
-        source = 'plugins/ship/hooks/ultraship.py'
+        source = self.clone_source()
         installed = shlex.quote(str(HOOK))
+        repo = shlex.quote(str(self.cwd))
         (self.cwd / 'hook-alias').symlink_to(HOOK)
+        (self.cwd / 'print.sed').write_text('1,5p\n')
         for command in (f'sed -i 1d {source}', f"sed -n '1,5p;w out' {source}", f"sed -n '1e id' {source}",
                         f'sed -n 1,5p {source} -i', f"sed -n -e 1,5p -e 'w out' {source}", f"sed -n '$p' {source}",
                         f"sed -n '/def pre/,/^def /p' {source}", f'sed 1,5p {source}',
+                        f'sed --file print.sed {source}', f'sed -n --file=print.sed {source}',
+                        f'sed -n 1,5p --file print.sed {source}', f'sed -n -f print.sed {source}',
                         # The shell keeps a backslash and newline inside single quotes, so it opens another file name.
                         "sed -n 1,5p 'plugins/ship/hooks/ultra\\\nship.py'",
-                        "cd /repo && diff -u saved.py 'plugins/ship/hooks/ultra\\\nship.py'",
+                        f"cd {repo} && sed -n 1,5p 'plugins/ship/hooks/ultra\\\nship.py'",
                         f'sed -n 1,5p {source} | python3 - pre', f'sed -n 1,5p {source} && python3 {source} pre',
                         f'sed -n 1,5p $(echo {source})', f'sed -n 1,5p {source} > {shlex.quote(str(self.store / "key"))}',
                         f'sed -n 1,5p {shlex.quote(str(self.store / "key"))}',
                         f'sed -n 1,5p {installed}', 'sed -n 1,5p ./hook-alias',
                         f'cd {shlex.quote(str(HOOK.parent))} && sed -n 1,5p ultraship.py',
-                        f'cd /repo && python3 {source} pre', f'cd $(pwd) && sed -n 1,5p {source}',
-                        f'cd - && sed -n 1,5p {source}', f'cd /repo & & sed -n 1,5p {source}',
-                        f'cd /repo && cd {shlex.quote(str(HOOK.parent))} && sed -n 1,5p ultraship.py',
+                        f'cd {repo} && python3 {source} pre', f'cd $(pwd) && sed -n 1,5p {source}',
+                        f'cd - && sed -n 1,5p {source}', f'cd {repo} & & sed -n 1,5p {source}',
+                        f'cd {repo} && cd {shlex.quote(str(HOOK.parent))} && sed -n 1,5p ultraship.py',
                         # A repository can configure a program for git, so git takes its folder only through `-C`.
-                        f'cd /repo && git diff --stat fa85be3 edf0871 -- {source}', f'cd /repo && git show HEAD:{source}',
-                        f'cd /repo && git diff -- {source} | python3 - pre'):
+                        f'cd {repo} && git diff --stat fa85be3 edf0871 -- {source}', f'cd {repo} && git show HEAD:{source}',
+                        f'cd {repo} && git diff -- {source} | python3 - pre'):
             with self.subTest(command=command):
                 self.assert_custody_denial({'agent_type': 'general-purpose', 'tool_name': 'Bash',
                                             'tool_input': {'command': command}})
@@ -1381,8 +1420,15 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
+    def batch_script(self):
+        """Make the regular `.py` file that a batch binds to a variable."""
+        helper = self.cwd / 'skills/babysit/scripts/thread_reply.py'
+        helper.parent.mkdir(parents=True)
+        helper.write_text('print(1)\n')
+        return shlex.quote(str(helper))
+
     def test_thread_reply_batches_are_allowed_for_main_and_subagent_callers(self):
-        helper = '/opt/ship/skills/babysit/scripts/thread_reply.py'
+        helper = self.batch_script()
         pull = 'https://github.com/acme/widgets/pull/2891'
         commands = (
             f'python3 {helper} resolve {pull} PRRT_kwDOabc123 && python3 {helper} resolve {pull} PRRT_kwDOabc456',
@@ -1402,10 +1448,32 @@ class ReceiptCustodyTests(unittest.TestCase):
 
     def test_a_variable_script_in_a_batch_keeps_hook_store_and_rebinding_refusals(self):
         (self.cwd / 'hook-alias').symlink_to(HOOK)
-        helper = '/opt/ship/skills/babysit/scripts/thread_reply.py'
+        helper = self.batch_script()
+        folder = shlex.quote(str(self.cwd))
         installed = shlex.quote(str(HOOK))
         store = shlex.quote(str(self.store / 'key'))
-        for command in (f'TR={installed}; for t in a; do python3 "$TR" pre; done',
+        # Python runs `__main__.py` of a folder and any file whatever its name; a copy keeps the name of its source.
+        (self.cwd / 'package').mkdir()
+        for name in ('package/__main__.py', 'tool', 'ledger.py', 'text_lint.py', 'TEXT_LINT.py'):
+            (self.cwd / name).write_text('print(1)\n')
+        (self.cwd / 'link.py').symlink_to(self.cwd / 'tool')
+        script_refusals = [f'TR={folder}/{name}; for t in a; do python3 "$TR" "$t"; done'
+                           for name in ('package', 'tool', 'missing.py', 'ledger.py', 'text_lint.py', 'TEXT_LINT.py',
+                                        'link.py')]
+        # A loop sets its name with no assignment word, so only a lower-case name that no shell reads is a loop name.
+        loop_refusals = [f'TR={helper}; for {name} in /opt/example/venv/bin; do python3 "$TR"; done'
+                         for name in ('PATH', 'IFS', 'ENV', 'BASH_ENV', 'HOME', 'PYTHONPATH', 'PYTHONSTARTUP',
+                                      'LD_PRELOAD', 'Item', 'path', 'fpath')]
+        for command in (*script_refusals, *loop_refusals,
+                        # The interpreter is the word `python3`, and the script is one whole quoted variable.
+                        f'TR={helper}; for t in a; do python "$TR" "$t"; done',
+                        f'TR={helper}; for t in a; do /usr/bin/python3 "$TR" "$t"; done',
+                        f'P={folder}/skills/babysit/scripts; F=/thread_reply.py; for t in a; do python "$P$F" "$t"; done',
+                        f'P={folder}/skills/babysit/scripts; F=/thread_reply.py; for t in a; do python3 "$P$F" "$t"; done',
+                        f'P={folder}/skills/babysit; for t in a; do python3 "$P/scripts/thread_reply.py" "$t"; done',
+                        f'TR={helper}; for t in a; do python3 prefix"$TR" "$t"; done',
+                        f'TR={helper}; for t in a; do python3 "$TR""$t"; done',
+                        f'TR={installed}; for t in a; do python3 "$TR" pre; done',
                         'TR="$PWD/hook-alias"; for t in a; do python3 "$TR" pre; done',
                         f'TR={helper}; for t in a b; do python3 "$TR" "$t"; TR=./hook-alias; done',
                         f'TR={helper}; for TR in ./hook-alias; do python3 "$TR" pre; done',
