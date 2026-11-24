@@ -6140,6 +6140,20 @@ def protected_row_path(value):
     return canonical_row_path(value) and bool(re.search(PROTECTED_ROW, value, re.I))
 
 
+def link_free_path(value):
+    """Check each part with lstat, because a non-strict realpath returns a symlink loop unchanged."""
+    parts = value.split('/')[1:]
+    for count in range(1, len(parts) + 1):
+        try:
+            if stat.S_ISLNK(os.lstat('/' + '/'.join(parts[:count])).st_mode):
+                return False
+        except FileNotFoundError:
+            return count == len(parts)  # only the final part may be missing
+        except OSError:
+            return False
+    return True
+
+
 def regular_file(path):
     try:
         return stat.S_ISREG(os.lstat(path).st_mode)
@@ -6255,7 +6269,8 @@ def row_reanchor_gate(data, command):
              'and is absent when the command has none.')
     # The driver names the directory; these folders stay closed even to a directory the driver names.
     if receipt is not None and (
-            not canonical_row_path(receipt) or re.search(PROTECTED_ROW, receipt, re.I)
+            not canonical_row_path(receipt) or not link_free_path(receipt)
+            or re.search(PROTECTED_ROW, receipt, re.I)
             or any((receipt + '/').casefold().startswith(folder.casefold().rstrip('/') + '/')
                    for folder in (os.path.dirname(target), os.path.realpath(STATE)))):
         deny(reason + "The receipt directory is a canonical absolute path outside the row file's folder, "

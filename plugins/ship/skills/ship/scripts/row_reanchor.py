@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import stat
 import subprocess
 import tomllib
@@ -304,7 +305,8 @@ def derive(old, new, base, head):
 
 
 @contextmanager
-def staged_bytes(path, data, mode):
+def staged_bytes(path, data, mode, held=None):
+    """Stage the bytes beside the path; `held` receives a descriptor that stays open until the stage ends."""
     staged = path.with_name('.row-reanchor-' + uuid.uuid4().hex)
     descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
     try:
@@ -313,10 +315,14 @@ def staged_bytes(path, data, mode):
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
+            if held is not None:
+                held.append(os.dup(handle.fileno()))
         require(staged.read_bytes() == data, 'staged write read-back differs')
         yield staged
     finally:
         staged.unlink(missing_ok=True)
+        for kept in held or ():
+            os.close(kept)
 
 
 @contextmanager
@@ -375,7 +381,7 @@ def record_lock(path):
         yield
 
 
-def merge_record(path, identity, entry, check_before_replace):
+def merge_record(path, identity, entry, check_before_replace, named=None):
     rows = {}
     try:
         metadata = path.lstat()
@@ -391,9 +397,13 @@ def merge_record(path, identity, entry, check_before_replace):
             rows = {(row['row_file'], row['row_id']): row for row in prior['rows']}
     rows[entry['row_file'], entry['row_id']] = entry
     data = (json.dumps({'schema': 1, **identity, 'rows': list(rows.values())}) + '\n').encode('utf-8')
-    with staged_bytes(path, data, 0o600) as record_stage:
+    held = []
+    with staged_bytes(path, data, 0o600, *(() if named is None else (held,))) as record_stage:
         check_before_replace('staged write')
         os.replace(record_stage, path)
+        # The open descriptor keeps the written inode, so a file put at the named path later is another file.
+        require(named is None or os.path.samestat(os.fstat(held[0]), os.stat(named)),
+                'record path must name the written record')
 
 
 def run(args):
@@ -401,9 +411,13 @@ def run(args):
     require(row_file.is_absolute() and stat.S_ISREG(row_file.lstat().st_mode)
             and row_file.resolve() == row_file, 'row file must be absolute, regular and canonical without links')
 
+    receipt = getattr(args, 'receipt_dir', None)
+    # The tool enters the receipt directory later, so a relative PATH entry resolves to the program here.
+    program = 'git' if receipt is None else os.path.abspath(shutil.which('git') or 'git')
+
     def git(operation, *words, not_ancestor=None):
         try:
-            return subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', str(row_file.parent), *words],
+            return subprocess.run([program, '-c', 'core.fsmonitor=false', '-C', str(row_file.parent), *words],
                                   check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
         except subprocess.CalledProcessError as error:
             if not_ancestor is not None and error.returncode == 1:
@@ -423,7 +437,6 @@ def run(args):
     base_sha = commit_sha('resolve base commit', args.base)
     head_sha = commit_sha('resolve head commit', args.head)
     require(head_sha == git('read HEAD', 'rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
-    receipt = getattr(args, 'receipt_dir', None)
     enter_receipts = nullcontext()
     if receipt is None:
         record = Path(git('find record path', 'rev-parse', '--path-format=absolute', '--git-path',
@@ -534,9 +547,7 @@ def run(args):
                 os.replace(stage, row_file)
             record_output = 'none'
         else:
-            merge_record(stored, identity, entry, check_worktree)
-            require(stored is record or os.path.samestat(os.stat(record), os.stat(stored)),
-                    'record path must name the written record')
+            merge_record(stored, identity, entry, check_worktree, None if stored is record else record)
             record_output = str(record)
     print('PASS')
     for key, value in {'schema': 1, **identity, **entry, 'base_span_lines': len(lines(base_values['old'])),
