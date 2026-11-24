@@ -4976,11 +4976,12 @@ PLAIN_PROGRAMS = {'bash', 'sh', 'python3', 'python', 'node', 'sha256sum', 'cat',
 LITERAL_VALUE = re.compile(r'[\w./+,:@%=-]+', re.ASCII)
 
 
-def literal_bindings_resolved(command, cwd):
+def literal_bindings_resolved(command, cwd, batch=False):
     """Write each later double-quoted `$name` use of a name that one earlier top-level command binds to a literal word.
 
     The result names the same files as the shell would, so path and hook-name checks read it as literal text.
-    A directory change, heredoc or anything uncertain leaves the command unchanged, so its uses stay unresolved."""
+    A directory change, heredoc or anything uncertain leaves the command unchanged, so its uses stay unresolved.
+    With `batch`, a complete command may also hold `for` loops and plain reads of other variables as arguments."""
     if '<<' in command:
         return command
     try:
@@ -5052,9 +5053,25 @@ def literal_bindings_resolved(command, cwd):
     # and no quoted word holds whitespace.
     names = '|'.join(bindings)
     plain = re.sub(rf'\$(?:\{{(?:{names}|HOME|PWD)\}}|(?:{names}|HOME|PWD)(?!\w))', '', command).replace('2>&1', '')
+    if batch:
+        # A plain read assigns no variable, and a `for` loop assigns only its own name, which the mention rule drops.
+        plain = re.sub(r'\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*(?!\w))', '', plain)
+        # A background list runs its binding in another shell. A prefix assignment, or one to a name the shell
+        # reads, can change the program that a later word starts.
+        if re.search(r'(?<!&)&(?!&)', plain):
+            return command
+        lead = True
+        for index, (raw, _, _, _) in enumerate(tokens):
+            if lead and SHELL_ASSIGNMENT.match(raw):
+                after = tokens[index + 1][0] if index + 1 < len(tokens) else '\n'
+                if raw.partition('=')[0].rstrip('+') in SHELL_SPECIAL_NAMES or after not in {';', '\n', '&'}:
+                    return command
+            else:
+                lead = raw in {';', '&', '|', '\n', 'do'}
     if (re.search(r'[$`{}()<>#\\!*?\[\]]', plain) or any(char.isspace() and char not in ' \t\n' for char in command)
             or any(re.search(r'\s', value) for raw, value, _, _ in tokens if raw != '\n')
             or any(start in positions and value not in PLAIN_PROGRAMS and not SHELL_ASSIGNMENT.match(raw)
+                   and not (batch and raw in {'for', 'do', 'done'})
                    and not re.fullmatch(rf'"\$(?:{names}|\{{(?:{names})\}})"', raw) for raw, value, start, _ in tokens)):
         return command
     # One pass over the original words, so no rewrite can form or hide another use; comments are not words.
@@ -5086,6 +5103,10 @@ def literal_bindings_resolved(command, cwd):
 
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                    'Report the blocked scope to the driver.')
+STATE_FOLDER_CUSTODY = ('This Bash command names the hook state folder (`.local/state` or `XDG_STATE_HOME`) together with '
+                        '`$`, `{`, `}`, `*`, `?`, `[`, `]`, a backtick, `cd`, `pushd` or the text `text`, also inside '
+                        'a longer word (state folder custody rule). Use the native Read and Write tools with a literal '
+                        'path, or a Bash command that names the literal path with none of these triggers.')
 ACCOUNT_CUSTODY = ('Use the exact Stop command for your session (account custody rule). '
                    'Report the blocked scope to the driver.')
 CUSTODY_ADVISORY = ('the custody check could not resolve every word of this command, and no word names the '
@@ -5129,6 +5150,21 @@ def own_account_call(data, raw):
             and re.fullmatch(r'[\w-]+', verdict) and verdict != 'owed' and evidence.strip()):
         return words
     return False
+
+
+def account_auto_difference(data):
+    """Say what makes an `account-auto` call differ from the Stop command that `own_account_call` admits."""
+    agent_type = data.get('agent_type') or ''
+    if agent_type and not re.match(r'^(ship:)?driver(--|$)', agent_type):
+        return ('The hook admits `account-auto` from the main session or a driver. '
+                f'This caller has agent type {agent_type[:80]!r}.')
+    if not isinstance(data.get('session_id'), str) or not data.get('session_id'):
+        return 'The hook admits `account-auto` only when its input carries a session ID. This call has none.'
+    try:
+        expected = shlex.join(['python3', str(ledger_script()), 'account-auto', str(owed_file(data))])
+    except (OSError, RuntimeError):
+        return 'The hook admits only the exact Stop command for this session, alone and with no other character.'
+    return f'The hook admits only this line for this session, alone and with no other character: `{expected}`.'
 
 
 def issue_account_grant(data):
@@ -5339,14 +5375,30 @@ def receipt_custody(data, read_search=False):
                 return True
             if tokens and tokens[-1][0] == '\n':
                 tokens = tokens[:-1]
+            # A leading `cd <literal folder> &&` only sets the folder the source path of `sed` or `diff` starts from.
+            moved = ('\\' not in raw and [token[0] for token in tokens[:1]] == ['cd']
+                     and [token[0] for token in tokens[2:4]] == ['&', '&']
+                     and tokens[2][3] == tokens[3][2]
+                     and re.fullmatch(r'(?!-)(?:~/)?[\w./+,:@%=-]+', tokens[1][0], re.ASCII))
+            if moved:
+                tokens = tokens[4:]
             if any(token[0] in {';', '&', '|', '(', ')', '<', '>', '`', '\n'} or unresolved_shell_word(token[0])
                    for token in tokens):
                 return False
             words = [token[1] for token in tokens]
             if not words:
                 return False
+            if words[0] == 'sed':
+                # Only `-n` with one print range reads; any other sed script or option can write a file or run a program.
+                # A backslash could hide a line continuation, which changes the file name the shell opens.
+                return ('\\' not in raw and len(words) > 3 and words[1] == '-n'
+                        and bool(re.fullmatch(r'[0-9]+(?:,[0-9]+)?p', words[2]))
+                        and not any(word.startswith('-') for word in words[3:]))
             if words[0] == 'diff':
                 return all(not word.startswith('-') or word in ('--', '-u', '-U0') for word in words[1:])
+            # A repository can configure programs that git runs, so git takes its folder only through `-C`.
+            if moved:
+                return False
             if words[:2] == ['git', '-C']:
                 words = ['git', *words[3:]]
             return (words[:2] in (['git', 'add'], ['git', 'diff'], ['git', 'show'], ['git', 'status'])
@@ -5971,13 +6023,23 @@ def receipt_custody(data, read_search=False):
                                     script = str(target)
                                 else:
                                     _, _, name_start, _ = names[index]
-                                    _, _, _, arg_end = arguments[operand]
+                                    _, _, arg_start, arg_end = arguments[operand]
                                     prefix = text[:name_start].removeprefix('set -eu\n')
                                     head = prefix + text[name_start:arg_end]
                                     expanded = literal_bindings_resolved(head, cwd_path)
-                                    if expanded == head:
-                                        return 'hard'
                                     script_raw, script, _, _ = shell_raw_words(expanded)[-1]
+                                    if expanded == head:
+                                        # The complete command can prove the binding through a `for` loop or beside
+                                        # plain reads of other variables; text after the use counts there.
+                                        # The words from the interpreter to its script stay literal, so no empty
+                                        # expansion can move the script to a later word.
+                                        if any(unresolved_shell_word(raw) for raw, _, _, _ in
+                                               (names[index], *arguments[:operand])):
+                                            return 'hard'
+                                        whole = shell_raw_words(literal_bindings_resolved(text, cwd_path, batch=True))
+                                        if len(whole) != len(tokens):
+                                            return 'hard'
+                                        script_raw, script, _, _ = whole[[token[2] for token in tokens].index(arg_start)]
                                     if unresolved_shell_word(script_raw):
                                         return 'hard'
                                 if (not script.startswith('/') or receipt_path(script, ancestors=True)
@@ -6096,21 +6158,31 @@ def receipt_custody(data, read_search=False):
                     return True
             return False
 
-        if (receipt_text(path_command)
-                or ('ledger.py' in search_account_command and 'account-auto' in search_account_command
-                    and not own_account_call(data, raw) and not plain_reader(raw))
-                or any(receipt_path(word) for word in words)
+        if receipt_text(path_command):
+            deny(RECEIPT_CUSTODY)
+        if ('ledger.py' in search_account_command and 'account-auto' in search_account_command
+                and not own_account_call(data, raw) and not plain_reader(raw)):
+            # The first line stays the receipt message; the next line names what differs from the Stop command.
+            deny(RECEIPT_CUSTODY + '\n' + account_auto_difference(data))
+        if (any(receipt_path(word) for word in words)
                 or ancestor_operand()
-                or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
-                # An expansion, glob or directory change near the state root could reach a store.
-                or (('.local/state' in command or 'xdg_state_home' in command)
-                    and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
-                         or any(char in raw for char in '*?[]{}$`'))
-                    and not own_account_call(data, raw))
-                or any(any(char in word for char in '*?[{$`')
-                       and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
-                            or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
-                       for word in raw_words)
+                or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))):
+            deny(RECEIPT_CUSTODY)
+        # An expansion, glob or directory change near the state root could reach a store.
+        if (('.local/state' in command or 'xdg_state_home' in command)
+                and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
+                     or any(char in raw for char in '*?[]{}$`'))
+                and not own_account_call(data, raw)):
+            # A command keeps the receipt message when it names a store, the text_lint hook or the ledger, names
+            # the ship state folder with no literal child folder, or changes directory to the state folder.
+            names_store = re.search(r'text[-_]lint|account-grants|ledger\.py'
+                                    r'|(?:\.local/state\}?|xdg_state_home\S*?)/ultraship(?!/?[\w.-])'
+                                    r'|\b(?:cd|pushd)\s+\S*?(?:\.local/state|xdg_state_home)\}?(?:\s|$)', command)
+            deny(RECEIPT_CUSTODY if names_store else STATE_FOLDER_CUSTODY)
+        if (any(any(char in word for char in '*?[{$`')
+                    and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
+                         or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
+                    for word in raw_words)
                 # A plain reader starts no program, and an inert note body is file text.
                 or ('text_lint' in code_text and not plain_reader(raw)
                     and (re.search(r'text_lint(\.py)?\s+hook\b', code_text) or any(token in code_text for token in

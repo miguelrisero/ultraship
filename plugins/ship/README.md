@@ -108,6 +108,10 @@ The hook sees these tools: `Agent`, `Task`, `Bash`, `Edit`, `Write`, `NotebookEd
 An exception inside the `pre` hook denies every tool call for every caller. A process failure blocks every tool the PreToolUse hooks see. This includes missing `python3`, syntax or import errors, timeouts, and bad exit codes. Input that fails JSON parsing or contains a value other than an object denies the call.
 
 Hook state lives in `${XDG_STATE_HOME:-~/.local/state}/ultraship`.
+The hook refuses a Bash command that names the state folder together with `$`, `{`, `}`, `*`, `?`, `[`, `]`, a backtick, `cd`, `pushd` or the text `text`.
+The refusal names the state folder custody rule. Use native Read and Write with a literal path, or name the literal path in Bash with none of these triggers.
+A command that names the `text-lint` or `account-grants` store keeps the receipt custody refusal.
+A refused `account-auto` call adds one line that names what differs from the Stop command.
 
 The hook issues one grant for one exact `account`, `account-auto`, or `correct-binding` call from the main session or driver. Run the command alone on one line with the literal script and pending paths. Copy the pending path from Stop. The grant store uses the OS account home. The CLI consumes the grant before it reads accounting evidence and uses the hook's evidence directory.
 

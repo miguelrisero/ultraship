@@ -779,6 +779,71 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_account_command_allowed(command, caller='ship:writer--sol')
 
+    def test_grant_custody_allows_a_line_range_read_of_hook_source_in_a_clone(self):
+        source = 'plugins/ship/hooks/ultraship.py'
+        for caller in ('', 'general-purpose', 'ship:writer--sol'):
+            for command in (f'sed -n 6231,6300p {source}', f"sed -n '6231,6300p' {source}", f'sed -n 5145p {source}',
+                            f'cd /repo && sed -n 6231,6300p {source}', f'cd ~/src/repo && sed -n 6231,6300p {source}',
+                            f'cd /repo && diff -u saved.py {source}',
+                            f'git -C /repo diff --stat fa85be3 edf0871 -- {source}'):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_account_command_allowed(command, caller=caller)
+
+    def test_grant_custody_allows_a_search_of_found_ledger_copies_in_a_clone(self):
+        for caller in ('', 'general-purpose'):
+            for command in ('find plugins -name "ledger.py"',
+                            'grep -n "def grant_store" $(find plugins -name "ledger.py")',
+                            'find plugins -name "ledger.py" && grep -n "consume_grant" $(find plugins -name "ledger.py")'):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_account_command_allowed(command, caller=caller)
+            # The accounting word and a hook symbol keep their refusals when the file list comes from a substitution.
+            for command in ('grep -n "account-auto" $(find plugins -name "ledger.py")',
+                            'grep -n "_issue_grant" $(find plugins -name "ledger.py")'):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                                'tool_input': {'command': command}})
+
+    def test_grant_custody_allows_a_marketplace_update_and_plain_reads_of_the_marketplace_list(self):
+        listing = '~/.claude/plugins/known_marketplaces.json'
+        for caller in ('', 'ship:driver--sol', 'general-purpose'):
+            for command in ('claude plugin marketplace update ultraship', 'claude plugin marketplace update',
+                            'claude plugin update ship@ultraship', f'cat {listing}', f"jq '.ultraship' {listing}",
+                            f'python3 -m json.tool {listing}',
+                            f'python3 -c "import json,os; print(list(json.load(open(os.path.expanduser(\'{listing}\')))))"'):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_account_command_allowed(command, caller=caller)
+            # A quoted module name in interpreter code could be an import target, so it keeps its refusal.
+            for command in (f'python3 -c "import json,os; print(json.load(open(os.path.expanduser(\'{listing}\')))[\'ultraship\'])"',
+                            f"python3 -c 'import json,os; print(json.load(open(os.path.expanduser(\"{listing}\"))).get(\"ultraship\"))'"):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                                'tool_input': {'command': command}})
+
+    def test_grant_custody_denies_other_sed_forms_and_directory_changes_with_the_hook_name(self):
+        source = 'plugins/ship/hooks/ultraship.py'
+        installed = shlex.quote(str(HOOK))
+        (self.cwd / 'hook-alias').symlink_to(HOOK)
+        for command in (f'sed -i 1d {source}', f"sed -n '1,5p;w out' {source}", f"sed -n '1e id' {source}",
+                        f'sed -n 1,5p {source} -i', f"sed -n -e 1,5p -e 'w out' {source}", f"sed -n '$p' {source}",
+                        f"sed -n '/def pre/,/^def /p' {source}", f'sed 1,5p {source}',
+                        # The shell keeps a backslash and newline inside single quotes, so it opens another file name.
+                        "sed -n 1,5p 'plugins/ship/hooks/ultra\\\nship.py'",
+                        "cd /repo && diff -u saved.py 'plugins/ship/hooks/ultra\\\nship.py'",
+                        f'sed -n 1,5p {source} | python3 - pre', f'sed -n 1,5p {source} && python3 {source} pre',
+                        f'sed -n 1,5p $(echo {source})', f'sed -n 1,5p {source} > {shlex.quote(str(self.store / "key"))}',
+                        f'sed -n 1,5p {shlex.quote(str(self.store / "key"))}',
+                        f'sed -n 1,5p {installed}', 'sed -n 1,5p ./hook-alias',
+                        f'cd {shlex.quote(str(HOOK.parent))} && sed -n 1,5p ultraship.py',
+                        f'cd /repo && python3 {source} pre', f'cd $(pwd) && sed -n 1,5p {source}',
+                        f'cd - && sed -n 1,5p {source}', f'cd /repo & & sed -n 1,5p {source}',
+                        f'cd /repo && cd {shlex.quote(str(HOOK.parent))} && sed -n 1,5p ultraship.py',
+                        # A repository can configure a program for git, so git takes its folder only through `-C`.
+                        f'cd /repo && git diff --stat fa85be3 edf0871 -- {source}', f'cd /repo && git show HEAD:{source}',
+                        f'cd /repo && git diff -- {source} | python3 - pre'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'agent_type': 'general-purpose', 'tool_name': 'Bash',
+                                            'tool_input': {'command': command}})
+
     def test_grant_custody_allows_literal_search_chain_with_hook_name(self):
         self.assert_account_command_allowed(
             "cd /repo && find . -name README.md && grep -n 'def pre' plugins/ship/hooks/ultraship.py && ls .")
@@ -965,6 +1030,30 @@ class ReceiptCustodyTests(unittest.TestCase):
         with self.subTest('sibling'):
             sibling = command.replace('s1.tsv', 'sibling.tsv')
             self.assert_custody_denial({**driver, 'tool_input': {'command': sibling}})
+
+    def test_stop_account_auto_line_passes_and_a_refusal_names_the_difference(self):
+        event = self.own_account_event()
+        event['session_id'] = '67a62f05-978d-412a-97db-3073378bcd29'
+        line = shlex.join(['python3', str(ultraship.ledger_script()), 'account-auto', str(self.prepare_owed(event))])
+        for caller in ('', 'ship:driver', 'ship:driver--sol'):
+            with self.subTest(caller=caller):
+                self.assert_account_command_allowed(line, caller=caller, session_id=event['session_id'])
+                self.consume(shlex.split(line))
+
+        def refusal(command=line, **changes):
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                ultraship.guarded_pre({'cwd': str(self.cwd), **event, 'tool_input': {'command': command}, **changes})
+            lines = json.loads(output.getvalue())['hookSpecificOutput']['permissionDecisionReason'].split('\n')
+            self.assertEqual(lines[0], ultraship.RECEIPT_CUSTODY)
+            return lines[1]
+
+        self.assertIn("agent type 'coordinator'", refusal(agent_type='coordinator'))
+        self.assertIn('session ID', refusal(session_id=None))
+        for command in (line + ' ', line + '\n', line + ' 2>&1', f'cd {shlex.quote(str(self.cwd))} && {line}',
+                        line.replace('67a62f05', '00000000')):
+            with self.subTest(command=command):
+                self.assertIn(f'`{line}`', refusal(command))
 
     def test_fail_unparsed_requires_exact_own_driver_call(self):
         event = self.own_account_event()
@@ -1292,6 +1381,73 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
+    def test_thread_reply_batches_are_allowed_for_main_and_subagent_callers(self):
+        helper = '/opt/ship/skills/babysit/scripts/thread_reply.py'
+        pull = 'https://github.com/acme/widgets/pull/2891'
+        commands = (
+            f'python3 {helper} resolve {pull} PRRT_kwDOabc123 && python3 {helper} resolve {pull} PRRT_kwDOabc456',
+            f'python3 {helper} reply {pull} PRRT_kwDOabc123 .scratch/r1.md\npython3 {helper} resolve {pull} PRRT_kwDOabc123\n',
+            f'for t in PRRT_kwDOabc123 PRRT_kwDOabc456; do python3 {helper} resolve {pull} "$t"; done',
+            # The script path sits in a variable, inside a loop or beside another variable.
+            f'TR={helper}; for t in PRRT_kwDOabc123 PRRT_kwDOabc456; do python3 "$TR" resolve {pull} "$t"; done',
+            f'TR={helper}\nPR={pull}\npython3 "$TR" reply "$PR" PRRT_kwDOabc123 .scratch/r1.md'
+            ' && python3 "$TR" resolve "$PR" PRRT_kwDOabc123\npython3 "$TR" resolve "$PR" PRRT_kwDOabc456\n',
+            f'TR={helper}\nPR={pull}\nfor t in PRRT_kwDOabc123 PRRT_kwDOabc456; do\n'
+            '  python3 "${TR}" resolve "$PR" "${t}" 2>&1 | tail -2\ndone\n',
+        )
+        for caller in ('', 'general-purpose', 'ship:driver'):
+            for command in commands:
+                with self.subTest(caller=caller, command=command):
+                    self.assert_account_command_allowed(command, caller=caller)
+
+    def test_a_variable_script_in_a_batch_keeps_hook_store_and_rebinding_refusals(self):
+        (self.cwd / 'hook-alias').symlink_to(HOOK)
+        helper = '/opt/ship/skills/babysit/scripts/thread_reply.py'
+        installed = shlex.quote(str(HOOK))
+        store = shlex.quote(str(self.store / 'key'))
+        for command in (f'TR={installed}; for t in a; do python3 "$TR" pre; done',
+                        'TR="$PWD/hook-alias"; for t in a; do python3 "$TR" pre; done',
+                        f'TR={helper}; for t in a b; do python3 "$TR" "$t"; TR=./hook-alias; done',
+                        f'TR={helper}; for TR in ./hook-alias; do python3 "$TR" pre; done',
+                        f'TR={helper}; for t in a; do TR=./hook-alias python3 "$TR" pre; done',
+                        'for t in ./hook-alias; do python3 "$t" pre; done',
+                        f'TR={helper}; x=TR; for t in a; do declare "$x=./hook-alias"; python3 "$TR" pre; done',
+                        f'TR={helper}; x=TR; printf -v "$x" %s ./hook-alias; python3 "$TR" pre "$x"',
+                        f'TR={helper}; x=TR; : $(( $x = 1 )); python3 "$TR" pre "$x"',
+                        f'TR={helper}; for t in a; do read TR < names; python3 "$TR" pre; done',
+                        f'TR={helper}; for t in a; do . ./env.sh; python3 "$TR" "$t"; done',
+                        f'TR={helper}; eval "$x"; python3 "$TR" pre "$y"',
+                        f'TR={helper}; for t in a; do python3 "$TR[1,-2]" "$t"; done',
+                        f'TR={helper}; for t in a; do python3 "$TR:h" "$t"; done',
+                        f'TR={helper}; for t in a; do python3 "${{TR%/*}}/x.py" "$t"; done',
+                        f'TR={helper}; for t in a; do python3 $TR "$t"; done',
+                        # An empty expansion before the script would make Python run the next word.
+                        f'TR={helper}; python3 -W $E "$TR" ./hook-alias pre',
+                        f'TR={helper}; for t in a; do python3 -X $E "$TR" ./hook-alias "$t"; done',
+                        f'TR={helper}; python3 -W"$E" "$TR" ./hook-alias pre',
+                        f'TR={helper}; python3 -W "$E" "$TR" ./hook-alias pre',
+                        # A background list keeps its binding in another shell.
+                        f'TR={helper} && true & for t in a; do python3 "$TR" "$t"; done',
+                        # A prefix assignment, or one to a name the shell reads, can change the program that starts.
+                        f'TR={helper}; for t in a; do PATH=/opt/other python3 "$TR" "$t"; done',
+                        f'TR={helper}; PATH=/opt/other; for t in a; do python3 "$TR" "$t"; done',
+                        f'TR={helper}; for t in a; do X=1 python3 "$TR" "$t"; done',
+                        f'TR={helper}; python3 "$TRé" x "$y"',
+                        f'TR={helper}; if true; then TR=./hook-alias; fi; python3 "$TR" pre "$t"',
+                        f'TR={helper}; while read t; do python3 "$TR" "$t"; done < names',
+                        f'false && TR={helper}; for t in a; do python3 "$TR" "$t"; done',
+                        f'TR={helper}; P=python3; for t in a; do "$P" "$TR" "$t"; done',
+                        f'TR={helper}; for t in a; do python3 "$TR" "$t"; done; python3 "$OTHER" pre',
+                        'D=/opt/ship/hooks; S=ultra; python3 "$D/${S}ship.py" pre "$t"',
+                        'D=/opt/ship; for t in ultraship; do python3 "$D/hooks/$t.py" pre; done',
+                        f'S={store}; for t in a; do python3 "$S" "$t"; done',
+                        'S=/opt/x.sh; for t in a; do bash "$S" "$t"; done'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'agent_type': 'general-purpose', 'tool_name': 'Bash',
+                                            'tool_input': {'command': command}})
+        self.assert_account_custody_denial(
+            f'L={shlex.quote(str(LEDGER))}; for t in a; do python3 "$L" account "$t"; done')
+
     def test_text_lint_and_ledger_words_reach_a_program_only_through_readers(self):
         for command in ("grep 'text_lint hook' notes.md | sh", "grep 'text_lint hook' notes.md | xargs python3",
                         "rg --pre=python3 'text_lint hook' .", "rg {--pre=python3,x} 'text_lint hook' .",
@@ -1441,6 +1597,71 @@ class ReceiptCustodyTests(unittest.TestCase):
                 with self.subTest(caller=caller, command=command):
                     self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
                                                'tool_input': {'command': command}})
+
+    def test_state_folder_triggers_name_their_own_rule(self):
+        folder = '~/.local/state/ultraship/row-reanchor'
+        record = ('{\n  "pr": "https://github.com/acme/widgets/pull/7",\n  "agent_id": "a1b2c3",\n'
+                  '  "row_id": "row-17",\n  "expires_at": "2026-01-01T00:00:00Z"\n}\n')
+        absolute = str(Path.home() / '.local/state/ultraship/row-reanchor/a1b2c3.json')
+        commands = (f'ls -t {folder}/*.json | head -5', 'ls -la "$HOME/.local/state/ultraship/row-reanchor/"',
+                    'ls "${XDG_STATE_HOME:-$HOME/.local/state}/ultraship/row-reanchor"',
+                    f"""python3 -c 'import json; print(json.load(open("{absolute}"))["pr"])'""",
+                    f"grep -l '\"pr\"' {folder}/*.json",
+                    f"cat > {folder}/a1b2c3.json <<'EOF'\n{record}EOF\n",
+                    f'mkdir -p {folder} && cd {folder} && ls',
+                    f'grep -n context {folder}/a1b2c3.json',
+                    'wc -l ~/.local/state/ultraship/owed/*.tsv',
+                    'ls -la ~/.local/state/ultraship/owed/ && wc -l ~/.local/state/ultraship/owed/*')
+        for caller in ('', 'ship:driver', 'general-purpose'):
+            for command in commands:
+                with self.subTest(caller=caller, command=command):
+                    self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                                'tool_input': {'command': command}}, ultraship.STATE_FOLDER_CUSTODY)
+        reason = ultraship.STATE_FOLDER_CUSTODY
+        for part in ('`$`', '`{`', '`}`', '`*`', '`?`', '`[`', '`]`', 'backtick', '`cd`', '`pushd`', '`text`',
+                     'Read and Write tools', 'literal path'):
+            with self.subTest(part=part):
+                self.assertIn(part, reason)
+
+    def test_state_folder_literal_paths_follow_the_caller_rule(self):
+        folder = '~/.local/state/ultraship/row-reanchor'
+        literal = (f'ls -la {folder}/', f'cat {folder}/a1b2c3.json', f'chmod 600 {folder}/a1b2c3.json',
+                   f'grep -n expires_at {folder}/a1b2c3.json', f'rm {folder}/a1b2c3.json')
+        for caller in ('', 'ship:driver'):
+            for command in literal:
+                with self.subTest(caller=caller, command=command):
+                    self.assert_account_command_allowed(command, caller=caller)
+        # A helper agent stays under the admission record rule, which names its own folder.
+        for command in literal:
+            with self.subTest(caller='general-purpose', command=command):
+                self.assert_custody_denial(
+                    {'agent_type': 'general-purpose', 'tool_name': 'Bash', 'tool_input': {'command': command}},
+                    'Only the driver and the main session touch row-reanchor admission records (custody rule). '
+                    'Report the blocked scope to the driver.')
+        for caller in ('', 'general-purpose'):
+            for command in ('ls ~/.local/state/ultraship/owed/', 'wc -l ~/.local/state/ultraship/owed/session-1.tsv'):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_account_command_allowed(command, caller=caller)
+
+    def test_state_folder_triggers_keep_the_receipt_text_for_store_commands(self):
+        owed = '~/.local/state/ultraship/owed'
+        for caller in ('', 'ship:driver', 'general-purpose'):
+            for command in ('cat ~/.local/state/ultraship/text-lint/key',
+                            'cat ~/.local/state/ultraship/account-grants/*',
+                            'cat ${XDG_STATE_HOME:-~/.local/state}/ultraship/*',
+                            'ls $HOME/.local/state/ultraship/', 'cat ~/.local/state/ultraship/*/key',
+                            'cd ~/.local/state/ultraship && cat text-lint/key',
+                            f'cat {owed}/../account-grants/x', f'S={owed}; cat $S/../account-grants/x',
+                            f'ln -s ../text-lint {owed}/link', f'ln -s ../account-grants/x {owed}/x.tsv; cat {owed}/*',
+                            "grep -rn 'text_lint.py hook' '${XDG_STATE_HOME}/row-review'"):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                                'tool_input': {'command': command}})
+        # A trigger still refuses a path to a store that the command builds from pieces.
+        for command in (f'D=te; cat {owed}/../${{D}}xt-lint/key', f'S=$(echo {owed}); cat $S/../acc*/x'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
+                                           ultraship.STATE_FOLDER_CUSTODY)
 
     def test_bash_state_ancestors_deny_every_caller(self):
         for caller in ('ship:writer--sol', 'ship:driver', ''):
