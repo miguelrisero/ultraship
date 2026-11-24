@@ -586,7 +586,7 @@ FROZEN_COMMIT = re.compile(
     r'(?<!\w)frozen(?:[ _]+(?:final|review|reviewed|subject|head|commit|sha|snapshot)){0,3}[ \t:|`*=_-]*' + COMMIT,
     re.I)
 # A negation before the SHA on the label's line, as in "Not **frozen commit:**", labels no subject.
-NEGATION = re.compile(r"\b(?:not|non|never)\b|n['’]t\b", re.I)
+NEGATION = re.compile(r"\b(?:not|non|never|earlier|previous|prior|old|former)\b|n['’]t\b", re.I)
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
 VERDICT_WORD = r'(?:pass|fail(?:ed|s|ing|ure)?|findings|blocked)\b'
 # A bare verdict line starts at the margin with a verdict word, then the line end, a dash or "(":
@@ -669,7 +669,7 @@ def final_verdict(text):
         rivals = sum(1 for line in closing if (VERDICT_RIVAL if bare else VERDICT_LABEL).match(line))
         # A bare verdict line above the closing paragraph is a second candidate.
         if (not last or rivals != 1 or not re.match(r'[*#_`]*[a-z]', lines[-1], re.I)
-                or bare and sum(1 for line in lines if BARE_VERDICT.match(line)) != 1
+                or bare and sum(1 for line in lines if BARE_VERDICT.match(line.lstrip())) != 1
                 or any(line.lstrip().startswith('>') for line in closing)):
             raise ValueError('expected one verdict')
         labels = [last[1]]
