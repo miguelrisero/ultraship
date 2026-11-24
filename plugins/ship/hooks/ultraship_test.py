@@ -392,9 +392,8 @@ class PreInputTests(unittest.TestCase):
                     self.assertEqual(reason, (
                         'The ship hook could not read its input as a JSON object, so it denies this call. '
                         'Report the blocked scope to the driver.'))
-                    self.assertIn('Keep the work pending.', retry)
-                    self.assertIn('Retry only after you meet the rule above.', retry)
-                    self.assertIn('report the blocked step, the rule, and the next permitted action', retry)
+                    self.assertEqual(retry, 'Retry in a compliant form now, or start the next task. '
+                                     'If the step stays blocked, send the CoC one line.')
 
 
 class ReceiptCustodyTests(unittest.TestCase):
