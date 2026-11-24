@@ -579,14 +579,19 @@ def load_receipts(path, *, root_fd=None):
 
 
 COMMIT = r'(?<![0-9a-fA-F])([0-9a-fA-F]{40})(?![0-9a-fA-F])'
-# A frozen label is the word, up to three label words, then the SHA: "Frozen commit: `<sha>`".
-FROZEN_COMMIT = re.compile(r'\bfrozen(?:[ _]+(?![0-9a-fA-F]{40})[A-Za-z]+){0,3}?[\s:|`*=_-]*' + COMMIT, re.I)
+# A frozen label is the word, up to three label words, then the SHA on the same line: "Frozen commit: `<sha>`".
+# "Non-frozen" and "not frozen" are no labels.
+FROZEN_COMMIT = re.compile(
+    r'(?<![\w-])(?<!not )frozen(?:[ _]+(?![0-9a-fA-F]{40})[A-Za-z]+){0,3}?[ \t:|`*=_-]*' + COMMIT, re.I)
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
-# A bare verdict line is a verdict word, then the line end, a dash or a bracket: "**FAIL** — two findings".
+# A bare verdict line is a verdict word, then the line end, a dash or "(": "**FAIL** — two findings".
+# A list item or a quote is no bare verdict line.
 BARE_VERDICT = re.compile(
-    r'^[\s*>#_`-]*((?:pass|fail(?:ed|s|ing|ure)?|findings|blocked)\b[*_`]*(?:\s*$|\s*[—–(]|\s+-\s).*)', re.I)
+    r'^(?!\s*(?:>|(?:[-*+]|\d+[.)])\s))[\s*#_`]*'
+    r'((?:pass|fail(?:ed|s|ing|ure)?|findings|blocked)\b[*_`]*(?:\s*$|\s*[—–(]|\s+-\s).*)', re.I)
 VERDICT_WORDS = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
-PULL_REQUEST = re.compile(r'https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)')
+PULL_REQUEST = re.compile(r'https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)(?!\w)')
+MERGE_GIT_SECONDS = 60
 
 
 def subject_commit(text):
@@ -606,10 +611,11 @@ def final_verdict(text):
     bare = not labels
     if len(labels) != 1:
         # Label lines above the closing paragraph are earlier rounds; a bare verdict counts only as the last line.
+        # A quoted last line repeats another report, so it never decides between several labels.
         pattern = BARE_VERDICT if bare else VERDICT_LABEL
         labels = [match[1] for line in re.split(r'\n\s*\n', text.strip())[-1].splitlines()
                   if (match := pattern.match(line))]
-        if len(labels) != 1 or not pattern.match(lines[-1]):
+        if len(labels) != 1 or not pattern.match(lines[-1]) or lines[-1].lstrip().startswith('>'):
             raise ValueError('expected one verdict')
     words = [word for token in re.findall(r"\w+(?:['’]\w+)*", labels[0].lower()) if (word := token.strip('_'))]
     if not words or words[0] not in VERDICT_WORDS | {'blocked'}:
@@ -625,24 +631,39 @@ def final_verdict(text):
             else 'findings' if 'findings' in words else 'fail')
 
 
+def merge_git(cwd, *args):
+    """Run one bounded local Git read without inherited Git overrides, replacement objects or lazy fetch."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    env.update(GIT_NO_REPLACE_OBJECTS='1', GIT_NO_LAZY_FETCH='1')
+    return subprocess.run(['git', '-C', str(cwd), *args], capture_output=True, text=True, check=True,
+                          env=env, timeout=MERGE_GIT_SECONDS).stdout.strip()
+
+
 def merged_state(cwd):
     """Read the remote default branch of `cwd` once: its ref, tip, GitHub repository and merged pull requests."""
     try:
         try:
-            ref = git(cwd, 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD')
+            ref = merge_git(cwd, 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD')
         except subprocess.CalledProcessError:
+            ref = ''
+        if not ref.startswith('refs/remotes/origin/'):
             ref = 'refs/remotes/origin/main'
-        tip = git(cwd, 'rev-parse', '--verify', ref + '^{commit}')
-        slug = re.search(r'github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$', git(cwd, 'remote', 'get-url', 'origin'))
+        tip = merge_git(cwd, 'rev-parse', '--verify', ref + '^{commit}')
+        try:
+            url = merge_git(cwd, 'remote', 'get-url', 'origin')
+        except subprocess.CalledProcessError:
+            url = ''
+        slug = re.search(r'(?:^|[/@])github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$', url)
         pulls = {}
-        # shortcut: a pull request counts as merged when a default-branch subject ends with "(#N)" or starts with
-        # "Merge pull request #N"; rebase merges carry no number, so read the recorded PR state if they are used.
-        for line in git(cwd, 'log', '--format=%H %s', tip).splitlines():
+        # shortcut: a pull request counts as merged when a first-parent subject of the default branch ends with
+        # "(#N)" or starts with "Merge pull request #N". Local Git holds no pull request record, so a direct push
+        # with that subject also counts, and a rebase merge never does; read the pull request state for those.
+        for line in merge_git(cwd, 'log', '--first-parent', '--format=%H %s', tip).splitlines():
             sha, _, subject = line.partition(' ')
-            number = re.search(r'\(#(\d+)\)$', subject) or re.match(r'Merge pull request #(\d+) ', subject)
+            number = re.search(r'\(#(\d+)\)$', subject) or re.match(r'Merge pull request #(\d+)\b', subject)
             if number:
                 pulls.setdefault(number[1], sha)
-    except (subprocess.CalledProcessError, OSError, UnicodeError):
+    except (subprocess.SubprocessError, OSError, UnicodeError):
         return None
     return ref, tip, slug[1].lower() if slug else None, pulls
 
@@ -656,10 +677,14 @@ def merged_proof(cwd, text, states):
     ref, tip, slug, pulls = states[cwd]
     # An unlabelled commit can be the base, which is on the default branch before any merge.
     frozen = {match[1].lower() for match in FROZEN_COMMIT.finditer(text)}
-    if len(frozen) == 1 and subprocess.run(['git', '-C', cwd, 'merge-base', '--is-ancestor', *frozen, tip],
-                                           capture_output=True).returncode == 0:
-        sha = frozen.pop()
-        return sha, f'commit {sha} is an ancestor of {ref} at {tip}'
+    if len(frozen) == 1:
+        try:
+            merge_git(cwd, 'merge-base', '--is-ancestor', *frozen, tip)
+        except (subprocess.SubprocessError, OSError):
+            pass
+        else:
+            sha = frozen.pop()
+            return sha, f'commit {sha} is an ancestor of {ref} at {tip}'
     named = {(match[1].lower(), match[2]) for match in PULL_REQUEST.finditer(text)}
     if len(named) == 1:
         repository, number = named.pop()
