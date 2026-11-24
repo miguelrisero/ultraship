@@ -1689,6 +1689,8 @@ class LedgerDirTests(unittest.TestCase):
              'expected one commit'),
             ('label in a nested fence', f'Reviewed head: `{sha}`\n\n````markdown\n```text\nFrozen commit: {base}\n'
                                         '```\n````\n\nVerdict: PASS', 'expected one commit'),
+            ('label after a quote line', f'Reviewed head: `{sha}`.\n\n> Earlier report:\nFrozen commit: {base}\n\n'
+                                         'Verdict: PASS', 'expected one commit'),
             ('label in indented code', f'Reviewed head: `{sha}`\n\nEarlier output:\n\n    Frozen commit: {base}\n\n'
                                        'Verdict: PASS', 'expected one commit'),
         ))
@@ -1718,6 +1720,8 @@ class LedgerDirTests(unittest.TestCase):
              'expected one verdict'),
             ('only label in fenced code', f'Reviewed {sha}.\n\n```\nVerdict: PASS\n```', 'expected one verdict'),
             ('label before fenced code', f'Verdict: findings {sha}\n\n```\nVerdict: PASS\n```', f'{sha} findings'),
+            ('quoted label beside a fenced label', f'Reviewed {sha}. One race.\n\n> Verdict: PASS\n\nExpected report:\n'
+                                                   '~~~text\nVerdict: FAIL\n~~~', 'expected one verdict'),
             ('blocked label with a pass', f'Verdict: blocked — the tests pass {sha}', 'expected one verdict'),
             ('pass or blocked', f'Verdict: PASS or BLOCKED {sha}', 'expected one verdict'),
             ('pass with a blocked scope', f'Verdict: PASS at {sha}. One blocked scope: the Git read.',
@@ -1729,6 +1733,8 @@ class LedgerDirTests(unittest.TestCase):
         self.assert_auto_outcomes((
             ('bold word and commit', f'The copies keep every refusal.\n\n**PASS** — `{sha}`.', f'{sha} pass'),
             ('word alone', f'No findings at `{sha}`.\n\nPASS', f'{sha} pass'),
+            ('earlier bare verdict', f'Reviewed {sha}.\n\nFAIL — missing authorization\n\nPASS — lint',
+             'expected one verdict'),
             ('lower case word alone', f'Read-only review at `{sha}`.\nfindings', f'{sha} findings'),
             ('bracketed outcome', f'Fix read at `{sha}`.\n**FAIL (`findings`) — two gaps remain.**',
              f'{sha} findings'),
@@ -1766,6 +1772,7 @@ class LedgerDirTests(unittest.TestCase):
                      'commit', '-q', '--allow-empty', '-m', subject)
             commits.append(self.git(self.common, 'rev-parse', 'HEAD'))
         self.git(self.common, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
         return commits
 
     def unmerged_commit(self):
@@ -1864,9 +1871,14 @@ class LedgerDirTests(unittest.TestCase):
             self.git(self.common, 'symbolic-ref', '--delete', 'refs/remotes/origin/main')
         self.git(self.common, 'update-ref', 'refs/remotes/origin/main', merged)
         with self.subTest('a plain default'):
-            self.git(self.common, 'update-ref', 'refs/remotes/origin/HEAD', root)
+            self.git(self.common, 'symbolic-ref', '--delete', 'refs/remotes/origin/HEAD')
+            self.git(self.common, 'update-ref', 'refs/remotes/origin/HEAD', merged)
             self.assert_retire_merged_outcome(text, None)
+        with self.subTest('an absent default'):
             self.git(self.common, 'update-ref', '-d', 'refs/remotes/origin/HEAD')
+            self.assert_retire_merged_outcome(text, None)
+        with self.subTest('a direct default'):
+            self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
             self.assert_retire_merged_outcome(
                 text, f'{merged} commit {merged} is an ancestor of refs/remotes/origin/main at {merged}')
         with self.subTest('a dangling default'):

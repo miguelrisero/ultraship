@@ -613,9 +613,14 @@ def prose(text):
 
 
 def own_lines(text):
-    """Return the lines that the reviewer states: no fenced code, no quote and no indented code."""
-    return [line for line in prose(text).split('\n')
-            if not line.lstrip().startswith('>') and not line.startswith(('    ', '\t'))]
+    """Return the lines that the reviewer states: no fenced code, no paragraph with a quote, no indented code."""
+    lines = []
+    for paragraph in re.split(r'\n[ \t]*\n', prose(text)):
+        rows = paragraph.split('\n')
+        # A line after a quoted line continues the quote, so the whole paragraph is the quote.
+        if not any(row.lstrip().startswith('>') for row in rows):
+            lines += [row for row in rows if not row.startswith(('    ', '\t'))]
+    return lines
 
 
 def frozen_commits(text):
@@ -645,12 +650,16 @@ def subject_commit(text):
 
 def final_verdict(text):
     """Return the verdict of the one verdict line: the only label line, or the single line that ends the review."""
+    fenced = sum(1 for line in text.splitlines() if VERDICT_LABEL.match(line))
     text = prose(text)
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
         raise ValueError('expected one verdict')
     labels = [match[1] for line in lines if (match := VERDICT_LABEL.match(line))]
     bare = not labels
+    if len(labels) == 1 and fenced > 1 and not any(VERDICT_LABEL.match(line) for line in own_lines(text)):
+        # Beside a fenced label, a quoted or indented label is one more example.
+        raise ValueError('expected one verdict')
     if len(labels) != 1:
         # Label lines above the closing paragraph are earlier rounds; a bare verdict counts only as the last line.
         # Between several labels only a last line that starts with the label at the margin decides: a list
@@ -658,7 +667,9 @@ def final_verdict(text):
         closing = re.split(r'\n\s*\n', text.strip())[-1].splitlines()
         last = (BARE_VERDICT if bare else VERDICT_LABEL).match(lines[-1])
         rivals = sum(1 for line in closing if (VERDICT_RIVAL if bare else VERDICT_LABEL).match(line))
+        # A bare verdict line above the closing paragraph is a second candidate.
         if (not last or rivals != 1 or not re.match(r'[*#_`]*[a-z]', lines[-1], re.I)
+                or bare and sum(1 for line in lines if BARE_VERDICT.match(line)) != 1
                 or any(line.lstrip().startswith('>') for line in closing)):
             raise ValueError('expected one verdict')
         labels = [last[1]]
@@ -696,14 +707,8 @@ def tracking_ref(cwd, name):
 
 def default_branch(cwd):
     """Return (ref, tip) of the plain `refs/remotes/origin/` branch that is the remote default."""
-    try:
-        ref = merge_git(cwd, 'symbolic-ref', '--no-recurse', '--quiet', 'refs/remotes/origin/HEAD')
-    except subprocess.CalledProcessError as error:
-        # Status 1 means that `origin/HEAD` is absent or plain; a plain one and any other failure prove nothing.
-        if error.returncode != 1 or 'refs/remotes/origin/HEAD' in merge_git(
-                cwd, 'for-each-ref', '--format=%(refname)', 'refs/remotes/origin/HEAD').split('\n'):
-            raise
-        ref = 'refs/remotes/origin/main'
+    # An absent or plain `origin/HEAD` names no default branch, so the read fails and proves nothing.
+    ref = merge_git(cwd, 'symbolic-ref', '--no-recurse', '--quiet', 'refs/remotes/origin/HEAD')
     tip, target = tracking_ref(cwd, ref)
     if target or not ref.startswith('refs/remotes/origin/'):
         raise OSError('the remote default branch is no plain tracking branch')
