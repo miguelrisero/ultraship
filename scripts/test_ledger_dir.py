@@ -1678,6 +1678,12 @@ class LedgerDirTests(unittest.TestCase):
             ('negation inside the label', f'Reviewed head: `{sha}`\nFrozen commit is not `{base}`.\nVerdict: PASS',
              'expected one commit'),
             ('quoted label', f'Reviewed head: `{sha}`\n> Frozen commit: `{base}`\nVerdict: PASS', 'expected one commit'),
+            ('negation in emphasis', f'Reviewed head: `{sha}`\n_not_ frozen commit: `{base}`\nVerdict: PASS',
+             'expected one commit'),
+            ('label in fenced code', f'Reviewed head: `{sha}`\n\n~~~text\nFrozen commit: {base}\n~~~\n\nVerdict: PASS',
+             'expected one commit'),
+            ('label after fenced code', f'```text\nbase: {base}\n```\nFrozen commit: `{sha}`\nVerdict: PASS',
+             f'{sha} pass'),
         ))
 
     def test_account_auto_binds_the_final_verdict_line_after_earlier_rounds(self):
@@ -1699,6 +1705,8 @@ class LedgerDirTests(unittest.TestCase):
              'expected one verdict'),
             ('indented final label', f'Reviewed {sha}.\nVerdict: findings\n\nExample from an earlier report:\n\n'
                                      '    Verdict: PASS', 'expected one verdict'),
+            ('final label after a quote line', f'Reviewed {sha}.\nVerdict: findings\n\n> Earlier report:\nVerdict: PASS',
+             'expected one verdict'),
             ('blocked label with a pass', f'Verdict: blocked — the tests pass {sha}', 'expected one verdict'),
             ('pass or blocked', f'Verdict: PASS or BLOCKED {sha}', 'expected one verdict'),
             ('pass with a blocked scope', f'Verdict: PASS at {sha}. One blocked scope: the Git read.',
@@ -1844,6 +1852,12 @@ class LedgerDirTests(unittest.TestCase):
             self.assert_retire_merged_outcome(text, None)
             self.git(self.common, 'symbolic-ref', '--delete', 'refs/remotes/origin/main')
         self.git(self.common, 'update-ref', 'refs/remotes/origin/main', merged)
+        with self.subTest('a plain default'):
+            self.git(self.common, 'update-ref', 'refs/remotes/origin/HEAD', root)
+            self.assert_retire_merged_outcome(text, None)
+            self.git(self.common, 'update-ref', '-d', 'refs/remotes/origin/HEAD')
+            self.assert_retire_merged_outcome(
+                text, f'{merged} commit {merged} is an ancestor of refs/remotes/origin/main at {merged}')
         with self.subTest('a dangling default'):
             self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/gone')
             self.assert_retire_merged_outcome(text, None)
@@ -1860,6 +1874,17 @@ class LedgerDirTests(unittest.TestCase):
                 self.git(self.common, 'symbolic-ref', 'refs/remotes/origin/HEAD', target)
                 self.assert_retire_merged_outcome(
                     text, ref and f'{merged} commit {merged} is an ancestor of {ref} at {merged}')
+
+    def test_retire_merged_ignores_grafts(self):
+        tip, = self.merged_origin('feat: widget (#12)')
+        unmerged = self.unmerged_commit()
+        grafts = self.common / '.git/info/grafts'
+        grafts.parent.mkdir(exist_ok=True)
+        grafts.write_text(f'{tip} {unmerged}\n')
+        grafted = subprocess.run(['git', '-C', str(self.checkout), 'merge-base', '--is-ancestor', unmerged, tip],
+                                 env=self.env, capture_output=True)
+        self.assertEqual(grafted.returncode, 0, grafted.stderr)
+        self.assert_retire_merged_outcome(f'Frozen commit: `{unmerged}`. Two gaps remain.', None)
 
     def test_retire_merged_ignores_inherited_git_overrides(self):
         merged, = self.merged_origin('feat: widget (#12)')

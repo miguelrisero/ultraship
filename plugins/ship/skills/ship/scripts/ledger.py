@@ -597,14 +597,18 @@ MERGE_GIT_SECONDS = 60
 
 
 def frozen_commits(text):
-    commits = set()
+    """Return the commits that a frozen label names outside quotes and fenced code."""
+    commits, fence = set(), ''
     for line in text.split('\n'):
-        if line.lstrip().startswith('>'):
-            continue
-        negation = NEGATION.search(line)
-        for match in FROZEN_COMMIT.finditer(line):
-            if not negation or negation.start() > match.start(1):
-                commits.add(match[1].lower())
+        marker = line.lstrip()[:3]
+        if marker in ('```', '~~~') and fence in ('', marker):
+            fence = '' if fence else marker
+        elif not fence and not marker.startswith('>'):
+            # Emphasis markers become spaces, so `_not_` reads as a word and each position stays.
+            negation = NEGATION.search(re.sub(r'[*_`~]', ' ', line))
+            for match in FROZEN_COMMIT.finditer(line):
+                if not negation or negation.start() > match.start(1):
+                    commits.add(match[1].lower())
     return commits
 
 
@@ -625,11 +629,13 @@ def final_verdict(text):
     bare = not labels
     if len(labels) != 1:
         # Label lines above the closing paragraph are earlier rounds; a bare verdict counts only as the last line.
-        # A quoted or indented last line repeats another report, so it never decides between several labels.
+        # A quote in the closing paragraph or an indented last line repeats another report, so it never
+        # decides between several labels.
         closing = re.split(r'\n\s*\n', text.strip())[-1].splitlines()
         last = (BARE_VERDICT if bare else VERDICT_LABEL).match(lines[-1])
         rivals = sum(1 for line in closing if (VERDICT_RIVAL if bare else VERDICT_LABEL).match(line))
-        if not last or rivals != 1 or lines[-1][:1].isspace() or lines[-1].startswith('>'):
+        if (not last or rivals != 1 or lines[-1][:1].isspace()
+                or any(line.lstrip().startswith('>') for line in closing)):
             raise ValueError('expected one verdict')
         labels = [last[1]]
     words = [word for token in re.findall(r"\w+(?:['’]\w+)*", labels[0].lower()) if (word := token.strip('_'))]
@@ -669,8 +675,9 @@ def default_branch(cwd):
     try:
         ref = merge_git(cwd, 'symbolic-ref', '--no-recurse', '--quiet', 'refs/remotes/origin/HEAD')
     except subprocess.CalledProcessError as error:
-        # Status 1 means that `origin/HEAD` is absent or plain; any other failure proves nothing.
-        if error.returncode != 1:
+        # Status 1 means that `origin/HEAD` is absent or plain; a plain one and any other failure prove nothing.
+        if error.returncode != 1 or 'refs/remotes/origin/HEAD' in merge_git(
+                cwd, 'for-each-ref', '--format=%(refname)', 'refs/remotes/origin/HEAD').split('\n'):
             raise
         ref = 'refs/remotes/origin/main'
     tip, target = tracking_ref(cwd, ref)
