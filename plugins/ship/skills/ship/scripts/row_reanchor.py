@@ -386,8 +386,16 @@ def run(args):
     base_sha = commit_sha('resolve base commit', args.base)
     head_sha = commit_sha('resolve head commit', args.head)
     require(head_sha == git('read HEAD', 'rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
-    record = Path(git('find record path', 'rev-parse', '--path-format=absolute', '--git-path',
-                      'ship/row-auth.json').decode().rstrip('\n'))
+    receipt = getattr(args, 'receipt_dir', None)
+    if receipt is None:
+        record = Path(git('find record path', 'rev-parse', '--path-format=absolute', '--git-path',
+                          'ship/row-auth.json').decode().rstrip('\n'))
+    else:
+        # A lane that may write only inside its workspace keeps the record and its lock there.
+        receipt_dir = Path(receipt)
+        require(receipt_dir.is_absolute() and '..' not in receipt_dir.parts
+                and receipt == receipt_dir.as_posix(), 'receipt directory must be absolute and canonical')
+        record = receipt_dir / 'row-auth.json'
 
     def blob(operation, sha, path):
         return git(operation, 'cat-file', 'blob', sha + ':' + path)
@@ -504,6 +512,7 @@ def main():
         for name in ('row-file', 'row-id', 'subject', 'base', 'head'):
             parser.add_argument('--' + name, required=True)
         parser.add_argument('--restoration')
+        parser.add_argument('--receipt-dir')
         run(parser.parse_args())
         return 0
     except Refused as error:

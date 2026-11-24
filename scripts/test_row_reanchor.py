@@ -136,6 +136,30 @@ class ToolTests(unittest.TestCase):
                       'base_lines': [4, 10], 'lines': [4, 10]}],
         })
 
+    def test_receipt_dir_holds_the_record_and_the_lock_and_the_default_stays_in_the_git_directory(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        default = self.record_path()
+        untouched = sorted(default.parent.iterdir())
+        receipts = self.root / 'receipts'
+        _, output = self.invoke(**{'receipt-dir': str(receipts)})
+        record = receipts / 'row-auth.json'
+        self.assertEqual(output.splitlines()[-1], f'record={record}')
+        self.assertEqual(sorted(path.name for path in receipts.iterdir()), ['row-auth.json', 'row-auth.lock'])
+        self.assertEqual((record.stat().st_mode & 0o777, receipts.stat().st_mode & 0o777), (0o600, 0o700))
+        self.assertEqual(json.loads(record.read_bytes())['rows'][0]['row_id'], 'target')
+        self.assertFalse(default.exists())
+        self.assertEqual(sorted(default.parent.iterdir()), untouched)
+        for value in ('receipts', str(self.root / 'a' / '..' / 'receipts'), str(receipts) + '/'):
+            with self.subTest(value=value):
+                self.invoke(2, 'receipt directory must be absolute and canonical', **{'receipt-dir': value})
+        link = self.root / 'link'
+        link.symlink_to(receipts, target_is_directory=True)
+        self.invoke(2, 'invalid record directory', **{'receipt-dir': str(link)})
+        _, output = self.invoke()  # no option: the record is in the Git directory, as before
+        self.assertEqual(output.splitlines()[-1], f'record={default}')
+
     def test_printed_fields_match_the_record_entry(self):
         self.setup_pair(literal=True, extra='[row.mutant]\noperator = "replace"\n')
         self.invoke()
@@ -959,6 +983,20 @@ class HookTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)
                 self.assertIn('[--restoration <commit>]', self.reason)
+
+    def test_exact_receipt_dir_suffix(self):
+        suffix = ' --receipt-dir ' + str(self.root / 'receipts')
+        restoration = ' --restoration ' + 'a' * 40
+        for command in (self.command + suffix, self.command + restoration + suffix):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+        for command in (self.command + ' --receipt-dir', self.command + suffix * 2,
+                        self.command + ' --receipt-dir receipts', self.command + ' --receipt-dir /tmp/a/../b',
+                        self.command + ' --receipt-dir "/tmp/a"', self.command + suffix + restoration,
+                        self.command.replace(' --head', suffix + ' --head')):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command), self.reason)
+                self.assertIn('[--receipt-dir <abs>]', self.reason)
 
     def test_record_conditions(self):
         for condition in ('missing', 'wrong_id', 'wrong_file', 'expired', 'group_write', 'future', 'link', 'array'):

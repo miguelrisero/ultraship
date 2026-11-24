@@ -298,6 +298,9 @@ Keep the route's authority, independent review, execution admission and publicat
 
 Use exactly `python3 -I <plugin root>/skills/ship/scripts/row_reanchor.py --row-file <absolute path> --row-id <id> --subject <repository-relative path> --base <ref> --head <ref>`.
 On the restore route, append ` --restoration <commit>` with the full restoration commit SHA.
+The tool writes its record `row-auth.json` and the lock under `ship/` in the worktree's Git directory.
+When the lane may write only inside its workspace, append ` --receipt-dir <absolute path>` last; the tool then writes both files in that directory.
+Use one receipt directory for one worktree, because the lock in that directory orders the runs.
 Use single spaces and unquoted arguments, with nothing before or after the command.
 The hook accepts only its own plugin's tool path for a writer with a matching record.
 
