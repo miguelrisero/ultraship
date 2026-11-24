@@ -9,12 +9,16 @@ Code findings identify file, line, and mechanism; plan findings identify relevan
 
 <a id="security-review-triage"></a>**Security review triage.**
 
-Copy this guidance into every review brief, including verification and fix reads.
+Copy this block verbatim into every review brief, including verification and fix reads:
+
+```text
 Prioritize evidence of clear danger, a realistic attacker path, or harm to customer data, money, or secrets.
-Report uncertainty and missing evidence explicitly. Preserve existing severity definitions, blocking findings, and all merge gates.
-For a finding the applicable gates already permit deferring, give the reason and a concise hardening proposal.
-The driver records that follow-up in Linear through the authorized route and sends the ticket to the chief for batched owner review.
-Avoid another review round solely for deferred findings. Keep required fixes, independent review, and fix reads in force.
+Report uncertainty and missing evidence explicitly.
+Preserve severity definitions, blocking findings, required fixes, independent review, fix reads, and all merge gates.
+```
+
+The driver consolidates deferred security findings at [handoff](#13-handoff).
+Avoid another review round solely for a security finding the existing gates permit deferring.
 
 Every initial, verification, and replacement brief lists permitted paths and exclusions.
 Apply this rule to every review dispatch, including slice, selection, fix-read, closing, and delegated review seats.
@@ -231,5 +235,10 @@ Report in chat:
 
 - The direct PR URL and head SHA.
 - What changed for the user, in two or three sentences.
-- A `Deferred` list: findings accepted as out of scope, each with a reason.
+- A `Deferred` list: findings the applicable gates permit deferring, each with a reason.
 - Remaining owner actions, each with a link.
+
+Consolidate duplicate deferred security findings by mechanism. Give each distinct finding a concise hardening proposal.
+Reuse an existing Linear ticket for the same issue. Create one only in the verified, authorized Linear team.
+Include its URL in the `Deferred` entry. If custody or access is unclear, keep the entry and report the routing gap.
+Send the list to the chief for batched owner review. In a standalone run, include it in the result handoff.

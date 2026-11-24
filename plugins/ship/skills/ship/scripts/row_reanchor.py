@@ -2,13 +2,14 @@
 """Derive a row's paired fields while preserving its whole-file mutant hunks."""
 import argparse
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import difflib
 import fcntl
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import stat
 import subprocess
 import tomllib
@@ -304,7 +305,8 @@ def derive(old, new, base, head):
 
 
 @contextmanager
-def staged_bytes(path, data, mode):
+def staged_bytes(path, data, mode, held=None):
+    """Stage the bytes beside the path; `held` receives a descriptor that stays open until the stage ends."""
     staged = path.with_name('.row-reanchor-' + uuid.uuid4().hex)
     descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
     try:
@@ -313,10 +315,53 @@ def staged_bytes(path, data, mode):
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
+            if held is not None:
+                held.append(os.dup(handle.fileno()))
         require(staged.read_bytes() == data, 'staged write read-back differs')
         yield staged
     finally:
-        staged.unlink(missing_ok=True)
+        try:
+            staged.unlink(missing_ok=True)
+        finally:
+            for kept in held or ():
+                os.close(kept)
+
+
+@contextmanager
+def folder_lock(folder):
+    # A replace gives the row file a new inode, so runs with separate record locks order on its folder.
+    descriptor = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def receipt_directory(path):
+    """Make the receipt directory the working directory through descriptors that follow no link."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    search = flags | getattr(os, 'O_PATH', 0)  # a parent may grant search without read
+    home = os.open('.', os.O_RDONLY | os.O_DIRECTORY)
+    descriptors = [os.open('/', search)]
+    try:
+        for part in path.parts[1:-1]:
+            descriptors.append(os.open(part, search, dir_fd=descriptors[-1]))
+        try:
+            os.mkdir(path.name, 0o700, dir_fd=descriptors[-1])
+            created = True
+        except FileExistsError:
+            created = False
+        descriptors.append(os.open(path.name, flags, dir_fd=descriptors[-1]))
+        if created:
+            os.fchmod(descriptors[-1], 0o700)
+        os.fchdir(descriptors[-1])
+        yield
+    finally:
+        os.fchdir(home)
+        for descriptor in (home, *descriptors):
+            os.close(descriptor)
 
 
 @contextmanager
@@ -338,7 +383,7 @@ def record_lock(path):
         yield
 
 
-def merge_record(path, identity, entry, check_before_replace):
+def merge_record(path, identity, entry, check_before_replace, named=None):
     rows = {}
     try:
         metadata = path.lstat()
@@ -354,9 +399,13 @@ def merge_record(path, identity, entry, check_before_replace):
             rows = {(row['row_file'], row['row_id']): row for row in prior['rows']}
     rows[entry['row_file'], entry['row_id']] = entry
     data = (json.dumps({'schema': 1, **identity, 'rows': list(rows.values())}) + '\n').encode('utf-8')
-    with staged_bytes(path, data, 0o600) as record_stage:
+    held = []
+    with staged_bytes(path, data, 0o600, *(() if named is None else (held,))) as record_stage:
         check_before_replace('staged write')
         os.replace(record_stage, path)
+        # The open descriptor keeps the written inode, so a file or link put at the named path later is another file.
+        require(named is None or os.path.samestat(os.fstat(held[0]), os.lstat(named)),
+                'record path must name the written record')
 
 
 def run(args):
@@ -364,9 +413,18 @@ def run(args):
     require(row_file.is_absolute() and stat.S_ISREG(row_file.lstat().st_mode)
             and row_file.resolve() == row_file, 'row file must be absolute, regular and canonical without links')
 
+    receipt = getattr(args, 'receipt_dir', None)
+    program = 'git'
+    if receipt is not None:
+        # The tool enters the receipt directory later, so a relative PATH entry resolves to the program here.
+        program = shutil.which('git')
+        require(program is not None, 'git executable not found')
+        if not os.path.isabs(program):
+            program = os.path.join(os.getcwd(), program)  # unnormalized: `link/..` keeps its meaning
+
     def git(operation, *words, not_ancestor=None):
         try:
-            return subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', str(row_file.parent), *words],
+            return subprocess.run([program, '-c', 'core.fsmonitor=false', '-C', str(row_file.parent), *words],
                                   check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
         except subprocess.CalledProcessError as error:
             if not_ancestor is not None and error.returncode == 1:
@@ -386,8 +444,19 @@ def run(args):
     base_sha = commit_sha('resolve base commit', args.base)
     head_sha = commit_sha('resolve head commit', args.head)
     require(head_sha == git('read HEAD', 'rev-parse', 'HEAD').decode().strip(), 'head must equal HEAD')
-    record = Path(git('find record path', 'rev-parse', '--path-format=absolute', '--git-path',
-                      'ship/row-auth.json').decode().rstrip('\n'))
+    enter_receipts = nullcontext()
+    if receipt is None:
+        record = Path(git('find record path', 'rev-parse', '--path-format=absolute', '--git-path',
+                          'ship/row-auth.json').decode().rstrip('\n'))
+        stored = record
+    else:
+        # A lane that may write only inside its workspace keeps the record and its lock there.
+        receipt_dir = Path(receipt)
+        require(receipt_dir.is_absolute() and '..' not in receipt_dir.parts and receipt == receipt_dir.as_posix()
+                and os.path.realpath(receipt) == receipt, 'receipt directory must be absolute and canonical')
+        record = receipt_dir / 'row-auth.json'
+        # Record I/O is relative to the entered directory, so a link that appears in the path later redirects nothing.
+        enter_receipts, stored = receipt_directory(receipt_dir), Path(record.name)
 
     def blob(operation, sha, path):
         return git(operation, 'cat-file', 'blob', sha + ':' + path)
@@ -476,7 +545,7 @@ def run(args):
                 'HEAD changed during ' + phase)
         require(row_file.read_bytes() == original, 'row file changed during ' + phase)
 
-    with record_lock(record):
+    with folder_lock(row_file.parent), enter_receipts, record_lock(stored):
         check_worktree('derivation')
         if replacements:
             mode = stat.S_IMODE(row_file.stat().st_mode)
@@ -485,7 +554,7 @@ def run(args):
                 os.replace(stage, row_file)
             record_output = 'none'
         else:
-            merge_record(record, identity, entry, check_worktree)
+            merge_record(stored, identity, entry, check_worktree, None if stored is record else record)
             record_output = str(record)
     print('PASS')
     for key, value in {'schema': 1, **identity, **entry, 'base_span_lines': len(lines(base_values['old'])),
@@ -504,6 +573,7 @@ def main():
         for name in ('row-file', 'row-id', 'subject', 'base', 'head'):
             parser.add_argument('--' + name, required=True)
         parser.add_argument('--restoration')
+        parser.add_argument('--receipt-dir')
         run(parser.parse_args())
         return 0
     except Refused as error:

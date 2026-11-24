@@ -8,7 +8,9 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import tempfile
 from threading import Event
 import time
@@ -64,14 +66,17 @@ class ToolTests(unittest.TestCase):
         self.subject.write_text('outside_before\n' + self.head + 'outside_after\n')
         self.head_sha = self.commit()
 
-    def invoke(self, expected=0, reason=None, **overrides):
+    def invoke(self, expected=0, reason=None, cwd=None, path=None, **overrides):
         before = self.row.read_bytes()
         options = {'row-file': str(self.row), 'row-id': 'target', 'subject': 'subject.txt',
                    'base': self.base, 'head': self.head_sha}
         options.update(overrides)
-        result = subprocess.run(['python3', '-I', str(TOOL), *[word for key, value in options.items()
-                                 for word in ('--' + key, value)]], capture_output=True, text=True,
-                                env={**os.environ, 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'})
+        env = {**os.environ, 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+        if path is not None:
+            env['PATH'] = path
+        result = subprocess.run([sys.executable if path is not None else 'python3', '-I', str(TOOL),
+                                 *[word for key, value in options.items() for word in ('--' + key, value)]],
+                                capture_output=True, text=True, cwd=cwd, env=env)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         self.assertNotIn(SENTINEL, result.stdout + result.stderr)
         self.assertEqual(result.stderr, '')
@@ -135,6 +140,121 @@ class ToolTests(unittest.TestCase):
                       'mutant_unchanged': True, 'changed_statements': 0,
                       'base_lines': [4, 10], 'lines': [4, 10]}],
         })
+
+    def test_receipt_dir_holds_the_record_and_the_lock_and_the_default_stays_in_the_git_directory(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        default = self.record_path()
+        untouched = sorted(default.parent.iterdir())
+        receipts = self.root / 'receipts'
+        _, output = self.invoke(**{'receipt-dir': str(receipts)})
+        record = receipts / 'row-auth.json'
+        self.assertEqual(output.splitlines()[-1], f'record={record}')
+        self.assertEqual(sorted(path.name for path in receipts.iterdir()), ['row-auth.json', 'row-auth.lock'])
+        self.assertEqual((record.stat().st_mode & 0o777, receipts.stat().st_mode & 0o777), (0o600, 0o700))
+        self.assertEqual(json.loads(record.read_bytes())['rows'][0]['row_id'], 'target')
+        self.assertFalse(default.exists())
+        self.assertEqual(sorted(default.parent.iterdir()), untouched)
+        link, real = self.root / 'link', self.root / 'real'
+        real.mkdir()
+        link.symlink_to(real, target_is_directory=True)
+        final_link = self.root / 'final-link'
+        final_link.symlink_to(receipts, target_is_directory=True)
+        for value in ('receipts', str(self.root / 'a' / '..' / 'receipts'), str(receipts) + '/',
+                      '/' + str(receipts), str(link / 'receipts'), str(final_link)):
+            with self.subTest(value=value):
+                self.invoke(2, 'receipt directory must be absolute and canonical', **{'receipt-dir': value})
+        self.assertEqual(list(real.iterdir()), [])
+        _, output = self.invoke()  # no option: the record is in the Git directory, as before
+        self.assertEqual(output.splitlines()[-1], f'record={default}')
+
+    def test_parent_swapped_for_a_link_after_the_path_check_redirects_no_receipt_file(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        home = Path.cwd()
+        # The swap happens before the tool enters the receipt directory, then after it.
+        for swap_at, written in (('folder_lock', []), ('record_lock', ['receipts', 'row-auth.json', 'row-auth.lock'])):
+            with self.subTest(swap_at=swap_at):
+                lane, guarded, moved = (self.root / (name + '-' + swap_at) for name in ('lane', 'guarded', 'moved'))
+                lane.mkdir()
+                guarded.mkdir()
+                original = getattr(reanchor, swap_at)
+
+                @contextlib.contextmanager
+                def swap_then_continue(path):
+                    lane.rename(moved)
+                    lane.symlink_to(guarded, target_is_directory=True)
+                    with original(path):
+                        yield
+
+                args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt', base=self.base,
+                                 head=self.head_sha, restoration=None, receipt_dir=str(lane / 'receipts'))
+                with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
+                        patch.object(reanchor, swap_at, swap_then_continue), self.assertRaises(OSError):
+                    reanchor.run(args)
+                self.assertEqual(list(guarded.iterdir()), [])
+                self.assertEqual(sorted(path.name for path in moved.rglob('*')), written)
+                self.assertEqual(Path.cwd(), home)
+
+    def test_relative_path_entry_finds_git_after_the_tool_enters_the_receipt_dir(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        launch, tools, marker = self.root / 'launch', self.root / 'tools', self.root / 'decoy-ran'
+        for folder in (launch / 'bin', tools / 'bin', tools / 'subdir'):
+            folder.mkdir(parents=True)
+        git = os.path.abspath(shutil.which('git'))
+        (launch / 'bin/git').symlink_to(git)
+        (launch / 'link').symlink_to(tools / 'subdir', target_is_directory=True)
+        receipts = self.root / 'receipts'
+        _, output = self.invoke(cwd=launch, path='bin', **{'receipt-dir': str(receipts)})
+        self.assertEqual(output.splitlines()[-1], f'record={receipts / "row-auth.json"}')
+        # `link/../bin` names `tools/bin` through the link; a lexical cleanup would name `launch/bin`.
+        (launch / 'bin/git').unlink()
+        (tools / 'bin/git').symlink_to(git)
+        _, output = self.invoke(cwd=launch, path='link/../bin', **{'receipt-dir': str(receipts)})
+        self.assertEqual(output.splitlines()[-1], f'record={receipts / "row-auth.json"}')
+        # A program outside PATH never stands in for a missing `git`.
+        decoy = launch / 'git'
+        decoy.write_text(f'#!/bin/sh\n: > {marker}\nexit 1\n')  # a builtin, so the marker needs no PATH
+        decoy.chmod(0o755)
+        self.invoke(2, 'git executable not found', cwd=launch, path=str(self.root / 'missing'),
+                    **{'receipt-dir': str(receipts)})
+        self.assertFalse(marker.exists())
+
+    def test_file_put_at_the_record_path_after_the_replace_gets_a_refusal(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        replace = os.replace
+        for intrusion in ('file', 'link'):  # another file, then a link to the written record under another name
+            with self.subTest(intrusion=intrusion):
+                receipts = self.root / ('receipts-' + intrusion)
+                record = receipts / 'row-auth.json'
+
+                def replace_then_intrude(source, target):
+                    replace(source, target)
+                    if Path(target).name == record.name:
+                        intruder = receipts / 'intruder'
+                        if intrusion == 'file':
+                            intruder.write_text('{}')
+                        else:
+                            replace(record, receipts / 'kept')
+                            intruder.symlink_to('kept')
+                        replace(intruder, record)
+
+                args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt', base=self.base,
+                                 head=self.head_sha, restoration=None, receipt_dir=str(receipts))
+                output = io.StringIO()
+                with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}), \
+                        patch.object(reanchor.os, 'replace', side_effect=replace_then_intrude), \
+                        contextlib.redirect_stdout(output), \
+                        self.assertRaisesRegex(reanchor.Refused, '^record path must name the written record$'):
+                    reanchor.run(args)
+                self.assertEqual(output.getvalue(), '')
+                self.assertEqual(record.is_symlink(), intrusion == 'link')
 
     def test_printed_fields_match_the_record_entry(self):
         self.setup_pair(literal=True, extra='[row.mutant]\noperator = "replace"\n')
@@ -599,17 +719,22 @@ class ToolTests(unittest.TestCase):
         self.invoke(2, 'row ID must match exactly once', restoration=restoration)
         self.assertFalse(self.record_path().exists())
 
-    def run_with_lock_held(self, while_locked):
-        record = self.record_path()
-        record.parent.mkdir(mode=0o700, exist_ok=True)
+    def run_with_lock_held(self, while_locked, held=None, receipt_dir=None):
+        """Run the tool while the test holds `held`: the record lock, or the row file's folder."""
+        if held is None:
+            record = Path(receipt_dir) / 'row-auth.json' if receipt_dir else self.record_path()
+            record.parent.mkdir(mode=0o700, exist_ok=True)
+            held = record.with_suffix('.lock')
         output = io.StringIO()
         args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
-                         base=self.base, head=self.head_sha, restoration=None)
+                         base=self.base, head=self.head_sha, restoration=None, receipt_dir=receipt_dir)
         lock_checked_or_done = Event()
         flock = fcntl.flock
 
         def observe_lock(descriptor, operation):
             self.assertEqual(operation, fcntl.LOCK_EX)
+            if not os.path.samestat(os.fstat(descriptor), os.fstat(lock)):
+                return flock(descriptor, operation)
             with self.assertRaises(BlockingIOError):
                 flock(descriptor, operation | fcntl.LOCK_NB)
             lock_checked_or_done.set()
@@ -618,8 +743,9 @@ class ToolTests(unittest.TestCase):
         env = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
         with patch.dict(os.environ, env), contextlib.redirect_stdout(output), \
                 ThreadPoolExecutor(max_workers=1) as writer:
-            with record.with_suffix('.lock').open('a+b') as lock:
-                flock(lock.fileno(), fcntl.LOCK_EX)
+            lock = os.open(held, os.O_RDONLY if held.is_dir() else os.O_RDONLY | os.O_CREAT, 0o600)
+            try:
+                flock(lock, fcntl.LOCK_EX)
                 with patch.object(reanchor.fcntl, 'flock', side_effect=observe_lock):
                     deadline = time.monotonic() + 5
                     result = writer.submit(reanchor.run, args)
@@ -628,10 +754,43 @@ class ToolTests(unittest.TestCase):
                                     'tool did not attempt to acquire the lock')
                     if result.done():
                         result.result()
-                        self.fail('tool finished while the record lock was held')
+                        self.fail('tool finished while the lock was held')
                     while_locked()
+            finally:
+                os.close(lock)
             result.result(timeout=deadline - time.monotonic())
         return output.getvalue()
+
+    def test_record_write_waits_for_the_receipt_dir_lock(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        receipts = self.root / 'receipts'
+        record = receipts / 'row-auth.json'
+        self.run_with_lock_held(lambda: self.assertFalse(record.exists()), receipt_dir=str(receipts))
+        entry, = json.loads(record.read_bytes())['rows']
+        self.assertEqual((entry['row_file'], entry['row_id']), ('rows.toml', 'target'))
+        self.assertFalse(self.record_path().exists())
+
+    def test_run_with_another_receipt_dir_or_none_waits_for_the_row_folder_lock(self):
+        self.setup_pair()
+        original = self.row.read_bytes()
+        first_edit = original + b'# a run with another receipt directory edited another row\n'
+        for receipt_dir in (str(self.root / 'second'), None):
+            with self.subTest(receipt_dir=receipt_dir):
+                self.row.write_bytes(original)
+                record = Path(receipt_dir) / 'row-auth.json' if receipt_dir else self.record_path()
+
+                def first_run_edits_the_row():
+                    # The waiting run holds no record lock yet, so only the row folder orders the two runs.
+                    self.assertFalse(record.parent.exists())
+                    self.assertEqual(self.row.read_bytes(), original)
+                    self.row.write_bytes(first_edit)
+
+                with self.assertRaisesRegex(reanchor.Refused, '^row file changed during derivation$'):
+                    self.run_with_lock_held(first_run_edits_the_row, held=self.row.parent, receipt_dir=receipt_dir)
+                self.assertEqual(self.row.read_bytes(), first_edit)
+                self.assertFalse(record.exists())
 
     def test_record_write_waits_for_exclusive_lock(self):
         self.setup_pair()
@@ -663,6 +822,12 @@ class ToolTests(unittest.TestCase):
             if target == self.row:
                 with lock_path.open('r+b') as lock, self.assertRaises(BlockingIOError):
                     flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                folder = os.open(self.row.parent, os.O_RDONLY)
+                try:
+                    with self.assertRaises(BlockingIOError):
+                        flock(folder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                finally:
+                    os.close(folder)
             replace(source, target)
 
         def check_waiting_edit():
@@ -932,11 +1097,11 @@ class HookTests(unittest.TestCase):
         self.record.write_text(json.dumps(self.fields))
         self.record.chmod(0o600)
 
-    def denied(self, command=None, agent_type='ship:writer--sol', tool='Bash', tin=None):
+    def denied(self, command=None, agent_type='ship:writer--sol', tool='Bash', tin=None, state=None):
         payload = {'agent_type': agent_type, 'agent_id': 'agent-1', 'cwd': str(self.root),
                    'tool_name': tool, 'tool_input': tin if tin is not None else {'command': command or self.command}}
         output = io.StringIO()
-        with patch.object(hook, 'STATE', self.state), contextlib.redirect_stdout(output):
+        with patch.object(hook, 'STATE', state or self.state), contextlib.redirect_stdout(output):
             try:
                 hook.pre(payload)
             except SystemExit as error:
@@ -954,11 +1119,101 @@ class HookTests(unittest.TestCase):
         suffix = f' --restoration {sha}'
         self.assertFalse(self.denied(self.command + suffix), self.reason)
         for command in (self.command + ' --restoration', self.command + suffix * 2,
-                        self.command + f' --restoration "{sha}"',
+                        self.command + f' --restoration "{sha}"', self.command + ' --restoration -' + sha,
                         self.command.replace(' --head', suffix + ' --head')):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)
                 self.assertIn('[--restoration <commit>]', self.reason)
+
+    def test_exact_receipt_dir_suffix(self):
+        receipts = str(self.root / 'receipts')
+        suffix = ' --receipt-dir ' + receipts
+        restoration = ' --restoration ' + 'a' * 40
+        self.assertTrue(self.denied(self.command + suffix), self.reason)  # the record names no receipt directory
+        self.assertIn('`receipt_dir` equals', self.reason)
+        self.fields['receipt_dir'] = receipts
+        self.write_record()
+        for command in (self.command + suffix, self.command + restoration + suffix):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied(command), self.reason)
+        for command in (self.command, self.command + restoration, self.command + suffix + '2',
+                        self.command + ' --receipt-dir', self.command + suffix * 2,
+                        self.command + ' --receipt-dir receipts', self.command + ' --receipt-dir /tmp/a/../b',
+                        self.command + ' --receipt-dir "/tmp/a"', self.command + suffix + restoration,
+                        self.command + ' --restoration --receipt-dir' + suffix,
+                        self.command.replace(' --head', suffix + ' --head')):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command), self.reason)
+                self.assertIn('[--receipt-dir <abs>]', self.reason)
+
+    def test_receipt_dir_matches_the_record_and_stays_outside_guarded_folders(self):
+        self.fields['receipt_dir'] = None
+        self.write_record()
+        self.assertTrue(self.denied(), self.reason)
+        self.assertIn('`receipt_dir` equals', self.reason)
+        link, real = self.root / 'link', self.root / 'real'
+        real.mkdir()
+        link.symlink_to(real, target_is_directory=True)
+        receipts = str(self.root / 'receipts')
+        for value in (str(self.row.parent), str(self.row.parent / 'receipts'),
+                      str(self.root / 'other/tests/mutation/receipts'), str(self.root / 'Tests/Mutation'),
+                      str(self.state), str(self.state / 'receipts'),
+                      '/' + receipts, receipts + '/', str(link / 'receipts'), str(self.root) + '/./receipts',
+                      'receipts', receipts + '/../receipts'):
+            with self.subTest(value=value):
+                self.fields['receipt_dir'] = value
+                self.write_record()
+                self.assertTrue(self.denied(self.command + ' --receipt-dir ' + value), self.reason)
+                self.assertIn('The receipt directory is a canonical absolute path outside', self.reason)
+        # A row file named `mutation` has an unprotected folder; the row-folder rule covers it.
+        row = self.root / 'flat/tests/mutation'
+        row.parent.mkdir(parents=True)
+        row.write_text('synthetic')
+        command = self.command.replace(str(self.row), str(row))
+        for value, denied in ((str(row.parent / 'receipts'), True), (str(self.root / 'flat/receipts'), False)):
+            with self.subTest(value=value):
+                self.fields.update(row_file=str(row), receipt_dir=value)
+                self.write_record()
+                self.assertEqual(self.denied(command + ' --receipt-dir ' + value), denied, self.reason)
+
+    def receipt_denied(self, value, **options):
+        self.fields['receipt_dir'] = value
+        self.write_record()
+        denied = self.denied(self.command + ' --receipt-dir ' + value, **options)
+        if denied:
+            self.assertIn('The receipt directory is a canonical absolute path outside', self.reason)
+        return denied
+
+    def test_receipt_dir_with_a_link_at_any_existing_part_is_denied(self):
+        loop, link, real = self.root / 'loop', self.root / 'link', self.root / 'real'
+        loop.symlink_to('loop')
+        real.mkdir()
+        link.symlink_to(real, target_is_directory=True)
+        (real / 'made').mkdir()
+        for value in (str(loop), str(loop / 'receipts'), str(link), str(link / 'made'),
+                      str(self.root / 'missing/receipts')):
+            with self.subTest(value=value):
+                self.assertTrue(self.receipt_denied(value), self.reason)
+        for value in (str(real / 'made'), str(real / 'new')):  # an existing directory, and a final part to create
+            with self.subTest(value=value):
+                self.assertFalse(self.receipt_denied(value), self.reason)
+
+    def test_receipt_dir_state_folder_containment(self):
+        state_link, root_link, upper = self.root / 'state-link', self.root / 'root-link', self.root / 'STATE'
+        state_link.symlink_to(self.state, target_is_directory=True)
+        root_link.symlink_to('/', target_is_directory=True)
+        upper.mkdir(exist_ok=True)
+        # The state root named through a link still closes the real folder.
+        self.assertTrue(self.receipt_denied(str(self.state / 'receipts'), state=state_link), self.reason)
+        # The comparison folds case, so a folder that differs from the state root only by case is closed too.
+        self.assertTrue(self.receipt_denied(str(upper / 'out')), self.reason)
+        # A sibling that shares the name prefix is outside the state root.
+        self.assertFalse(self.receipt_denied(str(self.root / 'state-other')), self.reason)
+        # A state root that resolves to `/` closes every path.
+        with patch.object(hook, 'row_record', return_value=(self.fields, '')):
+            for value in (str(self.root / 'receipts'), '/receipts'):
+                with self.subTest(value=value):
+                    self.assertTrue(self.receipt_denied(value, state=root_link), self.reason)
 
     def test_record_conditions(self):
         for condition in ('missing', 'wrong_id', 'wrong_file', 'expired', 'group_write', 'future', 'link', 'array'):

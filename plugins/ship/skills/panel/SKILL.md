@@ -49,7 +49,7 @@ An explicit repository-root path does not authorize broader discovery.
 4. Build one self-contained brief: subject, type, lenses, constraints, required decision, the required `Readable files` field and safety sentences above, absolute paths, SHAs, and the diff. Leave out your own conclusions and any other seat's output.
    Require flaky-risk findings with file, line, and mechanism for code subjects; use relevant evidence locations for plan subjects.
    Require explicit none with inspected scope when a seat finds no flaky risk.
-   Copy [security review triage](../ship/references/pipeline.md#security-review-triage) into each code review brief.
+   Copy the [security review triage block](../ship/references/pipeline.md#security-review-triage) into every seat brief, including fallback and replacement briefs.
 5. Launch one Agent call per seat, together in one message. Use the scoped `ship:reviewer--*` names and leave `model` unset.
 6. On an unavailable seat, dispatch the next agent in its fallback chain from `${CLAUDE_PLUGIN_ROOT}/skills/ship/references/roster.md`. Seats with no fallback stay missing.
 

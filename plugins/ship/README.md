@@ -95,6 +95,7 @@ For Bash, the hook only checks the command text for `ultraship/row-review`, so a
 
 A re-anchor admission record lives at `row-reanchor/<agent ID>.json` in the hook state folder.
 It holds `pr`, `agent_id`, `row_file`, `row_id` and `expires_at` (UTC, at most 4 hours ahead).
+It holds `receipt_dir` only when the command carries ` --receipt-dir`, and the two paths must be equal.
 The shared record checks require a regular file owned by the hook user, at most 64 KiB, without group or world writes.
 The command must match its canonical protected row file and row ID.
 Only the driver and the main session write this folder through Write, Edit or NotebookEdit.
