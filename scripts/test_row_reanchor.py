@@ -151,12 +151,16 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(json.loads(record.read_bytes())['rows'][0]['row_id'], 'target')
         self.assertFalse(default.exists())
         self.assertEqual(sorted(default.parent.iterdir()), untouched)
-        for value in ('receipts', str(self.root / 'a' / '..' / 'receipts'), str(receipts) + '/'):
+        link, real = self.root / 'link', self.root / 'real'
+        real.mkdir()
+        link.symlink_to(real, target_is_directory=True)
+        final_link = self.root / 'final-link'
+        final_link.symlink_to(receipts, target_is_directory=True)
+        for value in ('receipts', str(self.root / 'a' / '..' / 'receipts'), str(receipts) + '/',
+                      '/' + str(receipts), str(link / 'receipts'), str(final_link)):
             with self.subTest(value=value):
                 self.invoke(2, 'receipt directory must be absolute and canonical', **{'receipt-dir': value})
-        link = self.root / 'link'
-        link.symlink_to(receipts, target_is_directory=True)
-        self.invoke(2, 'invalid record directory', **{'receipt-dir': str(link)})
+        self.assertEqual(list(real.iterdir()), [])
         _, output = self.invoke()  # no option: the record is in the Git directory, as before
         self.assertEqual(output.splitlines()[-1], f'record={default}')
 
@@ -623,17 +627,22 @@ class ToolTests(unittest.TestCase):
         self.invoke(2, 'row ID must match exactly once', restoration=restoration)
         self.assertFalse(self.record_path().exists())
 
-    def run_with_lock_held(self, while_locked):
-        record = self.record_path()
-        record.parent.mkdir(mode=0o700, exist_ok=True)
+    def run_with_lock_held(self, while_locked, held=None, receipt_dir=None):
+        """Run the tool while the test holds `held`: the record lock, or the row file's folder."""
+        if held is None:
+            record = Path(receipt_dir) / 'row-auth.json' if receipt_dir else self.record_path()
+            record.parent.mkdir(mode=0o700, exist_ok=True)
+            held = record.with_suffix('.lock')
         output = io.StringIO()
         args = Namespace(row_file=str(self.row), row_id='target', subject='subject.txt',
-                         base=self.base, head=self.head_sha, restoration=None)
+                         base=self.base, head=self.head_sha, restoration=None, receipt_dir=receipt_dir)
         lock_checked_or_done = Event()
         flock = fcntl.flock
 
         def observe_lock(descriptor, operation):
             self.assertEqual(operation, fcntl.LOCK_EX)
+            if not os.path.samestat(os.fstat(descriptor), os.fstat(lock)):
+                return flock(descriptor, operation)
             with self.assertRaises(BlockingIOError):
                 flock(descriptor, operation | fcntl.LOCK_NB)
             lock_checked_or_done.set()
@@ -642,8 +651,9 @@ class ToolTests(unittest.TestCase):
         env = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
         with patch.dict(os.environ, env), contextlib.redirect_stdout(output), \
                 ThreadPoolExecutor(max_workers=1) as writer:
-            with record.with_suffix('.lock').open('a+b') as lock:
-                flock(lock.fileno(), fcntl.LOCK_EX)
+            lock = os.open(held, os.O_RDONLY if held.is_dir() else os.O_RDONLY | os.O_CREAT, 0o600)
+            try:
+                flock(lock, fcntl.LOCK_EX)
                 with patch.object(reanchor.fcntl, 'flock', side_effect=observe_lock):
                     deadline = time.monotonic() + 5
                     result = writer.submit(reanchor.run, args)
@@ -652,10 +662,43 @@ class ToolTests(unittest.TestCase):
                                     'tool did not attempt to acquire the lock')
                     if result.done():
                         result.result()
-                        self.fail('tool finished while the record lock was held')
+                        self.fail('tool finished while the lock was held')
                     while_locked()
+            finally:
+                os.close(lock)
             result.result(timeout=deadline - time.monotonic())
         return output.getvalue()
+
+    def test_record_write_waits_for_the_receipt_dir_lock(self):
+        self.setup_pair()
+        self.invoke()
+        self.head_sha = self.commit()
+        receipts = self.root / 'receipts'
+        record = receipts / 'row-auth.json'
+        self.run_with_lock_held(lambda: self.assertFalse(record.exists()), receipt_dir=str(receipts))
+        entry, = json.loads(record.read_bytes())['rows']
+        self.assertEqual((entry['row_file'], entry['row_id']), ('rows.toml', 'target'))
+        self.assertFalse(self.record_path().exists())
+
+    def test_run_with_another_receipt_dir_or_none_waits_for_the_row_folder_lock(self):
+        self.setup_pair()
+        original = self.row.read_bytes()
+        first_edit = original + b'# a run with another receipt directory edited another row\n'
+        for receipt_dir in (str(self.root / 'second'), None):
+            with self.subTest(receipt_dir=receipt_dir):
+                self.row.write_bytes(original)
+                record = Path(receipt_dir) / 'row-auth.json' if receipt_dir else self.record_path()
+
+                def first_run_edits_the_row():
+                    # The waiting run holds no record lock yet, so only the row folder orders the two runs.
+                    self.assertFalse(record.parent.exists())
+                    self.assertEqual(self.row.read_bytes(), original)
+                    self.row.write_bytes(first_edit)
+
+                with self.assertRaisesRegex(reanchor.Refused, '^row file changed during derivation$'):
+                    self.run_with_lock_held(first_run_edits_the_row, held=self.row.parent, receipt_dir=receipt_dir)
+                self.assertEqual(self.row.read_bytes(), first_edit)
+                self.assertFalse(record.exists())
 
     def test_record_write_waits_for_exclusive_lock(self):
         self.setup_pair()
@@ -978,25 +1021,61 @@ class HookTests(unittest.TestCase):
         suffix = f' --restoration {sha}'
         self.assertFalse(self.denied(self.command + suffix), self.reason)
         for command in (self.command + ' --restoration', self.command + suffix * 2,
-                        self.command + f' --restoration "{sha}"',
+                        self.command + f' --restoration "{sha}"', self.command + ' --restoration -' + sha,
                         self.command.replace(' --head', suffix + ' --head')):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)
                 self.assertIn('[--restoration <commit>]', self.reason)
 
     def test_exact_receipt_dir_suffix(self):
-        suffix = ' --receipt-dir ' + str(self.root / 'receipts')
+        receipts = str(self.root / 'receipts')
+        suffix = ' --receipt-dir ' + receipts
         restoration = ' --restoration ' + 'a' * 40
+        self.assertTrue(self.denied(self.command + suffix), self.reason)  # the record names no receipt directory
+        self.assertIn('`receipt_dir` equals', self.reason)
+        self.fields['receipt_dir'] = receipts
+        self.write_record()
         for command in (self.command + suffix, self.command + restoration + suffix):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command), self.reason)
-        for command in (self.command + ' --receipt-dir', self.command + suffix * 2,
+        for command in (self.command, self.command + restoration, self.command + suffix + '2',
+                        self.command + ' --receipt-dir', self.command + suffix * 2,
                         self.command + ' --receipt-dir receipts', self.command + ' --receipt-dir /tmp/a/../b',
                         self.command + ' --receipt-dir "/tmp/a"', self.command + suffix + restoration,
+                        self.command + ' --restoration --receipt-dir' + suffix,
                         self.command.replace(' --head', suffix + ' --head')):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)
                 self.assertIn('[--receipt-dir <abs>]', self.reason)
+
+    def test_receipt_dir_matches_the_record_and_stays_outside_guarded_folders(self):
+        self.fields['receipt_dir'] = None
+        self.write_record()
+        self.assertTrue(self.denied(), self.reason)
+        self.assertIn('`receipt_dir` equals', self.reason)
+        link, real = self.root / 'link', self.root / 'real'
+        real.mkdir()
+        link.symlink_to(real, target_is_directory=True)
+        receipts = str(self.root / 'receipts')
+        for value in (str(self.row.parent), str(self.row.parent / 'receipts'),
+                      str(self.root / 'other/tests/mutation/receipts'), str(self.root / 'Tests/Mutation'),
+                      str(self.state), str(self.state / 'receipts'),
+                      '/' + receipts, receipts + '/', str(link / 'receipts'), str(self.root) + '/./receipts'):
+            with self.subTest(value=value):
+                self.fields['receipt_dir'] = value
+                self.write_record()
+                self.assertTrue(self.denied(self.command + ' --receipt-dir ' + value), self.reason)
+                self.assertIn('The receipt directory is a canonical absolute path outside', self.reason)
+        # A row file named `mutation` has an unprotected folder; the row-folder rule covers it.
+        row = self.root / 'flat/tests/mutation'
+        row.parent.mkdir(parents=True)
+        row.write_text('synthetic')
+        command = self.command.replace(str(self.row), str(row))
+        for value, denied in ((str(row.parent / 'receipts'), True), (str(self.root / 'flat/receipts'), False)):
+            with self.subTest(value=value):
+                self.fields.update(row_file=str(row), receipt_dir=value)
+                self.write_record()
+                self.assertEqual(self.denied(command + ' --receipt-dir ' + value), denied, self.reason)
 
     def test_record_conditions(self):
         for condition in ('missing', 'wrong_id', 'wrong_file', 'expired', 'group_write', 'future', 'link', 'array'):
@@ -1038,6 +1117,7 @@ class HookTests(unittest.TestCase):
             self.command + ' && true', self.command + ' | cat', 'X=1 ' + self.command,
             self.command.replace('target', '"target"'), self.command.replace('python3 ', 'python3  '),
             self.command + '\n', self.command.replace('--row-id target', '--row-id other'),
+            self.command.replace('--base main', '--base --head'),
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command), self.reason)

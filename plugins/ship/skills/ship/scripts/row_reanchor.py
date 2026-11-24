@@ -320,6 +320,17 @@ def staged_bytes(path, data, mode):
 
 
 @contextmanager
+def folder_lock(folder):
+    # A replace gives the row file a new inode, so runs with separate record locks order on its folder.
+    descriptor = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
 def record_lock(path):
     try:
         path.parent.mkdir(mode=0o700)
@@ -393,8 +404,8 @@ def run(args):
     else:
         # A lane that may write only inside its workspace keeps the record and its lock there.
         receipt_dir = Path(receipt)
-        require(receipt_dir.is_absolute() and '..' not in receipt_dir.parts
-                and receipt == receipt_dir.as_posix(), 'receipt directory must be absolute and canonical')
+        require(receipt_dir.is_absolute() and '..' not in receipt_dir.parts and receipt == receipt_dir.as_posix()
+                and os.path.realpath(receipt) == receipt, 'receipt directory must be absolute and canonical')
         record = receipt_dir / 'row-auth.json'
 
     def blob(operation, sha, path):
@@ -484,7 +495,7 @@ def run(args):
                 'HEAD changed during ' + phase)
         require(row_file.read_bytes() == original, 'row file changed during ' + phase)
 
-    with record_lock(record):
+    with folder_lock(row_file.parent), record_lock(record):
         check_worktree('derivation')
         if replacements:
             mode = stat.S_IMODE(row_file.stat().st_mode)
