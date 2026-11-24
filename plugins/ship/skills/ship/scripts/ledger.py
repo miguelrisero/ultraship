@@ -648,7 +648,7 @@ def subject_commit(text):
     return commits.pop()
 
 
-def final_verdict(text):
+def final_verdict(text, subject):
     """Return the verdict of the one verdict line: the only label line, or the single line that ends the review."""
     fenced = sum(1 for line in text.splitlines() if VERDICT_LABEL.match(line))
     text = prose(text)
@@ -669,10 +669,13 @@ def final_verdict(text):
         rivals = sum(1 for line in closing if (VERDICT_RIVAL if bare else VERDICT_LABEL).match(line))
         # A bare verdict line above the closing paragraph is a second candidate.
         if (not last or rivals != 1 or not re.match(r'[*#_`]*[a-z]', lines[-1], re.I)
-                or bare and sum(1 for line in lines if BARE_VERDICT.match(line.lstrip())) != 1
+                or bare and sum(1 for line in lines if BARE_VERDICT.match(line.lstrip(' \t#'))) != 1
                 or any(line.lstrip().startswith('>') for line in closing)):
             raise ValueError('expected one verdict')
         labels = [last[1]]
+    # A verdict line that names another commit judges that commit.
+    if any(match[1].lower() != subject for match in re.finditer(COMMIT, labels[0])):
+        raise ValueError('expected one verdict')
     words = [word for token in re.findall(r"\w+(?:['’]\w+)*", labels[0].lower()) if (word := token.strip('_'))]
     if not words or words[0] not in VERDICT_WORDS | {'blocked'}:
         raise ValueError('expected one verdict')
@@ -817,7 +820,7 @@ def account_auto(pending, entries, receipts, *, flag=None):
                     if not text:
                         raise ValueError('no final turn text')
                     sha = subject_commit(text)
-                    verdict = final_verdict(text)
+                    verdict = final_verdict(text, sha)
                 except ValueError as exc:
                     reason = str(exc)
                     proof = (merged_proof(cwd, text, merges)

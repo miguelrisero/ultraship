@@ -1689,6 +1689,7 @@ class LedgerDirTests(unittest.TestCase):
              'expected one commit'),
             ('label in a nested fence', f'Reviewed head: `{sha}`\n\n````markdown\n```text\nFrozen commit: {base}\n'
                                         '```\n````\n\nVerdict: PASS', 'expected one commit'),
+            ('verdict for another commit', f'Frozen commit: `{sha}`\n\nVerdict: PASS for {base}', 'expected one verdict'),
             ('earlier frozen commit', f'Reviewed head: `{sha}`.\n\nEarlier frozen commit: `{base}`.\n\nVerdict: PASS',
              'expected one commit'),
             ('label after a quote line', f'Reviewed head: `{sha}`.\n\n> Earlier report:\nFrozen commit: {base}\n\n'
@@ -1736,6 +1737,8 @@ class LedgerDirTests(unittest.TestCase):
             ('bold word and commit', f'The copies keep every refusal.\n\n**PASS** — `{sha}`.', f'{sha} pass'),
             ('word alone', f'No findings at `{sha}`.\n\nPASS', f'{sha} pass'),
             ('earlier indented bare verdict', f'Reviewed {sha}.\n\n  FAIL — missing authorization\n\nPASS — lint',
+             'expected one verdict'),
+            ('earlier heading verdict', f'Reviewed {sha}.\n\n## FAIL — missing authorization\n\nPASS — lint',
              'expected one verdict'),
             ('earlier bare verdict', f'Reviewed {sha}.\n\nFAIL — missing authorization\n\nPASS — lint',
              'expected one verdict'),
