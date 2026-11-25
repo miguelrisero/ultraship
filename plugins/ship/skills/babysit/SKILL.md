@@ -22,6 +22,8 @@ Never chain a glob listing into a write command.
 ```
 A reviewer reports a refused call as blocked scope and continues other permitted scope.
 Triage does the same. Its Readable files name only search directories that hold no `tests/mutation/` directory.
+Copy the [security review triage block](../ship/references/pipeline.md#security-review-triage) into every triage and reviewer brief.
+Keep the existing triage outcomes and thread disposition rules.
 [Loaded instructions and refusals](../ship/references/owner-decisions.md#loaded-instructions-and-refusals) sets the retry rule and the ask-your-superior rule.
 
 ## Push boundary
