@@ -4625,6 +4625,31 @@ def review_thread_denial(command, data_mode=False, *, outer=True):
     return reason
 
 
+PR_METADATA_READ = re.compile(
+    r'gh[ \t]+pr[ \t]+view[ \t]+(?:https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/)?[1-9][0-9]*'
+    r'(?:[ \t]+--repo[ \t]+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?[ \t]+--json[ \t]+[A-Za-z]+(?:,[A-Za-z]+)*')
+
+
+def literal_pr_metadata_inspection(command):
+    # shortcut: plain metadata and grep lists only; use argv roles if other readers need this proof.
+    if 'grep' not in command or re.search(r'[^A-Za-z0-9_./,:;& \t\n-]', outside_single_quotes(command)):
+        return False
+    text = command.strip(' \t\n')
+    start, segments = 0, []
+    for separator in re.finditer(r"'[^']*'|&&|[;&\n]", text):
+        if separator[0].startswith("'"):
+            continue
+        if separator[0] == '&':
+            return False
+        segments.append(text[start:separator.start()].strip(' \t'))
+        start = separator.end()
+    segments.append(text[start:].strip(' \t'))
+    reads = [PR_METADATA_READ.fullmatch(segment) is not None for segment in segments]
+    return any(reads) and not all(reads) and all(
+        read or re.match(r'grep[ \t]', segment) and literal_search_shell(segment)
+        for read, segment in zip(reads, segments))
+
+
 def review_thread_scan(command, normalized, data_mode):
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
@@ -4642,7 +4667,8 @@ def review_thread_scan(command, normalized, data_mode):
             segment = tokens[start:end]
             data_command = data_command and (review_data_segment(segment) or literal_data_assignment(segment))
             start = end + 1
-    if names_gh and not ((data_command or data_mode) and re.search(r'\$\(|[<>]\(|`', command) is None):
+    if (names_gh and not ((data_command or data_mode) and re.search(r'\$\(|[<>]\(|`', command) is None)
+            and not literal_pr_metadata_inspection(command)):
         seen_gh = False
         for index, token in enumerate(tokens):
             if token and all(char in ';&|\n()' for char in token):
@@ -4976,11 +5002,12 @@ PLAIN_PROGRAMS = {'bash', 'sh', 'python3', 'python', 'node', 'sha256sum', 'cat',
 LITERAL_VALUE = re.compile(r'[\w./+,:@%=-]+', re.ASCII)
 
 
-def literal_bindings_resolved(command, cwd):
+def literal_bindings_resolved(command, cwd, batch=False):
     """Write each later double-quoted `$name` use of a name that one earlier top-level command binds to a literal word.
 
     The result names the same files as the shell would, so path and hook-name checks read it as literal text.
-    A directory change, heredoc or anything uncertain leaves the command unchanged, so its uses stay unresolved."""
+    A directory change, heredoc or anything uncertain leaves the command unchanged, so its uses stay unresolved.
+    With `batch`, a complete command may also hold `for` loops and plain reads of other variables as arguments."""
     if '<<' in command:
         return command
     try:
@@ -5052,9 +5079,31 @@ def literal_bindings_resolved(command, cwd):
     # and no quoted word holds whitespace.
     names = '|'.join(bindings)
     plain = re.sub(rf'\$(?:\{{(?:{names}|HOME|PWD)\}}|(?:{names}|HOME|PWD)(?!\w))', '', command).replace('2>&1', '')
+    if batch:
+        # A plain read assigns no variable, and a `for` loop assigns only its own name, which the mention rule drops.
+        plain = re.sub(r'\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*(?!\w))', '', plain)
+        # A background list runs its binding in another shell. A prefix assignment, or one to a name the shell
+        # reads, can change the program that a later word starts.
+        if re.search(r'(?<!&)&(?!&)', plain):
+            return command
+        # A loop sets its name with no assignment word, so the name is one that no shell or program reads.
+        if any(raw == 'for' and start in positions and not (
+                index + 2 < len(tokens) and re.fullmatch(r'[a-z][a-z0-9_]*', tokens[index + 1][0])
+                and tokens[index + 1][0] not in SHELL_SPECIAL_NAMES and tokens[index + 2][0] == 'in')
+               for index, (raw, _, start, _) in enumerate(tokens)):
+            return command
+        lead = True
+        for index, (raw, _, _, _) in enumerate(tokens):
+            if lead and SHELL_ASSIGNMENT.match(raw):
+                after = tokens[index + 1][0] if index + 1 < len(tokens) else '\n'
+                if raw.partition('=')[0].rstrip('+') in SHELL_SPECIAL_NAMES or after not in {';', '\n', '&'}:
+                    return command
+            else:
+                lead = raw in {';', '&', '|', '\n', 'do'}
     if (re.search(r'[$`{}()<>#\\!*?\[\]]', plain) or any(char.isspace() and char not in ' \t\n' for char in command)
             or any(re.search(r'\s', value) for raw, value, _, _ in tokens if raw != '\n')
             or any(start in positions and value not in PLAIN_PROGRAMS and not SHELL_ASSIGNMENT.match(raw)
+                   and not (batch and raw in {'for', 'do', 'done'})
                    and not re.fullmatch(rf'"\$(?:{names}|\{{(?:{names})\}})"', raw) for raw, value, start, _ in tokens)):
         return command
     # One pass over the original words, so no rewrite can form or hide another use; comments are not words.
@@ -5086,6 +5135,10 @@ def literal_bindings_resolved(command, cwd):
 
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                    'Report the blocked scope to the driver.')
+STATE_FOLDER_CUSTODY = ('This Bash command names the hook state folder (`.local/state` or `XDG_STATE_HOME`) together with '
+                        '`$`, `{`, `}`, `*`, `?`, `[`, `]`, a backtick, `cd`, `pushd` or the text `text`, also inside '
+                        'a longer word (state folder custody rule). Use the native Read and Write tools with a literal '
+                        'path, or a Bash command that names the literal path with none of these triggers.')
 ACCOUNT_CUSTODY = ('Use the exact Stop command for your session (account custody rule). '
                    'Report the blocked scope to the driver.')
 CUSTODY_ADVISORY = ('the custody check could not resolve every word of this command, and no word names the '
@@ -5129,6 +5182,21 @@ def own_account_call(data, raw):
             and re.fullmatch(r'[\w-]+', verdict) and verdict != 'owed' and evidence.strip()):
         return words
     return False
+
+
+def account_auto_difference(data):
+    """Say what makes an `account-auto` call differ from the Stop command that `own_account_call` admits."""
+    agent_type = data.get('agent_type') or ''
+    if agent_type and not re.match(r'^(ship:)?driver(--|$)', agent_type):
+        return ('The hook admits `account-auto` from the main session or a driver. '
+                f'This caller has agent type {agent_type[:80]!r}.')
+    if not isinstance(data.get('session_id'), str) or not data.get('session_id'):
+        return 'The hook admits `account-auto` only when its input carries a session ID. This call has none.'
+    try:
+        expected = shlex.join(['python3', str(ledger_script()), 'account-auto', str(owed_file(data))])
+    except (OSError, RuntimeError):
+        return 'The hook admits only the exact Stop command for this session, alone and with no other character.'
+    return f'The hook admits only this line for this session, alone and with no other character: `{expected}`.'
 
 
 def issue_account_grant(data):
@@ -5339,11 +5407,42 @@ def receipt_custody(data, read_search=False):
                 return True
             if tokens and tokens[-1][0] == '\n':
                 tokens = tokens[:-1]
+            # A leading `cd <literal folder> &&` only sets the folder the source path of `sed` starts from.
+            moved = ('\\' not in raw and [token[0] for token in tokens[:1]] == ['cd']
+                     and [token[0] for token in tokens[2:4]] == ['&', '&']
+                     and tokens[2][3] == tokens[3][2]
+                     and re.fullmatch(r'(?!-)(?:~/)?[\w./+,:@%=-]+', tokens[1][0], re.ASCII))
+            folder = cwd_path
+            if moved:
+                folder = os.path.join(cwd_path, os.path.expanduser(tokens[1][1]))
+                tokens = tokens[4:]
             if any(token[0] in {';', '&', '|', '(', ')', '<', '>', '`', '\n'} or unresolved_shell_word(token[0])
                    for token in tokens):
                 return False
             words = [token[1] for token in tokens]
             if not words:
+                return False
+            if words[0] == 'sed':
+                def clone_file(word):
+                    # A regular file inside a Git work tree, outside the plugin that runs this hook and outside the
+                    # folder that holds installed plugins. A repository at the home folder itself makes no clone.
+                    real = Path(os.path.realpath(os.path.join(folder, os.path.expanduser(word))))
+                    home = Path(os.path.realpath(os.path.expanduser('~')))
+                    config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or home / '.claude')
+                    return (real.is_file() and not real.is_relative_to(Path(__file__).resolve().parents[1])
+                            and not real.is_relative_to(Path(os.path.realpath(config / 'plugins')))
+                            and any((parent / '.git').exists() for parent in real.parents
+                                    if not home.is_relative_to(parent)))
+
+                # Only `-n` with one print range reads; any other sed script or option can write a file or run a program.
+                # A backslash could hide a line continuation, which changes the file name the shell opens.
+                return ('\\' not in raw and len(words) > 3 and words[1] == '-n'
+                        and bool(re.fullmatch(r'[0-9]+(?:,[0-9]+)?p', words[2]))
+                        and not any(word.startswith('-') for word in words[3:])
+                        and all(clone_file(word) for word in words[3:]))
+            # `diff` opens a file inside a folder operand, and a repository can configure programs that git runs,
+            # so only the `sed` form takes the `cd` prefix; git takes its folder through `-C`.
+            if moved:
                 return False
             if words[0] == 'diff':
                 return all(not word.startswith('-') or word in ('--', '-u', '-U0') for word in words[1:])
@@ -5761,8 +5860,14 @@ def receipt_custody(data, read_search=False):
                                              for command in commands for _, word, _, _ in tokens))
                     writes = writes or modifies_paths
                     changes_dir = re.search(r'(?:^|[;&|(\s])(?:cd|pushd)(?=\s|$)', text) is not None
+                    # An attached slash is field data only for a literal print stage with no other awk operands.
+                    plain_search = ('-F/' in text and source == text == raw
+                                    and commands <= {'ls', 'grep', 'awk', 'sort', 'tail'}
+                                    and not re.search(r'[$`\\<()#]', outside_single_quotes(text))
+                                    and not any(SHELL_ASSIGNMENT.match(raw_word) or start in positions and raw_word != word
+                                                for raw_word, word, start, _ in tokens))
                     data_segment, listing, recursive, opaque, reader, segment = [], [], [], [], [], []
-                    git_values, file_values = set(), set()
+                    git_values, file_values, slash_separators = set(), set(), set()
                     for token in [*tokens, ('\n', '\n', 0, 0)]:
                         if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
                             data_segment += [reads_only(segment, token[0])] * len(segment) + [False]
@@ -5776,6 +5881,11 @@ def receipt_custody(data, read_search=False):
                                     first = word
                                     break
                             name = os.path.basename(first)
+                            if (plain_search and len(segment) == 3 and segment[0][0] == 'awk'
+                                    and segment[0][2] in positions and segment[1][0] == '-F/'
+                                    and re.fullmatch(r'''\x27\{[ \t]*print[ \t]+\$(?:[0-9]+|NF)(?:"[/ :]+"\$(?:[0-9]+|NF))*[ \t]*\}\x27''',
+                                                     segment[2][0])):
+                                slash_separators.add(segment[1][2])
                             # A recursive reader or copier enters every folder below an operand. A table program
                             # recurses with any short flag letter or long option prefix it names.
                             letters, prefixes = RECURSION_FLAGS.get(name, ('', ''))
@@ -5939,6 +6049,7 @@ def receipt_custody(data, read_search=False):
                                 sub = arguments[operand + 1:operand + 2]
                                 read_ledger = bool(sub and sub[0][0] in ledger_reads)
                                 harness_ledger = '"${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/ledger.py"'
+                                batched = False
                                 if arg_raw == harness_ledger:
                                     root = os.environ.get('CLAUDE_PLUGIN_ROOT', '')
                                     if (not read_ledger or not re.fullmatch(
@@ -5971,13 +6082,26 @@ def receipt_custody(data, read_search=False):
                                     script = str(target)
                                 else:
                                     _, _, name_start, _ = names[index]
-                                    _, _, _, arg_end = arguments[operand]
+                                    _, _, arg_start, arg_end = arguments[operand]
                                     prefix = text[:name_start].removeprefix('set -eu\n')
                                     head = prefix + text[name_start:arg_end]
                                     expanded = literal_bindings_resolved(head, cwd_path)
-                                    if expanded == head:
-                                        return 'hard'
                                     script_raw, script, _, _ = shell_raw_words(expanded)[-1]
+                                    batched = expanded == head
+                                    if batched:
+                                        # The complete command can prove the binding through a `for` loop or beside
+                                        # plain reads of other variables; text after the use counts there.
+                                        # The interpreter is the word `python3`, and the script is one whole quoted
+                                        # variable. The words between them stay literal, so no empty expansion can
+                                        # move the script to a later word.
+                                        if (names[index][0] != 'python3' or not re.fullmatch(
+                                                r'"\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})"', arg_raw)
+                                                or any(unresolved_shell_word(raw) for raw, _, _, _ in arguments[:operand])):
+                                            return 'hard'
+                                        whole = shell_raw_words(literal_bindings_resolved(text, cwd_path, batch=True))
+                                        if len(whole) != len(tokens):
+                                            return 'hard'
+                                        script_raw, script, _, _ = whole[[token[2] for token in tokens].index(arg_start)]
                                     if unresolved_shell_word(script_raw):
                                         return 'hard'
                                 if (not script.startswith('/') or receipt_path(script, ancestors=True)
@@ -5986,6 +6110,11 @@ def receipt_custody(data, read_search=False):
                                     return 'hard'
                                 if ledger_path(Path(script)) and not read_ledger:
                                     deny(ACCOUNT_CUSTODY)
+                                # Python runs `__main__.py` of a folder, and a copy of the receipt hook or of the
+                                # ledger keeps its file name, so a batch script is another regular `.py` file.
+                                if batched and (not script.endswith('.py') or not regular_file(script)
+                                                or os.path.basename(script).casefold() in {'text_lint.py', 'ledger.py'}):
+                                    return 'hard'
                             elif unresolved_program(arg_raw, arg, code=kind == 'c'):
                                 return 'hard'
                     ticks = 0
@@ -6008,7 +6137,7 @@ def receipt_custody(data, read_search=False):
                         attached = word.partition('=')[2]
                         if attached:
                             paths.append(attached)
-                        if word.startswith('-') and not word.startswith('--'):
+                        if word.startswith('-') and not word.startswith('--') and word_start not in slash_separators:
                             paths.extend(word[offset:] for offset in range(2, len(word)))
                         # The tokenizer separates an unquoted backtick from the preceding literal text.
                         backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''
@@ -6096,21 +6225,31 @@ def receipt_custody(data, read_search=False):
                     return True
             return False
 
-        if (receipt_text(path_command)
-                or ('ledger.py' in search_account_command and 'account-auto' in search_account_command
-                    and not own_account_call(data, raw) and not plain_reader(raw))
-                or any(receipt_path(word) for word in words)
+        if receipt_text(path_command):
+            deny(RECEIPT_CUSTODY)
+        if ('ledger.py' in search_account_command and 'account-auto' in search_account_command
+                and not own_account_call(data, raw) and not plain_reader(raw)):
+            # The first line stays the receipt message; the next line names what differs from the Stop command.
+            deny(RECEIPT_CUSTODY + '\n' + account_auto_difference(data))
+        if (any(receipt_path(word) for word in words)
                 or ancestor_operand()
-                or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))
-                # An expansion, glob or directory change near the state root could reach a store.
-                or (('.local/state' in command or 'xdg_state_home' in command)
-                    and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
-                         or any(char in raw for char in '*?[]{}$`'))
-                    and not own_account_call(data, raw))
-                or any(any(char in word for char in '*?[{$`')
-                       and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
-                            or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
-                       for word in raw_words)
+                or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))):
+            deny(RECEIPT_CUSTODY)
+        # An expansion, glob or directory change near the state root could reach a store.
+        if (('.local/state' in command or 'xdg_state_home' in command)
+                and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
+                     or any(char in raw for char in '*?[]{}$`'))
+                and not own_account_call(data, raw)):
+            # A command keeps the receipt message when it names a store, the text_lint hook or the ledger, names
+            # the ship state folder with no literal child folder, or changes directory to the state folder.
+            names_store = re.search(r'text[-_]lint|account-grants|ledger\.py'
+                                    r'|(?:\.local/state\}?|xdg_state_home\S*?)/ultraship(?!/?[\w.-])'
+                                    r'|\b(?:cd|pushd)\s+\S*?(?:\.local/state|xdg_state_home)\}?(?:\s|$)', command)
+            deny(RECEIPT_CUSTODY if names_store else STATE_FOLDER_CUSTODY)
+        if (any(any(char in word for char in '*?[{$`')
+                    and (re.search(r'\.local/(s(?:t|[*?\[{$]|$)|[*?\[{$]|$)', word.casefold())
+                         or 'xdg_state' in word.casefold() or 'text-lint' in word.casefold())
+                    for word in raw_words)
                 # A plain reader starts no program, and an inert note body is file text.
                 or ('text_lint' in code_text and not plain_reader(raw)
                     and (re.search(r'text_lint(\.py)?\s+hook\b', code_text) or any(token in code_text for token in

@@ -239,7 +239,9 @@ The hook refuses a Bash command that names the state folder together with any of
 - `$`, `{`, `}`, `*`, `?`, `[` or `]`;
 - a backtick;
 - `cd` or `pushd`;
-- the text `text`.
+- the text `text`, also inside a longer word such as `context`.
+
+The refusal names the state folder custody rule and these triggers.
 
 The hook admits Read of one listed file, and Grep with one listed file as `path` and no `glob` or `type`.
 Glob, LSP, and every other read under `tests/mutation` stay denied.
@@ -290,7 +292,9 @@ The hook refuses a Bash command that names the state folder together with any of
 - `$`, `{`, `}`, `*`, `?`, `[` or `]`;
 - a backtick;
 - `cd` or `pushd`;
-- the text `text`.
+- the text `text`, also inside a longer word such as `context`.
+
+The refusal names the state folder custody rule and these triggers.
 
 The hook requires a regular record owned by its user, at most 64 KiB, without group or world write permission.
 Only the driver and the main session write admission records.
