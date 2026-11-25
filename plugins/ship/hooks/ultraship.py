@@ -4625,6 +4625,31 @@ def review_thread_denial(command, data_mode=False, *, outer=True):
     return reason
 
 
+PR_METADATA_READ = re.compile(
+    r'gh[ \t]+pr[ \t]+view[ \t]+(?:https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/)?[1-9][0-9]*'
+    r'(?:[ \t]+--repo[ \t]+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?[ \t]+--json[ \t]+[A-Za-z]+(?:,[A-Za-z]+)*')
+
+
+def literal_pr_metadata_inspection(command):
+    # shortcut: plain metadata and grep lists only; use argv roles if other readers need this proof.
+    if 'grep' not in command or re.search(r'[^A-Za-z0-9_./,:;& \t\n-]', outside_single_quotes(command)):
+        return False
+    text = command.strip(' \t\n')
+    start, segments = 0, []
+    for separator in re.finditer(r"'[^']*'|&&|[;&\n]", text):
+        if separator[0].startswith("'"):
+            continue
+        if separator[0] == '&':
+            return False
+        segments.append(text[start:separator.start()].strip(' \t'))
+        start = separator.end()
+    segments.append(text[start:].strip(' \t'))
+    reads = [PR_METADATA_READ.fullmatch(segment) is not None for segment in segments]
+    return any(reads) and not all(reads) and all(
+        read or re.match(r'grep[ \t]', segment) and literal_search_shell(segment)
+        for read, segment in zip(reads, segments))
+
+
 def review_thread_scan(command, normalized, data_mode):
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n()')
@@ -4642,7 +4667,8 @@ def review_thread_scan(command, normalized, data_mode):
             segment = tokens[start:end]
             data_command = data_command and (review_data_segment(segment) or literal_data_assignment(segment))
             start = end + 1
-    if names_gh and not ((data_command or data_mode) and re.search(r'\$\(|[<>]\(|`', command) is None):
+    if (names_gh and not ((data_command or data_mode) and re.search(r'\$\(|[<>]\(|`', command) is None)
+            and not literal_pr_metadata_inspection(command)):
         seen_gh = False
         for index, token in enumerate(tokens):
             if token and all(char in ';&|\n()' for char in token):
@@ -5834,8 +5860,14 @@ def receipt_custody(data, read_search=False):
                                              for command in commands for _, word, _, _ in tokens))
                     writes = writes or modifies_paths
                     changes_dir = re.search(r'(?:^|[;&|(\s])(?:cd|pushd)(?=\s|$)', text) is not None
+                    # An attached slash is field data only for a literal print stage with no other awk operands.
+                    plain_search = ('-F/' in text and source == text == raw
+                                    and commands <= {'ls', 'grep', 'awk', 'sort', 'tail'}
+                                    and not re.search(r'[$`\\<()#]', outside_single_quotes(text))
+                                    and not any(SHELL_ASSIGNMENT.match(raw_word) or start in positions and raw_word != word
+                                                for raw_word, word, start, _ in tokens))
                     data_segment, listing, recursive, opaque, reader, segment = [], [], [], [], [], []
-                    git_values, file_values = set(), set()
+                    git_values, file_values, slash_separators = set(), set(), set()
                     for token in [*tokens, ('\n', '\n', 0, 0)]:
                         if token[0] in {';', '&', '|', '(', ')', '`', '\n'}:
                             data_segment += [reads_only(segment, token[0])] * len(segment) + [False]
@@ -5849,6 +5881,11 @@ def receipt_custody(data, read_search=False):
                                     first = word
                                     break
                             name = os.path.basename(first)
+                            if (plain_search and len(segment) == 3 and segment[0][0] == 'awk'
+                                    and segment[0][2] in positions and segment[1][0] == '-F/'
+                                    and re.fullmatch(r'''\x27\{[ \t]*print[ \t]+\$(?:[0-9]+|NF)(?:"[/ :]+"\$(?:[0-9]+|NF))*[ \t]*\}\x27''',
+                                                     segment[2][0])):
+                                slash_separators.add(segment[1][2])
                             # A recursive reader or copier enters every folder below an operand. A table program
                             # recurses with any short flag letter or long option prefix it names.
                             letters, prefixes = RECURSION_FLAGS.get(name, ('', ''))
@@ -6100,7 +6137,7 @@ def receipt_custody(data, read_search=False):
                         attached = word.partition('=')[2]
                         if attached:
                             paths.append(attached)
-                        if word.startswith('-') and not word.startswith('--'):
+                        if word.startswith('-') and not word.startswith('--') and word_start not in slash_separators:
                             paths.extend(word[offset:] for offset in range(2, len(word)))
                         # The tokenizer separates an unquoted backtick from the preceding literal text.
                         backtick = '`' if index + 1 < len(tokens) and tokens[index + 1][:3] == ('`', '`', end) else ''

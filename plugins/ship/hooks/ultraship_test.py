@@ -397,6 +397,70 @@ class PreInputTests(unittest.TestCase):
                     self.assertIn('report the blocked step, the rule, and the next permitted action', retry)
 
 
+class CompoundReadHookTests(unittest.TestCase):
+    search = ('''ls /workspace/reports; grep -rl "sample notices" /workspace/reports --include="*.py" '''
+              '''2>/dev/null | grep -v "/tests/" | awk -F/ '{print $7"/"$8"/"$9" :: "$NF}' | sort -u | tail -15''')
+    metadata = 'gh pr view 235 --repo sample/project --json number,headRefOid,mergeStateStatus'
+    custody = 'Only the text_lint hook reads or writes refusal receipts (custody rule).'
+    thread_guard = 'Ship replies to and resolves review threads only through'
+
+    def setUp(self):
+        home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.state = home / 'state'
+        self.cwd = home / 'repo'
+        self.cwd.mkdir()
+        self.enterContext(patch.dict(os.environ, {'HOME': str(home), 'XDG_STATE_HOME': str(self.state)}))
+        self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(home))))
+        self.enterContext(patch.object(ultraship, 'STATE', self.state / 'ultraship'))
+        self.enterContext(patch.object(ultraship.subprocess, 'run', side_effect=AssertionError('fixture ran a process')))
+
+    def pre(self, command):
+        event = {'cwd': str(self.cwd), 'tool_name': 'Bash', 'tool_input': {'command': command}}
+        output = io.StringIO()
+        with redirect_stdout(output):
+            try:
+                ultraship.guarded_pre(event)
+            except SystemExit as error:
+                self.assertEqual(error.code, 0)
+        return json.loads(output.getvalue() or '{}').get('hookSpecificOutput', {})
+
+    def assert_refused(self, command, reason):
+        result = self.pre(command)
+        self.assertEqual(result.get('permissionDecision'), 'deny', result)
+        self.assertIn(reason, result['permissionDecisionReason'])
+
+    def test_compound_metadata_read(self):
+        for pattern in ('bash', "'bash'"):
+            inspection = f'grep -n {pattern} /workspace/reports/notes.txt'
+            for command in (f'{inspection} && {self.metadata}', f'{self.metadata}; {inspection}'):
+                with self.subTest(command=command):
+                    self.assertEqual(self.pre(command), {})
+
+    def test_compound_metadata_keeps_thread_guards(self):
+        write = 'gh api repos/sample/project/pulls/235/comments -X POST -f body=sample'
+        self.assert_refused(f'git diff -- . && {write}', 'gh api write outside the helper')
+        self.assert_refused(f'sh -c {shlex.quote(self.metadata)}', 'shell runner names gh')
+        self.assert_refused('git diff -- . && gh "$subcommand"', self.thread_guard)
+
+    def test_compound_search_field_separator(self):
+        for command in (self.search, self.search.replace('awk -F/', 'awk -F:')):
+            with self.subTest(command=command):
+                self.assertEqual(self.pre(command), {})
+
+    def test_report_probe_keeps_interpreter_protection(self):
+        report = r'''python3 -c "import re; from pathlib import Path; h=Path('report.html').read_text(); print(len(re.findall(r'data:[^\"\')]+', h)))"'''
+        self.assert_refused(report, self.custody)
+
+    def test_compound_search_keeps_path_redirect_and_program_checks(self):
+        receipt = shlex.quote(str(self.state / 'ultraship/text-lint/fixture.txt'))
+        for command in (self.search.replace('2>/dev/null', f'2>{receipt}'),
+                        self.search.replace('awk -F/', f'awk -F/ -f {receipt}'),
+                        self.search.replace('awk -F/', 'awk -F/ /'),
+                        self.search + ' | "$program"'):
+            with self.subTest(command=command):
+                self.assert_refused(command, self.custody)
+
+
 class ReceiptCustodyTests(unittest.TestCase):
     def setUp(self):
         temporary = self.enterContext(tempfile.TemporaryDirectory())
