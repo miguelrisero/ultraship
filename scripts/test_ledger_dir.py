@@ -719,7 +719,7 @@ class LedgerDirTests(unittest.TestCase):
                 home = self.resolve()
                 reviewed = self.commit_fixture(self.checkout, 'commit', '--allow-empty', '-qm', f'review {mode}')
                 short_sha = self.git(self.checkout, 'rev-parse', '--short', reviewed).upper()
-                ledger.append(home, 'deep-review', 'ship:reviewer--sol@deep', short_sha, 'findings', '')
+                ledger.append(home, 'deep-review', 'ship:reviewer--sol@reviewer-terminal-1', short_sha, 'findings', '')
                 ledger.append(home, 'simplify', 'ship:reviewer--opus@simplify', reviewed, 'pass', '')
                 if mode == 'full':
                     ledger.append(home, 'panel-high', 'ship:reviewer--astra@high', reviewed, 'pass', '')
@@ -747,6 +747,33 @@ class LedgerDirTests(unittest.TestCase):
                 self.assertEqual(self.cli('run-end').returncode, 0)
                 self.assertEqual(ledger.rows(home)[-1][1:5], ['run-end', '', head, 'closed'])
 
+    def test_review_gaps_use_merge_base_after_run_start_rewrite(self):
+        self.legacy.unlink()
+        base = self.git(self.checkout, 'rev-parse', 'HEAD')
+        start = self.commit_fixture(self.checkout, 'commit', '--allow-empty', '-qm', 'old run start')
+        self.assertEqual(self.cli('run-start', 'light', 'rewritten').returncode, 0)
+        home = self.resolve()
+        ledger.append(home, 'deep-review', 'ship:reviewer--sol', start, 'pass', '')
+        self.git(self.checkout, 'reset', '--keep', base)
+        head = self.commit_fixture(self.checkout, 'commit', '--allow-empty', '-qm', 'new head')
+        for step in ('simplify', 'fix-read'):
+            ledger.append(home, step, 'ship:reviewer--sol@reviewer_terminal_1', head, 'pass', '')
+        for step in ('slices', 'pr', 'babysit', 'gate'):
+            ledger.append(home, step, 'driver', base, 'pass', '')
+        notice = f'run start {start} was rewritten; using merge-base {base}'
+        gaps = self.cli('gaps')
+        self.assertEqual(gaps.returncode, 1)
+        self.assertEqual(gaps.stdout.splitlines().count(notice), 1)
+        self.assertIn(f'is not an ancestor of HEAD {head}', gaps.stdout)
+        self.assertEqual(self.hook('compact').splitlines().count(notice), 1)
+
+        ledger.append(home, 'deep-review', 'ship:reviewer--sol', head, 'pass', '')
+        gaps = self.cli('gaps')
+        self.assertEqual((gaps.returncode, gaps.stdout), (0, f'{notice}\ngaps: none\n'))
+        closed = self.cli('run-end')
+        self.assertEqual((closed.returncode, closed.stdout), (0, f'{notice}\n'))
+        self.assertEqual(ledger.rows(home)[-1][1:5], ['run-end', '', head, 'closed'])
+
     def test_review_gaps_report_bad_roles_and_commits(self):
         before_run = self.git(self.checkout, 'rev-parse', 'HEAD')
         self.git(self.common, 'switch', '-qc', 'unmerged')
@@ -762,13 +789,14 @@ class LedgerDirTests(unittest.TestCase):
         ledger.append(home, 'fix-read', 'ship:reviewer--sol', before_run, 'pass', '')
         gaps = self.cli('gaps')
         self.assertEqual(gaps.returncode, 1)
-        for reason in ('simplify (needs a reviewer--* row', 'wrong role', 'reviewer--x-writer',
+        for reason in ('simplify (needs a declared reviewer seat', "wrong role 'ship:reviewer--x-writer'",
+                       'declared seats: reviewer--astra',
                        f'newest reviewer row {unmerged!r}; is not an ancestor of HEAD {head}',
                        f'newest reviewer row {before_run!r}; does not descend from run start {start}'):
             self.assertIn(reason, gaps.stdout)
 
         missing = '0' * len(head)
-        for sha, suffix in ((head, ')'), (missing, '; unknown commit)')):
+        for sha, suffix in ((head, '; declared seats:'), (missing, '; unknown commit; declared seats:')):
             ledger.append(home, 'simplify', 'ship:writer--sol', sha, 'pass', '')
             gaps = self.cli('gaps')
             self.assertEqual(gaps.returncode, 1)

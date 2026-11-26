@@ -420,15 +420,14 @@ def gaps(run, head, cwd='.'):
     def reviewer(field):
         kind, ident = agent_key(field)
         return (kind.removeprefix('ship:') in seats
-                and ('@' not in field or re.fullmatch('[A-Za-z0-9]+', ident or '')))
+                and ('@' not in field or re.fullmatch(r'[^\s@]+', ident or '')))
 
     @cache
     def commit(sha):
         if re.fullmatch('[0-9a-fA-F]{4,64}', sha):
             sha = sha.lower()
             try:
-                resolved = git(cwd, '--no-replace-objects', 'rev-parse', '--verify',
-                               '--end-of-options', f'{sha}^{{commit}}')
+                resolved = git(cwd, '--no-replace-objects', 'rev-parse', '--verify', f'{sha}^{{commit}}')
             except subprocess.CalledProcessError:
                 return None
             if resolved.startswith(sha):
@@ -445,6 +444,18 @@ def gaps(run, head, cwd='.'):
             raise
         return True
 
+    base = start_commit = commit(start[3])
+    notice = None
+    if start_commit is not None and not ancestor(start_commit, head):
+        try:
+            base = git(cwd, '--no-replace-objects', 'merge-base', start_commit, head)
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode != 1:
+                raise
+            base = None
+        else:
+            notice = f'run start {start_commit} was rewritten; using merge-base {base}'
+
     def commit_issues(sha, closing):
         resolved = commit(sha)
         if resolved is None:
@@ -454,11 +465,13 @@ def gaps(run, head, cwd='.'):
         issues = []
         if not ancestor(resolved, head):
             issues.append(f'is not an ancestor of HEAD {head}')
-        base = commit(start[3])
-        if base is None:
+        if start_commit is None:
             issues.append(f'run start {start[3]!r} is an unknown commit')
+        elif base is None:
+            issues.append(f'run start {start_commit} has no merge-base with HEAD {head}')
         elif not ancestor(base, resolved):
-            issues.append(f'does not descend from run start {base}')
+            anchor = 'merge-base' if notice else 'run start'
+            issues.append(f'does not descend from {anchor} {base}')
         return issues
 
     done = {}
@@ -484,10 +497,11 @@ def gaps(run, head, cwd='.'):
         wrong = next((row for row in reversed(candidates) if not reviewer(row[2])), None)
         if wrong:
             details.extend([f'wrong role {wrong[2]!r} at {wrong[3]!r}',
-                            *commit_issues(wrong[3], closing)])
-        missing.append(f'{step} (needs a reviewer--* row {requirement}; '
+                            *commit_issues(wrong[3], closing),
+                            'declared seats: ' + ', '.join(sorted(seats))])
+        missing.append(f'{step} (needs a declared reviewer seat {requirement}; '
                        + '; '.join(details or ['no completed row']) + ')')
-    return missing
+    return missing, notice
 
 
 def append(path, *fields):
@@ -943,11 +957,13 @@ def main(argv):
         if not run:
             print('no open run')
             return
-        missing = gaps(run, git('.', 'rev-parse', 'HEAD'))
+        missing, notice = gaps(run, git('.', 'rev-parse', 'HEAD'))
         if cmd == 'status':
             print(f'run: {run[0][5]} mode={run[0][2]} ledger={path}')
             for r in run[1]:
                 print('  ' + ' '.join(r[1:5]) + (f' — {r[5]}' if len(r) > 5 and r[5] else ''))
+        if notice:
+            print(notice)
         print('gaps: ' + (' '.join(missing) or 'none'))
         if cmd == 'gaps' and missing:
             sys.exit(1)
@@ -955,7 +971,9 @@ def main(argv):
         if not run:
             sys.exit('no open run')
         head = git('.', 'rev-parse', 'HEAD')
-        missing = gaps(run, head)
+        missing, notice = gaps(run, head)
+        if notice:
+            print(notice)
         if missing:
             sys.exit('refusing run-end; gaps: ' + ' '.join(missing))
         append(path, 'run-end', '', head, 'closed', run[0][5])

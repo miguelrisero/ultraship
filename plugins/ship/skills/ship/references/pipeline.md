@@ -65,7 +65,11 @@ Preserve execution admission and the reviewer MCP ban under both [scoped decisio
 
 Record the reviewer seat and the actual reviewed commit in each review row.
 The ledger checks the seat against the Ship reviewer agent files.
-For `panel-high`, `simplify`, `deep-review`, `select`, `fix-read`, and `panel-final`, use a commit between run start and HEAD, inclusive, by Git ancestry.
+Use a nonempty agent ID with neither whitespace nor `@`.
+For `panel-high`, `simplify`, `deep-review`, `select`, `fix-read`, and `panel-final`, use a commit between the run base and HEAD, inclusive, by Git ancestry.
+The run base is the run-start commit when it is an ancestor of HEAD.
+After a rewrite, the ledger reports their merge base and uses it as the run base.
+A missing merge base keeps the review step open.
 In full mode, record `closing` at HEAD. Light mode has no `closing` step.
 Use a full commit SHA or an unambiguous abbreviated commit SHA. The ledger accepts uppercase hexadecimal digits.
 `append` trusts the supplied agent name; the role check detects label errors only.

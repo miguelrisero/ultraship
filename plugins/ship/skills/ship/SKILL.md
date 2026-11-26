@@ -108,7 +108,7 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" run-end
 
 Append a row as soon as each review, panel, or CI round returns. Use the step names in [pipeline](references/pipeline.md). For a reviewer, triage, or verifier result, write the agent as `<agent-type>@<agent-id>`, with the agent ID from that agent's launch result or task notification.
 
-Each required review step needs a non-`owed` row with a declared Ship reviewer seat and the reviewed commit SHA. The reviewed commit must descend from the run-start commit and be an ancestor of HEAD, with equality allowed. In full mode, `closing` requires the exact HEAD commit. See the [ledger rules](references/pipeline.md#ledger-review-evidence). `run-end` refuses while any required step has a gap.
+Each required review step needs a non-`owed` row with a declared Ship reviewer seat and the reviewed commit SHA. The reviewed commit must descend from the [run base](references/pipeline.md#ledger-review-evidence) and be an ancestor of HEAD, with equality allowed. In full mode, `closing` requires the exact HEAD commit. See the [ledger rules](references/pipeline.md#ledger-review-evidence). `run-end` refuses while any required step has a gap.
 
 `append` trusts the supplied agent name; the role check detects label errors only. Stop binds each result only to a row with its own agent ID, so close results never take each other's rows. A pending record from an older hook also accepts a row without an ID. Stop retains pending reviewer evidence until each result has a successful accounting row in its bound run, including a successfully closed run. Persistent hook-state receipts consume each row once across Stop cycles. Keep hook-state receipts with the pending evidence.
 

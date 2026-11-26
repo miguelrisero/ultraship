@@ -7432,7 +7432,9 @@ def compact(data):
             lines.append(f'Pending review evidence remains at {pending}. '
                          'Account each result with ledger.py before declaring the run complete.')
         if run:
-            missing = ledger.gaps(run, ledger.git(cwd, 'rev-parse', 'HEAD'), cwd)
+            missing, notice = ledger.gaps(run, ledger.git(cwd, 'rev-parse', 'HEAD'), cwd)
+            if notice:
+                lines.append(notice)
             lines.append(f'Open ship run: {run[0][5]} (mode {run[0][2]}). Ledger: {path}. '
                          f'Gaps: {" ".join(missing) or "none"}. The run note names the board path.')
     except Exception as exc:
