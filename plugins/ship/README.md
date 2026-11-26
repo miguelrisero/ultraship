@@ -34,12 +34,12 @@ Light mode runs steps 1, 3, 5, 7, 9, 10, and 12. Detail: [`skills/ship/reference
 [`skills/ship/references/roster.md`](skills/ship/references/roster.md) lists each agent, model, effort, use, and fallback chain.
 For verification with Chief:
 
-1. Upgrade Chief to `1.8.6` and Ship to `1.15.51` together.
+1. Upgrade Chief to `1.8.7` and Ship to `1.15.52` together.
 2. Start a fresh session with both plugins loaded.
 
 - Writer: `gpt-6.2-sol` at xhigh effort.
-- Important planner: `claude-fable-5-2` at xhigh effort, followed by the routine planner chain.
-- Routine planner: `gpt-6.2-sol` at xhigh effort, with `claude-opus-5-5` at xhigh effort as the fallback.
+- Normal plans: `claude-opus-5-5`, then `gpt-6.2-sol`. Both run at xhigh effort.
+- Important and P0 plans: `claude-fable-5-2`, then `gpt-6.2-sol`, then `claude-opus-5-5`. All run at xhigh effort.
 - Reviewers: `gpt-6.2-sol` at xhigh, `claude-opus-5-5`, `gpt-6.2-astra` and `gpt-6-luna`.
 - Opt-in Fable 5.2 seats: `writer--fable52` and `reviewer--fable52` run `claude-fable-5-2`. Dispatch them only when the brief or the owner names Fable 5.2.
 - Read-only agents get read, LSP, and web tools only. Planners and researchers also get fff tools. Reviewers, triage and verifiers use no MCP (`mcp__`) tools, and their LSP use is hover and documentSymbol only.

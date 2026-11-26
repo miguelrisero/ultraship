@@ -1,6 +1,6 @@
 ---
 name: planner--sol
-description: Plan an important design or engineering decision with evidence, slices, and falsifiable premises.
+description: Use for normal plans when ship:planner--opus is unavailable. Use for important and P0 plans when ship:planner--fable52 is unavailable.
 model: gpt-6.2-sol
 effort: xhigh
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch

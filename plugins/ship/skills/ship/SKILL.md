@@ -72,7 +72,9 @@ Preserve every other Input ban, reviewer MCP denial, and independent hook and to
 - If all admitted writer or planner seats are unavailable, retain the task as pending and report the missing seat.
 - Code goes to `ship:writer--sol`, one slice at a time, in the assigned worktree. Continue an existing writer with SendMessage for fixes on its slice.
 - Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch.
-- Start important planning in either mode with `ship:planner--fable52`. Apply the [important planning gate](references/pipeline.md#important-planning). Send broad research to `ship:researcher--luna`.
+- Start normal plans with `ship:planner--opus`. Follow the normal planner chain in the roster.
+- Start important planning in either mode with `ship:planner--fable52`. Treat P0 as important for planner selection. Apply the [important planning gate](references/pipeline.md#important-planning).
+- Send broad research to `ship:researcher--luna`.
 - Freeze one subject SHA per review step. Give every seat the same brief and keep sibling verdicts out of it.
 
 ## Execution admission
