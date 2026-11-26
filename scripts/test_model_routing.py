@@ -18,6 +18,28 @@ class ImportantPlanningContractTests(unittest.TestCase):
         self.pipeline = pipeline
         self.gate = self.plan.partition('### Important planning\n')[2]
 
+    def test_important_planning_starts_with_fable_then_follows_the_sol_chain(self):
+        roster = (self.ship / 'skills/ship/references/roster.md').read_text().splitlines()
+        planner_rows = [line.split('|') for line in roster if line.startswith('| `ship:planner--')]
+        self.assertEqual([row[1].strip() for row in planner_rows[:2]],
+                         ['`ship:planner--fable52`', '`ship:planner--sol`'])
+        first, sol = planner_rows[:2]
+        self.assertEqual(first[2].strip(), '`claude-fable-5-2`')
+        self.assertEqual(first[3].strip(), 'xhigh')
+        sol_chain = [seat.strip(' `') for seat in sol[5].split(',')]
+        fallback = [seat.strip(' `') for seat in first[5].split(',')] + sol_chain
+        self.assertEqual(fallback, ['planner--sol', *sol_chain])
+        for seat in fallback:
+            self.assertTrue((self.ship / 'agents' / (seat + '.md')).is_file(), seat)
+        self.assertIn('Continue through the `planner--sol` fallback chain in roster order.', self.gate)
+        self.assertIn('Dispatch `ship:planner--fable52` first for important planning.', self.gate)
+        self.assertIn('If Fable is unavailable, use `ship:planner--sol` next.', self.gate)
+        self.assertIn('Use `ship:planner--sol` for routine full-mode planning.', self.plan)
+        skill = (self.ship / 'skills/ship/SKILL.md').read_text()
+        self.assertIn('Start important planning in either mode with `ship:planner--fable52`.', skill)
+        goal = (self.ship / 'skills/ship/references/goal.md').read_text()
+        self.assertIn('Start important planning with ship:planner--fable52 and apply the Ship important planning gate.', goal)
+
     def test_driver_runs_refutation_before_fresh_confirmation_on_the_important_route(self):
         self.assertRegex(self.gate, r'(?s)Dispatch one independent `ship:reviewer--astra`.*'
                                     r'Start a fresh `ship:reviewer--opus` Agent')
@@ -157,7 +179,8 @@ class ModelRoutingTests(unittest.TestCase):
                 self.assertEqual(checks.inspect_text(text, Path('agents/test.md')), errors)
 
     def test_fable52_seats_pin_fable_and_copy_their_base_seat_body(self):
-        for seat, base, effort in (('writer--fable52', 'writer--sol', 'high'),
+        for seat, base, effort in (('planner--fable52', 'planner--sol', 'xhigh'),
+                                   ('writer--fable52', 'writer--sol', 'high'),
                                    ('reviewer--fable52', 'reviewer--fable', 'xhigh')):
             with self.subTest(seat=seat):
                 path = ROOT / 'plugins/ship/agents' / (seat + '.md')
@@ -169,6 +192,9 @@ class ModelRoutingTests(unittest.TestCase):
                 body = text.split('\n---\n', 1)[1]
                 base_body = base_text.split('\n---\n', 1)[1]
                 self.assertEqual(body, base_body)
+                if seat == 'planner--fable52':
+                    self.assertEqual(fields['tools'], checks.frontmatter(base_text)['tools'])
+                    self.assertNotIn('Agent', fields['tools'].split(', '))
                 if seat == 'writer--fable52':
                     self.assertEqual(fields['disallowedTools'], checks.frontmatter(base_text)['disallowedTools'])
         reviewer = checks.frontmatter((ROOT / 'plugins/ship/agents/reviewer--fable52.md').read_text())

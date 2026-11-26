@@ -48,7 +48,7 @@ Preserve execution admission and the reviewer MCP ban under both [scoped decisio
 | # | Step | Ledger step | Agents |
 |---|---|---|---|
 | 1 | Guard the branch, open the run | `run-start` | driver |
-| 2 | Plan and premises | `plan` | `planner--sol` |
+| 2 | Plan and premises | `plan` | `planner--fable52` (important), `planner--sol` (routine) |
 | 3 | Slices | `slices` | `writer--sol`, `reviewer--sol` |
 | 4 | High panel on the frozen branch | `panel-high` | `ship:panel high` |
 | 5 | Simplify and deep review, in parallel | `simplify`, `deep-review` | `ship:review simplify`, `ship:review` |
@@ -69,7 +69,8 @@ Preserve execution admission and the reviewer MCP ban under both [scoped decisio
 
 ## 2. Plan and premises
 
-Dispatch `planner--sol` with the objective, constraints, and evidence paths. Freeze its output in the run scratch file:
+Use `ship:planner--sol` for routine full-mode planning. Use the [important planning route](#important-planning) for important plans.
+Give the planner the objective, constraints, and evidence paths. Freeze its output in the run scratch file:
 
 - Slices in build order, each with files, a test, and an acceptance check.
 - Premises, each with a falsifier. Check each falsifier before step 3. Return to planning on a falsified premise. Apply the important planning rework limit when applicable.
@@ -85,6 +86,11 @@ Keep routine work on its existing route. The coordinator owns both rounds; the p
 Apply the [helper standing request](owner-decisions.md#helper-standing-request) to every brief, including fallbacks.
 List exact permitted paths and exclusions. Apply the reviewer search rules and [security review triage](#security-review-triage) above.
 Share only authorized evidence. Keep secrets, protected content, and confidential data outside the brief and any external query.
+
+Apply existing model eligibility and privacy rules to every planner dispatch.
+Dispatch `ship:planner--fable52` first for important planning. If Fable is unavailable, use `ship:planner--sol` next.
+Continue through the `planner--sol` fallback chain in roster order. Record the planner that authored the draft.
+Keep the plan and dependent work pending when no eligible planner is available.
 
 Before refutation, freeze all evidence outside the repository commit in permitted read-only snapshots.
 Record the source identity, exact readable snapshot path, and SHA256 of each item in an evidence manifest.
@@ -128,7 +134,9 @@ Continue independent work. Route owner decisions through the [existing contract]
 
 Record each result under `plan-refute` or `plan-confirm` as it returns.
 Use the exact `agent-type@agent-id`, repository SHA, verdict, and frozen plan digest.
-Record a passing `plan` row only after both rounds qualify. Keep dependent slices pending until then.
+For Chief planning before lane dispatch, keep these records on the run board.
+Record a passing `plan` row only after both rounds qualify. Use the run board when no Ship ledger exists.
+Keep dependent slices pending until then.
 The review gives zero authority for implementation or publication.
 
 ## 3. Slices

@@ -12,7 +12,7 @@ Chief runs at the session model and needs the `ship` plugin.
 
 | Work | Agent |
 |---|---|
-| Important planning | `ship:planner--sol` |
+| Important planning | `ship:planner--fable52` |
 | Code | `ship:writer--sol` |
 | A lane's ship tail | `ship:driver` (`claude-opus-5-5`), running `/ship:ship light`; `ship:driver--sol` at low Claude quota only |
 | Research | `ship:researcher--luna` |
