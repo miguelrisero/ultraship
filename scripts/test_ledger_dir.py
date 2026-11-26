@@ -1187,6 +1187,26 @@ class LedgerDirTests(unittest.TestCase):
         reason = self.non_git_stop_block(owed, row + original, result['id'])
         self.assertNotIn('Run each verified findings command', reason)
 
+    def test_stop_withholds_findings_when_the_transcript_has_a_later_turn(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings'),
+            (5, 'user', 'Review again.'), (6, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        reason = self.non_git_stop_block(owed, owed.read_bytes(), result['id'])
+        self.assertNotIn('Run each verified findings command', reason)
+
+    def test_stop_withholds_findings_command_that_custody_would_refuse(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        # The state folder name contains a receipt folder name, so custody refuses any command with this path.
+        state = self.base / 'ultraship' / 'text-lint-fixtures'
+        shutil.copytree(self.base / 'state', state)
+        stopped = json.loads(self.hook('stop', env={**self.env, 'XDG_STATE_HOME': str(state)}))
+        self.assertEqual(stopped['decision'], 'block')
+        self.assertIn(result['id'], stopped['reason'])
+        self.assertFalse(any(line.startswith('python3 ') for line in stopped['reason'].splitlines()))
+
     def test_stop_retains_malformed_notice_beside_commit_findings(self):
         sha = self.git(self.checkout, 'rev-parse', 'HEAD')
         owed, _, _, epoch = self.auto_owed([
