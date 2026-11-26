@@ -20,7 +20,7 @@ Then set up the tools the agents use:
 
 ```text
 /chief:run <task>
-  └─ important plan (ship:planner--fable52) → refute → confirm → freeze lanes → panel
+  └─ plan (ship:planner--fable52) → freeze lanes → panel
   └─ per lane: ship:driver runs /ship:ship light
        ├─ ship:writer--sol writes each slice
        ├─ ship:reviewer--sol reviews each slice

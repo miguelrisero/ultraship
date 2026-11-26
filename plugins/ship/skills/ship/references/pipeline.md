@@ -134,9 +134,7 @@ Continue independent work. Route owner decisions through the [existing contract]
 
 Record each result under `plan-refute` or `plan-confirm` as it returns.
 Use the exact `agent-type@agent-id`, repository SHA, verdict, and frozen plan digest.
-For Chief planning before lane dispatch, keep these records on the run board.
-Record a passing `plan` row only after both rounds qualify. Use the run board when no Ship ledger exists.
-Keep dependent slices pending until then.
+Record a passing `plan` row only after both rounds qualify. Keep dependent slices pending until then.
 The review gives zero authority for implementation or publication.
 
 ## 3. Slices

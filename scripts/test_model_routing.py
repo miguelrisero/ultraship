@@ -20,16 +20,14 @@ class ImportantPlanningContractTests(unittest.TestCase):
 
     def test_important_planning_starts_with_fable_then_follows_the_sol_chain(self):
         roster = (self.ship / 'skills/ship/references/roster.md').read_text().splitlines()
-        planner_rows = [line.split('|') for line in roster if line.startswith('| `ship:planner--')]
-        self.assertEqual([row[1].strip() for row in planner_rows[:2]],
-                         ['`ship:planner--fable52`', '`ship:planner--sol`'])
-        first, sol = planner_rows[:2]
+        start = next(i for i, line in enumerate(roster) if line.startswith('| `ship:planner--'))
+        first, sol = (line.split('|') for line in roster[start:start + 2])
+        self.assertEqual((first[1].strip(), first[5].strip(), sol[1].strip()),
+                         ('`ship:planner--fable52`', '`planner--sol`', '`ship:planner--sol`'))
         self.assertEqual(first[2].strip(), '`claude-fable-5-2`')
         self.assertEqual(first[3].strip(), 'xhigh')
         sol_chain = [seat.strip(' `') for seat in sol[5].split(',')]
-        fallback = [seat.strip(' `') for seat in first[5].split(',')] + sol_chain
-        self.assertEqual(fallback, ['planner--sol', *sol_chain])
-        for seat in fallback:
+        for seat in sol_chain:
             self.assertTrue((self.ship / 'agents' / (seat + '.md')).is_file(), seat)
         self.assertIn('Continue through the `planner--sol` fallback chain in roster order.', self.gate)
         self.assertIn('Dispatch `ship:planner--fable52` first for important planning.', self.gate)
@@ -191,10 +189,16 @@ class ModelRoutingTests(unittest.TestCase):
                 base_text = (ROOT / 'plugins/ship/agents' / (base + '.md')).read_text()
                 body = text.split('\n---\n', 1)[1]
                 base_body = base_text.split('\n---\n', 1)[1]
-                self.assertEqual(body, base_body)
                 if seat == 'planner--fable52':
+                    route = '[important planning](../skills/ship/references/pipeline.md#important-planning) route'
+                    sol_instruction = f"If the coordinator's brief names the {route}, return a draft for that route."
+                    fable_instruction = f"Return a draft for the coordinator's {route}."
+                    self.assertIn(sol_instruction, base_body)
+                    self.assertEqual(body, base_body.replace(sol_instruction, fable_instruction, 1))
                     self.assertEqual(fields['tools'], checks.frontmatter(base_text)['tools'])
                     self.assertNotIn('Agent', fields['tools'].split(', '))
+                else:
+                    self.assertEqual(body, base_body)
                 if seat == 'writer--fable52':
                     self.assertEqual(fields['disallowedTools'], checks.frontmatter(base_text)['disallowedTools'])
         reviewer = checks.frontmatter((ROOT / 'plugins/ship/agents/reviewer--fable52.md').read_text())
