@@ -66,7 +66,7 @@ Preserve actual owner Input event delivery and the canonical CoC Input ID → ex
 | Work | Agent |
 |---|---|
 | Planning | `ship:planner--opus` |
-| Important planning | `ship:planner--fable52` |
+| Important planning, including P0 | `ship:planner--fable52` |
 | Code for one slice | `ship:writer--sol` |
 | A lane's ship tail: reviews, PR, CI, gate | `ship:driver` |
 | Broad research | `ship:researcher--luna` |
@@ -93,11 +93,12 @@ Answer small questions and one-line edits directly. Open lanes for work that nee
 2. Read only the source needed for decisions. Send broad searches and long logs to a researcher.
 3. Investigate an unproven symptom before you commission a fix.
 4. Create a run-owned board with [state and recovery](references/state.md). Persist every transition.
-5. Select the planner by plan class. Treat P0 as important for planner selection.
+5. Select the planner by plan class.
    - Dispatch `ship:planner--opus` first for normal plans.
-   - Dispatch `ship:planner--fable52` first for important planning: architecture, contracts, migrations, security, and billing.
+   - Dispatch `ship:planner--fable52` first for important and P0 plans.
+   - Important planning includes architecture, contracts, migrations, security, and billing.
    - Follow the Ship roster at `skills/ship/references/roster.md` for fallback order.
-   - For important plans, apply the installed Ship plugin's `skills/ship/references/pipeline.md#important-planning` gate.
+   - Apply the installed Ship plugin's `skills/ship/references/pipeline.md#important-planning` gate only to important plans.
      Record the refutation and confirmation results on the run board.
      Keep dependent lanes pending until the gate passes.
 6. Freeze the goal, lane boundaries, dependencies, safety constraints, and checks.

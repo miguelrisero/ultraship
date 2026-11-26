@@ -1,6 +1,6 @@
 ---
 name: planner--fable52
-description: First planner for important design or engineering decisions that need evidence, slices, and falsifiable premises.
+description: First planner for important and P0 plans, including design or engineering decisions that need evidence, slices, and falsifiable premises.
 model: claude-fable-5-2
 effort: xhigh
 tools: Read, Grep, Glob, LSP, mcp__fff__find_files, mcp__fff__grep, mcp__fff__multi_grep, WebFetch, WebSearch

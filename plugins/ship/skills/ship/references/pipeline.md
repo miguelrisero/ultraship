@@ -70,7 +70,7 @@ Preserve execution admission and the reviewer MCP ban under both [scoped decisio
 ## 2. Plan and premises
 
 Start normal plans with `ship:planner--opus`. Follow the normal planner chain in the [roster](roster.md).
-Use the [important planning route](#important-planning) for important and P0 plans.
+Start important and P0 plans with `ship:planner--fable52`, then follow the important planner chain in the [roster](roster.md). Apply the [important planning gate](#important-planning) only to important plans.
 Give the planner the objective, constraints, and evidence paths. Freeze its output in the run scratch file:
 
 - Slices in build order, each with files, a test, and an acceptance check.
@@ -83,7 +83,7 @@ Run `ship:panel design` on the frozen plan before step 3 for design-heavy work.
 ### Important planning
 
 Use this route only for important planning, such as architecture, contracts, migrations, security, and billing.
-Treat P0 as important for planner selection.
+P0 alone selects the Fable 5.2 planner chain. The gate applies only if the plan also qualifies as important.
 The coordinator owns both rounds; the planner and reviewers stay read-only.
 Apply the [helper standing request](owner-decisions.md#helper-standing-request) to every brief, including fallbacks.
 List exact permitted paths and exclusions. Apply the reviewer search rules and [security review triage](#security-review-triage) above.

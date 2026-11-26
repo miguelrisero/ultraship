@@ -64,13 +64,13 @@ class NativePeerRoutingTests(unittest.TestCase):
         chief = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text()
         prepare = chief.split('## Prepare the run\n', 1)[1].split('## Dispatch\n', 1)[0]
         self.assertIn('| Planning | `ship:planner--opus` |', chief)
-        self.assertIn('| Important planning | `ship:planner--fable52` |', chief)
-        self.assertIn('Dispatch `ship:planner--fable52` first for important planning:', prepare)
-        self.assertIn('Treat P0 as important for planner selection.', prepare)
+        self.assertIn('| Important planning, including P0 | `ship:planner--fable52` |', chief)
+        self.assertIn('Dispatch `ship:planner--fable52` first for important and P0 plans.', prepare)
+        self.assertIn('Important planning includes architecture, contracts, migrations, security, and billing.', prepare)
         self.assertIn('Dispatch `ship:planner--opus` first for normal plans.', prepare)
         self.assertIn('Follow the Ship roster at `skills/ship/references/roster.md` for fallback order.', prepare)
-        self.assertIn('For important plans, apply the installed Ship plugin\'s '
-                      '`skills/ship/references/pipeline.md#important-planning` gate.', prepare)
+        self.assertIn('Apply the installed Ship plugin\'s '
+                      '`skills/ship/references/pipeline.md#important-planning` gate only to important plans.', prepare)
         self.assertIn('Record the refutation and confirmation results on the run board.', prepare)
         self.assertIn('Keep dependent lanes pending until the gate passes.', prepare)
         self.assertIn('6. Freeze the goal, lane boundaries, dependencies, safety constraints, and checks.\n'

@@ -73,7 +73,8 @@ Preserve every other Input ban, reviewer MCP denial, and independent hook and to
 - Code goes to `ship:writer--sol`, one slice at a time, in the assigned worktree. Continue an existing writer with SendMessage for fixes on its slice.
 - Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch.
 - Start normal plans with `ship:planner--opus`. Follow the normal planner chain in the roster.
-- Start important planning in either mode with `ship:planner--fable52`. Treat P0 as important for planner selection. Apply the [important planning gate](references/pipeline.md#important-planning).
+- Start important and P0 plans with `ship:planner--fable52`. Follow the important planner chain in the roster.
+- Apply the [important planning gate](references/pipeline.md#important-planning) only to important plans, in either mode.
 - Send broad research to `ship:researcher--luna`.
 - Freeze one subject SHA per review step. Give every seat the same brief and keep sibling verdicts out of it.
 
@@ -187,7 +188,7 @@ All conditions must hold:
 4. Better Review and human threads are resolved: zero unresolved threads.
 5. End-to-end evidence covers that head at the deepest safe level.
 6. `ledger.py gaps` reports none, and `run-end` succeeds.
-   Require both [important planning](references/pipeline.md#important-planning) results when that route applies, including in light mode.
+   Require both [important planning](references/pipeline.md#important-planning) results only for important plans, including in light mode.
 7. Every UI PR passes the [real-browser premerge gate](references/pipeline.md#ui-browser-gate); the default route requires the current pushed head and matching preview.
    This includes dashboard `frontend/app/**`, UI-affecting frontend design-package changes, and marketing UI through its existing Vercel preview route.
    Only when preview sign-in requires secret handling, accept qualified local real-browser evidence under the pipeline's conditional local route.

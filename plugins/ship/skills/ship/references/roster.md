@@ -2,8 +2,7 @@
 
 Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable agent, dispatch the next entry in the chain and record it in the ledger note. If all admitted writer or planner seats are unavailable, retain the task as pending and report the missing seat. A panel with a missing seat and no fallback is incomplete.
 
-For planning, select the plan class once. Use the first seat's row for the full fallback order for that class.
-Stop at the first available seat or at the end of the chain. Never revisit a seat within that chain.
+Select the plan class before each planning attempt. Within one attempt, stop at the first available seat or at the end of the chain, and never revisit a seat. A rework attempt starts again at the first seat of its class.
 
 Use [reviewer admission for protected row reads](owner-decisions.md#reviewer-admission-record-for-protected-row-reads) to select a seat for a protected row review.
 
