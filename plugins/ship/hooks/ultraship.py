@@ -7209,7 +7209,8 @@ def findings_commands(ledger, pending, owed, failures, data):
         if time.monotonic() >= deadline:
             return
         if len(row) != 4:
-            continue
+            # A split row can hide a sibling that shares the candidate's transcript.
+            return
         try:
             notice = json.loads(row[3])
             identifier = notice.get('id')
@@ -7252,8 +7253,8 @@ def findings_commands(ledger, pending, owed, failures, data):
             if re.search(r'```|~~~|\b(?:patch|diff|uncommitted|unstaged|staged|working tree)\b|[0-9a-f]{64}',
                          text, re.I):
                 continue
-            subjects = re.findall(r'^[ \t>*#_\-]*Reviewed commit[*_]*[ \t]*:(.*)$', text, re.M | re.I)
-            verdicts = re.findall(r'^[ \t>*#_\-]*(?:verdict|overall)[*_]*:(.*)$', text, re.M | re.I)
+            subjects = re.findall(r'^[\s>*#_\-]*Reviewed commit[*_]*\s*:(.*)$', text, re.M | re.I)
+            verdicts = [match[1] for line in text.splitlines() if (match := ledger.VERDICT_LABEL.match(line))]
             if len(subjects) != 1 or [value.strip().lower() for value in verdicts] != ['findings']:
                 continue
             subject = re.search(r'^Reviewed commit:[ \t]+([0-9a-f]{40})[ \t]*$', text, re.M | re.I)
@@ -7272,7 +7273,7 @@ def findings_commands(ledger, pending, owed, failures, data):
                 continue
             command = shlex.join(['python3', str(ledger_script()), 'account', str(pending), identifier,
                                   'review', f'{agent}@{result["agent_id"]}', sha, 'findings',
-                                  f'Findings in {transcript} at {datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()}'])
+                                  f'Findings for {identifier} at {datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()}'])
             words = own_account_call(data, command)
             if words:
                 ledger.grant_request(words[1], words[2:])
@@ -7311,6 +7312,7 @@ def stop(data):
     if data.get('stop_hook_active'):
         return
     listing = ''
+    commands = ''
     pending_failures = []
     try:
         reminder = path.with_suffix('.stop-state')
@@ -7343,6 +7345,13 @@ def stop(data):
                         raise pending_failures[0][2]
             except Exception as accounting_error:
                 listing = '\n' + pending_summary(failures, str(path)) + '\n'
+                if pending_failures:
+                    # Scan while the pending lock still excludes a concurrent notice for the same transcript.
+                    try:
+                        commands = '\n'.join(findings_commands(ledger, path, owed, pending_failures, data))
+                    except Exception:
+                        # Optional guidance cannot suppress the Stop decision.
+                        commands = ''
                 rows = [row for row, _ in failures]
                 try:
                     canonical = [row[:3] + [json.loads(row[3])] if len(row) == 4 else row for row in rows]
@@ -7367,13 +7376,6 @@ def stop(data):
             pending.seek(0)
             pending.truncate()
     except Exception as exc:
-        commands = ''
-        if pending_failures:
-            try:
-                commands = '\n'.join(findings_commands(ledger, path, owed, pending_failures, data))
-            except Exception:
-                # Optional guidance cannot suppress the Stop decision.
-                pass
         guidance = f'Run each verified findings command separately:\n{commands}\n' if commands else ''
         unbound = sum(1 for _, result, _ in pending_failures if isinstance(result, dict)
                       and result.get('v') == 2 and ('ledger' not in result or result.get('run') is None))

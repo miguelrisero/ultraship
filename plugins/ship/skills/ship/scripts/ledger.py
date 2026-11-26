@@ -100,6 +100,10 @@ def file_identity(info):
     return [info.st_dev, info.st_ino]
 
 
+# Stop guidance shares this label rule so both parsers count the same verdict lines.
+VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
+
+
 def grant_request(script, argv):
     owed = account_pending_arg(argv)
     if not owed:
@@ -671,8 +675,7 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
                     if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
                         raise ValueError('expected one commit')
                     sha = first[0].lower()
-                    label_pattern = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
-                    labels = (match[1] for line in text.splitlines() if (match := label_pattern.match(line)))
+                    labels = (match[1] for line in text.splitlines() if (match := VERDICT_LABEL.match(line)))
                     label = next(labels, None)
                     if label is None or next(labels, None) is not None:
                         raise ValueError('expected one verdict')

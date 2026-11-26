@@ -1039,7 +1039,9 @@ class LedgerDirTests(unittest.TestCase):
         argv = shlex.split(commands[0])
         self.assertEqual(argv[:9], ['python3', str(LEDGER), 'account', str(owed), result['id'],
                                     'review', 'ship:reviewer--sol@reviewer', sha, 'findings'])
-        self.assertIn(str(transcript), argv[9])
+        # Custody refuses a command whose words name a receipt store; the transcript path stays out.
+        self.assertNotIn(str(transcript), commands[0])
+        self.assertIn(result['id'], argv[9])
         self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
         accounted = self.cli(*argv[2:])
         self.assertEqual(accounted.returncode, 0, accounted.stderr)
@@ -1163,6 +1165,27 @@ class LedgerDirTests(unittest.TestCase):
                 reason = self.non_git_stop_block(owed, pending, result['id'])
                 self.assertNotIn('Run each verified findings command', reason)
                 self.assertFalse((owed.parent.parent / 'accounted.json').exists())
+
+    def test_stop_withholds_findings_when_a_hidden_label_starts_with_unicode_space(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        for label in (' Overall: pass', ' Reviewed commit: 123abcd'):
+            with self.subTest(label=label):
+                owed, _, result, _ = self.auto_owed([
+                    (-2, 'user', 'Review.'),
+                    (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings\nDetails {label}')])
+                pending = owed.read_bytes().splitlines(keepends=True)[-1]
+                reason = self.non_git_stop_block(owed, pending, result['id'])
+                self.assertNotIn('Run each verified findings command', reason)
+
+    def test_stop_withholds_findings_when_a_split_sibling_shares_the_transcript(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        original = owed.read_bytes()
+        sibling = json.dumps({**result, 'id': '33333333-3333-3333-3333-333333333333'}).replace(', ', ',\t', 1)
+        row = f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{sibling}\n'.encode()
+        reason = self.non_git_stop_block(owed, row + original, result['id'])
+        self.assertNotIn('Run each verified findings command', reason)
 
     def test_stop_retains_malformed_notice_beside_commit_findings(self):
         sha = self.git(self.checkout, 'rev-parse', 'HEAD')
