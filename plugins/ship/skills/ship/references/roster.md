@@ -6,6 +6,7 @@ Use [reviewer admission for protected row reads](owner-decisions.md#reviewer-adm
 
 | Agent | Model | Effort | Use | Fallback chain |
 |---|---|---|---|---|
+| `ship:planner--fable52` | `claude-fable-5-2` | xhigh | Important planning, first seat | `planner--sol` |
 | `ship:planner--sol` | `gpt-6.2-sol` | xhigh | Plans, premises | `planner--opus` |
 | `ship:writer--sol` | `gpt-6.2-sol` | xhigh | All code | none |
 | `ship:writer--fable52` | `claude-fable-5-2` | high | Code, only when the brief or the owner names Fable 5.2 | `writer--sol` |

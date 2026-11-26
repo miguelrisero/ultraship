@@ -20,7 +20,7 @@ Then set up the tools the agents use:
 
 ```text
 /chief:run <task>
-  └─ plan (ship:planner--sol) → freeze lanes → panel
+  └─ plan (ship:planner--fable52) → freeze lanes → panel
   └─ per lane: ship:driver runs /ship:ship light
        ├─ ship:writer--sol writes each slice
        ├─ ship:reviewer--sol reviews each slice
@@ -37,7 +37,8 @@ Use `/ship:ship <task>` alone for one task. Full mode adds a plan, a high panel,
 
 | Role | Model | Effort | Fallback |
 |---|---|---|---|
-| Planner | `gpt-6.2-sol` | xhigh | `claude-opus-5-5` (xhigh) |
+| Important planner | `claude-fable-5-2` | xhigh | `gpt-6.2-sol` (xhigh), then `claude-opus-5-5` (xhigh) |
+| Routine planner | `gpt-6.2-sol` | xhigh | `claude-opus-5-5` (xhigh) |
 | Writer | `gpt-6.2-sol` | xhigh | — |
 | Opt-in Fable 5.2 writer and reviewer, only when the brief or the owner names Fable 5.2 | `claude-fable-5-2` | high (writer), xhigh (reviewer) | `gpt-6.2-sol` (writer, xhigh), `claude-opus-5-5` (reviewer) |
 | Slice review, selection, fix read, high and final panels, closing pass | `gpt-6.2-sol` | xhigh | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |

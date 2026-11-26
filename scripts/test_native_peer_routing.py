@@ -60,6 +60,27 @@ class NativePeerRoutingTests(unittest.TestCase):
                             'Future targets over 48 Sol hours', '5% or less', '85% or more'):
             self.assertIn(requirement, dispatch)
 
+    def test_chief_uses_the_first_native_planner_and_shared_confirmation_gate(self):
+        chief = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text()
+        prepare = chief.split('## Prepare the run\n', 1)[1].split('## Dispatch\n', 1)[0]
+        roster = (ROOT / 'plugins/ship/skills/ship/references/roster.md').read_text()
+        first = re.search(r'(?m)^\| `(ship:planner--[^`]+)`', roster)
+        self.assertIsNotNone(first)
+        self.assertEqual(first[1], 'ship:planner--fable52')
+        self.assertIn(f'5. Dispatch `{first[1]}` first for important planning:', prepare)
+        self.assertIn('Follow the Ship roster at `skills/ship/references/roster.md` for fallback order.', prepare)
+        self.assertIn('pipeline.md#important-planning', prepare)
+        self.assertIn('Record the refutation and confirmation results on the run board.', prepare)
+        self.assertIn('Keep dependent lanes pending until the gate passes.', prepare)
+        self.assertIn('6. Freeze the goal, lane boundaries, dependencies, safety constraints, and checks.\n'
+                      '   For an important plan, take these only from the confirmed final plan. '
+                      'Return to the gate on any material change.\n'
+                      '   Run `ship:panel design` or `ship:panel high` once on substantive plans.', prepare)
+        self.assertIn('Leave the Agent `model` field unset.', chief)
+        state = (ROOT / 'plugins/chief/skills/run/references/state.md').read_text()
+        self.assertIn('| Planning gate | `plan-refute` and `plan-confirm` records, each with `agent-type@agent-id`, '
+                      'repository SHA, verdict, plan digest, and evidence manifest SHA-256; rework count and gate status |', state)
+
     def test_chief_contract_forbids_peer_fallback_and_preserves_owner_delivery(self):
         dispatch = (ROOT / 'plugins/chief/skills/run/references/dispatch.md').read_text()
         contract = dispatch.split('## Native peer routing contract\n', 1)[1].split('\n## ', 1)[0]

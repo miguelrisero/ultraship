@@ -9,6 +9,7 @@ Persist these sections after each transition:
 | Section | Contents |
 |---|---|
 | Current status | Goal, repository, run ID, chief model, last-seen main SHA, delivery authority |
+| Planning gate | `plan-refute` and `plan-confirm` records, each with `agent-type@agent-id`, repository SHA, verdict, plan digest, and evidence manifest SHA-256; rework count and gate status |
 | In-flight lanes | Task, status, dependencies, worktree, branch, base/head/reviewed SHA, agent/transcript ID, requested and observed model, PR URL, next action |
 | Next tasks | Ordered eligible queue and queued-at timestamps |
 | Delivery ledger | Ticket ID, ready/merged/live-verified/dark/reported/abandoned status, PR URL, evidence, timestamp, worktree disposition, linked proof follow-ups |

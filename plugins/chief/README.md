@@ -9,12 +9,12 @@ Chief reports on transitions and deadlines. Chief tracks each ticket until the c
 ```
 
 Chief runs at the session model and needs the `ship` plugin.
-Upgrade Chief to `1.8.5` and Ship to `1.15.50` together before using these routes.
+Upgrade Chief to `1.8.6` and Ship to `1.15.51` together before using these routes.
 Start a fresh session with both plugins loaded.
 
 | Work | Agent |
 |---|---|
-| Important planning | `ship:planner--sol` |
+| Important planning | `ship:planner--fable52` |
 | Code | `ship:writer--sol` |
 | A lane's ship tail | `ship:driver` (`claude-opus-5-5`), running `/ship:ship light`; `ship:driver--sol` at low Claude quota only |
 | Research | `ship:researcher--luna` |

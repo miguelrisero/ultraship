@@ -65,7 +65,7 @@ Preserve actual owner Input event delivery and the canonical CoC Input ID → ex
 
 | Work | Agent |
 |---|---|
-| Important planning | `ship:planner--sol` |
+| Important planning | `ship:planner--fable52` |
 | Code for one slice | `ship:writer--sol` |
 | A lane's ship tail: reviews, PR, CI, gate | `ship:driver` |
 | Broad research | `ship:researcher--luna` |
@@ -91,9 +91,15 @@ Answer small questions and one-line edits directly. Open lanes for work that nee
 1. Confirm the target repository, a clean owned working state, and GitHub access.
 2. Read only the source needed for decisions. Send broad searches and long logs to a researcher.
 3. Investigate an unproven symptom before you commission a fix.
-4. Send important topics to `ship:planner--sol`: architecture, contracts, migrations, security, billing.
-5. Freeze the goal, lane boundaries, dependencies, safety constraints, and checks. Run `ship:panel design` or `ship:panel high` once on substantive plans.
-6. Create a run-owned board with [state and recovery](references/state.md). Persist every transition.
+4. Create a run-owned board with [state and recovery](references/state.md). Persist every transition.
+5. Dispatch `ship:planner--fable52` first for important planning: architecture, contracts, migrations, security, and billing.
+   Follow the Ship roster at `skills/ship/references/roster.md` for fallback order.
+   Apply the installed Ship plugin's `skills/ship/references/pipeline.md#important-planning` gate.
+   Record the refutation and confirmation results on the run board.
+   Keep dependent lanes pending until the gate passes.
+6. Freeze the goal, lane boundaries, dependencies, safety constraints, and checks.
+   For an important plan, take these only from the confirmed final plan. Return to the gate on any material change.
+   Run `ship:panel design` or `ship:panel high` once on substantive plans.
 
 ## Dispatch
 
