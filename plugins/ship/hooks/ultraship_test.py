@@ -309,6 +309,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     git = lambda *a: subprocess.run(['git', '-C', str(repo), *a], check=True, capture_output=True)
     git('init', '-q', '-b', 'feat/x')
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init')
+    head = git('rev-parse', 'HEAD').stdout.decode().strip()
     ledger = lambda *a: run([sys.executable, str(LEDGER), *a], cwd=repo)
 
     assert 'ship/ledger/feat__x.tsv' in ledger('path').stdout
@@ -345,7 +346,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     assert blocked['decision'] == 'block' and 'reviewer--sol' in blocked['reason']
     assert 'ship:reviewer--sol@reviewer-terminal-1' in blocked['reason']
     assert hook('stop', session, env) == ''
-    assert ledger('append', 'deep-review', 'ship:reviewer--sol@reviewer-terminal-1', 'sha', 'pass').returncode == 0
+    assert ledger('append', 'deep-review', 'ship:reviewer--sol@reviewer-terminal-1', head, 'pass').returncode == 0
     assert hook('stop', session, env) == ''
 
     metadata_cases = [({}, {}), *[({key: value}, {key: value}) for key, value in provenance.items()]]
@@ -359,12 +360,12 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
         assert result['run'] is not None
         assert hook('stop', session, env)['decision'] == 'block'
         named = 'ship:reviewer--sol' + (f"@{expected['agent_id']}" if 'agent_id' in expected else '')
-        assert ledger('append', 'deep-review', named, 'sha', 'pass').returncode == 0
+        assert ledger('append', 'deep-review', named, head, 'pass').returncode == 0
         assert hook('stop', session, env) == ''
 
     hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--opus'}, env)
     for step in ['slices', 'simplify', 'deep-review', 'fix-read', 'pr', 'babysit', 'gate']:
-        assert ledger('append', step, 'ship:reviewer--opus', 'sha', 'pass').returncode == 0
+        assert ledger('append', step, 'ship:reviewer--opus', head, 'pass').returncode == 0
     assert hook('stop', session, env) == ''
     assert ledger('gaps').returncode == 0
     assert ledger('run-end').returncode == 0
