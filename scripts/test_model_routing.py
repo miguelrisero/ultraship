@@ -26,6 +26,7 @@ class ImportantPlanningContractTests(unittest.TestCase):
                          ('`ship:planner--fable52`', '`planner--sol`', '`ship:planner--sol`'))
         self.assertEqual(first[2].strip(), '`claude-fable-5-2`')
         self.assertEqual(first[3].strip(), 'xhigh')
+        self.assertEqual(sol[5].strip(), '`planner--opus`, `planner--sonnet`')
         sol_chain = [seat.strip(' `') for seat in sol[5].split(',')]
         for seat in sol_chain:
             self.assertTrue((self.ship / 'agents' / (seat + '.md')).is_file(), seat)
@@ -189,16 +190,12 @@ class ModelRoutingTests(unittest.TestCase):
                 base_text = (ROOT / 'plugins/ship/agents' / (base + '.md')).read_text()
                 body = text.split('\n---\n', 1)[1]
                 base_body = base_text.split('\n---\n', 1)[1]
+                self.assertEqual(body, base_body)
                 if seat == 'planner--fable52':
                     route = '[important planning](../skills/ship/references/pipeline.md#important-planning) route'
-                    sol_instruction = f"If the coordinator's brief names the {route}, return a draft for that route."
-                    fable_instruction = f"Return a draft for the coordinator's {route}."
-                    self.assertIn(sol_instruction, base_body)
-                    self.assertEqual(body, base_body.replace(sol_instruction, fable_instruction, 1))
+                    self.assertIn(f"If the coordinator's brief names the {route}, return a draft for that route.", body)
                     self.assertEqual(fields['tools'], checks.frontmatter(base_text)['tools'])
                     self.assertNotIn('Agent', fields['tools'].split(', '))
-                else:
-                    self.assertEqual(body, base_body)
                 if seat == 'writer--fable52':
                     self.assertEqual(fields['disallowedTools'], checks.frontmatter(base_text)['disallowedTools'])
         reviewer = checks.frontmatter((ROOT / 'plugins/ship/agents/reviewer--fable52.md').read_text())
