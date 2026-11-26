@@ -524,7 +524,7 @@ def reverse_lines(fh, budget):
     yield b''.join(reversed(fragments))
 
 
-def final_turn_text(path, epoch, budgets, *, expected_identity=None):
+def final_turn_text(path, epoch, budgets, *, expected_identity=None, reject_later=False):
     texts = []
     after_tool = True
     newest = float('inf')
@@ -552,6 +552,9 @@ def final_turn_text(path, epoch, budgets, *, expected_identity=None):
                     raise ValueError('transcript timestamps out of order')
                 newest = when
                 if when > epoch + 1:
+                    if reject_later:
+                        # A later turn means a second notice for this transcript exists or is on its way.
+                        return ''
                     continue
                 content = entry['message']['content']
                 if isinstance(content, str) and role == 'user':

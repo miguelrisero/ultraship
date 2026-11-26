@@ -5134,6 +5134,19 @@ def literal_bindings_resolved(command, cwd, batch=False):
     return ''.join(kept) + command[cursor:]
 
 
+RECEIPT_FOLDERS = ('text-lint', 'account-grants')
+
+
+def custody_normalized(value):
+    value = value.casefold().translate(str.maketrans('', '', "\"'\\"))
+    return re.sub(r'/\.(?=/|$)', '', re.sub(r'/+', '/', value))
+
+
+def names_receipt_folder(value):
+    value = custody_normalized(value)
+    return any('ultraship/' + folder in value for folder in RECEIPT_FOLDERS)
+
+
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                    'Report the blocked scope to the driver.')
 STATE_FOLDER_CUSTODY = ('This Bash command names the hook state folder (`.local/state` or `XDG_STATE_HOME`) together with '
@@ -5218,9 +5231,7 @@ def receipt_custody(data, read_search=False):
     state_root = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
     receipt_store = state_root / 'ultraship' / 'text-lint'
 
-    def normalized(value):
-        value = value.casefold().translate(str.maketrans('', '', "\"'\\"))
-        return re.sub(r'/\.(?=/|$)', '', re.sub(r'/+', '/', value))
+    normalized = custody_normalized
 
     # Folders that a `cd` or `pushd` in the command can enter; a relative word resolves against each of them too.
     cd_bases = []
@@ -5245,7 +5256,7 @@ def receipt_custody(data, read_search=False):
     def receipt_text(value):
         value = normalized(value)
         return (any(path in value for path in receipt_paths)
-                or any('ultraship/' + folder in value for folder in ('text-lint', 'account-grants')))
+                or any('ultraship/' + folder in value for folder in RECEIPT_FOLDERS))
 
     def receipt_path(value, ancestors=False, state_only=False, stores=receipt_paths):
         if not isinstance(value, str) or not value:
@@ -7249,7 +7260,8 @@ def findings_commands(ledger, pending, owed, failures, data):
             identity = transcript_ids.get(str(transcript))
             if transcripts[identity] != 1:
                 continue
-            text = '\n'.join(ledger.final_turn_text(transcript, int(epoch), budgets, expected_identity=identity).splitlines())
+            text = '\n'.join(ledger.final_turn_text(transcript, int(epoch), budgets, expected_identity=identity,
+                                                    reject_later=True).splitlines())
             if re.search(r'```|~~~|\b(?:patch|diff|uncommitted|unstaged|staged|working tree)\b|[0-9a-f]{64}',
                          text, re.I):
                 continue
@@ -7275,7 +7287,8 @@ def findings_commands(ledger, pending, owed, failures, data):
                                   'review', f'{agent}@{result["agent_id"]}', sha, 'findings',
                                   f'Findings for {identifier} at {datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()}'])
             words = own_account_call(data, command)
-            if words:
+            # Custody refuses a command that names a receipt folder, so Stop never prints one.
+            if words and not names_receipt_folder(command):
                 ledger.grant_request(words[1], words[2:])
                 yield command
         except (ValueError, OSError, KeyError, TypeError, OverflowError, subprocess.SubprocessError):
