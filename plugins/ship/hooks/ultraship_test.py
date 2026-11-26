@@ -338,7 +338,8 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     assert {key: result.get(key) for key in provenance} == provenance
     assert uuid.UUID(result['id']).version == 4 and result['id'] != provenance['agent_id']
     assert result['run'] is not None and result['ledger'] == ledger('path').stdout.strip()
-    assert set(result) == {'id', 'v', 'ledger', 'run', *provenance}
+    assert set(result) == {'id', 'v', 'ledger', 'run', 'stopped_at_ns', *provenance}
+    assert result['stopped_at_ns'] // 1_000_000_000 == int(owed.read_text().split('\t')[0])
     assert not Path(provenance['agent_transcript_path']).exists()
     hook('subagent-stop', {**session, 'agent_type': 'ship:writer--sol'}, env)
     blocked = hook('stop', session, env)
@@ -355,7 +356,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
         hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--sol', **metadata}, env)
         result = json.loads(owed.read_text().split('\t')[3])
         assert {key: result[key] for key in provenance if key in result} == expected, metadata
-        assert set(result) == {'id', 'v', 'ledger', 'run', *expected}, metadata
+        assert set(result) == {'id', 'v', 'ledger', 'run', 'stopped_at_ns', *expected}, metadata
         assert result['run'] is not None
         assert hook('stop', session, env)['decision'] == 'block'
         named = 'ship:reviewer--sol' + (f"@{expected['agent_id']}" if 'agent_id' in expected else '')
@@ -693,6 +694,28 @@ class ReceiptCustodyTests(unittest.TestCase):
         with patch.object(Path, 'open', side_effect=FileNotFoundError), redirect_stdout(io.StringIO()) as output:
             ultraship.stop(event)
         self.assertEqual(output.getvalue(), '')
+
+    def test_account_auto_withholds_offer_for_a_symlinked_owed_directory(self):
+        event = self.own_account_event()
+        pending = Path(self.account_words[3])
+        retained = pending.parent.rename(pending.parent.with_name('retained'))
+        pending.parent.symlink_to(retained, target_is_directory=True)
+        reason = ultraship.account_auto_difference(event)
+        self.assertNotIn(' account-auto ', reason)
+        self.assertIn('accounting state directory is unavailable or unsafe', reason)
+
+    def test_account_auto_reissues_an_exact_grant_for_a_replaced_owed_inode(self):
+        event = self.own_account_event()
+        words = [*self.account_words[:2], 'account-auto', self.account_words[3]]
+        command = shlex.join(words)
+        self.assert_account_command_allowed(command, session_id=event['session_id'])
+        pending = Path(words[3])
+        pending.rename(pending.with_suffix('.retained'))
+        pending.touch()
+        with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
+            self.consume(words)
+        self.assert_account_command_allowed(command, session_id=event['session_id'])
+        self.consume(words)
 
     def test_account_auto_names_each_grant_issuance_failure(self):
         event = self.own_account_event()

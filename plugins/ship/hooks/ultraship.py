@@ -5220,15 +5220,17 @@ def account_auto_difference(data):
     if not isinstance(data.get('session_id'), str) or not data.get('session_id'):
         return 'The hook admits `account-auto` only when its input carries a session ID. This call has none.'
     try:
-        pending = owed_file(data)
-        if not stat.S_ISREG(pending.lstat().st_mode):
-            return 'The owed file is unsafe. Ask the driver to check its custody.'
-        expected = shlex.join(['python3', str(ledger_script()), 'account-auto', str(pending)])
-    except FileNotFoundError:
-        return 'This session has no owed file. There is nothing to account.'
-    except (OSError, RuntimeError):
-        return 'The hook cannot check this session’s owed file. Ask the driver to check its custody.'
-    return f'The hook admits only this line for this session, alone and with no other character: `{expected}`.'
+        ledger = load_ledger()
+        check = ledger.account_evidence
+        refusal = ledger.GrantIssueError
+    except Exception:
+        return 'The ship hook could not load its ledger. Check the loaded Ship installation.'
+    words = ['python3', str(ledger_script()), 'account-auto', str(owed_file(data))]
+    try:
+        check(words[1], words[2:], STATE, data['session_id'])
+    except refusal as exc:
+        return str(exc)
+    return f'The hook admits only this line for this session, alone and with no other character: `{shlex.join(words)}`.'
 
 
 def issue_account_grant(data):
@@ -6953,7 +6955,7 @@ def subagent_stop(data):
         path = owed_file(data)
         path.parent.mkdir(parents=True, exist_ok=True)
         cwd = data.get('cwd') or os.getcwd()
-        result = {'id': str(uuid.uuid4()), 'v': 2}
+        result = {'id': str(uuid.uuid4()), 'v': 2, 'stopped_at_ns': time.time_ns()}
         for key in ('agent_id', 'agent_transcript_path'):
             value = data.get(key)
             if isinstance(value, str) and value.strip():
@@ -6972,7 +6974,8 @@ def subagent_stop(data):
             pass
         with path.open('a') as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
-            fh.write(f"{int(time.time())}\t{data['agent_type']}\t{cwd}\t{json.dumps(result)}\n")
+            epoch = result['stopped_at_ns'] // 1_000_000_000
+            fh.write(f"{epoch}\t{data['agent_type']}\t{cwd}\t{json.dumps(result)}\n")
 
 
 def owed_result(owed, session, occurrences):
@@ -7441,7 +7444,7 @@ def stop(data):
               'For a result on a frozen, uncommitted patch, use '
               f'`python3 {shlex.quote(str(ledger_script()))} account-patch {shlex.quote(str(path))} '
               '<result-id> <absolute-patch-file>`. '
-              'For a stopped agent with zero tool calls and no review labels, use '
+              'For a stopped agent with one prompt, one ready reply, zero tool calls and no review labels, use '
               f'`python3 {shlex.quote(str(ledger_script()))} account-void {shlex.quote(str(path))} <result-id>`. '
               'A void row gives zero review or completion credit. '
               'Keep other results without a verified reviewed commit pending. '

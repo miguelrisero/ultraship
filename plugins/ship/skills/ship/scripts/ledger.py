@@ -184,7 +184,7 @@ class GrantIssueError(ValueError):
 NO_OWED_FILE = 'This session has no owed file. There is nothing to account.'
 
 
-def _issue_grant(script, argv, state, session):
+def account_evidence(script, argv, state, session):
     reason = 'The accounting command does not match the loaded ledger or session. Copy the exact Stop command.'
     try:
         name, fields, pending = grant_request(script, argv)
@@ -203,7 +203,17 @@ def _issue_grant(script, argv, state, session):
                     os.close(owed_fd)
         except FileNotFoundError:
             raise GrantIssueError(NO_OWED_FILE) from None
-        reason = 'The accounting grant directory is unavailable or unsafe. Ask the driver to check its custody.'
+        return name, fields
+    except GrantIssueError:
+        raise
+    except (OSError, ValueError, KeyError, RuntimeError):
+        raise GrantIssueError(reason) from None
+
+
+def _issue_grant(script, argv, state, session):
+    name, fields = account_evidence(script, argv, state, session)
+    reason = 'The accounting grant directory is unavailable or unsafe. Ask the driver to check its custody.'
+    try:
         with locked_grant_store(create=True) as fd:
             reason = 'The retained accounting grant is unreadable or unsafe. Ask the driver to check its custody.'
             try:
@@ -218,10 +228,11 @@ def _issue_grant(script, argv, state, session):
                     # Keep the same expiry on an identical retry.
                     if saved == fields:
                         return
-                    seconds = (GRANT_LIFETIME_NS - age + 999_999_999) // 1_000_000_000
-                    unit = 'second' if seconds == 1 else 'seconds'
-                    raise GrantIssueError(f'A different accounting grant expires in {seconds} {unit}. '
-                                          'Wait for it to expire or finish its command.')
+                    if any(saved[key] != fields[key] for key in ('script', 'pending', 'command', 'argv_sha256', 'session')):
+                        seconds = (GRANT_LIFETIME_NS - age + 999_999_999) // 1_000_000_000
+                        unit = 'second' if seconds == 1 else 'seconds'
+                        raise GrantIssueError(f'A different accounting grant expires in {seconds} {unit}. '
+                                              'Wait for it to expire or finish its command.')
             reason = 'The ship hook could not save the accounting grant. Ask the driver to check storage access.'
             publish_at(fd, name, grant_bytes(dict(fields, issued_ns=time.time_ns())), sync_directory=False)
     except GrantIssueError:
@@ -691,13 +702,18 @@ def recorded_result(entries, identifier):
 def account_void(pending, identifier, *, entries):
     epoch, agent, result = recorded_result(entries, identifier)
     transcript = recorded_transcript(pending, result)
+    stopped_at = result.get('stopped_at_ns')
+    if 'stopped_at_ns' in result and (type(stopped_at) is not int or stopped_at // 1_000_000_000 != epoch):
+        raise ValueError('invalid stop time')
+    prompt = False
+    replies = []
+    latest = None
     try:
         with directory_descriptor(transcript.parent) as parent, \
                 os.fdopen(os.open(transcript.name, READ_FLAGS, dir_fd=parent), 'rb', buffering=0) as source:
             before = os.fstat(source.fileno())
             if not stat.S_ISREG(before.st_mode):
-                raise OSError('transcript must be a regular file')
-            turn = False
+                raise ValueError('transcript must be a regular file')
             for line in reverse_lines(source, [TRANSCRIPT_SCAN_LIMIT]):
                 if not line.strip():
                     continue
@@ -705,20 +721,31 @@ def account_void(pending, identifier, *, entries):
                 role = entry['type']
                 if role not in ('user', 'assistant'):
                     continue
-                if entry.get('sessionId', pending.stem) != pending.stem:
+                if entry.get('agentId') != result['agent_id']:
+                    raise ValueError('transcript agent identity differs from the recorded agent')
+                if entry.get('sessionId') != pending.stem:
                     raise ValueError('transcript path does not match the recorded agent and session')
                 stamp = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
                 if stamp.tzinfo is None:
                     raise TypeError('transcript timestamp has no time zone')
-                when = stamp.timestamp()
-                if when >= epoch + 1 or (role == 'user' and when > epoch):
+                delta = stamp - datetime(1970, 1, 1, tzinfo=timezone.utc)
+                when = ((delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds) * 1000
+                if stopped_at is not None:
+                    later = when > stopped_at
+                else:
+                    # Old notices record whole seconds only. A same-second prompt can be a resume.
+                    later = when >= (epoch + 1) * 1_000_000_000 or (
+                        role == 'user' and when > epoch * 1_000_000_000)
+                if later:
                     raise ValueError('transcript has activity after the stop notice')
+                if latest is not None and when > latest:
+                    raise ValueError('transcript timestamps out of order')
+                latest = when
                 content = entry['message']['content']
                 if isinstance(content, str) and role == 'user':
                     content = [{'type': 'text', 'text': content}]
                 if not isinstance(content, list):
                     raise TypeError('transcript content must have blocks')
-                turn = True
                 texts = []
                 for block in content:
                     kind = block['type']
@@ -726,12 +753,22 @@ def account_void(pending, identifier, *, entries):
                         raise ValueError('transcript contains a tool call')
                     if role == 'assistant' and kind == 'text':
                         texts.append(block['text'])
-                text = '\n'.join(texts)
-                if VERDICT_ANY.search(text) or re.search(r'(?<![A-Za-z0-9_])_*Reviewed\s+commit[*_\s]*:', text, re.I):
-                    raise ValueError('transcript contains a review label')
+                if role == 'user':
+                    if prompt or not replies:
+                        raise ValueError('expected one prompt and one ready reply')
+                    prompt = True
+                elif texts:
+                    text = '\n'.join(texts)
+                    if VERDICT_ANY.search(text) or re.search(r'(?<![A-Za-z0-9_])_*Reviewed\s+commit[*_\s]*:', text, re.I):
+                        raise ValueError('transcript contains a review label')
+                    if prompt or replies or len(texts) != 1:
+                        raise ValueError('expected one prompt and one ready reply')
+                    replies = texts
             after = os.fstat(source.fileno())
-            if not turn or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-                raise ValueError('transcript is empty or changed during accounting')
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise ValueError('transcript changed during accounting')
+            if not prompt or replies[0].strip().casefold() != 'ready':
+                raise ValueError('expected one prompt and one ready reply')
     except TranscriptLimit:
         raise ValueError('transcript scan limit reached') from None
     except (AttributeError, KeyError, TypeError, OverflowError, RecursionError, json.JSONDecodeError, UnicodeError):

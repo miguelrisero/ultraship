@@ -1007,11 +1007,11 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(json.loads(self.bound()[result['id']])['step'], 'review')
         self.assertEqual(self.hook('stop'), '')
 
-    def auto_owed(self, entries):
+    def auto_owed(self, entries, *, agent_id='reviewer'):
         owed = self.base / 'state/ultraship/owed/s1.tsv'
-        transcript = self.base / 's1/subagents/agent-reviewer.jsonl'
+        transcript = self.base / f's1/subagents/agent-{agent_id}.jsonl'
         transcript.parent.mkdir(parents=True, exist_ok=True)
-        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='reviewer',
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id=agent_id,
                   **({'agent_transcript_path': str(transcript)} if entries is not None else {}))
         epoch, _, _, raw = owed.read_text().splitlines()[-1].split('\t')
         result = json.loads(raw)
@@ -1022,6 +1022,7 @@ class LedgerDirTests(unittest.TestCase):
                 if isinstance(content, str) and role == 'assistant':
                     content = [{'type': 'text', 'text': content}]
                 lines.append(json.dumps({'timestamp': timestamp, 'type': role,
+                                         'agentId': agent_id, 'sessionId': 's1',
                                          'message': {'content': content}}))
             transcript.write_text(''.join(line + '\n' for line in lines))
         return owed, transcript, result, int(epoch)
@@ -1070,6 +1071,9 @@ class LedgerDirTests(unittest.TestCase):
                     transcript.rename(foreign)
                     result['agent_transcript_path'] = str(foreign)
                     owed.write_text(f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(result)}\n')
+                elif case == 'same-second prompt':
+                    result.pop('stopped_at_ns', None)
+                    owed.write_text(f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(result)}\n')
                 elif case == 'missing stop notice':
                     owed.write_text('')
                 elif case == 'invalid JSON':
@@ -1081,6 +1085,62 @@ class LedgerDirTests(unittest.TestCase):
                 self.assertIn(reason, refused.stderr)
                 self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
                 owed.unlink()
+
+    def test_void_refuses_prose_and_multiple_text_replies(self):
+        prompt = (-3, 'user', 'Review this inline diff.')
+        for replies in ([(-1, 'assistant', 'This diff loses data on retry.')],
+                        [(-2, 'assistant', 'This diff loses data on retry.'), (-1, 'assistant', 'ready')],
+                        [(-2, 'user', 'Please continue.'), (-1, 'assistant', 'ready')]):
+            with self.subTest(replies=replies):
+                owed, _, result, _ = self.auto_owed([prompt, *replies])
+                home = self.resolve()
+                before = (owed.read_bytes(), home.read_bytes())
+                attempt = self.cli('account-void', str(owed), result['id'])
+                self.assertEqual(attempt.returncode, 1, attempt)
+                self.assertIn('one prompt and one ready reply', attempt.stderr)
+                self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+                owed.unlink()
+
+    def test_void_refuses_a_siblings_copied_transcript(self):
+        entries = [(-2, 'user', 'Return ready.'), (-1, 'assistant', 'ready')]
+        owed, sibling, _, _ = self.auto_owed(entries, agent_id='sibling')
+        _, transcript, result, _ = self.auto_owed(entries)
+        shutil.copyfile(sibling, transcript)
+        before = owed.read_bytes()
+        attempt = self.cli('account-void', str(owed), result['id'])
+        self.assertEqual(attempt.returncode, 1, attempt)
+        self.assertIn('transcript agent identity differs', attempt.stderr)
+        self.assertEqual(owed.read_bytes(), before)
+
+    def test_resumed_agent_stop_records_a_new_result(self):
+        owed, transcript, first, _ = self.auto_owed([(-2, 'user', 'Return ready.'), (-1, 'assistant', 'ready')])
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='reviewer',
+                  agent_transcript_path=str(transcript))
+        first_notice, second_notice = (json.loads(line.split('\t')[3]) for line in owed.read_text().splitlines())
+        self.assertEqual(first_notice['id'], first['id'])
+        self.assertNotEqual(second_notice['id'], first['id'])
+        self.assertEqual(second_notice['agent_id'], first['agent_id'])
+        self.assertEqual(second_notice['agent_transcript_path'], first['agent_transcript_path'])
+
+    def test_void_accepts_a_prompt_reply_and_stop_in_one_second(self):
+        owed, transcript, result, epoch = self.auto_owed([
+            (0.1, 'user', 'Return ready.'), (0.2, 'assistant', ' ReAdY ')])
+        owed.unlink()
+        hook_spec = importlib.util.spec_from_file_location('void_stop_hook', HOOK)
+        stop_hook = importlib.util.module_from_spec(hook_spec)
+        hook_spec.loader.exec_module(stop_hook)
+        stop_instant = epoch * 1_000_000_000 + 300_000_000
+        with mock.patch.dict(os.environ, self.env, clear=True), \
+                mock.patch.object(stop_hook, 'STATE', owed.parent.parent), \
+                mock.patch.object(stop_hook.time, 'time_ns', return_value=stop_instant):
+            stop_hook.subagent_stop({'session_id': 's1', 'cwd': str(self.checkout),
+                                     'agent_type': 'ship:reviewer--sol', 'agent_id': result['agent_id'],
+                                     'agent_transcript_path': str(transcript)})
+        notice = json.loads(owed.read_text().split('\t')[3])
+        self.assertEqual(notice.get('stopped_at_ns'), stop_instant)
+        attempt = self.cli('account-void', str(owed), notice['id'])
+        self.assertEqual(attempt.returncode, 0, attempt.stderr)
+        self.assertEqual(self.hook('stop'), '')
 
     def frozen_patch(self, data=b'diff --git a/x b/x\n+frozen\n'):
         patch = self.base / 'frozen.patch'
