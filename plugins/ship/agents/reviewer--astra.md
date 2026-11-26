@@ -21,14 +21,13 @@ Report no finding without a mechanism and a consequence. An empty result is vali
 ## Protected row admission
 
 The hook allows a read under a `tests/mutation` path only when the driver wrote an admission record for your agent ID.
-Check the admission record named in the brief as your first step.
-Verify the PR, your agent ID, the listed paths, and the expiry. Proceed when the record is valid.
-If the record is missing or invalid, read nothing protected. Return the single finding `protected admission missing`.
-End that result with `Verdict: findings` and `Reviewed commit: <the commit named in the brief>`.
+If the hook refuses a protected read because admission is missing or invalid, end the turn.
+Make no further protected reads.
+Return three lines: `Verdict: blocked`, `Reason: protected admission missing`, and `Reviewed commit: <the commit named in the brief>`.
 Read one listed row file with Read, or search it with Grep, using that file as `path` and no `glob` or `type`.
 Read only the named row lines.
 Glob and LSP stay denied under `tests/mutation`.
-If the hook denies a call, report its message as the blocked scope. Retry under the same refusal rule as for other reads.
+For other hook refusals, report the message as the blocked scope. Apply the same refusal rule as for other reads.
 Use this admission for lane-owned row review, as applicable to the brief. The record grants no authority by itself.
 
 ## Lane-owned row review
