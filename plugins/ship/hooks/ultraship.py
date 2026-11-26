@@ -697,45 +697,50 @@ def outside_single_quotes(command):
     return ''.join(kept)
 
 
-def read_only_shell(command):
-    # Only literal read commands qualify; expansions and redirections can execute or create another program.
+def literal_shell_segments(command, *, strict=False):
+    """Return literal argv lists and their separators, or None for out-of-scope syntax."""
+    # Expansions and redirections can execute or create another program.
     # A backslash, a glob bracket or a quoted operator outside single quotes changes the words the shell runs.
-    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|]", outside_single_quotes(command)):
-        return False
+    if (strict and '\x00' in command) or re.search(r"[^\w \t\n./,:=@%+\-'\";&|]", outside_single_quotes(command)):
+        return None
     # A quote may only wrap a whole word: the shell joins a quoted span with the text or span beside it, and the
     # non-POSIX lexer below does not. Without backslashes, each span ends at the next matching quote.
     for span in re.finditer(r"'[^']*'|\"[^\"]*\"", command):
         if (span.start() and command[span.start() - 1] not in ' \t\n;&|'
                 or span.end() < len(command) and command[span.end()] not in ' \t\n;&|'):
-            return False
+            return None
     try:
         # Non-POSIX tokens keep their quotes, so only an unquoted operator separates commands.
-        lexer = shlex.shlex(command, posix=False, punctuation_chars=';&|\n')
+        lexer = shlex.shlex(command.strip(' \t\n') if strict else command,
+                            posix=False, punctuation_chars=';&|\n')
         lexer.whitespace = ' \t\r'
         lexer.whitespace_split = True
         lexer.commenters = ''
-        tokens = list(lexer)
-    except ValueError:
-        return False
-    parts, current = [], []
-    for token in tokens:
-        if token and all(char in ';&|\n' for char in token):
-            if token not in {';', '&&', '||', '|', '\n'}:
-                return False
-            if current:
-                parts.append(current)
-                current = []
-        else:
-            try:
+        parts, current = [], []
+        for token in lexer:
+            if token and all(char in ';&|\n' for char in token):
+                if (strict and not current) or token not in {';', '&&', '||', '|', '\n'}:
+                    return None
+                if current:
+                    parts.append((current, token))
+                    current = []
+            else:
                 word = shlex.split(token)
-            except ValueError:
-                return False
-            if len(word) != 1:
-                return False
-            current.append(word[0])
-    if current:
-        parts.append(current)
-    for words in parts:
+                if len(word) != 1 or strict and token.startswith('='):
+                    return None
+                current.append(word[0])
+        if current:
+            parts.append((current, ''))
+        return parts if not strict or not parts or parts[-1][1] in {'', ';'} else None
+    except ValueError:
+        return None
+
+
+def read_only_shell(command):
+    parts = literal_shell_segments(command)
+    if parts is None:
+        return False
+    for words, _ in parts:
         if words[0] not in READ_ONLY_COMMANDS:
             return False
         if words[0] == 'sed' and not (
@@ -4377,6 +4382,94 @@ def review_data_segment(words):
     return True
 
 
+def clone_source_file(cwd, word):
+    real = Path(os.path.realpath(os.path.join(cwd, os.path.expanduser(word))))
+    home = Path.home().resolve()
+    config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or home / '.claude')
+    return (real.is_file() and not real.is_relative_to(Path(__file__).resolve().parents[1])
+            and not real.is_relative_to((config / 'plugins').resolve())
+            and any((parent / '.git').exists() for parent in real.parents if not home.is_relative_to(parent)))
+
+
+def custody_read_only_shell(command, cwd, *, fallback=False):
+    """Classify literal reads without granting access to any path."""
+    home_cd = re.match(r'[ \t]*cd[ \t]+(~/[\w./-]+)(?=[ \t\n;&|]|$)', command, re.ASCII)
+    if home_cd:
+        start, end = home_cd.span(1)
+        command = command[:start] + shlex.quote(os.path.expanduser(home_cd[1])) + command[end:]
+    parts = literal_shell_segments(command, strict=True)
+    if not parts:
+        return False
+    moved = False
+    for index, (words, ending) in enumerate(parts):
+        name, args = words[0], words[1:]
+        if name == 'cd':
+            # Follow one leading cd so the directory custody scan has every possible base.
+            if (index or len(args) != 1 or args[0].startswith(('-', '~')) or ending not in {'&&', ''}
+                    or (os.environ.get('CDPATH') or os.environ.get('cdpath')) and not os.path.isabs(args[0])):
+                return False
+            cwd = os.path.join(cwd, args[0])
+            if not os.path.isdir(cwd):
+                return False
+            moved = True
+        elif name == 'git':
+            # Use -C for Git; a cd prefix retains the existing hook-source restriction.
+            if moved or not custody_git_read(args, piped=ending == '|', fallback=fallback):
+                return False
+        elif name == 'awk':
+            # shortcut: admit literal field printing; use an awk parser for broader programs.
+            if (not args or not re.fullmatch(r'\{[ \t]*print(?:[ \t]+\$(?:[0-9]+|NF))?[ \t]*\}', args[0])
+                    or any(word.startswith('-') or SHELL_ASSIGNMENT.match(word) for word in args[1:])):
+                return False
+        elif name == 'sed':
+            if not read_only_shell(shlex.join(words)) or not all(clone_source_file(cwd, word) for word in args[2:]):
+                return False
+        elif name == 'rg':
+            # The configuration file can inject a program option. The fallback avoids implicit recursive reads.
+            if fallback or args[:1] != ['--no-config'] or not reader_options_known('rg', args[1:]):
+                return False
+        elif name == 'grep':
+            letters = SAFE_GREP_LETTERS.translate(str.maketrans('', '', 'rR')) if fallback else SAFE_GREP_LETTERS
+            if not all(not word.startswith('-') or word == '--' or word in {'-A', '-B', '-C', '-e', '-m'}
+                       or re.fullmatch(r'-[' + letters + r'0-9]+', word) for word in args):
+                return False
+        else:
+            flags = {'cat': 'AbEnstTuv', 'head': 'cnqv', 'tail': 'cnqv', 'wc': 'clLmw', 'sort': 'bdfghiMnrsuV',
+                     'uniq': 'cdiu', 'cut': 'bcdfnsz', 'ls': 'aAhdilnRStU', 'stat': 'cLf', 'file': 'bhiLN',
+                     'diff': 'uU'}.get(name)
+            if name == 'ls' and fallback:
+                flags = flags.replace('R', '')
+                if not any(not word.startswith('-') for word in args):
+                    return False
+            if (flags is None or name == 'diff' and (moved or fallback)
+                    or any(word.startswith('-') and word not in {'-', '--'}
+                           and not re.fullmatch(rf'-[{flags}0-9]+', word) for word in args)
+                    or name == 'uniq' and (sum(not word.startswith('-') or word == '-' for word in args) > 1
+                                           or '--' in args and args.index('--') < len(args) - 2)):
+                return False
+    return True
+
+
+def custody_git_read(args, *, piped, fallback):
+    """Recognize Git reads with literal options and keep configurable programs out of the fallback."""
+    if args[:2] == ['--no-pager', '--no-optional-locks']:
+        return (not git_read_argv(['git', *args[2:]])
+                and ('diff' not in args or {'--no-ext-diff', '--no-textconv'} <= set(args)))
+    words = args
+    while words[:1] == ['-C'] and len(words) > 1 and not words[1].startswith('-'):
+        words = words[2:]
+    if not words:
+        return False
+    name, operands = words[0], words[1:]
+    if name == 'show' and (piped or not fallback):
+        return not git_read_argv(['git', '-c', 'core.fsmonitor=false', *words])
+    if fallback:
+        return name == 'rev-parse' and not git_read_argv(['git', '-c', 'core.fsmonitor=false', *words])
+    return git_read_words(words) or not git_read_argv(['git', '-c', 'core.fsmonitor=false', *words]) or (
+        name == 'cat-file' and len(operands) == 2 and operands[0] in {'-t', '-s', '-p', '-e'}
+        and not operands[1].startswith('-'))
+
+
 def literal_data_assignment(words):
     # shortcut: names use a deny list; upgrade to a fixed name allowlist when a new case needs more.
     denied = {'path', 'fpath', 'cdpath', 'module_path', 'ifs', 'env', 'bash_env', 'home', 'zdotdir',
@@ -5161,6 +5254,8 @@ RECEIPT_CUSTODY_FAILED = ('The ship hook could not check refusal-receipt custody
                           'Report the blocked scope to the driver.')
 PRE_FAILED = ('The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
               'Report the blocked scope to the driver.')
+PRE_READ_WARNING = ('S2: The ship hook failed. Only a confirmed read-only Bash call can proceed. '
+                    'The traceback is on stderr. Report the error to the driver.')
 PRE_INPUT_INVALID = ('The ship hook could not read its input as a JSON object, so it denies this call. '
                      'Report the blocked scope to the driver.')
 
@@ -5465,23 +5560,12 @@ def receipt_custody(data, read_search=False):
             if not words:
                 return False
             if words[0] == 'sed':
-                def clone_file(word):
-                    # A regular file inside a Git work tree, outside the plugin that runs this hook and outside the
-                    # folder that holds installed plugins. A repository at the home folder itself makes no clone.
-                    real = Path(os.path.realpath(os.path.join(folder, os.path.expanduser(word))))
-                    home = Path(os.path.realpath(os.path.expanduser('~')))
-                    config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or home / '.claude')
-                    return (real.is_file() and not real.is_relative_to(Path(__file__).resolve().parents[1])
-                            and not real.is_relative_to(Path(os.path.realpath(config / 'plugins')))
-                            and any((parent / '.git').exists() for parent in real.parents
-                                    if not home.is_relative_to(parent)))
-
                 # Only `-n` with one print range reads; any other sed script or option can write a file or run a program.
                 # A backslash could hide a line continuation, which changes the file name the shell opens.
                 return ('\\' not in raw and len(words) > 3 and words[1] == '-n'
                         and bool(re.fullmatch(r'[0-9]+(?:,[0-9]+)?p', words[2]))
                         and not any(word.startswith('-') for word in words[3:])
-                        and all(clone_file(word) for word in words[3:]))
+                        and all(clone_source_file(folder, word) for word in words[3:]))
             # `diff` opens a file inside a folder operand, and a repository can configure programs that git runs,
             # so only the `sed` form takes the `cd` prefix; git takes its folder through `-C`.
             if moved:
@@ -5652,8 +5736,22 @@ def receipt_custody(data, read_search=False):
                     first == 'df' or read_only_git(words, [raw for raw, _, _, _ in parts], ending))
 
             comment = pr_comment_body_removed(raw)
-            custody_source = literal_bindings_resolved(
-                path_command if path_command != raw else joined if comment == raw else comment, cwd_path)
+            scan_source = path_command if path_command != raw else joined if comment == raw else comment
+            # The estimator path has no whitespace or glob characters, so its bare expansion is one word.
+            eta = re.fullmatch(r'([ \t]*(?P<var>[A-Za-z_]\w*)=(?P<path>/[\w./-]+);[ \t]+python3[ \t]+)'
+                               r'(?P<use>\$(?P=var)|\$\{(?P=var)\})([ \t]+eta[ \t]+--size[ \t]+[SML][ \t]*\n?)',
+                               raw, re.ASCII)
+            if eta:
+                config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+                cache = (config / 'plugins/cache/better-plugin/chief-of-chiefs').resolve()
+                script = Path(eta['path'])
+                if (script.is_relative_to(cache) and str(script.resolve()) == eta['path'] and regular_file(script)
+                        and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+/skills/estimate/scripts/estimate\.py',
+                                         str(script.relative_to(cache)))):
+                    start, end = eta.span('use')
+                    scan_source = raw[:start] + '"' + eta['use'] + '"' + raw[end:]
+            custody_source = literal_bindings_resolved(scan_source, cwd_path)
+            literal_read = custody_read_only_shell(raw, cwd_path)
             cache_operand = cache_listing[1] if cache_listing else None
             try:
                 masked_source = cat_heredoc_data(custody_source)
@@ -6033,7 +6131,8 @@ def receipt_custody(data, read_search=False):
                         return 'hard'
                     evidence_index = len(tokens) - 1 if account_words and account_words[2] != 'account-auto' else -1
                     name_source = source[:tokens[evidence_index][2]] if evidence_index >= 0 else source
-                    plain_source = source == text and plain_hook_source_command(source, tokens)
+                    plain_source = source == text and (plain_hook_source_command(source, tokens)
+                                                       or source == custody_source and literal_read)
                     if not plain_source:
                         # An inert quoted-delimiter script cannot run a process or import a module; its names are file text.
                         name_text = python_heredoc_shell(cat_heredoc_data(name_source), inert_only=True)
@@ -6206,7 +6305,7 @@ def receipt_custody(data, read_search=False):
                                     or globbed and changes_dir and not listing[index]
                                     and glob_window(path, receipt_paths | grant_paths)
                                     or globbed and not listing[index] and glob_prefix(path, stores={hook_folder})
-                                    or (modifies_paths and installed_hook in resolved(path))):
+                                    or (modifies_paths and not literal_read and installed_hook in resolved(path))):
                                 return 'hard'
                             hook_glob = hook_glob or globbed and glob_prefix(path, stores={hook_folder})
                             if ((globbed and glob_prefix(path, stores={hook_folder}))
@@ -7441,7 +7540,7 @@ def compact(data):
 
 
 def guarded_pre(data):
-    """Deny every tool for every caller when `pre` raises an exception."""
+    """Keep unexpected errors closed unless a Bash read passes classification and custody."""
     try:
         output = pre_output(data)
         issue_account_grant(data)
@@ -7450,10 +7549,25 @@ def guarded_pre(data):
             print(json.dumps({'hookSpecificOutput': output}))
     except Exception:
         traceback.print_exc()
+        tool = data.get('tool_name') if isinstance(data, dict) else ''
         try:
             receipt_custody(data, read_search=True)
+            if tool == 'Bash':
+                command = (data.get('tool_input') or {}).get('command')
+                cwd = data.get('cwd') or os.getcwd()
+                if isinstance(command, str) and custody_read_only_shell(command, cwd, fallback=True):
+                    trigger = custody_normalized(command)
+                    if (any('ultraship/' + folder in trigger for folder in ROW_RECORD_FOLDERS)
+                            or '--row-file' in trigger or '--row-id' in trigger):
+                        deny(PRE_FAILED)
+                    verdict = receipt_custody(data)
+                    if verdict == 'hard':
+                        deny(RECEIPT_CUSTODY)
+                    if verdict is False:
+                        print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
+                                                                 'additionalContext': PRE_READ_WARNING}}))
+                        return
         except Exception:
-            tool = data.get('tool_name') if isinstance(data, dict) else ''
             if isinstance(tool, str) and (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')):
                 deny(RECEIPT_CUSTODY)
         deny(PRE_FAILED)
