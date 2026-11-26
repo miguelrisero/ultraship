@@ -1,6 +1,7 @@
 # Ship pipeline
 
 Each step names its ledger `step`. Light mode runs steps 1, 3, 5, 7, 9, 10, and 12.
+Apply the [important planning gate](#important-planning) in either mode when its scope applies.
 
 At any owner-dependent step, apply [owner decisions](owner-decisions.md). Record the Input and blocked scope on the board. Continue independent work without claiming the dependent step passes. Keep external CI/deploy waits tied to their run identities.
 
@@ -71,10 +72,64 @@ Preserve execution admission and the reviewer MCP ban under both [scoped decisio
 Dispatch `planner--sol` with the objective, constraints, and evidence paths. Freeze its output in the run scratch file:
 
 - Slices in build order, each with files, a test, and an acceptance check.
-- Premises, each with a falsifier. Check each falsifier before step 3; a falsified premise returns to planning.
+- Premises, each with a falsifier. Check each falsifier before step 3. Return to planning on a falsified premise. Apply the important planning rework limit when applicable.
 - A conformance snapshot: the acceptance checks the finished branch must meet.
 
-For design-heavy work, run `ship:panel design` on the plan before step 3.
+Require prior confirmation only when the important planning gate applies.
+Run `ship:panel design` on the frozen plan before step 3 for design-heavy work.
+
+### Important planning
+
+Use this route only for important planning, such as architecture, contracts, migrations, security, and billing.
+Keep routine work on its existing route. The coordinator owns both rounds; the planner and reviewers stay read-only.
+Apply the [helper standing request](owner-decisions.md#helper-standing-request) to every brief, including fallbacks.
+List exact permitted paths and exclusions. Apply the reviewer search rules and [security review triage](#security-review-triage) above.
+Share only authorized evidence. Keep secrets, protected content, and confidential data outside the brief and any external query.
+
+Before refutation, freeze all evidence outside the repository commit in permitted read-only snapshots.
+Record the source identity, exact readable snapshot path, and SHA256 of each item in an evidence manifest.
+Use the same manifest in both rounds. Review only the frozen commit and the named snapshots for plan evidence.
+Include the evidence manifest SHA256 in both briefs and both review records.
+Use an empty manifest when the commit contains all evidence.
+
+1. Dispatch one independent `ship:reviewer--astra` to refute the frozen draft.
+   Give the refuter the draft, evidence locations, constraints, and falsifiers without earlier verdicts or coordinator conclusions.
+   Ask for counterexamples to material premises, alternatives that meet the constraints, and missing checks, with cited evidence.
+2. Resolve each material finding with cited evidence or a change to the plan. Record its disposition separately from the plan.
+   Freeze the final plan with its decision, slices, constraints, evidence, falsifiers, and acceptance checks.
+   Return to refutation if the final plan introduces a material decision, premise, or scope outside the reviewed draft.
+3. Start a fresh `ship:reviewer--opus` Agent with only the frozen final plan, its permitted evidence, and the required brief rules.
+   Do not resume any earlier agent. Omit earlier verdicts, review transcripts, and coordinator conclusions.
+   Keep the refute findings and the disposition record out of the confirmation brief and its readable files.
+   Give the confirmer this task: "Confirm the exact final plan against its evidence and falsifiers. Report a verdict with coverage."
+
+Leave `model` unset. Use the [existing roster fallback chains](roster.md) for unavailable or ineligible seats and record substitutions.
+Skip any seat whose pinned model authored the plan or served in the other round. Never use a fallback to bypass a refusal.
+Withhold credit if observed routing shows that two roles used the same model.
+Include the frozen repository SHA and the SHA256 of the reviewed draft or final plan in each brief.
+Use a new agent for each replacement. Require each verdict to name the reviewed identities and its evidence coverage.
+Verify the repository evidence at its frozen commit.
+Recompute the plan, manifest, and snapshot digests before each review dispatch and before accepting its verdict.
+Verify the plan digest and all evidence digests before each dependent dispatch, including the design panel and dependent slices.
+Match the recomputed digests to the confirmation record for the final plan.
+Recheck them before marking planning complete and before any other dependent action.
+Keep dependent work pending on missing, unreadable, or mismatched evidence.
+Keep the plan pending if either round is missing, blocked, incomplete, or stale.
+Keep unresolved material contradictions pending, even after a confirmation pass. Require a passing confirmation for the exact final plan.
+
+Allow one rework attempt after the initial attempt.
+Apply this limit to every return to planning or refutation, including after a failed confirmation or an evidence change.
+Persist the rework count in the run record before any return to planning or refutation.
+Keep the count for the same planning scope across handoff and recovery.
+Return to refutation if the evidence changes between rounds and the limit permits.
+Repeat both rounds if the plan or its evidence changes after confirmation and the limit permits.
+On exhaustion, keep the plan and dependent slices pending. Report the unresolved issue and the next permitted action to the superior.
+Continue independent work. Route owner decisions through the [existing contract](owner-decisions.md) and preserve [execution admission](../SKILL.md#execution-admission).
+
+Record each result under `plan-refute` or `plan-confirm` as it returns.
+Use the exact `agent-type@agent-id`, repository SHA, verdict, and frozen plan digest.
+Record a passing `plan` row only after both rounds qualify. Keep dependent slices pending until then.
+The review gives zero authority for implementation or publication.
 
 ## 3. Slices
 

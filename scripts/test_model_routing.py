@@ -9,6 +9,84 @@ checks = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checks)
 
 
+class ImportantPlanningContractTests(unittest.TestCase):
+    ship = ROOT / 'plugins/ship'
+
+    def setUp(self):
+        pipeline = (self.ship / 'skills/ship/references/pipeline.md').read_text()
+        self.plan = pipeline.split('## 2. Plan and premises\n', 1)[1].split('## 3. Slices\n', 1)[0]
+        self.pipeline = pipeline
+        self.gate = self.plan.partition('### Important planning\n')[2]
+
+    def test_driver_runs_refutation_before_fresh_confirmation_on_the_important_route(self):
+        self.assertRegex(self.gate, r'(?s)Dispatch one independent `ship:reviewer--astra`.*'
+                                    r'Start a fresh `ship:reviewer--opus` Agent')
+        self.assertIn('Use this route only for important planning', self.gate)
+        self.assertIn('Light mode runs steps 1, 3, 5, 7, 9, 10, and 12.', self.pipeline)
+        self.assertIn('Keep routine work on its existing route', self.plan)
+        self.assertIn('Apply the [important planning gate](#important-planning) in either mode', self.pipeline)
+        skill = (self.ship / 'skills/ship/SKILL.md').read_text()
+        self.assertIn('references/pipeline.md#important-planning', skill)
+        completion = skill.split('## Completion gate\n', 1)[1].split('### Explicit checks', 1)[0]
+        self.assertIn('Require both [important planning](references/pipeline.md#important-planning) results', completion)
+        planner = (self.ship / 'agents/planner--sol.md').read_text()
+        self.assertIn('#important-planning', planner)
+        self.assertNotIn('Agent', checks.frontmatter(planner)['tools'])
+        for seat in ('reviewer--astra', 'reviewer--opus'):
+            with self.subTest(seat=seat):
+                reviewer = (self.ship / 'agents' / (seat + '.md')).read_text()
+                self.assertEqual(checks.frontmatter(reviewer)['tools'], 'Read, Grep, Glob, LSP, WebFetch, WebSearch')
+
+    def test_confirmation_uses_only_frozen_evidence_and_keeps_material_conflicts_pending(self):
+        for requirement in (
+            'Give the refuter the draft, evidence locations, constraints, and falsifiers',
+            'Skip any seat whose pinned model authored the plan or served in the other round',
+            'Do not resume any earlier agent',
+            'Omit earlier verdicts, review transcripts, and coordinator conclusions',
+            'Keep the refute findings and the disposition record out of the confirmation brief and its readable files',
+            'Confirm the exact final plan against its evidence and falsifiers',
+            'Keep the plan pending if either round is missing, blocked, incomplete, or stale',
+            'Keep unresolved material contradictions pending',
+            'Record a passing `plan` row only after both rounds qualify',
+            'Repeat both rounds if the plan or its evidence changes after confirmation',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.plan)
+
+    def test_rework_stops_after_one_additional_attempt(self):
+        self.assertRegex(self.gate, r'(?s)Allow one rework attempt after the initial attempt\..*'
+                                    r'Persist the rework count.*'
+                                    r'On exhaustion, keep the plan and dependent slices pending')
+        self.assertIn('Apply this limit to every return to planning or refutation', self.gate)
+
+    def test_design_panel_keeps_a_frozen_plan_on_both_routes(self):
+        ordinary = self.plan.split('### Important planning\n', 1)[0]
+        self.assertIn('Require prior confirmation only when the important planning gate applies.\n'
+                      'Run `ship:panel design` on the frozen plan before step 3 for design-heavy work.', ordinary)
+
+    def test_outside_commit_evidence_stays_bound_until_dependent_work(self):
+        for requirement in (
+            'Record the source identity, exact readable snapshot path, and SHA256 of each item',
+            'Use the same manifest in both rounds',
+            'Include the evidence manifest SHA256 in both briefs and both review records',
+            'Recompute the plan, manifest, and snapshot digests before each review dispatch and before accepting its verdict',
+            'Verify the plan digest and all evidence digests before each dependent dispatch',
+            'Match the recomputed digests to the confirmation record for the final plan',
+            'Keep dependent work pending on missing, unreadable, or mismatched evidence',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.gate)
+
+    def test_both_rounds_preserve_dispatch_and_action_gates(self):
+        for requirement in (
+            'helper standing request', 'permitted paths and exclusions', 'security review triage',
+            'Leave `model` unset', 'existing roster fallback chains', 'execution admission',
+            'owner decisions', 'zero authority for implementation or publication',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, self.plan)
+
+
 class ModelRoutingTests(unittest.TestCase):
     def test_astra_and_luna_reviewer_names_pin_their_declared_models(self):
         for seat, model in (('reviewer--astra', 'gpt-6.2-astra'),
