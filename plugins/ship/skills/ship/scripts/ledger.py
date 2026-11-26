@@ -19,6 +19,7 @@ import tempfile
 import time
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
+from functools import cache
 from pathlib import Path
 
 REQUIRED = {
@@ -411,23 +412,81 @@ def open_run(path):
     return None
 
 
-def gaps(run, head):
+def gaps(run, head, cwd='.'):
     start, after = run
+    agents = Path(__file__).resolve().parents[3] / 'agents'
+    seats = {p.stem for p in agents.glob('reviewer--*.md') if p.is_file()}
+
+    def reviewer(field):
+        kind, ident = agent_key(field)
+        return (kind.removeprefix('ship:') in seats
+                and ('@' not in field or re.fullmatch('[A-Za-z0-9]+', ident or '')))
+
+    @cache
+    def commit(sha):
+        if re.fullmatch('[0-9a-fA-F]{4,64}', sha):
+            sha = sha.lower()
+            try:
+                resolved = git(cwd, '--no-replace-objects', 'rev-parse', '--verify',
+                               '--end-of-options', f'{sha}^{{commit}}')
+            except subprocess.CalledProcessError:
+                return None
+            if resolved.startswith(sha):
+                return resolved
+        return None
+
+    @cache
+    def ancestor(older, newer):
+        try:
+            git(cwd, '--no-replace-objects', 'merge-base', '--is-ancestor', older, newer)
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode == 1:
+                return False
+            raise
+        return True
+
+    def commit_issues(sha, closing):
+        resolved = commit(sha)
+        if resolved is None:
+            return ['unknown commit']
+        if closing:
+            return [] if resolved == head else [f'differs from HEAD {head}']
+        issues = []
+        if not ancestor(resolved, head):
+            issues.append(f'is not an ancestor of HEAD {head}')
+        base = commit(start[3])
+        if base is None:
+            issues.append(f'run start {start[3]!r} is an unknown commit')
+        elif not ancestor(base, resolved):
+            issues.append(f'does not descend from run start {base}')
+        return issues
+
     done = {}
     for row in after:
         if row[4] != 'owed':
             done.setdefault(row[1], []).append(row)
     missing = []
     for step in REQUIRED[start[2]]:
-        if step not in done:
-            missing.append(step)
-        elif step in REVIEW_STEPS:
-            reviews = [row for row in done[step]
-                       if agent_key(row[2])[0].startswith(('ship:reviewer--', 'reviewer--'))]
-            if not reviews:
-                missing.append(f'{step} (wrong role)')
-            elif not any(row[3] == head for row in reviews):
-                missing.append(f'{step} (stale head)')
+        candidates = done.get(step, [])
+        if step not in REVIEW_STEPS:
+            if not candidates:
+                missing.append(step)
+            continue
+        closing = step == 'closing'
+        reviews = [row for row in candidates if reviewer(row[2])]
+        if any(not commit_issues(row[3], closing) for row in reversed(reviews)):
+            continue
+        requirement = 'at HEAD' if closing else "on this run's history"
+        details = []
+        if reviews:
+            sha = reviews[-1][3]
+            details = [f'newest reviewer row {sha!r}', *commit_issues(sha, closing)]
+        wrong = next((row for row in reversed(candidates) if not reviewer(row[2])), None)
+        if wrong:
+            details.extend([f'wrong role {wrong[2]!r} at {wrong[3]!r}',
+                            *commit_issues(wrong[3], closing)])
+        missing.append(f'{step} (needs a reviewer--* row {requirement}; '
+                       + '; '.join(details or ['no completed row']) + ')')
     return missing
 
 

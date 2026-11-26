@@ -61,6 +61,15 @@ Preserve execution admission and the reviewer MCP ban under both [scoped decisio
 | 12 | Completion gate | `gate` | driver |
 | 13 | Handoff | — | driver |
 
+### Ledger review evidence
+
+Record the reviewer seat and the actual reviewed commit in each review row.
+The ledger checks the seat against the Ship reviewer agent files.
+For `panel-high`, `simplify`, `deep-review`, `select`, `fix-read`, and `panel-final`, use a commit between run start and HEAD, inclusive, by Git ancestry.
+In full mode, record `closing` at HEAD. Light mode has no `closing` step.
+Use a full commit SHA or an unambiguous abbreviated commit SHA. The ledger accepts uppercase hexadecimal digits.
+`append` trusts the supplied agent name; the role check detects label errors only.
+
 ## 1. Guard and open
 
 1. Confirm the repository, a clean owned worktree, GitHub access, and a branch based on current remote main.
