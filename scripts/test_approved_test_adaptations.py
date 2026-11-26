@@ -48,6 +48,49 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             (SHIP / 'agents/driver--sol.md').read_text(),
         )
 
+    def test_writers_can_create_only_the_absent_rows_file_named_by_the_decision(self):
+        rules = []
+        for name in ('writer--sol.md', 'writer--fable52.md'):
+            with self.subTest(writer=name):
+                text = (SHIP / 'agents' / name).read_text()
+                rule = section(text, '### Native creation of an absent rows file').strip()
+                rules.append(rule)
+                for requirement in (
+                    '[lane-owned row route](driver.md#lane-owned-row-route)',
+                    'frozen CoC decision names one rows file',
+                    '`backend/api/tests/mutation/`',
+                    'Verify the SHA256 and bindings before the Write',
+                    'Require `git ls-tree` to exit 0 with empty output',
+                    'at the recorded base',
+                    'absent in the worktree',
+                    'no path component is a symlink',
+                    'native `Write` once at the absolute path',
+                    'only the rows the decision names',
+                    'the anchor guard',
+                    'one independent not-weaker review at the pushed head',
+                ):
+                    self.assertIn(requirement, rule)
+        if len(rules) == 2:
+            self.assertEqual(*rules)
+
+    def test_existing_protected_rows_files_keep_unique_native_edit(self):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
+            with self.subTest(writer=name):
+                text = (SHIP / 'agents' / name).read_text()
+                rule = ('For every other native change to protected rows, use `Edit` with '
+                        'an absolute path, `replace_all=false` and one unique exact match.')
+                self.assertTrue(rule in text, rule)
+        route = section((SHIP / 'agents/driver.md').read_text(), '### Lane-owned row route')
+        parent = route.split('   Earlier test-only parent:', 1)[1].split('\n5. Restore:', 1)[0]
+        rule = 'For an existing rows file, the writer uses native Edit with `replace_all=false` for the authorized insertion.'
+        self.assertTrue(rule in parent, rule)
+
+    def test_driver_step_four_points_to_the_writer_create_rule(self):
+        route = section((SHIP / 'agents/driver.md').read_text(), '### Lane-owned row route')
+        add = route.split('\n4. Add:', 1)[1].split('\n5. Restore:', 1)[0]
+        self.assertIn('require the frozen CoC decision to name its path', add)
+        self.assertIn('writer--sol.md#native-creation-of-an-absent-rows-file', add)
+
     def test_writer_briefs_admit_the_canonical_route_document(self):
         policy = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
         self.assertIn(
@@ -220,7 +263,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     'Before any protected insertion, the writer verifies the frozen CoC decision by absolute path and SHA256.',
                     'Bind it to the writer, repository, lane, draft URL, row base, parent PR URL and full squash SHA.',
                     'Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.',
-                    'The writer uses native Edit with `replace_all=false` for the authorized insertion.',
+                    'For an existing rows file, the writer uses native Edit with `replace_all=false` for the authorized insertion.',
                     'At the frozen head, the driver verifies the decision digest and bindings again against the applied rows.',
                 )
                 for rule in approval:

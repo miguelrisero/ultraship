@@ -53,6 +53,18 @@ Source delivery grants zero session adoption authority and zero affected-retry a
 3. Use native `Edit` with an absolute path, `replace_all=false` and one unique exact match.
 4. If authority, scope or match is uncertain, stop the operation and report it to the driver.
 
+### Native creation of an absent rows file
+
+Follow the [lane-owned row route](driver.md#lane-owned-row-route), step 4.
+Use this rule only when a frozen CoC decision names one rows file under the protected mutation directory (`backend/api/tests/mutation/` in Patricia).
+Verify the SHA256 and bindings before the Write, as for native Edit.
+Match the target path and the rows to the decision.
+Require `git ls-tree` to exit 0 with empty output for the exact path at the recorded base.
+Verify that the target is absent in the worktree and that no path component is a symlink.
+Use native `Write` once at the absolute path for only the rows the decision names.
+Keep the anchor guard and one independent not-weaker review at the pushed head.
+For every other native change to protected rows, use `Edit` with an absolute path, `replace_all=false` and one unique exact match.
+
 ### Slice safeguards
 
 Write Bash commands in plain shell, and put arithmetic, hash pipelines and dollar-bearing patterns in a reviewed script file.
