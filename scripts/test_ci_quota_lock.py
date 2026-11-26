@@ -95,8 +95,12 @@ esac
         self.assertIn('ci-and-locks.md#flaky-guard-lock', slices)
         push = pipeline.split('## 9. Push and PR', 1)[1].split('\n## ', 1)[0]
         self.assertIn('Apply the [writer brief rules](#3-slices) to every writer dispatched here.', push)
-        drivers = [path.read_text().split('\n---\n', 1)[1] for path in POLICY_PATHS[:2]]
-        self.assertEqual(*drivers)
+        for path in POLICY_PATHS[:2]:
+            with self.subTest(driver=path.name):
+                self.assertIn(
+                    'Apply [CI reads and flaky guard locks](../skills/ship/references/ci-and-locks.md) '
+                    'during polling and guard execution.', path.read_text(),
+                )
         babysit = POLICY_PATHS[2].read_text().split('## One round', 1)[1]
         self.assertIn('gh pr view --json statusCheckRollup', babysit)
 
