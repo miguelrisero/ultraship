@@ -378,6 +378,18 @@ print('ultraship hooks: ok')
 
 
 class PreInputTests(unittest.TestCase):
+    def test_bash_pre_hook_blocks_process_failure(self):
+        config = json.loads(HOOK.with_name('hooks.json').read_text())
+        hooks = [hook for entry in config['hooks']['PreToolUse']
+                 if re.fullmatch(entry['matcher'], 'Bash') for hook in entry['hooks']]
+        self.assertTrue(any(
+            hook.get('type') == 'command'
+            and hook.get('command') == 'python3 "${CLAUDE_PLUGIN_ROOT}/hooks/ultraship.py" pre'
+            and hook.get('onFailure') == 'block'
+            for hook in hooks
+        ))
+        self.assertTrue(all(hook.get('onFailure') == 'block' for hook in hooks))
+
     def test_pre_denies_input_that_is_not_a_json_object(self):
         with tempfile.TemporaryDirectory() as temporary:
             env = {**os.environ, 'HOME': temporary, 'XDG_STATE_HOME': temporary}
@@ -594,6 +606,23 @@ class ReceiptCustodyTests(unittest.TestCase):
         result = json.loads(output.getvalue())['hookSpecificOutput']
         self.assertNotIn('permissionDecision', result)
         self.assertTrue(result['additionalContext'].startswith('S2: '), result)
+
+    def test_parser_refusal_preserves_literal_retry(self):
+        caller = 'ship:writer--sol'
+        event = {'cwd': str(self.cwd), 'tool_name': 'Bash', 'agent_type': caller,
+                 'tool_input': {'command': 'pwd "-P'}}
+        with redirect_stdout(io.StringIO()) as output, self.assertRaises(SystemExit):
+            ultraship.guarded_pre(event)
+        decision = json.loads(output.getvalue())['hookSpecificOutput']
+        self.assertEqual(decision['permissionDecision'], 'deny')
+        self.assertIn('unparsed shell syntax rule: unfinished shell quote', decision['permissionDecisionReason'])
+        self.assert_account_command_allowed('pwd -P', caller=caller)
+
+    def test_literal_cwd_query_keeps_custody_and_hook_failure_blocks(self):
+        event = {'tool_name': 'Bash', 'agent_type': 'ship:writer--sol', 'tool_input': {'command': 'pwd -P'}}
+        self.assert_custody_denial({**event, 'cwd': str(self.store)})
+        with patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+            self.assert_custody_denial(event, ultraship.PRE_FAILED)
 
     def prepare_owed(self, event):
         pending = ultraship.owed_file(event)
