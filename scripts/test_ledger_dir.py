@@ -2028,7 +2028,7 @@ class LedgerDirTests(unittest.TestCase):
         ):
             with self.subTest(label=label):
                 owed, _, result, _ = self.auto_owed([
-                    (-2, 'user', 'Review.'), (-1, 'assistant', f'{label} {sha}')])
+                    (-2, 'user', f'Review case: {label}'), (-1, 'assistant', f'{label} {sha}')])
                 auto = self.cli('account-auto', str(owed))
                 owed.write_text('')
                 self.assertEqual(auto.returncode, 0, auto.stderr)
@@ -2054,7 +2054,8 @@ class LedgerDirTests(unittest.TestCase):
             ('  > - **Verdict:** FAIL and Findings', 'findings'),
         ):
             with self.subTest(label=label):
-                owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'{label} {sha}')])
+                owed, _, result, _ = self.auto_owed([(-2, 'user', f'Review case: {label}'),
+                                                    (-1, 'assistant', f'{label} {sha}')])
                 auto = self.cli('account-auto', str(owed))
                 self.assertEqual(auto.returncode, 0, auto.stderr)
                 self.assertEqual(auto.stdout, f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} {verdict}\n"
