@@ -134,7 +134,13 @@ class BriefSafetyTests(unittest.TestCase):
             ('plugins/ship/skills/babysit/SKILL.md', '## Brief safety'),
             ('plugins/ship/skills/ship/references/owner-decisions.md', '## Helper standing request'),
         ):
-            section = (ROOT / name).read_text().split(heading + '\n', 1)[1].split('\n## ', 1)[0]
+            body = (ROOT / name).read_text().split(heading + '\n', 1)[1]
+            if heading == '## Brief template':
+                section = body.split('```text\n', 1)[1].split('\n```', 1)[0]
+                self.assertLess(section.index('## You may always'), section.index('## Only the owner'))
+                self.assertLess(section.index('## Only the owner'), section.index('Task:'))
+            else:
+                section = body.split('\n## ', 1)[0]
             for requirement in (
                 'Readable files: <exact absolute paths or directories in backticks that the agent may read, including every path its brief, route or agent definition requires; every other path is out of scope>',
                 'After a hook refusal, retry in another form when the refusal reason is fixed or the new form meets the rule the refusal names. '
