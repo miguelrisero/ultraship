@@ -111,34 +111,41 @@ PATCH_LABEL = re.compile(r'[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:[*_
 PATCH_BYTE_LIMIT = 64 * 1024 * 1024
 FENCE = re.compile(r'(`{3,}|~{3,})')
 VERDICT_RECORD = re.compile(r'[*_]*verdict[*_]*\s*:[*_]*\s*(pass|findings)[*_]*\s*', re.I)
+# Any verdict-shaped label, in any container, counts toward the one-verdict rule.
+VERDICT_ANY = re.compile(r'(?:verdict|overall)[*_\s]*:', re.I)
+LIST_ITEM = re.compile(r' {0,3}(?:[-+*]|\d{1,9}[.)])( {1,4})(?=\S)')
 # Markdown HTML blocks of these kinds run across blank lines, so they could hold the closing record.
 HTML_BLOCK = re.compile(r'^ {0,3}<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:pre|script|style|textarea)(?=[\s>]|$))',
                         re.I | re.M)
 
 
-def own_lines(text):
-    """Drop quoted lines and fenced blocks, so a reviewer's quotation never supplies a subject or verdict."""
-    kept, fence = [], None
+def check_fences(text):
+    """Raise when a code fence stays open at the end of the text, because it would hold the closing record."""
+    fence = None  # (marker, content indent); the indent is above zero for a fence opened in a list item
     for line in text.split('\n'):
-        stripped = line.lstrip()
-        indent = len(line[:len(line) - len(stripped)].expandtabs(4))
-        opener = FENCE.match(stripped) if indent <= 3 else None
-        if opener and not fence and opener.group(1)[0] == '`' and '`' in stripped[opener.end():]:
-            opener = None  # a backtick in the info string makes the line inline code, not a fence
+        body = line.lstrip(' \t')
+        indent = len(line[:len(line) - len(body)].expandtabs(4))
+        if fence and fence[1] and body and indent < fence[1]:
+            fence = None  # a less indented line ends the list item and its fence
         if fence:
+            marker, base = fence
             # Markdown closes a fence only on the same character, at least as long, indented at most three
-            # spaces, with nothing after it.
-            if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence) \
-                    and not stripped[opener.end():].strip():
+            # spaces past its container, with only spaces or tabs after it.
+            closer = FENCE.match(body) if indent - base <= 3 else None
+            if closer and closer.group(1)[0] == marker[0] and len(closer.group(1)) >= len(marker) \
+                    and not body[closer.end():].strip(' \t'):
                 fence = None
-        elif opener:
-            fence = opener.group(1)
-        elif indent < 4 and not stripped.startswith('>'):
-            # A line indented four or more spaces is an indented code block.
-            kept.append(line)
+            continue
+        item = LIST_ITEM.match(line)
+        base = item.end() if item else 0
+        if item:
+            body, indent = line[base:], 0
+        opener = FENCE.match(body) if indent <= 3 else None
+        # A backtick in the info string makes the line inline code, not a fence.
+        if opener and not (opener.group(1)[0] == '`' and '`' in body[opener.end():]):
+            fence = (opener.group(1), base)
     if fence:
         raise ValueError('unclosed code fence')
-    return '\n'.join(kept)
 
 
 def grant_request(script, argv):
@@ -692,19 +699,20 @@ def account_patch(pending, identifier, patch, *, entries):
         raise ValueError('mixed review subject')
     if HTML_BLOCK.search(text):
         raise ValueError('html block in review')
-    own_lines(text)  # an unclosed fence would hold the closing record
+    check_fences(text)
     # The review ends with a blank line and an unindented two-line record, which no quotation, fence,
     # list or indented block can hold. The first line is never the record, because the reader strips its indent.
     lines = text.split('\n')
     record = lines[-2:]
     subject = next((m for line in record if line == line.lstrip() and (m := PATCH_LABEL.fullmatch(line))), None)
     stated = next((m for line in record if line == line.lstrip() and (m := VERDICT_RECORD.fullmatch(line))), None)
-    if len(lines) < 4 or lines[-3].strip() or not subject or not stated:
+    # Markdown counts only spaces and tabs as a blank line.
+    if len(lines) < 4 or lines[-3].strip(' \t') or not subject or not stated:
         raise ValueError('expected a closing review record')
     digest = subject.group(1).lower()
     if {d.lower() for d in PATCH_DIGEST.findall(text)} != {digest}:
         raise ValueError('expected one patch digest')
-    if sum(1 for line in lines if VERDICT_LABEL.match(line)) != 1:
+    if sum(1 for line in lines if VERDICT_ANY.search(line)) != 1:
         raise ValueError('expected one verdict')
     verdict = stated.group(1).lower()
     try:

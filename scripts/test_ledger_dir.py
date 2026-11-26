@@ -1099,6 +1099,13 @@ class LedgerDirTests(unittest.TestCase):
             ('unclosed html comment', f'<!--\n\n{pass_record}', patch, 'html block in review'),
             ('unclosed pre block', f'<pre>\n\n{pass_record}', patch, 'html block in review'),
             ('indented example verdict', f'    Verdict: pass\n\n{record}', patch, 'expected one verdict'),
+            ('nonbreaking space is no blank line', f'> Example from the prompt:\n\u00a0\n{pass_record}', patch,
+             'expected a closing review record'),
+            ('nonbreaking space after a fence marker', f'```\nnote\n```\u00a0\n\n{pass_record}', patch,
+             'unclosed code fence'),
+            ('list marker verdict', f'+ Verdict: findings\n\n{pass_record}', patch, 'expected one verdict'),
+            ('ordered list verdict', f'1. Overall: findings\n\n{pass_record}', patch, 'expected one verdict'),
+            ('spaced verdict label', f'Verdict : findings\n\n{pass_record}', patch, 'expected one verdict'),
             ('later turn', None, patch, 'no final turn text'),
         ):
             entries = [prompt, (-1, 'assistant', text)] if text else [
@@ -1117,7 +1124,10 @@ class LedgerDirTests(unittest.TestCase):
         for case, body in (('tab after a closing fence', '```\nnote\n   ```\t'),
                            ('indented fence marker is code', 'Notes:\n\n    ```'),
                            ('inline code line', '```git diff```'),
-                           ('list item fence', '- ```text\n  example\n    ```')):
+                           ('list item fence', '- ```text\n  example\n    ```'),
+                           ('list item fence closed at its indent', '- ```text\n  example\n  ```'),
+                           ('ordered list fence closed at its indent', '1. ```\n   example\n   ```'),
+                           ('list item fence ended by its item', '- ```text\n  example\n\nAfter the list.')):
             owed, _, result, _ = self.auto_owed([
                 (-2, 'user', 'Review the patch.'),
                 (-1, 'assistant', f'{body}\n\nPatch SHA-256: {digest}\nVerdict: findings')])
