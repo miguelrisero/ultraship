@@ -1116,6 +1116,17 @@ class LedgerDirTests(unittest.TestCase):
                 self.assertIn(reason, accounted.stderr)
                 self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
 
+    def test_account_patch_accepts_markdown_fence_edges(self):
+        patch, digest = self.frozen_patch()
+        for case, tail in (('tab after a closing fence', '```\nnote\n   ```\t\nEnd.'),
+                           ('indented fence marker is code', '\n    ```\n\nEnd.')):
+            owed, _, result, _ = self.auto_owed([
+                (-2, 'user', 'Review the patch.'),
+                (-1, 'assistant', f'Patch SHA-256: {digest}\nVerdict: findings\n{tail}')])
+            with self.subTest(case=case):
+                accounted = self.cli('account-patch', str(owed), result['id'], str(patch))
+                self.assertEqual(accounted.returncode, 0, accounted.stderr)
+
     def test_account_patch_opens_no_symlinked_parent_and_bounds_the_hash(self):
         patch, digest = self.frozen_patch()
         (self.base / 'linked').symlink_to(self.base)

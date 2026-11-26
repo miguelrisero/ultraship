@@ -117,12 +117,12 @@ def own_lines(text):
     kept, fence = [], None
     for line in text.splitlines():
         stripped = line.lstrip()
-        indent = len(line.expandtabs(4)) - len(stripped)
-        opener = FENCE.match(stripped)
+        indent = len(line[:len(line) - len(stripped)].expandtabs(4))
+        opener = FENCE.match(stripped) if indent <= 3 else None
         if fence:
             # Markdown closes a fence only on the same character, at least as long, indented at most three
             # spaces, with nothing after it.
-            if opener and indent <= 3 and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence) \
+            if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence) \
                     and not stripped[opener.end():].strip():
                 fence = None
         elif opener:
