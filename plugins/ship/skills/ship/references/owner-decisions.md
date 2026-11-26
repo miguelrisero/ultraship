@@ -41,6 +41,7 @@ Never chain a glob listing into a write command.
 ```
 A reviewer reports a refused call as blocked scope and continues other permitted scope.
 [Loaded instructions and refusals](#loaded-instructions-and-refusals) sets the retry rule and the ask-your-superior rule.
+List the absolute path to `${CLAUDE_PLUGIN_ROOT}/agents/driver.md` under `Readable files` in the writer brief for lane-owned row work.
 
 ## Chief-managed CoC delivery
 
