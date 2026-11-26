@@ -119,7 +119,7 @@ class NativePeerRoutingTests(unittest.TestCase):
             'plugins/chief/skills/run/SKILL.md',
             'plugins/chief/skills/run/references/dispatch.md',
             *(f'plugins/ship/agents/{name}.md' for name in (
-                'driver', 'driver--sol', 'writer--sol', 'writer--sonnet', 'writer--fable52',
+                'driver', 'driver--sol', 'writer--sol', 'writer--fable52',
             )),
         )
         for name in paths:

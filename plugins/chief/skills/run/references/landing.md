@@ -6,9 +6,21 @@ A ready lane meets Ship's completion gate on its current head. Apply its queue c
 
 Default to a ready-for-review handoff. Merge only within explicit task or durable repository authority. Required review approval remains mandatory; an admin override needs a specific user instruction. Keep schema, API contracts, migrations, destructive operations, security, billing, authorization, and repository policy invariants under human review. Keep such lanes draft-only until the chief's independent review passes.
 
-Billing and authorization require an independent adversarial verification lane, separate from the builder's panels. Use `ship:verifier--fable` with replay/idempotency, tenant isolation, and authorization cases. Supply authorized test boundaries. Apply the same product guards and permission limits to every reviewer.
-
 Before landing, compare every changed bound, validator, fixture, and golden with the base branch. A green test encoding a relaxed policy cannot prove policy compliance. After the merge, run a negative control for merge-critical guards at the merge commit in an isolated environment, restore the source, and confirm the passing case. A checker that finds none of its expected patterns reports an error. A pattern-based drift instrument also needs a known-detecting negative control and a known-clean positive control, tuned to avoid false matches; preserve that evidence. Missing grep matches do not prove absent tests; use an isolated mutation check when practical, then restore and confirm green.
+
+## Verifier dispatch check
+
+Billing and authorization require an independent adversarial verification lane, separate from the builder's panels.
+Before dispatch, confirm that the current session lists the exact native route `ship:verifier--opus`.
+Use the subagent types registered with the native Agent tool. Source and cache files supply zero evidence of session registration.
+If the route is absent or cannot be confirmed, hold verification and record its status on the board.
+Report Ship `1.15.51` as the required plugin version and Chief `1.8.6` as its paired version.
+Resume verification only after you confirm the route in a session with both plugins loaded.
+Dispatch `ship:verifier--opus` with the Agent `model` field unset.
+Use the `ship:verifier--astra` fallback only when the exact Opus route is registered but unavailable.
+Follow the roster and record the substitution on the board. Keep all tool and permission restrictions.
+Give the verifier replay/idempotency, tenant isolation, and authorization cases. Supply authorized test boundaries.
+Apply the same product guards and permission limits to every reviewer.
 
 ## Canonical push and contact safeguards
 

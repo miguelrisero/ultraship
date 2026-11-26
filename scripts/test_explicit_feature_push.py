@@ -159,7 +159,7 @@ class ExplicitFeaturePushTests(unittest.TestCase):
                     'writers retain zero push authority, including push dry-runs',
                 ):
                     self.assertIn(requirement, text)
-        for name in ('writer--sol', 'writer--sonnet'):
+        for name in ('writer--sol', 'writer--fable52'):
             text = (ROOT / f'plugins/ship/agents/{name}.md').read_text()
             self.assertIn('Never push, run `/merge` or `gh pr merge`, deploy, publish, or release.', text)
 

@@ -30,6 +30,30 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             with self.subTest(consumer=name):
                 self.assertIn('[Loaded instructions and refusals]', (ROOT / name).read_text())
 
+    def test_sol_driver_takes_the_conservative_permitted_action(self):
+        driver = (ROOT / 'plugins/ship/agents/driver--sol.md').read_text()
+        for requirement in (
+            'Choose the most conservative reversible action that the brief and existing authority permit. Take it in the same turn.',
+            'Record the choice, its authority, and the evidence in the lane state file.',
+            'Keep every owner-only decision, genuine question, refused action, and hold pending under its own rule.',
+            'Route each genuine question to the role that can answer it.',
+            'Block only the dependent step. Continue independent work.',
+            'End each turn with a dated next action and its accountable owner, or route the decision.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertTrue(requirement in driver, requirement)
+        self.assertLessEqual(len(driver.splitlines()), 65)
+
+    def test_sol_driver_bases_merge_eta_on_evidence_and_warns_before_a_slip(self):
+        driver = (ROOT / 'plugins/ship/agents/driver--sol.md').read_text()
+        for requirement in (
+            'Base the merge ETA on the evidence for remaining CI, review rounds, merge queue, deploy, and live checks.',
+            'Give only an ETA the evidence supports.',
+            'Report a slip before the ETA passes, with the new time.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertTrue(requirement in driver, requirement)
+
     def test_retry_rule_permits_a_rule_meeting_form_and_asking_the_superior(self):
         for requirement in (
             'Retry rule: after a hook or permission refusal, an agent may retry in another form '

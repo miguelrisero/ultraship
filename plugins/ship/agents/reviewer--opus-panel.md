@@ -1,5 +1,5 @@
 ---
-name: reviewer--fable
+name: reviewer--opus-panel
 description: Required panel seat for the design and final panels.
 model: claude-opus-5-5
 effort: xhigh

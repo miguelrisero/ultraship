@@ -19,7 +19,7 @@ CONTRACT_PATHS = (
     SHIP / 'skills/ship/SKILL.md',
     *(SHIP / f'agents/{name}.md' for name in (
         'driver', 'driver--sol', 'reviewer--sol', 'reviewer--opus',
-        'writer--sol', 'writer--sonnet', 'writer--fable52',
+        'writer--sol', 'writer--fable52',
     )),
 )
 BODY = '''Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.
@@ -55,6 +55,10 @@ class ContractTests(unittest.TestCase):
         for path in CONTRACT_PATHS:
             with self.subTest(path=path):
                 text = path.read_text()
+                if path.name == 'driver--sol.md':
+                    self.assertIn('Apply [Squash-merge containment](../skills/ship/SKILL.md#squash-merge-containment) '
+                                  'to every author-head containment claim.', text)
+                    text = (path.parent / '../skills/ship/SKILL.md').read_text()
                 self.assertEqual(text.count('Squash-merge containment\n'), 1)
                 section = text.split('Squash-merge containment\n\n', 1)[1].split('\n\n', 1)[0]
                 self.assertEqual(section + '\n', BODY)

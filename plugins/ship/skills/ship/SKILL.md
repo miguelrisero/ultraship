@@ -69,6 +69,7 @@ Preserve every other Input ban, reviewer MCP denial, and independent hook and to
 
 - Read [roster](references/roster.md) before the first dispatch. Use each scoped `ship:*` agent and leave the Agent `model` field unset. A hook denies overrides.
 - On an unavailable agent, dispatch the next agent in its fallback chain and record the substitution in the ledger note.
+- If all admitted writer or planner seats are unavailable, retain the task as pending and report the missing seat.
 - Code goes to `ship:writer--sol`, one slice at a time, in the assigned worktree. Continue an existing writer with SendMessage for fixes on its slice.
 - Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch.
 - Start important planning in either mode with `ship:planner--fable52`. Apply the [important planning gate](references/pipeline.md#important-planning). Send broad research to `ship:researcher--luna`.
@@ -114,7 +115,14 @@ Copy both paths from the Stop diagnostic; run the command alone on one line with
 
 Use the pending file and result ID from the Stop diagnostic. Supply the actual agent, reviewed SHA, verdict and evidence from the completed result. The command appends an `account-result` record to the recorded ledger. It preserves all existing rows and the run's closure, and exact retries append nothing. This bookkeeping covers only the named result; it grants no pipeline step, review or completion evidence of its own. Never reopen a closed run or invent review rows to clear Stop.
 
-Use the Stop diagnostic's `account-auto` command to account for results with a clear commit and verdict in their recorded turns:
+Use a complete result-specific command from Stop when it supplies one. Stop prints it only for findings tied to an explicit reviewed commit and the original ledger and run.
+
+Keep patch-only findings pending. A base commit and a patch digest do not identify the reviewed commit.
+Record a later independent review separately on the run board. Link the pending result ID, original subject and verdict, and later reviewed commit and result. The link grants zero accounting, review, or publication credit.
+
+When Stop reports a missing original ledger or run binding, end the turn with a blocker report. Keep run completion on hold. Restore the original binding through an approved recovery route before crediting that result.
+
+Use `account-auto` only after verifying the reviewed commit and verdict for every result in the pending file:
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto "<pending.tsv>"

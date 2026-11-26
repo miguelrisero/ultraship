@@ -113,7 +113,7 @@ The owner answer authorizes the edit; the driver or CoC serves as provenance ver
 Keep the standing fixed-event comparator scoped to its branch and the existing council/Chief route independently usable.
 A stale or missing citation supplies zero authority; record complete applicable authority and a reason before using an independent route.
 
-Prepare the verified record for the self-contained writer contract in [writer--sol](../../../agents/writer--sol.md) or [writer--sonnet](../../../agents/writer--sonnet.md).
+Prepare the verified record for the self-contained writer contract in [writer--sol](../../../agents/writer--sol.md) or [writer--fable52](../../../agents/writer--fable52.md).
 Send the complete verified record and exact scope in every owner-event brief, including briefs for tool-capable writers.
 Keep operative writer rules in the loaded writer definition.
 Read `get_input` and reconcile answer events through `get_input_events` when needed.
