@@ -103,49 +103,21 @@ def file_identity(info):
 
 # Stop guidance shares this label rule so both parsers count the same verdict lines.
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
-REVIEWED_COMMIT = re.compile(r'^[\s>*#_\-]*Reviewed commit[*_]*\s*:.*(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])',
+# A commit label anywhere in a line, including after a list marker or quote, makes the subject mixed.
+REVIEWED_COMMIT = re.compile(r'(?<![A-Za-z0-9_])Reviewed commit[*_\s]*:.*(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])',
                              re.I | re.M)
 PATCH_DIGEST = re.compile(r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])', re.I)
 PATCH_LABEL = re.compile(r'[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:[*_]*\s*`?([0-9a-f]{64})`?[*_]*\s*',
                          re.I)
 PATCH_BYTE_LIMIT = 64 * 1024 * 1024
-FENCE = re.compile(r'(`{3,}|~{3,})')
 VERDICT_RECORD = re.compile(r'[*_]*verdict[*_]*\s*:[*_]*\s*(pass|findings)[*_]*\s*', re.I)
 # Any verdict-shaped label, in any container, counts toward the one-verdict rule.
-VERDICT_ANY = re.compile(r'(?:verdict|overall)[*_\s]*:', re.I)
-LIST_ITEM = re.compile(r' {0,3}(?:[-+*]|\d{1,9}[.)])( {1,4})(?=\S)')
-# Markdown HTML blocks of these kinds run across blank lines, so they could hold the closing record.
+VERDICT_ANY = re.compile(r'(?<![A-Za-z0-9_])(?:verdict|overall)[*_\s]*:', re.I)
+# Fences and these HTML blocks can run across blank lines and hold the closing record; without them, Markdown
+# ends every quote, list and indented block before an unindented record that follows a blank line.
+CODE_FENCE = re.compile(r'```|~~~')
 HTML_BLOCK = re.compile(r'^ {0,3}<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:pre|script|style|textarea)(?=[\s>]|$))',
                         re.I | re.M)
-
-
-def check_fences(text):
-    """Raise when a code fence stays open at the end of the text, because it would hold the closing record."""
-    fence = None  # (marker, content indent); the indent is above zero for a fence opened in a list item
-    for line in text.split('\n'):
-        body = line.lstrip(' \t')
-        indent = len(line[:len(line) - len(body)].expandtabs(4))
-        if fence and fence[1] and body and indent < fence[1]:
-            fence = None  # a less indented line ends the list item and its fence
-        if fence:
-            marker, base = fence
-            # Markdown closes a fence only on the same character, at least as long, indented at most three
-            # spaces past its container, with only spaces or tabs after it.
-            closer = FENCE.match(body) if indent - base <= 3 else None
-            if closer and closer.group(1)[0] == marker[0] and len(closer.group(1)) >= len(marker) \
-                    and not body[closer.end():].strip(' \t'):
-                fence = None
-            continue
-        item = LIST_ITEM.match(line)
-        base = item.end() if item else 0
-        if item:
-            body, indent = line[base:], 0
-        opener = FENCE.match(body) if indent <= 3 else None
-        # A backtick in the info string makes the line inline code, not a fence.
-        if opener and not (opener.group(1)[0] == '`' and '`' in body[opener.end():]):
-            fence = (opener.group(1), base)
-    if fence:
-        raise ValueError('unclosed code fence')
 
 
 def grant_request(script, argv):
@@ -699,7 +671,8 @@ def account_patch(pending, identifier, patch, *, entries):
         raise ValueError('mixed review subject')
     if HTML_BLOCK.search(text):
         raise ValueError('html block in review')
-    check_fences(text)
+    if CODE_FENCE.search(text):
+        raise ValueError('code fence in review')
     # The review ends with a blank line and an unindented two-line record, which no quotation, fence,
     # list or indented block can hold. The first line is never the record, because the reader strips its indent.
     lines = text.split('\n')

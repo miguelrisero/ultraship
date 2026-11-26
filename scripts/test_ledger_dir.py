@@ -1093,16 +1093,20 @@ class LedgerDirTests(unittest.TestCase):
              'expected one verdict'),
             ('lazy quote continuation', f'> Example from the prompt:\n{pass_record}', patch,
              'expected a closing review record'),
-            ('fenced example', f'```\n{pass_record}\n```\n\n{record}', patch, 'expected one verdict'),
-            ('unclosed fence', f'```text\n\n{pass_record}', patch, 'unclosed code fence'),
+            ('fenced example', f'```\n{pass_record}\n```\n\n{record}', patch, 'code fence in review'),
+            ('list fence ended by its item', f'- Example:\n\n  ```\n  sample\n\n```\n\n{pass_record}', patch,
+             'code fence in review'),
+            ('fence after an html block', f'<div>\n```\n</div>\n\n```\n\n{pass_record}', patch, 'code fence in review'),
+            ('tilde fence', f'~~~\n\n{pass_record}', patch, 'code fence in review'),
+            ('ordered list commit', f'1. Reviewed commit: 123abcd\n\n{record}', patch, 'mixed review subject'),
+            ('quoted commit', f'> Reviewed commit: 123abcd\n\n{record}', patch, 'mixed review subject'),
+            ('unclosed fence', f'```text\n\n{pass_record}', patch, 'code fence in review'),
             ('html comment', f'<!--\n\n{pass_record}\n-->', patch, 'html block in review'),
             ('unclosed html comment', f'<!--\n\n{pass_record}', patch, 'html block in review'),
             ('unclosed pre block', f'<pre>\n\n{pass_record}', patch, 'html block in review'),
             ('indented example verdict', f'    Verdict: pass\n\n{record}', patch, 'expected one verdict'),
             ('nonbreaking space is no blank line', f'> Example from the prompt:\n\u00a0\n{pass_record}', patch,
              'expected a closing review record'),
-            ('nonbreaking space after a fence marker', f'```\nnote\n```\u00a0\n\n{pass_record}', patch,
-             'unclosed code fence'),
             ('list marker verdict', f'+ Verdict: findings\n\n{pass_record}', patch, 'expected one verdict'),
             ('ordered list verdict', f'1. Overall: findings\n\n{pass_record}', patch, 'expected one verdict'),
             ('spaced verdict label', f'Verdict : findings\n\n{pass_record}', patch, 'expected one verdict'),
@@ -1119,15 +1123,13 @@ class LedgerDirTests(unittest.TestCase):
                 self.assertIn(reason, accounted.stderr)
                 self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
 
-    def test_account_patch_accepts_markdown_edges_before_the_record(self):
+    def test_account_patch_accepts_fence_free_markdown_before_the_record(self):
         patch, digest = self.frozen_patch()
-        for case, body in (('tab after a closing fence', '```\nnote\n   ```\t'),
-                           ('indented fence marker is code', 'Notes:\n\n    ```'),
-                           ('inline code line', '```git diff```'),
-                           ('list item fence', '- ```text\n  example\n    ```'),
-                           ('list item fence closed at its indent', '- ```text\n  example\n  ```'),
-                           ('ordered list fence closed at its indent', '1. ```\n   example\n   ```'),
-                           ('list item fence ended by its item', '- ```text\n  example\n\nAfter the list.')):
+        for case, body in (('list item', '- One finding.\n  Second line.'),
+                           ('block quote', '> The prompt asked for a patch review.'),
+                           ('indented code', 'Notes:\n\n    render(patch)'),
+                           ('identifier ending in verdict', 'The variable render_verdict: str loses its value.'),
+                           ('inline code', 'The `git diff` output matches.')):
             owed, _, result, _ = self.auto_owed([
                 (-2, 'user', 'Review the patch.'),
                 (-1, 'assistant', f'{body}\n\nPatch SHA-256: {digest}\nVerdict: findings')])
