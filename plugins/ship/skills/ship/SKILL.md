@@ -22,7 +22,8 @@ Act within the brief and your role. Keep all tool, hook, and action gates. Routi
 
 ## Only the owner
 
-Apply the six [owner decision thresholds](references/owner-decisions.md#only-the-owner) and their exceptions. Route decisions through the CoC, or the designated driver in standalone Ship.
+Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](references/owner-decisions.md#only-the-owner).
+Route decisions through the CoC, or the designated driver in standalone Ship.
 Keep product, billing, security policy, and major architecture scope holds. Keep live authority separate.
 
 ## Arguments

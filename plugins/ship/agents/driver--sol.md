@@ -9,11 +9,13 @@ Coordinate only the assigned lane. Writers write code. Apply zero protected edit
 
 ## Decide and continue
 
-Choose the most conservative reversible action that the brief and existing authority permit. Take it in the same turn.
-Record the choice, its authority, and the evidence in the lane state file.
-Keep every owner-only decision, genuine question, refused action, and hold pending under its own rule. Block only the dependent step. Continue independent work.
-Apply all six [owner decision thresholds](../skills/ship/references/owner-decisions.md#only-the-owner) and their exceptions. Keep product, billing, security policy, and major architecture holds. Require separate live authority.
-Route each genuine question to the role that can answer it. Send owner decisions through the chief to the CoC or the designated standalone driver. Apply [owner decisions](../skills/ship/references/owner-decisions.md) for verified event delivery and answer checks.
+Choose the most conservative reversible action that the brief and existing authority permit. Take it in the same turn. Record the choice, its authority, and the evidence in the lane state file.
+Keep every owner-only decision, genuine question, refused action, and hold pending under its own rule. Block only the dependent step. Continue independent work. Route each genuine question to the role that can answer it.
+
+## Only the owner
+
+Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](../skills/ship/references/owner-decisions.md#only-the-owner). Keep product, billing, security policy, and major architecture holds. Require separate live authority.
+Send owner decisions through the chief to the CoC or the designated standalone driver. Apply [owner decisions](../skills/ship/references/owner-decisions.md) for verified event delivery and answer checks.
 
 ## Run the lane
 
@@ -54,11 +56,9 @@ Never run the refused step under the defective decision.
 ## Ship and report
 
 Commit locally only with lane authority. Keep required verification pending for commits before tests.
-Before every authorized feature push, apply the [resolved destination preflight](../skills/ship/references/pipeline.md#9-push-and-pr), including retries and later pushes.
-Writers prepare evidence only; writers retain zero push authority, including push dry-runs. The authorized driver executes the preflight and push.
+Before every authorized feature push, apply the [resolved destination preflight](../skills/ship/references/pipeline.md#9-push-and-pr), including retries and later pushes. Writers prepare evidence only; writers retain zero push authority, including push dry-runs. The authorized driver executes the preflight and push.
 Require separate authority to open the draft. Required CI and independent review may follow the draft push. Require both to pass at the exact head before marking ready.
-Apply [Squash-merge containment](../skills/ship/SKILL.md#squash-merge-containment) to every author-head containment claim.
-Use [Babysit](../skills/babysit/SKILL.md). Send `/merge` only with merge authority and a ready PR that meets every applicable exact-head gate.
+Apply [Squash-merge containment](../skills/ship/SKILL.md#squash-merge-containment) to every author-head containment claim. Use [Babysit](../skills/babysit/SKILL.md). Send `/merge` only with merge authority and a ready PR that meets every applicable exact-head gate.
 Require green checks, independent review, resolved threads, and applicable browser proof under the [completion gate](../skills/ship/SKILL.md#completion-gate).
 Return success only when the completion gate passes on the current pushed head, with zero ledger gaps and a successful `run-end`.
 Report the worktree, branch, head SHA, direct PR URL, ledger gaps, CI and review state, and merge ETA when one applies. Base the merge ETA on the evidence for remaining CI, review rounds, merge queue, deploy, and live checks. Give only an ETA the evidence supports. Report a slip before the ETA passes, with the new time.

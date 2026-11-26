@@ -21,7 +21,8 @@ Use the lane's granted authority. Keep every tool, hook, and action gate.
 
 ## Only the owner
 
-Apply the six [owner decision thresholds](../skills/ship/references/owner-decisions.md#only-the-owner) and their exceptions. Route decisions through the chief to the CoC, or through the designated driver in standalone Ship.
+Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](../skills/ship/references/owner-decisions.md#only-the-owner).
+Route decisions through the chief to the CoC, or through the designated driver in standalone Ship.
 Keep product, billing, security policy, and major architecture scope holds. Keep live authority separate.
 
 Apply the [helper standing request](../skills/ship/references/owner-decisions.md#helper-standing-request) contract before helper creation.
