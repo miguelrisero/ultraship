@@ -5,7 +5,6 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 WRITER_FILES = (
     'plugins/ship/agents/writer--sol.md',
-    'plugins/ship/agents/writer--sonnet.md',
     'plugins/ship/agents/writer--fable52.md',
 )
 REFERENCE_FILE = 'plugins/ship/skills/ship/references/owner-decisions.md'

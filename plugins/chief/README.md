@@ -9,7 +9,7 @@ Chief reports on transitions and deadlines. Chief tracks each ticket until the c
 ```
 
 Chief runs at the session model and needs the `ship` plugin.
-Upgrade Chief to `1.8.5` and Ship to `1.15.49` together before using these routes.
+Upgrade Chief to `1.8.5` and Ship to `1.15.50` together before using these routes.
 Start a fresh session with both plugins loaded.
 
 | Work | Agent |

@@ -1,14 +1,13 @@
 # Agent roster
 
-Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable agent, dispatch the next entry in the chain and record it in the ledger note. A seat with no fallback stays missing, and its panel is incomplete.
+Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable agent, dispatch the next entry in the chain and record it in the ledger note. If all admitted writer or planner seats are unavailable, retain the task as pending and report the missing seat. A panel with a missing seat and no fallback is incomplete.
 
 Use [reviewer admission for protected row reads](owner-decisions.md#reviewer-admission-record-for-protected-row-reads) to select a seat for a protected row review.
 
 | Agent | Model | Effort | Use | Fallback chain |
 |---|---|---|---|---|
-| `ship:planner--sol` | `gpt-6.2-sol` | xhigh | Plans, premises | `planner--opus`, `planner--sonnet` |
-| `ship:writer--sol` | `gpt-6.2-sol` | xhigh | All code | `writer--sonnet` |
-| `ship:writer--sonnet` | `claude-sonnet-5-5` | high | Code, last fallback | none |
+| `ship:planner--sol` | `gpt-6.2-sol` | xhigh | Plans, premises | `planner--opus` |
+| `ship:writer--sol` | `gpt-6.2-sol` | xhigh | All code | none |
 | `ship:writer--fable52` | `claude-fable-5-2` | high | Code, only when the brief or the owner names Fable 5.2 | `writer--sol` |
 | `ship:driver` | `claude-opus-5-5` | xhigh | Lane ship tail | `driver--sol` at low Claude quota only |
 | `ship:driver--sol` | `gpt-6.2-sol` | xhigh | Lane ship tail at low Claude quota, with a recorded quota reading | none |
@@ -23,7 +22,7 @@ Use [reviewer admission for protected row reads](owner-decisions.md#reviewer-adm
 | `ship:verifier--opus` | `claude-opus-5-5` | xhigh | Billing and authorization | `verifier--astra` |
 | `ship:verifier--astra` | `gpt-6.2-astra` | xhigh | Billing and authorization, fallback | none |
 
-`claude-sonnet-5-5` at effort high is the last entry of every planner, reviewer, and researcher chain that has one. The writer chain ends at `writer--sonnet`. Opus agents never run at effort max. Sol agents run `gpt-6.2-sol` at explicit effort xhigh.
+`claude-sonnet-5-5` at effort high is the last entry in the reviewer and researcher chains that list it. Opus agents never run at effort max. Sol agents run `gpt-6.2-sol` at explicit effort xhigh.
 
 ## Tools
 

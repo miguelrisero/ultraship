@@ -11,12 +11,16 @@ EVENT_ID = '1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8'
 SHIP = ROOT / 'plugins/ship'
 ROUTE_CARRIERS = (
     'skills/ship/SKILL.md', 'agents/driver.md', 'agents/driver--sol.md',
-    'agents/writer--sol.md', 'agents/writer--sonnet.md', 'agents/writer--fable52.md',
+    'agents/writer--sol.md', 'agents/writer--fable52.md',
 )
 REVIEWERS = ('reviewer--sol.md', 'reviewer--opus.md', 'reviewer--astra.md')
 
 
 def section(text, heading):
+    if heading == '### Lane-owned row route' and text.startswith('---\nname: driver--sol\n'):
+        if 'Apply the [lane-owned row route](../skills/ship/SKILL.md#lane-owned-row-route).' not in text:
+            raise AssertionError('Sol driver must apply the shared lane-owned row route')
+        text = (SHIP / 'skills/ship/SKILL.md').read_text()
     marker = heading + '\n'
     if text.splitlines().count(heading) != 1:
         raise AssertionError(heading)
@@ -491,7 +495,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         )
 
     def test_writers_require_verified_authority_and_preserve_controls(self):
-        for name in ('writer--sol.md', 'writer--sonnet.md'):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
             text = (ROOT / 'plugins/ship/agents' / name).read_text()
             for phrase in (
                 INPUT_ID, WORKSPACE_ID, EVENT_ID, 'get_input', 'owner_ui',
@@ -555,13 +559,30 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 with self.subTest(path=name, phrase=phrase):
                     self.assertIn(phrase, text)
 
+    def test_sol_driver_puts_approval_evidence_in_the_writer_brief_before_dispatch(self):
+        driver = (SHIP / 'agents/driver--sol.md').read_text()
+        self.assertTrue(
+            'Before dispatch, put the exact edit and file, the approver and the approval time, '
+            'the owner rule citation, the Input ID, and the workspace ID in the writer brief.' in driver,
+            'The writer brief must carry the approval evidence before dispatch.',
+        )
+        self.assertTrue(
+            'include the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, '
+            'choice id, and verifier name in that brief.' in driver,
+            'The same writer brief must carry the verifier fallback.',
+        )
+
     def test_exact_coc_adaptations_preserve_or_strengthen_the_same_guarantee(self):
         for name in (
-            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--fable52.md',
             'plugins/ship/agents/driver.md', 'plugins/ship/agents/driver--sol.md',
             'plugins/ship/skills/ship/SKILL.md',
         ):
             text = (ROOT / name).read_text()
+            policy = text
+            if Path(name).name == 'driver--sol.md':
+                self.assertIn('Apply [Same-strength adaptations](../skills/ship/SKILL.md#same-strength-adaptations).', text)
+                policy = section((SHIP / 'skills/ship/SKILL.md').read_text(), '### Same-strength adaptations')
             for phrase in (
                 'The same-strength route requires exact written CoC approval citing an already applicable verified owner-authority route.',
                 'This same-strength route excludes mutation-row anchor refreshes; it cannot replace category 5 requirements.',
@@ -577,7 +598,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Dry-run proof and new-head CI remain under separate applicable admission.',
             ):
                 with self.subTest(path=name, phrase=phrase):
-                    self.assertIn(phrase, text)
+                    self.assertIn(phrase, policy)
             if Path(name).name.startswith('writer--'):
                 phrase = 'Verify the same-strength approval and evidence, then send the driver the quoted authority and exact scope before any permitted edit.'
             elif Path(name).name.startswith('driver'):
@@ -613,8 +634,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
 class ScopedDecisionRouteTests(unittest.TestCase):
     ship = ROOT / 'plugins/ship'
     reference = ship / 'skills/ship/references/owner-decisions.md'
-    lanes = ('driver.md', 'driver--sol.md', 'writer--sol.md', 'writer--sonnet.md',
-             'writer--fable52.md')
+    lanes = ('driver.md', 'driver--sol.md', 'writer--sol.md', 'writer--fable52.md')
     reviewers = ('reviewer--sol.md', 'reviewer--opus.md')
     skill = ship / 'skills/ship/SKILL.md'
 

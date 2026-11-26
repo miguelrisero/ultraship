@@ -21,6 +21,7 @@ import traceback
 import unicodedata
 import urllib.parse
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -5133,6 +5134,19 @@ def literal_bindings_resolved(command, cwd, batch=False):
     return ''.join(kept) + command[cursor:]
 
 
+RECEIPT_FOLDERS = ('text-lint', 'account-grants')
+
+
+def custody_normalized(value):
+    value = value.casefold().translate(str.maketrans('', '', "\"'\\"))
+    return re.sub(r'/\.(?=/|$)', '', re.sub(r'/+', '/', value))
+
+
+def names_receipt_folder(value):
+    value = custody_normalized(value)
+    return any('ultraship/' + folder in value for folder in RECEIPT_FOLDERS)
+
+
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                    'Report the blocked scope to the driver.')
 STATE_FOLDER_CUSTODY = ('This Bash command names the hook state folder (`.local/state` or `XDG_STATE_HOME`) together with '
@@ -5217,9 +5231,7 @@ def receipt_custody(data, read_search=False):
     state_root = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
     receipt_store = state_root / 'ultraship' / 'text-lint'
 
-    def normalized(value):
-        value = value.casefold().translate(str.maketrans('', '', "\"'\\"))
-        return re.sub(r'/\.(?=/|$)', '', re.sub(r'/+', '/', value))
+    normalized = custody_normalized
 
     # Folders that a `cd` or `pushd` in the command can enter; a relative word resolves against each of them too.
     cd_bases = []
@@ -5244,7 +5256,7 @@ def receipt_custody(data, read_search=False):
     def receipt_text(value):
         value = normalized(value)
         return (any(path in value for path in receipt_paths)
-                or any('ultraship/' + folder in value for folder in ('text-lint', 'account-grants')))
+                or any('ultraship/' + folder in value for folder in RECEIPT_FOLDERS))
 
     def receipt_path(value, ancestors=False, state_only=False, stores=receipt_paths):
         if not isinstance(value, str) or not value:
@@ -7103,7 +7115,7 @@ def non_git_ledger_home(ledger, cwd, epoch, owner, result_id, git_error):
 def account_one(ledger, owed, result, receipts, session, histories, used):
     epoch, agent, cwd = owed[:3]
     result_id = json.dumps([session, cwd, result['id']])
-    if 'ledger' in result and result['run'] is None:
+    if 'ledger' in result and result['run'] is None and result.get('v') != 2:
         return
     # Recorded results keep their ledger across branch changes.
     try:
@@ -7125,6 +7137,8 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
         except ReceiptIntegrityError as error:
             # Main's non-git lookup failure leaves other receipts eligible for publication.
             raise ValueError(str(error)) from error
+    if result.get('v') == 2 and 'run' in result and result['run'] is None:
+        raise ValueError('Pending result has a null run binding')
     if not home.is_absolute() or home.resolve() != home:
         raise ValueError('Recorded ledger must be an absolute path without symlinks')
     if home not in histories:
@@ -7180,7 +7194,105 @@ def account_one(ledger, owed, result, receipts, session, histories, used):
                 used.add(token)
                 return
     named = agent + (f'@{result["agent_id"]}' if result.get('agent_id') else '')
-    raise ValueError(f'Review results have no unused ledger row for agent {named}; pending result {result["id"]}')
+    raise MissingReviewRow(f'Review results have no unused ledger row for agent {named}; pending result {result["id"]}',
+                           history[start][0])
+
+
+class MissingReviewRow(ValueError):
+    def __init__(self, message, start_epoch):
+        super().__init__(message)
+        self.start_epoch = start_epoch
+
+
+def findings_commands(ledger, pending, owed, failures, data):
+    # Emit guidance only. Stop never grants or executes these commands.
+    root = pending.parent.parent
+    with ledger.evidence_root(root.parent.resolve(strict=True) / root.name) as evidence_fd:
+        owed_fd = os.open('owed', ledger.DIRECTORY_FLAGS, dir_fd=evidence_fd)
+        try:
+            ledger.owed_status(owed_fd, pending.name)
+        finally:
+            os.close(owed_fd)
+    occurrences, transcripts = Counter(), Counter()
+    transcript_ids = {}
+    deadline = time.monotonic() + 5
+    for row in owed:
+        if time.monotonic() >= deadline:
+            return
+        if len(row) != 4:
+            # A split row can hide a sibling that shares the candidate's transcript.
+            return
+        try:
+            notice = json.loads(row[3])
+            identifier = notice.get('id')
+            source = notice.get('agent_transcript_path')
+            if source:
+                # A noncanonical sibling can still refer to the candidate's transcript.
+                source_path = Path(source)
+                if (not source_path.is_absolute() or source_path.parent.name != 'subagents'
+                        or source_path.parent.parent.name != pending.stem):
+                    return
+                info = source_path.stat()
+                if not stat.S_ISREG(info.st_mode):
+                    return
+                identity = (info.st_dev, info.st_ino)
+                transcript_ids[source] = identity
+                transcripts[identity] += 1
+        except (ValueError, AttributeError, RecursionError, TypeError, OSError):
+            return
+        if isinstance(identifier, str):
+            occurrences[identifier] += 1
+    budgets = {}
+    git_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    git_env.update(GIT_ALLOW_PROTOCOL='', GIT_NO_LAZY_FETCH='1')
+    for row, result, error in failures[:20]:
+        if time.monotonic() >= deadline:
+            break
+        if not isinstance(error, MissingReviewRow):
+            continue
+        try:
+            epoch, agent, cwd = row[:3]
+            identifier = result['id']
+            if (occurrences[identifier] != 1 or not result.get('ledger') or not result.get('run')
+                    or ledger.notification_precedes_run(epoch, error.start_epoch)):
+                continue
+            transcript = ledger.recorded_transcript(pending, result)
+            identity = transcript_ids.get(str(transcript))
+            if transcripts[identity] != 1:
+                continue
+            text = '\n'.join(ledger.final_turn_text(transcript, int(epoch), budgets, expected_identity=identity,
+                                                    sole_turn=True).splitlines())
+            if re.search(r'```|~~~|\b(?:patch|diff|uncommitted|unstaged|staged|working tree)\b|[0-9a-f]{64}',
+                         text, re.I):
+                continue
+            subjects = re.findall(r'^[\s>*#_\-]*Reviewed commit[*_]*\s*:(.*)$', text, re.M | re.I)
+            verdicts = [match[1] for line in text.splitlines() if (match := ledger.VERDICT_LABEL.match(line))]
+            if len(subjects) != 1 or [value.strip().lower() for value in verdicts] != ['findings']:
+                continue
+            subject = re.search(r'^Reviewed commit:[ \t]+([0-9a-f]{40})[ \t]*$', text, re.M | re.I)
+            if subject is None:
+                continue
+            sha = subject[1].lower()
+            if set(match.lower() for match in re.findall(r'(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])', text, re.I)) != {sha}:
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            check = subprocess.run(['git', '--no-replace-objects', '-C', cwd, 'rev-parse', '--verify',
+                                    '--end-of-options', f'{sha}^{{commit}}'],
+                                   env=git_env, stdin=subprocess.DEVNULL, capture_output=True, timeout=remaining)
+            if check.returncode or check.stdout != (sha + '\n').encode('ascii'):
+                continue
+            command = shlex.join(['python3', str(ledger_script()), 'account', str(pending), identifier,
+                                  'review', f'{agent}@{result["agent_id"]}', sha, 'findings',
+                                  f'Findings for {identifier} at {datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()}'])
+            words = own_account_call(data, command)
+            # Custody refuses a command that names a receipt folder, so Stop never prints one.
+            if words and not names_receipt_folder(command):
+                ledger.grant_request(words[1], words[2:])
+                yield command
+        except (ValueError, OSError, KeyError, TypeError, OverflowError, subprocess.SubprocessError):
+            continue
 
 
 def pending_summary(failures, session):
@@ -7213,6 +7325,8 @@ def stop(data):
     if data.get('stop_hook_active'):
         return
     listing = ''
+    commands = ''
+    pending_failures = []
     try:
         reminder = path.with_suffix('.stop-state')
         try:
@@ -7244,6 +7358,13 @@ def stop(data):
                         raise pending_failures[0][2]
             except Exception as accounting_error:
                 listing = '\n' + pending_summary(failures, str(path)) + '\n'
+                if pending_failures:
+                    # Scan while the pending lock still excludes a concurrent notice for the same transcript.
+                    try:
+                        commands = '\n'.join(findings_commands(ledger, path, owed, pending_failures, data))
+                    except Exception:
+                        # Optional guidance cannot suppress the Stop decision.
+                        commands = ''
                 rows = [row for row, _ in failures]
                 try:
                     canonical = [row[:3] + [json.loads(row[3])] if len(row) == 4 else row for row in rows]
@@ -7268,19 +7389,34 @@ def stop(data):
             pending.seek(0)
             pending.truncate()
     except Exception as exc:
-        print(json.dumps({'decision': 'block', 'reason':
-              f'Pending review evidence retained at {path}: {exc}. '
-              f'{listing}'
+        guidance = f'Run each verified findings command separately:\n{commands}\n' if commands else ''
+        unbound = sum(1 for _, result, _ in pending_failures if isinstance(result, dict)
+                      and result.get('v') == 2 and ('ledger' not in result or result.get('run') is None))
+        if unbound:
+            subject = '1 pending result lacks its' if unbound == 1 else f'{unbound} pending results lack their'
+            guidance += (f'{subject} original ledger or run binding. '
+                         'Restore the original bindings through an approved recovery route. '
+                         'These results give zero review credit. '
+                         'End this turn with a blocker report. Keep run completion on hold. ')
+        reason = f'Pending review evidence retained at {path}: {exc}. {listing}{guidance}'
+        if unbound and unbound == len(pending_failures):
+            print(json.dumps({'decision': 'block', 'reason': reason}))
+            return
+        record_scope = ('Record only results with their original ledger and run binding' if unbound
+                        else 'Record each result')
+        print(json.dumps({'decision': 'block', 'reason': reason +
               'Resolve ledger access (set SHIP_LEDGER_DIR to an absolute permitted directory if needed). '
-              'Record each result with `ledger.py append <step> <agent> <sha> <verdict> [note]` in its open run, '
-              'Read every retained result and use its exact agent identity, including @agent_id when present. '
+              f'{record_scope} with `ledger.py append <step> <agent> <sha> <verdict> [note]` in its open run. '
+              'Use the exact agent identity, including @agent_id when present. '
               'For a recorded result in a closed or earlier-branch run, use '
               f'`python3 {shlex.quote(str(ledger_script()))} '
               f"account {shlex.quote(str(path))} <result-id> <step> <agent> <sha> <verdict> '<evidence>'`; "
               'this appends bookkeeping without reopening the run. '
               'Run this command alone on one line with the evidence in single quotes. Never invent review evidence. '
-              f'For results with clear transcript evidence, run `python3 {shlex.quote(str(ledger_script()))} '
-              f'account-auto {shlex.quote(str(path))}` alone on one line.'}))
+              'Use only the reviewed commit. A base SHA or patch digest gives zero review credit. '
+              'Keep results without a verified reviewed commit pending. '
+              'Link a later review on the run board. Keep the original subject and verdict. '
+              'The link gives zero accounting or review credit.'}))
 
 
 def compact(data):

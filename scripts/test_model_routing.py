@@ -11,6 +11,28 @@ spec.loader.exec_module(checks)
 
 
 class ModelRoutingTests(unittest.TestCase):
+    def test_writer_and_planner_use_only_admitted_fallbacks(self):
+        ship = ROOT / 'plugins/ship'
+        for seat in ('writer--sonnet', 'planner--sonnet'):
+            with self.subTest(seat=seat):
+                self.assertFalse((ship / 'agents' / (seat + '.md')).exists())
+        skill_dir = ship / 'skills/ship'
+        roster = (skill_dir / 'references/roster.md').read_text()
+        for seat, fallback in (('writer--sol', 'none'), ('planner--sol', '`planner--opus`'),
+                               ('writer--fable52', '`writer--sol`')):
+            with self.subTest(seat=seat):
+                row, = (line for line in roster.splitlines() if line.startswith(f'| `ship:{seat}` |'))
+                self.assertEqual(row.split('|')[-2].strip(), fallback)
+                if seat == 'writer--fable52':
+                    self.assertIn('only when the brief or the owner names Fable 5.2', row)
+        opus = checks.frontmatter((ship / 'agents/planner--opus.md').read_text())
+        self.assertEqual((opus['model'], opus['effort']), ('claude-opus-5-5', 'xhigh'))
+        hold = 'If all admitted writer or planner seats are unavailable, retain the task as pending and report the missing seat.'
+        self.assertIn(hold, roster)
+        self.assertIn(hold, (skill_dir / 'SKILL.md').read_text())
+        self.assertIn('Apply the [roster](../ship/references/roster.md) when the writer is unavailable.',
+                      (ship / 'skills/babysit/SKILL.md').read_text())
+
     def test_astra_and_luna_reviewer_names_pin_their_declared_models(self):
         for seat, model in (('reviewer--astra', 'gpt-6.2-astra'),
                             ('verifier--astra', 'gpt-6.2-astra'),
@@ -100,7 +122,7 @@ class ModelRoutingTests(unittest.TestCase):
     def test_chief_holds_verification_when_the_paired_native_route_is_missing(self):
         for plugin in ('chief', 'ship'):
             readme = (ROOT / f'plugins/{plugin}/README.md').read_text()
-            self.assertIn('Upgrade Chief to `1.8.5` and Ship to `1.15.49` together', readme)
+            self.assertIn('Upgrade Chief to `1.8.5` and Ship to `1.15.50` together', readme)
         run = ROOT / 'plugins/chief/skills/run'
         skill = (run / 'SKILL.md').read_text()
         self.assertIn('[verifier dispatch check](references/landing.md#verifier-dispatch-check)', skill)
@@ -110,7 +132,7 @@ class ModelRoutingTests(unittest.TestCase):
         check = check[1].split('\n## ', 1)[0]
         self.assertIn('Before dispatch, confirm that the current session lists the exact native route `ship:verifier--opus`.', check)
         self.assertIn('If the route is absent or cannot be confirmed, hold verification', check)
-        self.assertIn('Report Ship `1.15.49` as the required plugin version', check)
+        self.assertIn('Report Ship `1.15.50` as the required plugin version', check)
         self.assertIn('Use the `ship:verifier--astra` fallback only when the exact Opus route is registered but unavailable.', check)
 
     def test_ledger_keeps_historical_seat_names_and_agent_ids(self):

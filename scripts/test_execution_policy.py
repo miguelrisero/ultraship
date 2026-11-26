@@ -1093,14 +1093,14 @@ class ReviewerSearchTests(unittest.TestCase):
 class ExecutionPolicyTests(unittest.TestCase):
     def test_each_writer_scopes_migration_checks_and_gates_make_test_targets(self):
         requirement = 'Run `make api-migrations-check` only when the diff adds a migration, never as a heredoc, and without the slot gate. Run `make api-test`, `make api-test-all`, `make app-test` and `make e2e` only through the installed slot gate.'
-        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
             text = read('plugins/ship/agents/' + name)
             admission = text.partition('### Execution admission and cleanup\n')[2].split('\n### ', 1)[0]
             with self.subTest(path=name):
                 self.assertEqual(admission.splitlines().count(requirement), 1)
 
     def test_each_writer_requires_plain_checks(self):
-        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
             text = read('plugins/ship/agents/' + name)
             admission = text.partition('### Execution admission and cleanup\n')[2].split('\n### ', 1)[0]
             with self.subTest(path=name):
@@ -1108,7 +1108,7 @@ class ExecutionPolicyTests(unittest.TestCase):
                     'Run each check as its own plain command, with no inline interpreter code.'), 1)
 
     def test_each_writer_distinguishes_ordinary_admission_from_special_gos(self):
-        for name in ('writer--sol.md', 'writer--sonnet.md'):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
             text = read('plugins/ship/agents/' + name)
             admission = text.partition('### Execution admission and cleanup\n')[2].split('\n### ', 1)[0]
             for requirement in (
@@ -1127,7 +1127,7 @@ class ExecutionPolicyTests(unittest.TestCase):
             self.assertNotIn('wait for a GO permitted by the brief', text)
 
     def test_each_writer_limits_escalation_to_owned_groups_after_term_grace(self):
-        for name in ('writer--sol.md', 'writer--sonnet.md'):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
             text = read('plugins/ship/agents/' + name)
             for requirement in (
                 'Verify the caller started each target process group and recheck its boot/start identity before every signal.',
@@ -1210,7 +1210,7 @@ class ExecutionPolicyTests(unittest.TestCase):
             )),
         )
         sections = []
-        for name in ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md'):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
             with self.subTest(path=name):
                 text = read('plugins/ship/agents/' + name)
                 heading = '\n### Native file edits\n'
@@ -1239,5 +1239,5 @@ class ExecutionPolicyTests(unittest.TestCase):
                         )
         self.assertEqual(
             len(set(sections)), 1,
-            'All three writers must carry identical Native file edits sections',
+            'All writers must carry identical Native file edits sections',
         )
