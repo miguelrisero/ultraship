@@ -670,13 +670,16 @@ def account_patch(pending, identifier, patch, *, entries):
         raise ValueError('no final turn text')
     if REVIEWED_COMMIT.search(text):
         raise ValueError('mixed review subject')
-    text = own_lines(text)
+    raw, text = text, own_lines(text)
     digests = {digest.lower() for digest in PATCH_DIGEST.findall(text)}
     labelled = {digest.lower() for line in text.splitlines() if PATCH_LABEL.match(line)
                 for digest in PATCH_DIGEST.findall(line)}
-    if len(digests) != 1 or labelled != digests:
+    # A digest or verdict inside a quotation or fence fails closed, whatever the fence structure.
+    if len(digests) != 1 or labelled != digests or {d.lower() for d in PATCH_DIGEST.findall(raw)} != digests:
         raise ValueError('expected one patch digest')
     digest = digests.pop()
+    if sum(1 for line in raw.splitlines() if VERDICT_LABEL.match(line)) != 1:
+        raise ValueError('expected one verdict')
     verdict = review_verdict(text)
     try:
         if not os.path.isabs(patch) or os.path.realpath(patch) != patch:
