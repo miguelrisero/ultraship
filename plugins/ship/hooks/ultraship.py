@@ -5186,6 +5186,13 @@ def own_account_call(data, raw):
                 and re.fullmatch(r'[1-9][0-9]*', words[5]) and words[6].strip()):
             return words
         return False
+    if words[2] == 'account-patch':
+        # ledger.py hashes the patch and reads the subject and verdict itself; only the file path is caller data.
+        if (len(words) == 6 and words[3] == pending
+                and re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', words[4])
+                and words[5].startswith('/') and os.path.normpath(words[5]) == words[5]):
+            return words
+        return False
     if len(words) != 10 or words[2] != 'account' or words[3] != pending:
         return False
     result, step, agent, sha, verdict, evidence = words[4:]

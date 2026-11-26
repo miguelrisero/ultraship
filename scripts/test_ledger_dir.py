@@ -1026,6 +1026,71 @@ class LedgerDirTests(unittest.TestCase):
             transcript.write_text(''.join(line + '\n' for line in lines))
         return owed, transcript, result, int(epoch)
 
+    def frozen_patch(self, data=b'diff --git a/x b/x\n+frozen\n'):
+        patch = self.base / 'frozen.patch'
+        patch.write_bytes(data)
+        return patch, hashlib.sha256(data).hexdigest()
+
+    def test_account_patch_closes_a_result_on_its_frozen_patch_digest(self):
+        patch, digest = self.frozen_patch()
+        base = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, transcript, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review the uncommitted patch.'),
+            (-1, 'assistant', f'Reviewed patch SHA-256: `{digest.upper()}`\nBase: {base}\n**Verdict:** findings')])
+        home = self.resolve()
+        accounted = self.cli('account-patch', str(owed), result['id'], str(patch))
+        self.assertEqual(accounted.returncode, 0, accounted.stderr)
+        self.assertEqual(accounted.stdout,
+                         f"accounted {result['id']} ship:reviewer--sol@reviewer patch:{digest} findings\n")
+        row = ledger.rows(home)[-1]
+        # The subject is the patch the reviewer read; the base commit earns no row.
+        self.assertEqual(row[1:5], ['account-result', 'ship:reviewer--sol@reviewer', f'patch:{digest}', 'findings'])
+        self.assertNotIn(base, row[3])
+        note = json.loads(row[5])
+        self.assertEqual(note['step'], 'review')
+        self.assertEqual(note['evidence'], f'{transcript} at '
+                         f'{datetime.fromtimestamp(epoch, timezone.utc).isoformat()}: findings on {patch}')
+        saved = home.read_bytes()
+        self.assertEqual(self.cli('account-patch', str(owed), result['id'], str(patch)).returncode, 0)
+        self.assertEqual(home.read_bytes(), saved)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+
+    def test_account_patch_leaves_unclear_results_pending(self):
+        patch, digest = self.frozen_patch()
+        other = 'cd' * 32
+        base = self.git(self.checkout, 'rev-parse', 'HEAD')
+        prompt = (-3, 'user', 'Review the uncommitted patch.')
+        link = self.base / 'linked.patch'
+        link.symlink_to(patch)
+        for case, text, path, reason in (
+            ('changed patch', f'Patch SHA-256: {other}\nVerdict: findings', patch, 'patch digest differs'),
+            ('missing patch', f'Patch SHA-256: {digest}\nVerdict: findings', self.base / 'gone.patch',
+             'patch file unavailable'),
+            ('symlinked patch', f'Patch SHA-256: {digest}\nVerdict: findings', link, 'patch file unavailable'),
+            ('relative patch', f'Patch SHA-256: {digest}\nVerdict: findings', 'frozen.patch',
+             'patch file unavailable'),
+            ('mixed subject', f'Reviewed commit: {base}\nPatch SHA-256: {digest}\nVerdict: findings', patch,
+             'mixed review subject'),
+            ('two digests', f'Patch SHA-256: {digest}\nTree SHA-256: {other}\nVerdict: findings', patch,
+             'expected one patch digest'),
+            ('no digest', 'Verdict: findings', patch, 'expected one patch digest'),
+            ('second verdict', f'Patch SHA-256: {digest}\nVerdict: findings\nOverall: pass', patch,
+             'expected one verdict'),
+            ('later turn', None, patch, 'no final turn text'),
+        ):
+            entries = [prompt, (-1, 'assistant', text)] if text else [
+                prompt, (-1, 'assistant', f'Patch SHA-256: {digest}\nVerdict: findings'),
+                (3, 'user', 'Review it again.'), (4, 'assistant', 'Verdict: pass')]
+            owed, _, result, _ = self.auto_owed(entries)
+            home = self.resolve()
+            before = (owed.read_bytes(), home.read_bytes())
+            with self.subTest(case=case):
+                accounted = self.cli('account-patch', str(owed), result['id'], str(path))
+                self.assertNotEqual(accounted.returncode, 0)
+                self.assertIn(reason, accounted.stderr)
+                self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+
     def test_stop_prints_exact_command_for_commit_bound_findings(self):
         sha = self.git(self.checkout, 'rev-parse', 'HEAD')
         owed, transcript, result, _ = self.auto_owed([

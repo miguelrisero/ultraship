@@ -1524,6 +1524,22 @@ class ReceiptCustodyTests(unittest.TestCase):
             with self.subTest(index=index, value=value):
                 self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(words)}})
 
+    def test_own_account_call_admits_patch_accounting_with_an_absolute_patch(self):
+        event = self.own_account_event()
+        words = ['python3', str(LEDGER), 'account-patch', self.account_words[3], self.account_words[4],
+                 str(self.cwd / 'frozen.patch')]
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        self.consume(words)
+        for index, value in ((4, 'invalid'), (5, 'frozen.patch'), (5, str(self.cwd / '../frozen.patch')),
+                             (5, str(self.cwd) + '//frozen.patch'), (5, '')):
+            invalid = words.copy()
+            invalid[index] = value
+            with self.subTest(index=index, value=value):
+                self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(invalid)}})
+        for invalid in (words[:-1], [*words, 'extra']):
+            with self.subTest(words=invalid):
+                self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(invalid)}})
+
     def test_own_account_call_preserves_other_custody_checks(self):
         event = self.own_account_event()
         state = Path(os.environ['HOME']) / '.local/state'

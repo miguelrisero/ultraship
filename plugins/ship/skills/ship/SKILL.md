@@ -120,7 +120,13 @@ Use the pending file and result ID from the Stop diagnostic. Supply the actual a
 
 Use a complete result-specific command from Stop when it supplies one. Stop prints it only for findings tied to an explicit reviewed commit and the original ledger and run.
 
-Keep patch-only findings pending. A base commit and a patch digest do not identify the reviewed commit.
+A base commit does not identify a reviewed patch. For a result on a frozen, uncommitted patch, run:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-patch <pending.tsv> <result-id> <absolute-patch-file>
+```
+
+The command reads the subject and verdict from the reviewer's transcript and hashes the patch file itself. The transcript must hold one prompt and no later turn. The review turn must name exactly one distinct 64-digit SHA-256 digest, equal to the file's digest, and exactly one verdict label. A `Reviewed commit:` line with a commit SHA leaves the result pending. The patch path must be absolute and canonical, with no symlink. The command records `patch:<digest>` as the subject; a base commit gets no row. The result also needs its recorded agent, ledger and run.
 Record a later independent review separately on the run board. Link the pending result ID, original subject and verdict, and later reviewed commit and result. The link grants zero accounting, review, or publication credit.
 
 When Stop reports a missing original ledger or run binding, end the turn with a blocker report. Keep run completion on hold. Restore the original binding through an approved recovery route before crediting that result.

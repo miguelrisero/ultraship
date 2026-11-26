@@ -31,9 +31,10 @@ USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py append <step> <agent>[@<agent-id>] <sha> <verdict> [note]
        ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
        ledger.py account-auto [--fail-unparsed] <pending.tsv>
+       ledger.py account-patch <pending.tsv> <result-id> <patch-file>
        ledger.py correct-binding <pending.tsv> <result-id> <ledger-line> <reason>"""
 MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
-ACCOUNT_COMMANDS = ('account', 'account-auto', 'correct-binding')
+ACCOUNT_COMMANDS = ('account', 'account-auto', 'account-patch', 'correct-binding')
 GRANT_LIFETIME_NS = 900_000_000_000
 GRANT_REFUSAL = 'Accounting requires a fresh grant from the ship hook. Run the exact command again.'
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -49,7 +50,7 @@ def account_pending_arg(argv):
             return args[1]
         if len(args) == 1:
             return args[0]
-    if (cmd, len(args)) in (('account', 7), ('correct-binding', 4)):
+    if (cmd, len(args)) in (('account', 7), ('account-patch', 3), ('correct-binding', 4)):
         return args[0]
     return None
 
@@ -102,6 +103,9 @@ def file_identity(info):
 
 # Stop guidance shares this label rule so both parsers count the same verdict lines.
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
+REVIEWED_COMMIT = re.compile(r'^[\s>*#_\-]*Reviewed commit[*_]*\s*:.*(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])',
+                             re.I | re.M)
+PATCH_DIGEST = re.compile(r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])', re.I)
 
 
 def grant_request(script, argv):
@@ -621,6 +625,61 @@ def recorded_transcript(pending, result):
     return path
 
 
+def review_verdict(text):
+    labels = (match[1] for line in text.splitlines() if (match := VERDICT_LABEL.match(line)))
+    label = next(labels, None)
+    if label is None or next(labels, None) is not None:
+        raise ValueError('expected one verdict')
+    words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower()) if (word := token.strip('_'))]
+    verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
+    if not words or words[0] not in verdict_words:
+        raise ValueError('expected one verdict')
+    if 'pass' in words and (words[0] != 'pass' or any(
+            word in verdict_words or word in ('not', 'no', 'never', 'without')
+            or word.endswith(("n't", 'n’t')) for word in words[1:])):
+        raise ValueError('expected one verdict')
+    return 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
+
+
+def account_patch(pending, identifier, patch, *, entries):
+    """Account a result whose sole review turn names one patch digest that the frozen file still matches."""
+    matches = [fields for fields in (line.split('\t') for line in entries)
+               if len(fields) == 4 and json.loads(fields[3]).get('id') == identifier]
+    if len(matches) != 1:
+        raise ValueError('pending result ID must match exactly one notification')
+    epoch, agent, _, raw = matches[0]
+    result = json.loads(raw)
+    transcript = recorded_transcript(pending, result)
+    # A later turn or a resumed prompt leaves turn ownership ambiguous.
+    text = final_turn_text(transcript, int(epoch), {}, sole_turn=True)
+    if not text:
+        raise ValueError('no final turn text')
+    if REVIEWED_COMMIT.search(text):
+        raise ValueError('mixed review subject')
+    digests = {digest.lower() for digest in PATCH_DIGEST.findall(text)}
+    if len(digests) != 1:
+        raise ValueError('expected one patch digest')
+    digest = digests.pop()
+    verdict = review_verdict(text)
+    try:
+        if not os.path.isabs(patch) or os.path.realpath(patch) != patch:
+            raise OSError
+        with os.fdopen(os.open(patch, READ_FLAGS), 'rb') as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise OSError
+            measured = hashlib.file_digest(source, 'sha256').hexdigest()
+    except OSError:
+        raise ValueError('patch file unavailable') from None
+    if measured != digest:
+        raise ValueError('patch digest differs')
+    when = datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()
+    sha = f'patch:{digest}'
+    account(pending, identifier, 'review', agent, sha, verdict, f'{transcript} at {when}: {verdict} on {patch}',
+            entries=entries)
+    named = f'{agent}@{result["agent_id"]}' if result.get('agent_id') else agent
+    return f'accounted {identifier} {named} {sha} {verdict}'
+
+
 def account_auto(pending, entries, receipts, *, fail_unparsed=False):
     budgets = {}
     accounted = remaining = already = awaiting = 0
@@ -688,20 +747,7 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
                     if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
                         raise ValueError('expected one commit')
                     sha = first[0].lower()
-                    labels = (match[1] for line in text.splitlines() if (match := VERDICT_LABEL.match(line)))
-                    label = next(labels, None)
-                    if label is None or next(labels, None) is not None:
-                        raise ValueError('expected one verdict')
-                    words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower())
-                             if (word := token.strip('_'))]
-                    verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
-                    if not words or words[0] not in verdict_words:
-                        raise ValueError('expected one verdict')
-                    if 'pass' in words and (words[0] != 'pass' or any(
-                            word in verdict_words or word in ('not', 'no', 'never', 'without')
-                            or word.endswith(("n't", 'n’t')) for word in words[1:])):
-                        raise ValueError('expected one verdict')
-                    verdict = 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
+                    verdict = review_verdict(text)
                 except ValueError as exc:
                     reason = str(exc)
                     if not fail_unparsed or reason not in (
@@ -836,6 +882,8 @@ def main(argv):
                     print(correct_binding(pending, root, root_fd, *args[1:]))
                 elif cmd == 'account':
                     print(account(pending, *args[1:], entries=source.read().splitlines()))
+                elif cmd == 'account-patch':
+                    print(account_patch(pending, *args[1:], entries=source.read().splitlines()))
                 else:
                     with locked_receipts(root_fd):
                         account_auto(pending, source.read().splitlines(),
