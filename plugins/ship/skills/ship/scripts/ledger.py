@@ -28,13 +28,13 @@ REQUIRED = {
     'light': ['slices', 'simplify', 'deep-review', 'fix-read', 'pr', 'babysit', 'gate'],
 }
 REVIEW_STEPS = {'panel-high', 'simplify', 'deep-review', 'select', 'fix-read', 'panel-final', 'closing'}
-USAGE = """usage: ledger.py path | status | gaps | run-end
+USAGE = """usage: ledger.py path | status | gaps | run-anchor | run-end
        ledger.py run-start <full|light> <run-id> [board-path]
        ledger.py append <step> <agent>[@<agent-id>] <sha> <verdict> [note]
        ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
        ledger.py account-auto [--fail-unparsed] <pending.tsv>
        ledger.py correct-binding <pending.tsv> <result-id> <ledger-line> <reason>"""
-MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
+MARKS = ('run-start', 'run-anchor', 'run-end', 'account-result', 'correct-binding')
 ACCOUNT_COMMANDS = ('account', 'account-auto', 'correct-binding')
 GRANT_LIFETIME_NS = 900_000_000_000
 GRANT_REFUSAL = 'Accounting requires a fresh grant from the ship hook. Run the exact command again.'
@@ -444,17 +444,17 @@ def gaps(run, head, cwd='.'):
             raise
         return True
 
-    base = start_commit = commit(start[3])
-    notice = None
-    if start_commit is not None and not ancestor(start_commit, head):
-        try:
-            base = git(cwd, '--no-replace-objects', 'merge-base', start_commit, head)
-        except subprocess.CalledProcessError as exc:
-            if exc.returncode != 1:
-                raise
-            base = None
-        else:
-            notice = f'run start {start_commit} was rewritten; using merge-base {base}'
+    anchor_index = next((i for i in range(len(after) - 1, -1, -1)
+                         if after[i][1] == 'run-anchor'), -1)
+    anchor = after[anchor_index] if anchor_index >= 0 else start
+    label = 'run anchor' if anchor_index >= 0 else 'run start'
+    base = commit(anchor[3])
+    base_issue = notice = None
+    if base is None:
+        base_issue = f'{label} {anchor[3]!r} is an unknown commit'
+    elif not ancestor(base, head):
+        base_issue = f'{label} {base} is not in HEAD history'
+        notice = f'{base_issue}; run ledger.py run-anchor and repeat the reviews'
 
     def commit_issues(sha, closing):
         resolved = commit(sha)
@@ -465,19 +465,17 @@ def gaps(run, head, cwd='.'):
         issues = []
         if not ancestor(resolved, head):
             issues.append(f'is not an ancestor of HEAD {head}')
-        if start_commit is None:
-            issues.append(f'run start {start[3]!r} is an unknown commit')
-        elif base is None:
-            issues.append(f'run start {start_commit} has no merge-base with HEAD {head}')
-        elif not ancestor(base, resolved):
-            anchor = 'merge-base' if notice else 'run start'
-            issues.append(f'does not descend from {anchor} {base}')
+        if base_issue:
+            issues.append(base_issue)
+        if base is not None and not ancestor(base, resolved):
+            issues.append(f'does not descend from {label} {base}')
         return issues
 
     done = {}
-    for row in after:
-        if row[4] != 'owed':
-            done.setdefault(row[1], []).append(row)
+    for index, row in enumerate(after):
+        step = row[1]
+        if row[4] != 'owed' and (index > anchor_index or step not in REVIEW_STEPS or step == 'closing'):
+            done.setdefault(step, []).append(row)
     missing = []
     for step in REQUIRED[start[2]]:
         candidates = done.get(step, [])
@@ -945,6 +943,13 @@ def main(argv):
             sys.exit(f'run {run[0][5]} is still open; finish it with run-end first')
         append(path, 'run-start', args[0], git('.', 'rev-parse', 'HEAD'), 'open', ' '.join(args[1:]))
         print(path)
+    elif cmd == 'run-anchor':
+        if args:
+            sys.exit(USAGE)
+        if not run:
+            sys.exit('no open run; start one with run-start')
+        head = git('.', '--no-replace-objects', 'rev-parse', '--verify', 'HEAD^{commit}')
+        append(path, 'run-anchor', '', head, 'open', run[0][5])
     elif cmd == 'append':
         if len(args) not in (4, 5):
             sys.exit(USAGE)

@@ -63,13 +63,13 @@ Preserve execution admission and the reviewer MCP ban under both [scoped decisio
 
 ### Ledger review evidence
 
-Record the reviewer seat and the actual reviewed commit in each review row.
-The ledger checks the seat against the Ship reviewer agent files.
+Record `<seat>@<agent-id>` and the actual reviewed commit in each new review row.
 Use a nonempty agent ID with neither whitespace nor `@`.
+The ledger checks the seat against the Ship reviewer agent files and also accepts a bare declared seat.
 For `panel-high`, `simplify`, `deep-review`, `select`, `fix-read`, and `panel-final`, use a commit between the run base and HEAD, inclusive, by Git ancestry.
-The run base is the run-start commit when it is an ancestor of HEAD.
-After a rewrite, the ledger reports their merge base and uses it as the run base.
-A missing merge base keeps the review step open.
+The latest `run-anchor` supplies the run base when present. Otherwise, the `run-start` row supplies it.
+If the run base leaves HEAD history, run `ledger.py run-anchor` to record the current HEAD.
+Repeat the six history reviews that apply to the run mode. Only rows after the latest anchor qualify for those steps.
 In full mode, record `closing` at HEAD. Light mode has no `closing` step.
 Use a full commit SHA or an unambiguous abbreviated commit SHA. The ledger accepts uppercase hexadecimal digits.
 `append` trusts the supplied agent name; the role check detects label errors only.
