@@ -296,7 +296,7 @@ class TextLintTests(unittest.TestCase):
                                  + text_lint.INPUT_TEMPLATE)
         self.assertIn('<meta name="output-kind" content="decision">', text_lint.INPUT_TEMPLATE)
         self.assertIn('<meta name="output-kind" content="result">', text_lint.INPUT_TEMPLATE)
-        headings = ('What is wrong', 'Why now', 'Options A to C with effects',
+        headings = ('What is wrong', 'Why now', 'Options A to D with effects',
                     'Recommendation', 'If no answer')
         positions = [text_lint.INPUT_TEMPLATE.index('<h2>' + heading + '</h2>') for heading in headings]
         self.assertEqual(positions, sorted(positions))

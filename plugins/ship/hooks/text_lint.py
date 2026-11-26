@@ -33,7 +33,7 @@ Decision:
 <meta name="output-kind" content="decision">
 <h2>What is wrong</h2><p>...</p>
 <h2>Why now</h2><p>...</p>
-<h2>Options A to C with effects</h2><p>A: ... B: ... C: ...</p>
+<h2>Options A to D with effects</h2><p>A: ... B: ... C: ... D: ...</p><p>With three real options, add: Only three real paths exist. A fourth would be padding.</p>
 <h2>Recommendation</h2><p>...</p>
 <h2>If no answer</h2><p>...</p>
 Result alternative:
