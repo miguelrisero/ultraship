@@ -52,6 +52,27 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
         self.assertEqual(fields['tools'], 'Read, Grep, Glob, LSP, WebFetch, WebSearch')
         self.assertEqual(fields['effort'], 'xhigh')
 
+    def test_protected_reviewer_checks_admission_without_a_second_message(self):
+        policy = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        admission = policy.split('## Reviewer admission record for protected row reads\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('In the brief, name the admission record and the reviewed commit.', admission)
+        self.assertIn("Make the admission check the reviewer's first step.", admission)
+        self.assertIn('require zero protected reads and the single finding `protected admission missing`', admission)
+        self.assertIn('`Verdict: findings` and `Reviewed commit: <the commit named in the brief>`', admission)
+        self.assertNotIn('SendMessage', admission)
+        self.assertNotIn('until the driver confirms', admission)
+        for path in AGENTS.glob('reviewer--*.md'):
+            _, sections = split_body(path.read_text())
+            if ADMISSION in sections:
+                with self.subTest(seat=path.stem):
+                    text = sections[ADMISSION]
+                    self.assertIn('Check the admission record named in the brief as your first step.', text)
+                    self.assertIn('If the record is missing or invalid, read nothing protected.', text)
+                    self.assertIn('protected admission missing', text)
+                    self.assertIn('`Verdict: findings`', text)
+                    self.assertIn('`Reviewed commit: <the commit named in the brief>`', text)
+                    self.assertNotIn('Wait for the driver', text)
+
     def test_dispatch_selects_a_reviewer_with_the_loaded_route(self):
         text = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
         admission = text.split('## Reviewer admission record for protected row reads\n', 1)[1].split('\n## ', 1)[0]
@@ -63,4 +84,4 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
                 text = path.read_text()
                 self.assertNotIn('return `ready`', text.casefold())
                 if ADMISSION in text:
-                    self.assertIn('Check the admission record before any protected read.', text)
+                    self.assertIn('Check the admission record named in the brief as your first step.', text)
