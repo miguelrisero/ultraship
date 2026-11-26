@@ -134,7 +134,7 @@ Record a later independent review separately on the run board. Link the pending 
 
 When Stop reports a missing original ledger or run binding, end the turn with a blocker report. Keep run completion on hold. Restore the original binding through an approved recovery route before crediting that result.
 
-Use `account-auto` only after verifying the reviewed commit and verdict for every result in the pending file:
+Use `account-auto` only after verifying the commit and verdict for every result in the pending file:
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto "<pending.tsv>"
@@ -149,6 +149,8 @@ The command reads the transcript at an absolute path without symlinks, ending in
 The review turn must contain exactly one distinct 40-digit hexadecimal commit SHA. The command counts SHAs between Markdown underscores or backticks. A SHA has no adjacent hexadecimal digits.
 
 The command strips Markdown markers and whitespace from the value on the label line. The first word must be a verdict word. The command recognizes `pass` as positive and `fail`, `failed`, `fails`, `failing`, `failure`, and `findings` as negative. A `pass` value permits only one verdict word and excludes negations: `not`, `no`, `never`, `without`, and words ending in `n't`. The command records `findings` for a negative value that contains `findings`, or `fail` for other negative values.
+
+For `Verdict: blocked`, give one `Reason: <reason>` line and the commit named in the brief. The command records a blocked accounting row with the reason and commit in its evidence. The row gives zero review, pipeline, or completion credit. Account for a continued turn under its own result ID while the run stays open.
 
 The command requires exactly one `run-start` row that matches the recorded run before it accepts a receipt or an `account-result` row. The receipt must name the same ledger and run. The receipt row must follow the recorded `run-start`. The first `run-end` or next `run-start`, if present, ends the range. The result's own `account-result` row can also satisfy the receipt outside that range. The plain `account-auto <pending.tsv>` form leaves the result pending if any required evidence is missing or differs. The plain form also leaves it pending if the verdict label repeats or the verdict value mixes positive and negative words.
 

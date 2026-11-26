@@ -577,8 +577,25 @@ def reverse_lines(fh, budget):
     yield b''.join(reversed(fragments))
 
 
-def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=False):
+def transcript_timestamp_ns(entry):
+    stamp = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
+    if stamp.tzinfo is None:
+        raise TypeError('transcript timestamp has no time zone')
+    delta = stamp - datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return ((delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds) * 1000
+
+
+def stop_time(epoch, result):
+    stopped_at = result.get('stopped_at_ns')
+    if 'stopped_at_ns' in result and (type(stopped_at) is not int or stopped_at // 1_000_000_000 != epoch):
+        raise ValueError('invalid stop time')
+    return stopped_at
+
+
+def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=False, stopped_at=None):
     # sole_turn returns text only when the transcript holds one prompt and nothing after the notice.
+    prompt_end = epoch * 1_000_000_000 if stopped_at is None else stopped_at
+    transcript_end = (epoch + 1) * 1_000_000_000 if stopped_at is None else stopped_at
     texts = []
     found = None
     after_tool = True
@@ -599,14 +616,11 @@ def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=F
                 role = entry['type']
                 if role not in ('user', 'assistant'):
                     continue
-                stamp = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
-                if stamp.tzinfo is None:
-                    raise TypeError('transcript timestamp has no time zone')
-                when = stamp.timestamp()
+                when = transcript_timestamp_ns(entry)
                 if when > newest:
                     raise ValueError('transcript timestamps out of order')
                 newest = when
-                if when > epoch + 1:
+                if when > transcript_end:
                     if sole_turn:
                         # A later turn means a second notice for this transcript exists or is on its way.
                         return ''
@@ -622,7 +636,7 @@ def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=F
                             # A second prompt means a resumed agent; a timestamp cannot say which turn owns the notice.
                             return ''
                         # A prompt in the grace second makes turn ownership ambiguous.
-                        text = '\n'.join(reversed(texts)).strip() if when <= epoch else ''
+                        text = '\n'.join(reversed(texts)).strip() if when <= prompt_end else ''
                         if not (sole_turn and text):
                             return text
                         found = text
@@ -679,9 +693,11 @@ def review_verdict(text):
     label = next(labels, None)
     if label is None or next(labels, None) is not None:
         raise ValueError('expected one verdict')
+    if re.fullmatch(r'[\s*_`]*blocked[\s*_`]*', label, re.I):
+        return 'blocked'
     words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower()) if (word := token.strip('_'))]
     verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
-    if not words or words[0] not in verdict_words:
+    if not words or words[0] not in verdict_words or 'blocked' in words:
         raise ValueError('expected one verdict')
     if 'pass' in words and (words[0] != 'pass' or any(
             word in verdict_words or word in ('not', 'no', 'never', 'without')
@@ -702,9 +718,7 @@ def recorded_result(entries, identifier):
 def account_void(pending, identifier, *, entries):
     epoch, agent, result = recorded_result(entries, identifier)
     transcript = recorded_transcript(pending, result)
-    stopped_at = result.get('stopped_at_ns')
-    if 'stopped_at_ns' in result and (type(stopped_at) is not int or stopped_at // 1_000_000_000 != epoch):
-        raise ValueError('invalid stop time')
+    stopped_at = stop_time(epoch, result)
     prompt = None
     replies = []
     latest = None
@@ -725,11 +739,7 @@ def account_void(pending, identifier, *, entries):
                     raise ValueError('transcript agent identity differs from the recorded agent')
                 if entry.get('sessionId') != pending.stem:
                     raise ValueError('transcript path does not match the recorded agent and session')
-                stamp = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
-                if stamp.tzinfo is None:
-                    raise TypeError('transcript timestamp has no time zone')
-                delta = stamp - datetime(1970, 1, 1, tzinfo=timezone.utc)
-                when = ((delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds) * 1000
+                when = transcript_timestamp_ns(entry)
                 if stopped_at is not None:
                     later = when > stopped_at
                 else:
@@ -901,10 +911,14 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
                 source = str(path)
                 epoch = int(epoch)
                 when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+                step = 'review'
+                blocked = False
                 try:
-                    text = final_turn_text(path, epoch, budgets)
+                    text = final_turn_text(path, epoch, budgets, stopped_at=stop_time(epoch, result))
                     if not text:
                         raise ValueError('no final turn text')
+                    blocked = any(re.search(r'(?<![A-Za-z0-9])blocked(?![A-Za-z0-9])', label[1], re.I)
+                                  for line in text.splitlines() if (label := VERDICT_LABEL.match(line)))
                     commits = re.finditer(r'(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])', text)
                     first = next(commits, None)
                     if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
@@ -913,13 +927,19 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
                     verdict = review_verdict(text)
                 except ValueError as exc:
                     reason = str(exc)
-                    if not fail_unparsed or reason not in (
+                    if blocked or not fail_unparsed or reason not in (
                             'expected one commit', 'expected one verdict', 'transcript parse error'):
                         raise
                     sha, verdict = '0' * 40, 'fail'
                 else:
                     reason = verdict
-                account(pending, identifier, 'review', agent, sha, verdict, f'{source} at {when}: {reason}',
+                    if verdict == 'blocked':
+                        reasons = re.findall(r'^Reason:[ \t]*(\S[^\r\n]*)$', text, re.I | re.M)
+                        if len(reasons) != 1:
+                            raise ValueError('expected one blocked reason')
+                        reason = f'blocked at {sha}: {reasons[0].strip()}'
+                        step = sha = 'blocked'
+                account(pending, identifier, step, agent, sha, verdict, f'{source} at {when}: {reason}',
                         entries=entries)
                 named = f'{agent}@{result["agent_id"]}' if result.get('agent_id') else agent
         except (json.JSONDecodeError, UnicodeError, OverflowError, RecursionError):
