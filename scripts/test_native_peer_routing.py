@@ -55,7 +55,7 @@ class NativePeerRoutingTests(unittest.TestCase):
             self.assertTrue(any(re.fullmatch(h['matcher'], tool) and any('text_lint.py' in c['command'] for c in h['hooks']) for h in hooks))
         dispatch = (ROOT / 'plugins/chief/skills/run/references/dispatch.md').read_text()
         for requirement in ('full sentences of at most 25 words', 'Prohibit glued-word shorthand',
-                            '`Facts`, `Decision`, and `Next`', '`Options` A–C with effects',
+                            '`Facts`, `Decision`, and `Next`', '`Options` A–D with effects (three only with the line "Only three real paths exist. A fourth would be padding.")',
                             'informational result Inputs without artificial choices',
                             'Future targets over 48 Sol hours', '5% or less', '85% or more'):
             self.assertIn(requirement, dispatch)

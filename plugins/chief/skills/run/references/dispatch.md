@@ -38,7 +38,7 @@ Keep authorized lifecycle commands separate from peer reports. Preserve actual p
 Apply the same output contract to every model. Separate words with spaces and use full sentences of at most 25 words.
 Prohibit glued-word shorthand in peer and owner text. Lead peer bodies with the outcome and its meaning.
 Follow with `Facts`, `Decision`, and `Next` sections. Name the accountable owner and dated UTC time in `Next`.
-Decision Inputs contain `What is wrong`, `Why now`, `Options` A–C with effects, `Recommendation`, and `If no answer`.
+Decision Inputs contain `What is wrong`, `Why now`, `Options` A–D with effects (three only with the line "Only three real paths exist. A fourth would be padding."), `Recommendation`, and `If no answer`.
 State one recommendation with its reason and the default when the owner gives no answer.
 Preserve informational result Inputs without artificial choices. Preserve existing published choice IDs and exact owner answer contracts during retries.
 Classify every prepared Input HTML explicitly with `<meta name="output-kind" content="decision">` or `<meta name="output-kind" content="result">`.

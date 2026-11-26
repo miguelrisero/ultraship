@@ -49,7 +49,7 @@ Report status only on a transition or at a deadline.
 Report lane state changes, PR openings, CI turning red or green, merges, and verified deploys.
 Omit standing holds from routine status reports.
 State what changed, what it means, and the next action.
-For a hold or wait, give `Facts` (direct PR URL, 40-hex head SHA), `Decision` (blocked step, release condition), and `Next` (accountable owner, exact permitted action, UTC deadline).
+In a peer hold or wait report, give `Facts` (direct PR URL, 40-hex head SHA), `Decision` (blocked step, release condition), and `Next` (accountable owner, exact permitted action, UTC deadline).
 The chief refuses an incomplete lane or driver report and asks the sender for all required fields.
 Verify CoC liveness using its existing recorded identity and the [process check](references/state.md#continuation-and-waits).
 Retry through existing scheduling with zero additional pollers or duplicate Inputs.
@@ -167,7 +167,7 @@ blocker everywhere"). Record that check in the PR body.
 
 The driver dispatches `ship:writer--sol` for code and keeps every fix inside its lane.
 
-There is no lane cap (owner, 2026-10-22, until new notice). Run as many lanes as the work needs. When cap risk is flagged, follow [state and recovery](references/state.md). Surface lanes queued over four hours with an ETA or a priority decision.
+There is no lane cap in the Green and Amber quota tiers (owner, 2026-10-22, until new notice). Run as many lanes as the work needs. In the Red and Critical tiers, the CoC emergency lane limits apply. When cap risk is flagged, follow [state and recovery](references/state.md). Surface lanes queued over four hours with an ETA or a priority decision.
 
 Give every person a realistic ETA, and keep it (owner, 2026-10-28: "please REALISTIC TIMELINE, stop scamming people with your timelines, always super optimistic, learn as a rule that you cannot fail on your promises"). Build each ETA from the real path: CI, review rounds, the gate wait, the merge-queue depth, the deploy, and the live check. Quote the time you are sure of. Say "earlier if it goes well" as a separate sentence. When a promise is at risk, tell the person before it passes, with the new realistic time and the cause.
 
