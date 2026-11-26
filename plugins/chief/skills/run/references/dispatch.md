@@ -74,7 +74,15 @@ Use only the authority below. Keep all action gates, tool denials, and hooks.
 7. Ask your chief for permission at any time. Continue independent work.
 
 ## Only the owner
-Apply the six thresholds and exceptions under `Only the owner` in the ship plugin's `skills/ship/references/owner-decisions.md`.
+Load `owner-decisions:owner-decisions` and apply its current `Only the owner` section.
+Treat the older `Escalate only a critical item` heading as a reason to look up the current policy.
+If the installed skill or `Only the owner` is missing or incomplete, read the [canonical Better Plugin source](https://github.com/bettergroupinc/better-plugin/blob/main/plugins/owner-decisions/skills/owner-decisions/SKILL.md#only-the-owner).
+Use an authorized local copy of `plugins/owner-decisions/skills/owner-decisions/SKILL.md` in the Better Plugin checkout if web access is unavailable.
+Include the exact local policy path in `Readable files` when the brief authorizes that read.
+If the canonical policy remains unavailable, refuse a sensitive action whose approval requirement is unclear.
+Keep the action pending and report the missing policy through your usual decision route. Continue independent work.
+Keep existing permission denials and holds.
+Only the owner's own words approve a critical item.
 Send decision needs to your chief. The CoC owns the canonical Input; the designated driver owns standalone delivery. Keep live authority separate.
 
 Task: <frozen goal, one paragraph>

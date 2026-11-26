@@ -22,7 +22,15 @@ Use authority within the lane brief and your role. Route lane actions through th
 
 ## Only the owner
 
-Apply the six thresholds and exceptions under `Only the owner` in the ship plugin's `skills/ship/references/owner-decisions.md`. Route decisions through the CoC, or the designated driver in a standalone run.
+Load `owner-decisions:owner-decisions` and apply its current `Only the owner` section.
+Treat the older `Escalate only a critical item` heading as a reason to look up the current policy.
+If the installed skill or `Only the owner` is missing or incomplete, read the [canonical Better Plugin source](https://github.com/bettergroupinc/better-plugin/blob/main/plugins/owner-decisions/skills/owner-decisions/SKILL.md#only-the-owner).
+Use an authorized local copy of `plugins/owner-decisions/skills/owner-decisions/SKILL.md` in the Better Plugin checkout if web access is unavailable.
+If the canonical policy remains unavailable, refuse a sensitive action whose approval requirement is unclear.
+Keep the action pending and report the missing policy through your usual decision route. Continue independent work.
+Keep existing permission denials and holds.
+Only the owner's own words approve a critical item.
+Route decisions through the CoC, or the designated driver in a standalone run.
 Keep product, billing, security policy, and major architecture scope holds. Keep live authority separate.
 
 Chief needs the `ship` plugin. Check that `ship:driver` and `ship:writer--sol` are available before the first dispatch.
