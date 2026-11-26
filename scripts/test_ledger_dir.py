@@ -1029,7 +1029,7 @@ class LedgerDirTests(unittest.TestCase):
 
     def test_account_void_closes_its_stopped_result_without_credit(self):
         owed, _, result, _ = self.auto_owed([
-            (-2, 'user', 'Return the single word ready.'), (-1, 'assistant', 'ready')])
+            (-2, 'user', 'Return the single word `ready`.'), (-1, 'assistant', 'ready')])
         home = self.resolve()
         gaps = ledger.gaps(ledger.open_run(home))
         args = ('account-void', str(owed), result['id'])
@@ -1046,7 +1046,7 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(set(self.bound()), {result['id']})
 
     def test_account_void_refuses_uncertain_or_nonempty_review_evidence(self):
-        prompt = (-4, 'user', 'Return the single word ready.')
+        prompt = (-4, 'user', 'Return the single word `ready`.')
         ready = (-1, 'assistant', 'ready')
         home = self.resolve()
         for case, entries, reason in (
@@ -1112,6 +1112,26 @@ class LedgerDirTests(unittest.TestCase):
         self.assertIn('transcript agent identity differs', attempt.stderr)
         self.assertEqual(owed.read_bytes(), before)
 
+    def test_void_refuses_prompts_with_review_material(self):
+        handshake = 'Return the single word `ready`'
+        for prompt in (
+            'Review this inline change.',
+            handshake + '\n@@ -1 +1 @@\n-old\n+new',
+            handshake + '\nPaths:\n- ledger.py\n- ultraship.py',
+            handshake + '\nReviewed commit: abcdef1',
+            handshake + ' ' * (200 - len(handshake)) + '.',
+            [{'type': 'text', 'text': handshake}, {'type': 'document'}],
+        ):
+            with self.subTest(prompt=prompt):
+                owed, _, result, _ = self.auto_owed([(-2, 'user', prompt), (-1, 'assistant', 'ready')])
+                home = self.resolve()
+                before = (owed.read_bytes(), home.read_bytes())
+                attempt = self.cli('account-void', str(owed), result['id'])
+                self.assertEqual(attempt.returncode, 1, attempt)
+                self.assertIn('expected a handshake-only prompt', attempt.stderr)
+                self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+                owed.unlink()
+
     def test_resumed_agent_stop_records_a_new_result(self):
         owed, transcript, first, _ = self.auto_owed([(-2, 'user', 'Return ready.'), (-1, 'assistant', 'ready')])
         self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='reviewer',
@@ -1124,7 +1144,7 @@ class LedgerDirTests(unittest.TestCase):
 
     def test_void_accepts_a_prompt_reply_and_stop_in_one_second(self):
         owed, transcript, result, epoch = self.auto_owed([
-            (0.1, 'user', 'Return ready.'), (0.2, 'assistant', ' ReAdY ')])
+            (0.1, 'user', ' Return the single word `ready` and nothing else. '), (0.2, 'assistant', ' ReAdY ')])
         owed.unlink()
         hook_spec = importlib.util.spec_from_file_location('void_stop_hook', HOOK)
         stop_hook = importlib.util.module_from_spec(hook_spec)

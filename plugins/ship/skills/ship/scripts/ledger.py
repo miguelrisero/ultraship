@@ -705,7 +705,7 @@ def account_void(pending, identifier, *, entries):
     stopped_at = result.get('stopped_at_ns')
     if 'stopped_at_ns' in result and (type(stopped_at) is not int or stopped_at // 1_000_000_000 != epoch):
         raise ValueError('invalid stop time')
-    prompt = False
+    prompt = None
     replies = []
     latest = None
     try:
@@ -751,12 +751,12 @@ def account_void(pending, identifier, *, entries):
                     kind = block['type']
                     if kind.endswith(('_tool_use', '_tool_result')) or kind in ('tool_use', 'tool_result'):
                         raise ValueError('transcript contains a tool call')
-                    if role == 'assistant' and kind == 'text':
+                    if kind == 'text':
                         texts.append(block['text'])
                 if role == 'user':
-                    if prompt or not replies:
+                    if prompt is not None or not replies:
                         raise ValueError('expected one prompt and one ready reply')
-                    prompt = True
+                    prompt = '\n'.join(texts).strip() if len(texts) == len(content) else ''
                 elif texts:
                     text = '\n'.join(texts)
                     if VERDICT_ANY.search(text) or re.search(r'(?<![A-Za-z0-9_])_*Reviewed\s+commit[*_\s]*:', text, re.I):
@@ -767,8 +767,11 @@ def account_void(pending, identifier, *, entries):
             after = os.fstat(source.fileno())
             if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
                 raise ValueError('transcript changed during accounting')
-            if not prompt or replies[0].strip().casefold() != 'ready':
+            if prompt is None or replies[0].strip().casefold() != 'ready':
                 raise ValueError('expected one prompt and one ready reply')
+            # Recognize the handshake itself rather than guessing which trailing text is review material.
+            if len(prompt) > 200 or not re.fullmatch(r'Return the single word `ready`(?: and nothing else)?\.?', prompt):
+                raise ValueError('expected a handshake-only prompt')
     except TranscriptLimit:
         raise ValueError('transcript scan limit reached') from None
     except (AttributeError, KeyError, TypeError, OverflowError, RecursionError, json.JSONDecodeError, UnicodeError):

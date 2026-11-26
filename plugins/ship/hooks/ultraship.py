@@ -7444,7 +7444,7 @@ def stop(data):
               'For a result on a frozen, uncommitted patch, use '
               f'`python3 {shlex.quote(str(ledger_script()))} account-patch {shlex.quote(str(path))} '
               '<result-id> <absolute-patch-file>`. '
-              'For a stopped agent with one prompt, one ready reply, zero tool calls and no review labels, use '
+              'For a stopped agent with only a readiness prompt, one ready reply, zero tool calls and no review labels, use '
               f'`python3 {shlex.quote(str(ledger_script()))} account-void {shlex.quote(str(path))} <result-id>`. '
               'A void row gives zero review or completion credit. '
               'Keep other results without a verified reviewed commit pending. '
