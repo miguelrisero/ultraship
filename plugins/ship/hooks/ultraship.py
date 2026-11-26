@@ -7261,7 +7261,7 @@ def findings_commands(ledger, pending, owed, failures, data):
             if transcripts[identity] != 1:
                 continue
             text = '\n'.join(ledger.final_turn_text(transcript, int(epoch), budgets, expected_identity=identity,
-                                                    reject_later=True).splitlines())
+                                                    sole_turn=True).splitlines())
             if re.search(r'```|~~~|\b(?:patch|diff|uncommitted|unstaged|staged|working tree)\b|[0-9a-f]{64}',
                          text, re.I):
                 continue

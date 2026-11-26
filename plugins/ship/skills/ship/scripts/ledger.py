@@ -524,8 +524,10 @@ def reverse_lines(fh, budget):
     yield b''.join(reversed(fragments))
 
 
-def final_turn_text(path, epoch, budgets, *, expected_identity=None, reject_later=False):
+def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=False):
+    # sole_turn returns text only when the transcript holds one prompt and nothing after the notice.
     texts = []
+    found = None
     after_tool = True
     newest = float('inf')
     try:
@@ -552,7 +554,7 @@ def final_turn_text(path, epoch, budgets, *, expected_identity=None, reject_late
                     raise ValueError('transcript timestamps out of order')
                 newest = when
                 if when > epoch + 1:
-                    if reject_later:
+                    if sole_turn:
                         # A later turn means a second notice for this transcript exists or is on its way.
                         return ''
                     continue
@@ -563,8 +565,16 @@ def final_turn_text(path, epoch, budgets, *, expected_identity=None, reject_late
                     raise TypeError('transcript content must have blocks')
                 if role == 'user':
                     if any(block['type'] != 'tool_result' for block in content):
+                        if found is not None:
+                            # A second prompt means a resumed agent; a timestamp cannot say which turn owns the notice.
+                            return ''
                         # A prompt in the grace second makes turn ownership ambiguous.
-                        return '\n'.join(reversed(texts)).strip() if when <= epoch else ''
+                        text = '\n'.join(reversed(texts)).strip() if when <= epoch else ''
+                        if not (sole_turn and text):
+                            return text
+                        found = text
+                elif found is not None:
+                    continue
                 elif any(block['type'] in ('tool_use', 'server_tool_use') for block in content):
                     after_tool = False
                 elif after_tool:
@@ -577,7 +587,7 @@ def final_turn_text(path, epoch, budgets, *, expected_identity=None, reject_late
         raise ValueError('transcript unavailable') from None
     except (AttributeError, KeyError, TypeError, OverflowError, RecursionError, ValueError):
         raise ValueError('transcript parse error') from None
-    return ''
+    return found or ''
 
 
 def load_receipts(path, *, root_fd=None):

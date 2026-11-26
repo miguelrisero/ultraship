@@ -1195,6 +1195,14 @@ class LedgerDirTests(unittest.TestCase):
         reason = self.non_git_stop_block(owed, owed.read_bytes(), result['id'])
         self.assertNotIn('Run each verified findings command', reason)
 
+    def test_stop_withholds_findings_when_a_resumed_prompt_lands_on_the_notice_second(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, result, _ = self.auto_owed([
+            (-3, 'user', 'Review.'), (-2, 'assistant', f'Reviewed commit: {sha}\nVerdict: pass'),
+            (0, 'user', 'Review again.'), (0.5, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        reason = self.non_git_stop_block(owed, owed.read_bytes(), result['id'])
+        self.assertNotIn('Run each verified findings command', reason)
+
     def test_stop_withholds_findings_command_that_custody_would_refuse(self):
         sha = self.git(self.checkout, 'rev-parse', 'HEAD')
         owed, _, result, _ = self.auto_owed([
