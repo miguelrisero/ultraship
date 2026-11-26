@@ -1,4 +1,5 @@
 """Synthetic linked-worktree ledger and hook regressions."""
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 import errno
@@ -13,6 +14,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from threading import Event
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -804,6 +806,80 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(gaps.stdout.splitlines().count(notice), 1)
         for step in ('simplify', 'deep-review', 'fix-read'):
             self.assertIn(f'{step} (', gaps.stdout.splitlines()[-1])
+
+    def test_review_gaps_report_an_unresolvable_base_without_review_rows(self):
+        self.legacy.unlink()
+        head = self.git(self.checkout, 'rev-parse', 'HEAD')
+        missing = '0' * len(head)
+        ledger.append(self.resolve(), 'run-start', 'light', missing, 'open', 'pruned')
+        gaps = self.cli('gaps')
+        self.assertEqual(gaps.returncode, 1)
+        notice = f'run start {missing} is not in HEAD history; run ledger.py run-anchor and repeat the reviews'
+        self.assertEqual(gaps.stdout.splitlines().count(notice), 1)
+        self.assertIn('deep-review (', gaps.stdout.splitlines()[-1])
+
+    def test_run_anchor_waits_for_run_end(self):
+        for complete in (True, False):
+            with self.subTest(complete=complete):
+                self.git(self.checkout, 'switch', '-qc', f'lock-{complete}')
+                self.assertEqual(self.cli('run-start', 'light', 'serialized').returncode, 0)
+                home = self.resolve()
+                head = self.git(self.checkout, 'rev-parse', 'HEAD')
+                for step in ledger.REQUIRED['light']:
+                    if complete or step != 'deep-review':
+                        ledger.append(home, step, 'ship:reviewer--sol', head, 'pass', '')
+
+                checking, waiting, release, end_done = Event(), Event(), Event(), Event()
+                real_gaps, real_git, real_flock = ledger.gaps, ledger.git, ledger.fcntl.flock
+
+                def pause_gaps(*args):
+                    checking.set()
+                    self.assertTrue(release.wait(10), 'run-end did not resume')
+                    return real_gaps(*args)
+
+                def check_lock(fd, flags):
+                    flags |= ledger.fcntl.LOCK_NB
+                    if checking.is_set() and not release.is_set():
+                        with self.assertRaises(BlockingIOError):
+                            real_flock(fd, flags)
+                        waiting.set()
+                        self.assertTrue(end_done.wait(10), 'run-end did not release the lock')
+                    return real_flock(fd, flags)
+
+                def invoke(command):
+                    try:
+                        ledger.main([command])
+                    except SystemExit as exc:
+                        return exc.code
+                    finally:
+                        if command == 'run-end':
+                            end_done.set()
+                    return None
+
+                with mock.patch.object(ledger, 'gaps', side_effect=pause_gaps), \
+                        mock.patch.object(ledger, 'git', side_effect=lambda _, *a: real_git(self.checkout, *a)), \
+                        mock.patch.object(ledger, 'ledger_path', return_value=home), \
+                        mock.patch.object(ledger.fcntl, 'flock', side_effect=check_lock), \
+                        ThreadPoolExecutor(max_workers=2) as pool:
+                    end = pool.submit(invoke, 'run-end')
+                    try:
+                        self.assertTrue(checking.wait(10), 'run-end did not reach gaps')
+                        anchor = pool.submit(invoke, 'run-anchor')
+                        self.assertTrue(waiting.wait(10), 'run-anchor did not wait for run-end')
+                    finally:
+                        release.set()
+                    ended, anchored = end.result(timeout=10), anchor.result(timeout=10)
+
+                if complete:
+                    self.assertIsNone(ended)
+                    self.assertIn('no open run', anchored)
+                    self.assertEqual(ledger.rows(home)[-1][1], 'run-end')
+                    self.assertEqual(self.cli('gaps').stdout, 'no open run\n')
+                else:
+                    self.assertIn('refusing run-end; gaps: deep-review (', ended)
+                    self.assertIsNone(anchored)
+                    self.assertEqual(ledger.rows(home)[-1][1:5], ['run-anchor', '', head, 'open'])
+                    self.assertIn('simplify (', self.cli('gaps').stdout)
 
     def test_review_gaps_report_bad_roles_and_commits(self):
         before_run = self.git(self.checkout, 'rev-parse', 'HEAD')

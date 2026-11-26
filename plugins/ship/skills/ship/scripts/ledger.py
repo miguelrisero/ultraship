@@ -410,15 +410,20 @@ def ledger_path(cwd='.'):
     return path
 
 
+def parse_rows(text):
+    return [line.split('\t') for line in text.splitlines() if line]
+
+
 def rows(path):
-    if not path.exists():
-        return []
-    return [line.split('\t') for line in path.read_text().splitlines() if line]
+    return parse_rows(path.read_text()) if path.exists() else []
 
 
 def open_run(path):
+    return find_open_run(rows(path))
+
+
+def find_open_run(all_rows):
     """Return (start_row, rows_after_start) for the open run, or None."""
-    all_rows = rows(path)
     for i in range(len(all_rows) - 1, -1, -1):
         step = all_rows[i][1]
         if step == 'run-end':
@@ -470,7 +475,9 @@ def gaps(run, head, cwd='.'):
         base_issue = f'{label} {anchor[3]!r} is an unknown commit'
     elif not ancestor(base, head):
         base_issue = f'{label} {base} is not in HEAD history'
-        notice = f'{base_issue}; run ledger.py run-anchor and repeat the reviews'
+    if base_issue:
+        notice = (f'{label} {base or anchor[3]} is not in HEAD history; '
+                  'run ledger.py run-anchor and repeat the reviews')
 
     def commit_issues(sha, closing):
         resolved = commit(sha)
@@ -518,17 +525,27 @@ def gaps(run, head, cwd='.'):
     return missing, notice
 
 
-def append(path, *fields):
+@contextmanager
+def locked_ledger(path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    clean = [f.replace('\t', ' ').replace('\n', ' ') for f in fields]
     with path.open('a+b') as fh:
         fcntl.flock(fh, fcntl.LOCK_EX)
-        fh.seek(0, os.SEEK_END)
-        if fh.tell():
-            fh.seek(-1, os.SEEK_END)
-            if fh.read(1) != b'\n':
-                fh.write(b'\n')
-        fh.write(('\t'.join([str(int(time.time())), *clean]) + '\n').encode('utf-8'))
+        yield fh
+
+
+def append_locked(fh, *fields):
+    clean = [f.replace('\t', ' ').replace('\n', ' ') for f in fields]
+    fh.seek(0, os.SEEK_END)
+    if fh.tell():
+        fh.seek(-1, os.SEEK_END)
+        if fh.read(1) != b'\n':
+            fh.write(b'\n')
+    fh.write(('\t'.join([str(int(time.time())), *clean]) + '\n').encode('utf-8'))
+
+
+def append(path, *fields):
+    with locked_ledger(path) as fh:
+        append_locked(fh, *fields)
 
 
 
@@ -1020,6 +1037,28 @@ def main(argv):
             sys.exit(str(exc))
         return
     path = ledger_path()
+    if cmd in ('run-anchor', 'run-end'):
+        if cmd == 'run-anchor' and args:
+            sys.exit(USAGE)
+        no_run = 'no open run; start one with run-start' if cmd == 'run-anchor' else 'no open run'
+        if not path.exists():
+            sys.exit(no_run)
+        with locked_ledger(path) as fh:
+            fh.seek(0)
+            run = find_open_run(parse_rows(fh.read().decode('utf-8')))
+            if not run:
+                sys.exit(no_run)
+            head = git('.', '--no-replace-objects', 'rev-parse', '--verify', 'HEAD^{commit}')
+            if cmd == 'run-anchor':
+                append_locked(fh, 'run-anchor', '', head, 'open', run[0][5])
+            else:
+                missing, notice = gaps(run, head)
+                if notice:
+                    print(notice)
+                if missing:
+                    sys.exit('refusing run-end; gaps: ' + ' '.join(missing))
+                append_locked(fh, 'run-end', '', head, 'closed', run[0][5])
+        return
     run = open_run(path)
     if cmd == 'path':
         print(path)
@@ -1030,13 +1069,6 @@ def main(argv):
             sys.exit(f'run {run[0][5]} is still open; finish it with run-end first')
         append(path, 'run-start', args[0], git('.', 'rev-parse', 'HEAD'), 'open', ' '.join(args[1:]))
         print(path)
-    elif cmd == 'run-anchor':
-        if args:
-            sys.exit(USAGE)
-        if not run:
-            sys.exit('no open run; start one with run-start')
-        head = git('.', '--no-replace-objects', 'rev-parse', '--verify', 'HEAD^{commit}')
-        append(path, 'run-anchor', '', head, 'open', run[0][5])
     elif cmd == 'append':
         if len(args) not in (4, 5):
             sys.exit(USAGE)
@@ -1059,16 +1091,6 @@ def main(argv):
         print('gaps: ' + (' '.join(missing) or 'none'))
         if cmd == 'gaps' and missing:
             sys.exit(1)
-    elif cmd == 'run-end':
-        if not run:
-            sys.exit('no open run')
-        head = git('.', 'rev-parse', 'HEAD')
-        missing, notice = gaps(run, head)
-        if notice:
-            print(notice)
-        if missing:
-            sys.exit('refusing run-end; gaps: ' + ' '.join(missing))
-        append(path, 'run-end', '', head, 'closed', run[0][5])
     else:
         sys.exit(USAGE)
 
