@@ -37,8 +37,8 @@ Use `/ship:ship <task>` alone for one task. Full mode adds a plan, a high panel,
 
 | Role | Model | Effort | Fallback |
 |---|---|---|---|
-| Planner | `gpt-6.2-sol` | xhigh | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
-| Writer | `gpt-6.2-sol` | xhigh | `claude-sonnet-5-5` (high) |
+| Planner | `gpt-6.2-sol` | xhigh | `claude-opus-5-5` (xhigh) |
+| Writer | `gpt-6.2-sol` | xhigh | — |
 | Opt-in Fable 5.2 writer and reviewer, only when the brief or the owner names Fable 5.2 | `claude-fable-5-2` | high (writer), xhigh (reviewer) | `gpt-6.2-sol` (writer, xhigh), `claude-opus-5-5` (reviewer) |
 | Slice review, selection, fix read, high and final panels, closing pass | `gpt-6.2-sol` | xhigh | `claude-opus-5-5` (xhigh), `claude-sonnet-5-5` |
 | Deep review, simplify | `claude-opus-5-5` | xhigh | `claude-sonnet-5-5` |
@@ -48,7 +48,7 @@ Use `/ship:ship <task>` alone for one task. Full mode adds a plan, a high panel,
 | Chief | session model (`claude-opus-5-5`) | — | — |
 | Driver | `claude-opus-5-5` | xhigh | `gpt-6.2-sol` (xhigh), at low Claude quota only |
 
-Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effort max. Sol runs `gpt-6.2-sol` at explicit effort xhigh. The full roster, with panels, is in [`plugins/ship/skills/ship/references/roster.md`](plugins/ship/skills/ship/references/roster.md).
+Reviewer and researcher Sonnet fallbacks run `claude-sonnet-5-5` at effort high. Opus never runs at effort max. Sol runs `gpt-6.2-sol` at explicit effort xhigh. The full roster, with panels, is in [`plugins/ship/skills/ship/references/roster.md`](plugins/ship/skills/ship/references/roster.md).
 
 ## Panels
 

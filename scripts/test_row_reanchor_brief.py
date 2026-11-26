@@ -158,7 +158,7 @@ class BriefTests(unittest.TestCase):
 
     def test_carriers_and_admission_flow_link_the_brief(self):
         carriers = [Path('plugins/ship/agents') / name for name in
-                    ('writer--sol.md', 'writer--sonnet.md', 'writer--fable52.md', 'driver.md', 'driver--sol.md')]
+                    ('writer--sol.md', 'writer--fable52.md', 'driver.md', 'driver--sol.md')]
         carriers.append(Path('plugins/ship/skills/ship/SKILL.md'))
         for carrier in carriers:
             link = ('../skills/ship/' if carrier.parent.name == 'agents' else '')

@@ -11,7 +11,7 @@ EVENT_ID = '1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8'
 SHIP = ROOT / 'plugins/ship'
 ROUTE_CARRIERS = (
     'skills/ship/SKILL.md', 'agents/driver.md', 'agents/driver--sol.md',
-    'agents/writer--sol.md', 'agents/writer--sonnet.md', 'agents/writer--fable52.md',
+    'agents/writer--sol.md', 'agents/writer--fable52.md',
 )
 REVIEWERS = ('reviewer--sol.md', 'reviewer--opus.md', 'reviewer--astra.md')
 
@@ -495,7 +495,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         )
 
     def test_writers_require_verified_authority_and_preserve_controls(self):
-        for name in ('writer--sol.md', 'writer--sonnet.md'):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
             text = (ROOT / 'plugins/ship/agents' / name).read_text()
             for phrase in (
                 INPUT_ID, WORKSPACE_ID, EVENT_ID, 'get_input', 'owner_ui',
@@ -574,7 +574,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
 
     def test_exact_coc_adaptations_preserve_or_strengthen_the_same_guarantee(self):
         for name in (
-            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/writer--sol.md', 'plugins/ship/agents/writer--fable52.md',
             'plugins/ship/agents/driver.md', 'plugins/ship/agents/driver--sol.md',
             'plugins/ship/skills/ship/SKILL.md',
         ):
@@ -634,8 +634,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
 class ScopedDecisionRouteTests(unittest.TestCase):
     ship = ROOT / 'plugins/ship'
     reference = ship / 'skills/ship/references/owner-decisions.md'
-    lanes = ('driver.md', 'driver--sol.md', 'writer--sol.md', 'writer--sonnet.md',
-             'writer--fable52.md')
+    lanes = ('driver.md', 'driver--sol.md', 'writer--sol.md', 'writer--fable52.md')
     reviewers = ('reviewer--sol.md', 'reviewer--opus.md')
     skill = ship / 'skills/ship/SKILL.md'
 
