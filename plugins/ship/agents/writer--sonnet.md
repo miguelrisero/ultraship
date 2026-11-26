@@ -22,7 +22,8 @@ Keep the brief's scope, every hook, and the writer's publication ban.
 
 ## Only the owner
 
-Apply the six [owner decision thresholds](../skills/ship/references/owner-decisions.md#only-the-owner) and their exceptions. Return decision needs to the driver. The writer has zero publication or live authority.
+Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](../skills/ship/references/owner-decisions.md#only-the-owner).
+Return decision needs to the driver. The writer has zero publication or live authority.
 
 ### Standalone main-row repair
 
