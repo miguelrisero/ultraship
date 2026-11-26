@@ -704,7 +704,7 @@ class ReceiptCustodyTests(unittest.TestCase):
             (self.ledger, '__file__', None, 'The accounting command does not match the loaded ledger or session. Copy the exact Stop command.'),
             (self.ledger, 'evidence_root', PermissionError, 'The accounting state directory is unavailable or unsafe. Ask the driver to check its custody.'),
             (self.ledger, 'owed_status', FileNotFoundError, 'This session has no owed file. There is nothing to account.'),
-            (self.ledger, 'owed_status', ValueError, 'The owed file is unsafe. Ask the driver to check its custody.'),
+            (self.ledger, 'owed_status', ValueError, 'The owed file is unavailable or unsafe. Ask the driver to check its custody.'),
             (self.ledger.pwd, 'getpwuid', KeyError, 'The accounting grant directory is unavailable or unsafe. Ask the driver to check its custody.'),
             (self.ledger, 'read_grant', ValueError, 'The retained accounting grant is unreadable or unsafe. Ask the driver to check its custody.'),
             (self.ledger, 'publish_at', OSError, 'The ship hook could not save the accounting grant. Ask the driver to check storage access.'),
@@ -719,7 +719,10 @@ class ReceiptCustodyTests(unittest.TestCase):
         pending.unlink()
         for _ in range(2):
             self.assert_custody_denial(event, 'This session has no owed file. There is nothing to account.')
-        pending.touch()
+        pending.parent.rmdir()
+        pending.parent.parent.rmdir()
+        self.assert_custody_denial(event, 'This session has no owed file. There is nothing to account.')
+        self.prepare_owed(event)
         self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
         self.consume(words)
 
@@ -1614,10 +1617,11 @@ class ReceiptCustodyTests(unittest.TestCase):
         words = [*self.account_words[:2], 'account-void', *self.account_words[3:5]]
         self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
         self.consume(words)
-        for invalid in (words[:-1], [*words, 'ready'], [*words[:-1], 'invalid'],
-                        [*words[:3], str(Path(words[3]).with_name('foreign.tsv')), words[4]]):
+        for invalid in (words[:-1], [*words, 'ready'], [*words[:-1], 'invalid']):
             with self.subTest(words=invalid):
                 self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(invalid)}})
+        foreign = [*words[:3], str(Path(words[3]).with_name('foreign.tsv')), words[4]]
+        self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(foreign)}}, ultraship.ACCOUNT_CUSTODY)
         self.assert_custody_denial({**event, 'agent_type': 'ship:reviewer--sol',
                                    'tool_input': {'command': shlex.join(words)}})
 

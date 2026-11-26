@@ -191,18 +191,18 @@ def _issue_grant(script, argv, state, session):
         if not session or str(state / 'owed' / (re.sub(r'[^\w.-]', '_', session) + '.tsv')) != str(pending):
             raise GrantIssueError(reason)
         reason = 'The accounting state directory is unavailable or unsafe. Ask the driver to check its custody.'
-        root = state.parent.resolve(strict=True) / state.name
-        with evidence_root(root) as evidence_fd:
-            try:
+        try:
+            root = state.parent.resolve(strict=True) / state.name
+            with evidence_root(root) as evidence_fd:
                 owed_fd = os.open('owed', DIRECTORY_FLAGS, dir_fd=evidence_fd)
                 try:
-                    reason = 'The owed file is unsafe. Ask the driver to check its custody.'
+                    reason = 'The owed file is unavailable or unsafe. Ask the driver to check its custody.'
                     fields.update(session=session, root=str(root), root_id=file_identity(os.fstat(evidence_fd)),
                                   owed_id=file_identity(owed_status(owed_fd, pending.name)))
                 finally:
                     os.close(owed_fd)
-            except FileNotFoundError:
-                raise GrantIssueError(NO_OWED_FILE) from None
+        except FileNotFoundError:
+            raise GrantIssueError(NO_OWED_FILE) from None
         reason = 'The accounting grant directory is unavailable or unsafe. Ask the driver to check its custody.'
         with locked_grant_store(create=True) as fd:
             reason = 'The retained accounting grant is unreadable or unsafe. Ask the driver to check its custody.'
@@ -710,7 +710,8 @@ def account_void(pending, identifier, *, entries):
                 stamp = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
                 if stamp.tzinfo is None:
                     raise TypeError('transcript timestamp has no time zone')
-                if stamp.timestamp() >= epoch + 1:
+                when = stamp.timestamp()
+                if when >= epoch + 1 or (role == 'user' and when > epoch):
                     raise ValueError('transcript has activity after the stop notice')
                 content = entry['message']['content']
                 if isinstance(content, str) and role == 'user':
@@ -721,12 +722,12 @@ def account_void(pending, identifier, *, entries):
                 texts = []
                 for block in content:
                     kind = block['type']
-                    if kind in ('tool_use', 'server_tool_use', 'tool_result'):
+                    if kind.endswith(('_tool_use', '_tool_result')) or kind in ('tool_use', 'tool_result'):
                         raise ValueError('transcript contains a tool call')
                     if role == 'assistant' and kind == 'text':
                         texts.append(block['text'])
                 text = '\n'.join(texts)
-                if VERDICT_ANY.search(text) or re.search(r'\bReviewed\s+commit[*_\s]*:', text, re.I):
+                if VERDICT_ANY.search(text) or re.search(r'(?<![A-Za-z0-9_])_*Reviewed\s+commit[*_\s]*:', text, re.I):
                     raise ValueError('transcript contains a review label')
             after = os.fstat(source.fileno())
             if not turn or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
