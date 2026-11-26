@@ -104,7 +104,7 @@ def file_identity(info):
 # Stop guidance shares this label rule so both parsers count the same verdict lines.
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
 # A commit label anywhere in a line, including after a list marker or quote, makes the subject mixed.
-REVIEWED_COMMIT = re.compile(r'(?<![A-Za-z0-9_])Reviewed commit[*_\s]*:.*(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])',
+REVIEWED_COMMIT = re.compile(r'(?<![A-Za-z0-9_])_*Reviewed commit[*_\s]*:.*(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])',
                              re.I | re.M)
 PATCH_DIGEST = re.compile(r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])', re.I)
 PATCH_LABEL = re.compile(r'[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:[*_]*\s*`?([0-9a-f]{64})`?[*_]*\s*',
@@ -112,7 +112,7 @@ PATCH_LABEL = re.compile(r'[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:[*_
 PATCH_BYTE_LIMIT = 64 * 1024 * 1024
 VERDICT_RECORD = re.compile(r'[*_]*verdict[*_]*\s*:[*_]*\s*(pass|findings)[*_]*\s*', re.I)
 # Any verdict-shaped label, in any container, counts toward the one-verdict rule.
-VERDICT_ANY = re.compile(r'(?<![A-Za-z0-9_])(?:verdict|overall)[*_\s]*:', re.I)
+VERDICT_ANY = re.compile(r'(?<![A-Za-z0-9_])_*(?:verdict|overall)[*_\s]*:', re.I)
 # Fences and these HTML blocks can run across blank lines and hold the closing record; without them, Markdown
 # ends every quote, list and indented block before an unindented record that follows a blank line.
 CODE_FENCE = re.compile(r'```|~~~')
