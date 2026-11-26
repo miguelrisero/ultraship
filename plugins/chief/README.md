@@ -9,6 +9,8 @@ Chief reports on transitions and deadlines. Chief tracks each ticket until the c
 ```
 
 Chief runs at the session model and needs the `ship` plugin.
+Upgrade Chief to `1.8.5` and Ship to `1.15.50` together before using these routes.
+Start a fresh session with both plugins loaded.
 
 | Work | Agent |
 |---|---|
@@ -16,7 +18,7 @@ Chief runs at the session model and needs the `ship` plugin.
 | Code | `ship:writer--sol` |
 | A lane's ship tail | `ship:driver` (`claude-opus-5-5`), running `/ship:ship light`; `ship:driver--sol` at low Claude quota only |
 | Research | `ship:researcher--luna` |
-| Billing and authorization verification | `ship:verifier--fable` |
+| Billing and authorization verification | `ship:verifier--opus` |
 
 - Lanes: no cap; when cap risk is flagged, the recovery rules apply ([`skills/run/SKILL.md`](skills/run/SKILL.md)).
 - Board and recovery: [`skills/run/references/state.md`](skills/run/references/state.md).

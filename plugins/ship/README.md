@@ -32,6 +32,10 @@ Light mode runs steps 1, 3, 5, 7, 9, 10, and 12. Detail: [`skills/ship/reference
 ## Agents
 
 [`skills/ship/references/roster.md`](skills/ship/references/roster.md) lists each agent, model, effort, use, and fallback chain.
+For verification with Chief:
+
+1. Upgrade Chief to `1.8.5` and Ship to `1.15.50` together.
+2. Start a fresh session with both plugins loaded.
 
 - Writer: `gpt-6.2-sol` at xhigh effort.
 - Planner: `gpt-6.2-sol` at xhigh effort, with `claude-opus-5-5` at xhigh effort as the fallback.
