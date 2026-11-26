@@ -1036,7 +1036,8 @@ class LedgerDirTests(unittest.TestCase):
         base = self.git(self.checkout, 'rev-parse', 'HEAD')
         owed, transcript, result, epoch = self.auto_owed([
             (-2, 'user', 'Review the uncommitted patch.'),
-            (-1, 'assistant', f'**Reviewed patch SHA-256:** `{digest.upper()}`\nBase: {base}\n**Verdict:** findings')])
+            (-1, 'assistant', f'Base: {base}\nOne finding.\n\n**Reviewed patch SHA-256:** `{digest.upper()}`\n'
+                              '**Verdict:** findings')])
         home = self.resolve()
         accounted = self.cli('account-patch', str(owed), result['id'], str(patch))
         self.assertEqual(accounted.returncode, 0, accounted.stderr)
@@ -1063,50 +1064,45 @@ class LedgerDirTests(unittest.TestCase):
         prompt = (-3, 'user', 'Review the uncommitted patch.')
         link = self.base / 'linked.patch'
         link.symlink_to(patch)
+        record = f'Patch SHA-256: {digest}\nVerdict: findings'
+        own = f'One finding.\n\n{record}'
+        pass_record = f'Patch SHA-256: {digest}\nVerdict: pass'
         for case, text, path, reason in (
-            ('changed patch', f'Patch SHA-256: {other}\nVerdict: findings', patch, 'patch digest differs'),
-            ('missing patch', f'Patch SHA-256: {digest}\nVerdict: findings', self.base / 'gone.patch',
-             'patch file unavailable'),
-            ('symlinked patch', f'Patch SHA-256: {digest}\nVerdict: findings', link, 'patch file unavailable'),
-            ('relative patch', f'Patch SHA-256: {digest}\nVerdict: findings', 'frozen.patch',
-             'patch file unavailable'),
-            ('mixed subject', f'Reviewed commit: {base}\nPatch SHA-256: {digest}\nVerdict: findings', patch,
+            ('changed patch', f'One finding.\n\nPatch SHA-256: {other}\nVerdict: findings', patch,
+             'patch digest differs'),
+            ('missing patch', own, self.base / 'gone.patch', 'patch file unavailable'),
+            ('symlinked patch', own, link, 'patch file unavailable'),
+            ('relative patch', own, 'frozen.patch', 'patch file unavailable'),
+            ('mixed subject', f'Reviewed commit: {base}\n\n{record}', patch, 'mixed review subject'),
+            ('abbreviated commit', f'Reviewed commit: 123abcd\n\n{record}', patch, 'mixed review subject'),
+            ('carriage return hides a commit', f'Summary\rReviewed commit: 123abcd\n\n{record}', patch,
              'mixed review subject'),
-            ('two digests', f'Patch SHA-256: {digest}\nTree SHA-256: {other}\nVerdict: findings', patch,
-             'expected one patch digest'),
-            ('no digest', 'Verdict: findings', patch, 'expected one patch digest'),
-            ('unlabelled digest', f'See {digest}\nVerdict: findings', patch, 'expected one patch digest'),
-            ('quoted subject and verdict', f'> Patch SHA-256: {digest}\n> Verdict: pass\nI could not review the patch.',
-             patch, 'expected one patch digest'),
-            ('fenced subject and verdict', f'```\nPatch SHA-256: {digest}\nVerdict: pass\n```\nNo review.', patch,
-             'expected one patch digest'),
-            ('quoted verdict', f'Patch SHA-256: {digest}\n> Verdict: pass\nNo verdict of my own.', patch,
+            ('two digests', f'Tree SHA-256: {other}\n\n{record}', patch, 'expected one patch digest'),
+            ('record not last', f'{record}\n\nMore notes.', patch, 'expected a closing review record'),
+            ('record without a blank line', f'One finding.\n{record}', patch, 'expected a closing review record'),
+            ('record alone', record, patch, 'expected a closing review record'),
+            ('indented record', f'One finding.\n\n    Patch SHA-256: {digest}\n    Verdict: findings', patch,
+             'expected a closing review record'),
+            ('unlabelled digest', f'One finding.\n\nSee {digest}\nVerdict: findings', patch,
+             'expected a closing review record'),
+            ('disclaimed digest', f'One finding.\n\nPatch SHA-256: unknown; the prompt supplied {digest}\n'
+             'Verdict: findings', patch, 'expected a closing review record'),
+            ('qualified verdict', f'One finding.\n\nPatch SHA-256: {digest}\nVerdict: fail, no findings', patch,
+             'expected a closing review record'),
+            ('quoted example', f'> Example from the prompt:\n> {pass_record}\n\n{record}', patch,
              'expected one verdict'),
-            ('nested fence exposes a quoted verdict',
-             f'Patch SHA-256: {digest}\n````\n```\nVerdict: pass\n````\nVerdict: findings', patch,
-             'expected one verdict'),
-            ('fenced example holds the only fields',
-             f'````markdown\n```text\nPatch SHA-256: {digest}\nVerdict: pass\n```\n````\nI could not review the patch.',
-             patch, 'expected one patch digest'),
-            ('disclaimed digest', f'Patch SHA-256: unknown; the prompt supplied {digest}\nVerdict: findings', patch,
-             'expected one patch digest'),
-            ('indented markers inside a fence',
-             f'```text\n    ```\nPatch SHA-256: {digest}\nVerdict: pass\n    ```\n```\nI could not review the patch.',
-             patch, 'expected one patch digest'),
-            ('indented code block', f'Example:\n\n    Patch SHA-256: {digest}\n    Verdict: pass\n\nNo review.', patch,
-             'expected one patch digest'),
-            ('unclosed fence', f'Patch SHA-256: {digest}\nVerdict: findings\n```\nnotes', patch, 'unclosed code fence'),
-            ('quoted digest beside an own digest', f'Patch SHA-256: {digest}\n> Patch SHA-256: {other}\nVerdict: pass',
-             patch, 'expected one patch digest'),
-            ('abbreviated commit', f'Reviewed commit: 123abcd\nPatch SHA-256: {digest}\nVerdict: findings', patch,
-             'mixed review subject'),
-            ('second verdict', f'Patch SHA-256: {digest}\nVerdict: findings\nOverall: pass', patch,
-             'expected one verdict'),
+            ('lazy quote continuation', f'> Example from the prompt:\n{pass_record}', patch,
+             'expected a closing review record'),
+            ('fenced example', f'```\n{pass_record}\n```\n\n{record}', patch, 'expected one verdict'),
+            ('unclosed fence', f'```text\n\n{pass_record}', patch, 'unclosed code fence'),
+            ('html comment', f'<!--\n\n{pass_record}\n-->', patch, 'html block in review'),
+            ('unclosed html comment', f'<!--\n\n{pass_record}', patch, 'html block in review'),
+            ('unclosed pre block', f'<pre>\n\n{pass_record}', patch, 'html block in review'),
+            ('indented example verdict', f'    Verdict: pass\n\n{record}', patch, 'expected one verdict'),
             ('later turn', None, patch, 'no final turn text'),
         ):
             entries = [prompt, (-1, 'assistant', text)] if text else [
-                prompt, (-1, 'assistant', f'Patch SHA-256: {digest}\nVerdict: findings'),
-                (3, 'user', 'Review it again.'), (4, 'assistant', 'Verdict: pass')]
+                prompt, (-1, 'assistant', own), (3, 'user', 'Review it again.'), (4, 'assistant', 'Verdict: pass')]
             owed, _, result, _ = self.auto_owed(entries)
             home = self.resolve()
             before = (owed.read_bytes(), home.read_bytes())
@@ -1116,13 +1112,15 @@ class LedgerDirTests(unittest.TestCase):
                 self.assertIn(reason, accounted.stderr)
                 self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
 
-    def test_account_patch_accepts_markdown_fence_edges(self):
+    def test_account_patch_accepts_markdown_edges_before_the_record(self):
         patch, digest = self.frozen_patch()
-        for case, tail in (('tab after a closing fence', '```\nnote\n   ```\t\nEnd.'),
-                           ('indented fence marker is code', '\n    ```\n\nEnd.')):
+        for case, body in (('tab after a closing fence', '```\nnote\n   ```\t'),
+                           ('indented fence marker is code', 'Notes:\n\n    ```'),
+                           ('inline code line', '```git diff```'),
+                           ('list item fence', '- ```text\n  example\n    ```')):
             owed, _, result, _ = self.auto_owed([
                 (-2, 'user', 'Review the patch.'),
-                (-1, 'assistant', f'Patch SHA-256: {digest}\nVerdict: findings\n{tail}')])
+                (-1, 'assistant', f'{body}\n\nPatch SHA-256: {digest}\nVerdict: findings')])
             with self.subTest(case=case):
                 accounted = self.cli('account-patch', str(owed), result['id'], str(patch))
                 self.assertEqual(accounted.returncode, 0, accounted.stderr)
@@ -1136,7 +1134,8 @@ class LedgerDirTests(unittest.TestCase):
             ('oversized patch', patch, 4, 'patch file exceeds its byte limit'),
         ):
             owed, _, result, _ = self.auto_owed([
-                (-2, 'user', 'Review the patch.'), (-1, 'assistant', f'Patch SHA-256: {digest}\nVerdict: findings')])
+                (-2, 'user', 'Review the patch.'),
+                (-1, 'assistant', f'One finding.\n\nPatch SHA-256: {digest}\nVerdict: findings')])
             home = self.resolve()
             before = home.read_bytes()
             real = os.path.realpath

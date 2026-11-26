@@ -110,15 +110,21 @@ PATCH_LABEL = re.compile(r'[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:[*_
                          re.I)
 PATCH_BYTE_LIMIT = 64 * 1024 * 1024
 FENCE = re.compile(r'(`{3,}|~{3,})')
+VERDICT_RECORD = re.compile(r'[*_]*verdict[*_]*\s*:[*_]*\s*(pass|findings)[*_]*\s*', re.I)
+# Markdown HTML blocks of these kinds run across blank lines, so they could hold the closing record.
+HTML_BLOCK = re.compile(r'^ {0,3}<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:pre|script|style|textarea)(?=[\s>]|$))',
+                        re.I | re.M)
 
 
 def own_lines(text):
     """Drop quoted lines and fenced blocks, so a reviewer's quotation never supplies a subject or verdict."""
     kept, fence = [], None
-    for line in text.splitlines():
+    for line in text.split('\n'):
         stripped = line.lstrip()
         indent = len(line[:len(line) - len(stripped)].expandtabs(4))
         opener = FENCE.match(stripped) if indent <= 3 else None
+        if opener and not fence and opener.group(1)[0] == '`' and '`' in stripped[opener.end():]:
+            opener = None  # a backtick in the info string makes the line inline code, not a fence
         if fence:
             # Markdown closes a fence only on the same character, at least as long, indented at most three
             # spaces, with nothing after it.
@@ -681,19 +687,26 @@ def account_patch(pending, identifier, patch, *, entries):
     text = final_turn_text(transcript, int(epoch), {}, sole_turn=True)
     if not text:
         raise ValueError('no final turn text')
+    text = re.sub(r'\r\n?', '\n', text)  # Markdown line endings, so every check sees the same lines
     if REVIEWED_COMMIT.search(text):
         raise ValueError('mixed review subject')
-    raw, text = text, own_lines(text)
-    digests = {digest.lower() for digest in PATCH_DIGEST.findall(text)}
-    # The whole field value must be the digest, so a disclaimed or annotated value never counts.
-    labelled = {match.group(1).lower() for line in text.splitlines() if (match := PATCH_LABEL.fullmatch(line))}
-    # A digest or verdict inside a quotation or fence fails closed, whatever the fence structure.
-    if len(digests) != 1 or labelled != digests or {d.lower() for d in PATCH_DIGEST.findall(raw)} != digests:
+    if HTML_BLOCK.search(text):
+        raise ValueError('html block in review')
+    own_lines(text)  # an unclosed fence would hold the closing record
+    # The review ends with a blank line and an unindented two-line record, which no quotation, fence,
+    # list or indented block can hold. The first line is never the record, because the reader strips its indent.
+    lines = text.split('\n')
+    record = lines[-2:]
+    subject = next((m for line in record if line == line.lstrip() and (m := PATCH_LABEL.fullmatch(line))), None)
+    stated = next((m for line in record if line == line.lstrip() and (m := VERDICT_RECORD.fullmatch(line))), None)
+    if len(lines) < 4 or lines[-3].strip() or not subject or not stated:
+        raise ValueError('expected a closing review record')
+    digest = subject.group(1).lower()
+    if {d.lower() for d in PATCH_DIGEST.findall(text)} != {digest}:
         raise ValueError('expected one patch digest')
-    digest = digests.pop()
-    if sum(1 for line in raw.splitlines() if VERDICT_LABEL.match(line)) != 1:
+    if sum(1 for line in lines if VERDICT_LABEL.match(line)) != 1:
         raise ValueError('expected one verdict')
-    verdict = review_verdict(text)
+    verdict = stated.group(1).lower()
     try:
         if not os.path.isabs(patch) or os.path.realpath(patch) != patch:
             raise OSError
