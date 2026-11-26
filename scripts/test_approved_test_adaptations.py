@@ -9,18 +9,11 @@ WORKSPACE_ID = 'b8fed386-cf11-40fe-b14f-425e6331ee41'
 EVENT_ID = '1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8'
 
 SHIP = ROOT / 'plugins/ship'
-ROUTE_CARRIERS = (
-    'skills/ship/SKILL.md', 'agents/driver.md', 'agents/driver--sol.md',
-    'agents/writer--sol.md', 'agents/writer--fable52.md',
-)
+ROUTE_CARRIERS = ('agents/driver.md', 'agents/writer--sol.md', 'agents/writer--fable52.md')
 REVIEWERS = ('reviewer--sol.md', 'reviewer--opus.md', 'reviewer--astra.md')
 
 
 def section(text, heading):
-    if heading == '### Lane-owned row route' and text.startswith('---\nname: driver--sol\n'):
-        if 'Apply the [lane-owned row route](../skills/ship/SKILL.md#lane-owned-row-route).' not in text:
-            raise AssertionError('Sol driver must apply the shared lane-owned row route')
-        text = (SHIP / 'skills/ship/SKILL.md').read_text()
     marker = heading + '\n'
     if text.splitlines().count(heading) != 1:
         raise AssertionError(heading)
@@ -28,6 +21,23 @@ def section(text, heading):
 
 
 class ApprovedTestAdaptationsTests(unittest.TestCase):
+    def test_ship_skill_links_to_the_driver_route_without_copying_it(self):
+        heading = '### Lane-owned row route'
+        skill = (SHIP / 'skills/ship/SKILL.md').read_text()
+        self.assertIn(
+            'Apply the [lane-owned row route](../skills/ship/SKILL.md#lane-owned-row-route).',
+            (SHIP / 'agents/driver--sol.md').read_text(),
+        )
+        self.assertEqual(
+            section(skill, heading).strip(),
+            'Follow the [lane-owned row route](../../agents/driver.md#lane-owned-row-route) for protected mutation rows.',
+        )
+        route = section((SHIP / 'agents/driver.md').read_text(), heading)
+        steps = re.findall(r'^[1-9]\. .+', route, flags=re.M)
+        self.assertEqual([step[0] for step in steps], list('123456789'))
+        for step in steps:
+            self.assertNotIn(step, skill)
+
     def test_lane_owned_scope_evidence_and_proof(self):
         for name in ROUTE_CARRIERS:
             route = section((SHIP / name).read_text(), '### Lane-owned row route')
@@ -245,8 +255,6 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             for name in names[1:]:
                 with self.subTest(path=name):
                     copy = section((SHIP / name).read_text(), heading).rstrip('\n')
-                    if heading == '### Lane-owned row route':
-                        copy = copy.replace('](../skills/ship/references/', '](references/')
                     self.assertEqual(canonical, copy)
 
     def test_lane_owned_route_selection_precedes_tool_admission_and_run(self):

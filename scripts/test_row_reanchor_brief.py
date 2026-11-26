@@ -159,10 +159,8 @@ class BriefTests(unittest.TestCase):
     def test_carriers_and_admission_flow_link_the_brief(self):
         carriers = [Path('plugins/ship/agents') / name for name in
                     ('writer--sol.md', 'writer--fable52.md', 'driver.md', 'driver--sol.md')]
-        carriers.append(Path('plugins/ship/skills/ship/SKILL.md'))
+        link = '../skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record'
         for carrier in carriers:
-            link = ('../skills/ship/' if carrier.parent.name == 'agents' else '')
-            link += 'references/owner-decisions.md#row-re-anchor-tool-admission-record'
             text = (ROOT / carrier).read_text()
             with self.subTest(carrier=carrier):
                 self.assertIn(f'Admit the writer with the [row re-anchor tool admission record]({link}).', text)
