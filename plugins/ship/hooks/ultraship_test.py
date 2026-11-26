@@ -719,9 +719,10 @@ class ReceiptCustodyTests(unittest.TestCase):
         pending.unlink()
         for _ in range(2):
             self.assert_custody_denial(event, 'This session has no owed file. There is nothing to account.')
-        pending.parent.rmdir()
-        pending.parent.parent.rmdir()
-        self.assert_custody_denial(event, 'This session has no owed file. There is nothing to account.')
+        with patch.object(ultraship, 'STATE', self.state / 'ultraship'):
+            missing = [*words[:3], str(ultraship.owed_file(event))]
+            self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(missing)}},
+                                     'This session has no owed file. There is nothing to account.')
         self.prepare_owed(event)
         self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
         self.consume(words)
