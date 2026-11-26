@@ -99,6 +99,64 @@ class NativePeerRoutingTests(unittest.TestCase):
         self.assertIn('every timer, recovery, driver, writer, reviewer, and child brief, including retries and replacements', template)
         self.assertIn('canonical CoC Input ID/version, exact owner answer event, continuing driver and acceptance, result Input receipt', template)
 
+    def test_owner_thresholds_live_in_the_canonical_skill(self):
+        paths = (
+            'plugins/ship/skills/ship/references/owner-decisions.md',
+            'plugins/ship/skills/ship/SKILL.md',
+            'plugins/chief/skills/run/SKILL.md',
+            'plugins/chief/skills/run/references/dispatch.md',
+            *(f'plugins/ship/agents/{name}.md' for name in (
+                'driver', 'driver--sol', 'writer--sol', 'writer--fable52',
+            )),
+        )
+        for name in paths:
+            with self.subTest(path=name):
+                section = (ROOT / name).read_text().split('## Only the owner\n', 1)[1]
+                section = section.split('\n##', 1)[0]
+                self.assertIn('owner-decisions:owner-decisions', section)
+                self.assertNotIn('| Deletion of customer data |', section)
+                self.assertNotIn('six thresholds', section)
+
+    def test_owner_policy_lookup_requires_current_heading_and_preserves_holds(self):
+        for name in ('plugins/ship/skills/ship/references/owner-decisions.md',
+                     'plugins/chief/skills/run/SKILL.md',
+                     'plugins/chief/skills/run/references/dispatch.md'):
+            with self.subTest(path=name):
+                section = (ROOT / name).read_text().split('## Only the owner\n', 1)[1].split('\n## ', 1)[0]
+                for requirement in (
+                    '`Only the owner`',
+                    'Treat the older `Escalate only a critical item` heading as a reason to look up the current policy.',
+                    'If the installed skill or `Only the owner` is missing or incomplete, read the',
+                    'https://github.com/bettergroupinc/better-plugin/blob/main/plugins/owner-decisions/skills/owner-decisions/SKILL.md#only-the-owner',
+                    '`plugins/owner-decisions/skills/owner-decisions/SKILL.md`',
+                    'authorized local copy',
+                    'If the canonical policy remains unavailable',
+                    'refuse a sensitive action whose approval requirement is unclear',
+                    'Keep existing permission denials and holds.',
+                    'Continue independent work.',
+                    "Only the owner's own words approve a critical item.",
+                ):
+                    self.assertIn(requirement, section)
+        ship = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        self.assertIn('Keep separate product, billing, security policy, and architecture scope holds in force.', ship)
+        self.assertIn('Keep all separate action, scope, publication, and live-operation gates.', ship)
+
+    def test_copied_chief_brief_uses_canonical_policy_with_older_ship(self):
+        dispatch = (ROOT / 'plugins/chief/skills/run/references/dispatch.md').read_text()
+        brief = dispatch.split('## Brief template\n', 1)[1].split('```text\n', 1)[1].split('\n```', 1)[0]
+        self.assertIn('Include the exact local policy path in `Readable files`', brief)
+        self.assertNotIn('ship/references/owner-decisions.md', brief.split('## Only the owner\n', 1)[1].split('\nTask:', 1)[0])
+        contract = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        helper = contract.split('## Helper standing request\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('Include the absolute path of this reference in `Readable files`', helper)
+
+    def test_merge_deadline_starts_after_all_pre_command_gates(self):
+        for name in ('plugins/ship/skills/ship/SKILL.md', 'plugins/chief/skills/run/SKILL.md'):
+            with self.subTest(path=name):
+                text = (ROOT / name).read_text()
+                self.assertIn('Send `/merge` within 30 minutes after all applicable pre-command gates pass.', text)
+                self.assertIn("Keep the repository's merge rules and queue holds.", text)
+
     def test_shared_owner_contract_keeps_event_verification_and_coc_custody(self):
         text = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
         for requirement in ('Only the CoC publishes canonical owner decisions and results in CoC workspace Inputs.',
