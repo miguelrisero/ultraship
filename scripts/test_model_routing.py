@@ -1,6 +1,7 @@
 """Required review and verifier seats use Opus with their explicit effort."""
 import importlib.util
 from pathlib import Path
+import re
 import tempfile
 import unittest
 
@@ -19,41 +20,77 @@ class ImportantPlanningContractTests(unittest.TestCase):
         self.pipeline = pipeline
         self.gate = self.plan.partition('### Important planning\n')[2]
 
-    def test_important_planning_starts_with_fable_then_follows_the_sol_chain(self):
-        roster = (self.ship / 'skills/ship/references/roster.md').read_text().splitlines()
-        start = next(i for i, line in enumerate(roster) if line.startswith('| `ship:planner--'))
-        first, sol = (line.split('|') for line in roster[start:start + 2])
-        self.assertEqual((first[1].strip(), first[5].strip(), sol[1].strip()),
-                         ('`ship:planner--fable52`', '`planner--sol`', '`ship:planner--sol`'))
-        self.assertEqual(first[2].strip(), '`claude-fable-5-2`')
-        self.assertEqual(first[3].strip(), 'xhigh')
-        self.assertEqual(sol[5].strip(), '`planner--opus`')
-        sol_chain = [seat.strip(' `') for seat in sol[5].split(',')]
-        for seat in sol_chain:
-            self.assertTrue((self.ship / 'agents' / (seat + '.md')).is_file(), seat)
-        self.assertIn('Continue through the `planner--sol` fallback chain in roster order.', self.gate)
+    def test_planner_chains_start_and_end_by_plan_class(self):
+        roster = (self.ship / 'skills/ship/references/roster.md').read_text()
+        rows = {}
+        for line in roster.splitlines():
+            if line.startswith('| `ship:planner--'):
+                seat, model, effort, _, fallback = (cell.strip() for cell in line.split('|')[1:-1])
+                rows[seat.removeprefix('`ship:').removesuffix('`')] = (model, effort, fallback)
+        step, = (line for line in self.pipeline.splitlines() if line.startswith('| 2 | Plan and premises |'))
+        for plan_class, expected in (
+            ('normal', ('planner--opus', 'planner--sol')),
+            ('important and P0', ('planner--fable52', 'planner--sol', 'planner--opus')),
+        ):
+            with self.subTest(plan_class=plan_class):
+                self.assertIn(f'`{expected[0]}` ({plan_class})', step)
+                chain = (expected[0], *re.findall(r'`(planner--[\w-]+)`', rows[expected[0]][2]))
+                self.assertEqual(len(chain), len(set(chain)), 'planner chain repeats a seat')
+                self.assertEqual(chain, expected)
+                for seat in chain:
+                    self.assertTrue((self.ship / 'agents' / (seat + '.md')).is_file(), seat)
+        self.assertEqual(rows['planner--fable52'][:2], ('`claude-fable-5-2`', 'xhigh'))
+        self.assertEqual(rows['planner--opus'], ('`claude-opus-5-5`', 'xhigh',
+                                                 'Normal: `planner--sol`; important and P0: none'))
+        self.assertEqual(rows['planner--sol'][2], 'Normal: none; important and P0: `planner--opus`')
+        self.assertIn('Select the plan class before each planning attempt. '
+                      'Within one attempt, stop at the first available seat or at the end of the chain, '
+                      'and never revisit a seat. A rework attempt starts again at the first seat of its class.', roster)
+
+    def test_ship_selects_the_first_planner_by_plan_class(self):
+        self.assertIn('Start important and P0 plans with `ship:planner--fable52`, '
+                      'then follow the important planner chain in the [roster](roster.md).', self.plan)
         self.assertIn('Dispatch `ship:planner--fable52` first for important planning.', self.gate)
         self.assertIn('If Fable is unavailable, use `ship:planner--sol` next.', self.gate)
-        self.assertIn('Use `ship:planner--sol` for routine full-mode planning.', self.plan)
+        self.assertIn('Follow the important planner chain in the [roster](roster.md).', self.gate)
+        self.assertIn('Start normal plans with `ship:planner--opus`.', self.plan)
+        self.assertIn('Follow the normal planner chain in the [roster](roster.md).', self.plan)
         skill = (self.ship / 'skills/ship/SKILL.md').read_text()
-        self.assertIn('Start important planning in either mode with `ship:planner--fable52`.', skill)
+        self.assertIn('Start important and P0 plans with `ship:planner--fable52`.', skill)
+        self.assertIn('Start normal plans with `ship:planner--opus`.', skill)
         goal = (self.ship / 'skills/ship/references/goal.md').read_text()
-        self.assertIn('Start important planning with ship:planner--fable52 and apply the Ship important planning gate.', goal)
+        self.assertIn('Start normal plans with ship:planner--opus.', goal)
+        self.assertIn('Start important and P0 plans with ship:planner--fable52.', goal)
+        fable = checks.frontmatter((self.ship / 'agents/planner--fable52.md').read_text())
+        self.assertTrue(fable['description'].startswith('First planner for important and P0 plans,'))
+        self.assertNotIn(': ', fable['description'])
+
+    def test_planning_gate_applies_only_to_important_plans(self):
+        self.assertIn('Apply the [important planning gate](#important-planning) only to important plans.', self.plan)
+        self.assertIn('P0 alone selects the Fable 5.2 planner chain. '
+                      'The gate applies only if the plan also qualifies as important.', self.gate)
+        goal = (self.ship / 'skills/ship/references/goal.md').read_text()
+        self.assertIn('Apply the Ship important planning gate to important plans.', goal)
+        skill = (self.ship / 'skills/ship/SKILL.md').read_text()
+        self.assertIn('Apply the [important planning gate](references/pipeline.md#important-planning) '
+                      'only to important plans, in either mode.', skill)
+        completion = skill.split('## Completion gate\n', 1)[1].split('### Explicit checks', 1)[0]
+        self.assertIn('Require both [important planning](references/pipeline.md#important-planning) '
+                      'results only for important plans, including in light mode.', completion)
 
     def test_driver_runs_refutation_before_fresh_confirmation_on_the_important_route(self):
         self.assertRegex(self.gate, r'(?s)Dispatch one independent `ship:reviewer--astra`.*'
                                     r'Start a fresh `ship:reviewer--opus` Agent')
         self.assertIn('Use this route only for important planning', self.gate)
         self.assertIn('Light mode runs steps 1, 3, 5, 7, 9, 10, and 12.', self.pipeline)
-        self.assertIn('Keep routine work on its existing route', self.plan)
         self.assertIn('Apply the [important planning gate](#important-planning) in either mode', self.pipeline)
         skill = (self.ship / 'skills/ship/SKILL.md').read_text()
         self.assertIn('references/pipeline.md#important-planning', skill)
-        completion = skill.split('## Completion gate\n', 1)[1].split('### Explicit checks', 1)[0]
-        self.assertIn('Require both [important planning](references/pipeline.md#important-planning) results', completion)
-        planner = (self.ship / 'agents/planner--sol.md').read_text()
-        self.assertIn('#important-planning', planner)
-        self.assertNotIn('Agent', checks.frontmatter(planner)['tools'])
+        for seat in ('planner--sol', 'planner--opus'):
+            with self.subTest(seat=seat):
+                planner = (self.ship / 'agents' / (seat + '.md')).read_text()
+                self.assertIn('#important-planning', planner)
+                self.assertNotIn('Agent', checks.frontmatter(planner)['tools'])
         for seat in ('reviewer--astra', 'reviewer--opus'):
             with self.subTest(seat=seat):
                 reviewer = (self.ship / 'agents' / (seat + '.md')).read_text()
@@ -117,8 +154,7 @@ class ModelRoutingTests(unittest.TestCase):
                 self.assertFalse((ship / 'agents' / (seat + '.md')).exists())
         skill_dir = ship / 'skills/ship'
         roster = (skill_dir / 'references/roster.md').read_text()
-        for seat, fallback in (('writer--sol', 'none'), ('planner--sol', '`planner--opus`'),
-                               ('writer--fable52', '`writer--sol`')):
+        for seat, fallback in (('writer--sol', 'none'), ('writer--fable52', '`writer--sol`')):
             with self.subTest(seat=seat):
                 row, = (line for line in roster.splitlines() if line.startswith(f'| `ship:{seat}` |'))
                 self.assertEqual(row.split('|')[-2].strip(), fallback)
@@ -221,7 +257,7 @@ class ModelRoutingTests(unittest.TestCase):
     def test_chief_holds_verification_when_the_paired_native_route_is_missing(self):
         for plugin in ('chief', 'ship'):
             readme = (ROOT / f'plugins/{plugin}/README.md').read_text()
-            self.assertIn('Upgrade Chief to `1.8.6` and Ship to `1.15.51` together', readme)
+            self.assertIn('Upgrade Chief to `1.8.7` and Ship to `1.15.52` together', readme)
         run = ROOT / 'plugins/chief/skills/run'
         skill = (run / 'SKILL.md').read_text()
         self.assertIn('[verifier dispatch check](references/landing.md#verifier-dispatch-check)', skill)
@@ -231,7 +267,7 @@ class ModelRoutingTests(unittest.TestCase):
         check = check[1].split('\n## ', 1)[0]
         self.assertIn('Before dispatch, confirm that the current session lists the exact native route `ship:verifier--opus`.', check)
         self.assertIn('If the route is absent or cannot be confirmed, hold verification', check)
-        self.assertIn('Report Ship `1.15.51` as the required plugin version', check)
+        self.assertIn('Report Ship `1.15.52` as the required plugin version and Chief `1.8.7` as its paired version.', check)
         self.assertIn('Use the `ship:verifier--astra` fallback only when the exact Opus route is registered but unavailable.', check)
 
     def test_ledger_keeps_historical_seat_names_and_agent_ids(self):

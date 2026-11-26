@@ -2,12 +2,15 @@
 
 Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable agent, dispatch the next entry in the chain and record it in the ledger note. If all admitted writer or planner seats are unavailable, retain the task as pending and report the missing seat. A panel with a missing seat and no fallback is incomplete.
 
+Select the plan class before each planning attempt. Within one attempt, stop at the first available seat or at the end of the chain, and never revisit a seat. A rework attempt starts again at the first seat of its class.
+
 Use [reviewer admission for protected row reads](owner-decisions.md#reviewer-admission-record-for-protected-row-reads) to select a seat for a protected row review.
 
 | Agent | Model | Effort | Use | Fallback chain |
 |---|---|---|---|---|
-| `ship:planner--fable52` | `claude-fable-5-2` | xhigh | Important planning, first seat | `planner--sol` |
-| `ship:planner--sol` | `gpt-6.2-sol` | xhigh | Plans, premises | `planner--opus` |
+| `ship:planner--fable52` | `claude-fable-5-2` | xhigh | Important and P0 plans, first seat | `planner--sol`, then `planner--opus` |
+| `ship:planner--opus` | `claude-opus-5-5` | xhigh | Plans that are not important or P0, first seat | Normal: `planner--sol`; important and P0: none |
+| `ship:planner--sol` | `gpt-6.2-sol` | xhigh | Fallback for normal, important, and P0 plans | Normal: none; important and P0: `planner--opus` |
 | `ship:writer--sol` | `gpt-6.2-sol` | xhigh | All code | none |
 | `ship:writer--fable52` | `claude-fable-5-2` | high | Code, only when the brief or the owner names Fable 5.2 | `writer--sol` |
 | `ship:driver` | `claude-opus-5-5` | xhigh | Lane ship tail | `driver--sol` at low Claude quota only |

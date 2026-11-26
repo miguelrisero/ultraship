@@ -60,16 +60,17 @@ class NativePeerRoutingTests(unittest.TestCase):
                             'Future targets over 48 Sol hours', '5% or less', '85% or more'):
             self.assertIn(requirement, dispatch)
 
-    def test_chief_uses_the_first_native_planner_and_shared_confirmation_gate(self):
+    def test_chief_selects_planners_by_class_and_uses_the_shared_confirmation_gate(self):
         chief = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text()
         prepare = chief.split('## Prepare the run\n', 1)[1].split('## Dispatch\n', 1)[0]
-        roster = (ROOT / 'plugins/ship/skills/ship/references/roster.md').read_text()
-        first = re.search(r'(?m)^\| `(ship:planner--[^`]+)`', roster)
-        self.assertIsNotNone(first)
-        self.assertEqual(first[1], 'ship:planner--fable52')
-        self.assertIn(f'5. Dispatch `{first[1]}` first for important planning:', prepare)
+        self.assertIn('| Planning | `ship:planner--opus` |', chief)
+        self.assertIn('| Important planning, including P0 | `ship:planner--fable52` |', chief)
+        self.assertIn('Dispatch `ship:planner--fable52` first for important and P0 plans.', prepare)
+        self.assertIn('Important planning includes architecture, contracts, migrations, security, and billing.', prepare)
+        self.assertIn('Dispatch `ship:planner--opus` first for normal plans.', prepare)
         self.assertIn('Follow the Ship roster at `skills/ship/references/roster.md` for fallback order.', prepare)
-        self.assertIn('pipeline.md#important-planning', prepare)
+        self.assertIn('Apply the installed Ship plugin\'s '
+                      '`skills/ship/references/pipeline.md#important-planning` gate only to important plans.', prepare)
         self.assertIn('Record the refutation and confirmation results on the run board.', prepare)
         self.assertIn('Keep dependent lanes pending until the gate passes.', prepare)
         self.assertIn('6. Freeze the goal, lane boundaries, dependencies, safety constraints, and checks.\n'
