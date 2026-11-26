@@ -62,8 +62,9 @@ Preserve actual owner Input event delivery and the canonical CoC Input ID → ex
 | A lane's ship tail: reviews, PR, CI, gate | `ship:driver` |
 | Broad research | `ship:researcher--luna` |
 | Independent review | `ship:review` or a `ship:reviewer--*` seat |
-| Billing and authorization verification | `ship:verifier--fable` |
+| Billing and authorization verification | `ship:verifier--opus` |
 
+Apply the [verifier dispatch check](references/landing.md#verifier-dispatch-check) before each billing or authorization verification dispatch.
 Leave the Agent `model` field unset. Fallback chains are in the ship plugin's `skills/ship/references/roster.md`. Record every substitution on the board.
 
 Nesting: chief → driver → writers and reviewers. Keep ship, panel, and review inline inside the driver.

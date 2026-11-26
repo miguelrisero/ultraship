@@ -32,6 +32,10 @@ Light mode runs steps 1, 3, 5, 7, 9, 10, and 12. Detail: [`skills/ship/reference
 ## Agents
 
 The plugin defines 21 agents. [`skills/ship/references/roster.md`](skills/ship/references/roster.md) lists each model, effort, use, and fallback chain.
+For verification with Chief:
+
+1. Upgrade Chief to `1.8.5` and Ship to `1.15.49` together.
+2. Start a fresh session with both plugins loaded.
 
 - Writers: `gpt-6.2-sol` at xhigh effort, with `claude-sonnet-5-5` (high) as the fallback.
 - Reviewers: `gpt-6.2-sol` at xhigh, `claude-opus-5-5`, `gpt-6.2-astra` and `gpt-6-luna`.

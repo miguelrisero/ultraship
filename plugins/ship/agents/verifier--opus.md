@@ -1,5 +1,5 @@
 ---
-name: verifier--fable
+name: verifier--opus
 description: Verify billing, authorization, and tenant-isolation behavior adversarially.
 model: claude-opus-5-5
 effort: xhigh
