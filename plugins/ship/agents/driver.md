@@ -196,6 +196,15 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.
    For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
    From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.
+   For a created rows file, the driver verifies the complete file at the pushed head.
+   Require exactly the rows the frozen CoC decision names and nothing else.
+   Use content-free evidence from a producer with existing read authority.
+   Record the full-file match in the reviewer brief.
+   Include the decision file's absolute path and SHA256.
+   List the decision under `Readable files`.
+   Include the rows file's blob ID at the pushed head.
+   The reviewer confirms the full-file match and its bindings before the not-weaker review.
+   Hold the review if the match or its evidence is missing or mismatched.
    The driver then admits only the head copy.
    For each added row, the driver supplies the [added row ID proof](../skills/ship/references/owner-decisions.md#added-row-id-proof) and admits its exact head extent.
    At the base and the frozen head, the driver records the test runner's fixture listing, such as `pytest --fixtures-per-test`.

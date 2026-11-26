@@ -56,13 +56,20 @@ Source delivery grants zero session adoption authority and zero affected-retry a
 ### Native creation of an absent rows file
 
 Follow the [lane-owned row route](driver.md#lane-owned-row-route), step 4.
-Use this rule only when a frozen CoC decision names one rows file under the protected mutation directory (`backend/api/tests/mutation/` in Patricia).
+A frozen CoC decision must name exactly one absent rows file under the protected mutation directory (`backend/api/tests/mutation/` in Patricia).
 Verify the SHA256 and bindings before the Write, as for native Edit.
-Match the target path and the rows to the decision.
+Verify the exact absolute path.
+Match the target path to the decision.
+Match all rows to the decision.
 Require `git ls-tree` to exit 0 with empty output for the exact path at the recorded base.
-Verify that the target is absent in the worktree and that no path component is a symlink.
-Use native `Write` once at the absolute path for only the rows the decision names.
-Keep the anchor guard and one independent not-weaker review at the pushed head.
+Verify that the target is absent in the worktree.
+Verify that no path component is a symlink.
+Use native `Write` exactly once per decision.
+Write only to the verified path and include only the rows the decision names.
+Refuse a second `Write` to any path under the same decision.
+Refuse `Write` to any path that no decision names.
+Use the native `Edit` rule for every later change once the file exists.
+Keep the anchor guard, the full-file proof in step 8, and one independent not-weaker review at the pushed head.
 For every other native change to protected rows, use `Edit` with an absolute path, `replace_all=false` and one unique exact match.
 
 ### Slice safeguards

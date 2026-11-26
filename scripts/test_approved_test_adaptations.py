@@ -55,21 +55,34 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 text = (SHIP / 'agents' / name).read_text()
                 rule = section(text, '### Native creation of an absent rows file').strip()
                 rules.append(rule)
+                checks, marker, limits = rule.partition('Use native `Write`')
                 for requirement in (
                     '[lane-owned row route](driver.md#lane-owned-row-route)',
-                    'frozen CoC decision names one rows file',
+                    'A frozen CoC decision must name exactly one absent rows file',
                     '`backend/api/tests/mutation/`',
                     'Verify the SHA256 and bindings before the Write',
-                    'Require `git ls-tree` to exit 0 with empty output',
-                    'at the recorded base',
-                    'absent in the worktree',
-                    'no path component is a symlink',
-                    'native `Write` once at the absolute path',
-                    'only the rows the decision names',
+                    'Verify the exact absolute path.',
+                    'Match the target path to the decision.',
+                    'Match all rows to the decision.',
+                    'Require `git ls-tree` to exit 0 with empty output for the exact path at the recorded base.',
+                    'Verify that the target is absent in the worktree.',
+                    'Verify that no path component is a symlink.',
+                ):
+                    with self.subTest(check=requirement):
+                        self.assertTrue(requirement in checks, requirement)
+                with self.subTest(limit='one Write per decision'):
+                    self.assertTrue(marker and limits.startswith(' exactly once per decision.'))
+                for requirement in (
+                    'Write only to the verified path and include only the rows the decision names.',
+                    'Refuse a second `Write` to any path under the same decision.',
+                    'Refuse `Write` to any path that no decision names.',
+                    'Use the native `Edit` rule for every later change once the file exists.',
                     'the anchor guard',
+                    'the full-file proof in step 8',
                     'one independent not-weaker review at the pushed head',
                 ):
-                    self.assertIn(requirement, rule)
+                    with self.subTest(limit=requirement):
+                        self.assertTrue(requirement in limits, requirement)
         if len(rules) == 2:
             self.assertEqual(*rules)
 
@@ -90,6 +103,23 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         add = route.split('\n4. Add:', 1)[1].split('\n5. Restore:', 1)[0]
         self.assertIn('require the frozen CoC decision to name its path', add)
         self.assertIn('writer--sol.md#native-creation-of-an-absent-rows-file', add)
+
+    def test_created_rows_file_requires_a_full_match_before_not_weaker_review(self):
+        route = section((SHIP / 'agents/driver.md').read_text(), '### Lane-owned row route')
+        review = route.split('\n8. Review:', 1)[1].split('\n9.', 1)[0]
+        for requirement in (
+            'For a created rows file, the driver verifies the complete file at the pushed head.',
+            'Require exactly the rows the frozen CoC decision names and nothing else.',
+            'Use content-free evidence from a producer with existing read authority.',
+            'Record the full-file match in the reviewer brief.',
+            "Include the decision file's absolute path and SHA256.",
+            'List the decision under `Readable files`.',
+            "Include the rows file's blob ID at the pushed head.",
+            'The reviewer confirms the full-file match and its bindings before the not-weaker review.',
+            'Hold the review if the match or its evidence is missing or mismatched.',
+        ):
+            with self.subTest(check=requirement):
+                self.assertTrue(requirement in review, requirement)
 
     def test_writer_briefs_admit_the_canonical_route_document(self):
         policy = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
