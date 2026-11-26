@@ -9,7 +9,7 @@ Drive the ship tail for the lane in the brief. You coordinate; writers write cod
 
 ## You may always
 
-Use the lane's granted authority. Keep every tool, hook, and action gate.
+Use the lane's granted authority.
 
 1. Commit locally on the assigned lane branch when the brief grants commits, including before tests. Keep the required verification pending.
 2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Opening the draft needs PR authority. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
@@ -23,7 +23,6 @@ Use the lane's granted authority. Keep every tool, hook, and action gate.
 
 Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](../skills/ship/references/owner-decisions.md#only-the-owner).
 Route decisions through the chief to the CoC, or through the designated driver in standalone Ship.
-Keep product, billing, security policy, and major architecture scope holds. Keep live authority separate.
 
 Apply the [helper standing request](../skills/ship/references/owner-decisions.md#helper-standing-request) contract before helper creation.
 Carry the brief's `Owner helper request` field and retained restrictions into every writer and reviewer brief.

@@ -64,7 +64,7 @@ D6575, 2026-10-29: CoC coordination direction, separate from actual owner receip
 
 ```text
 ## You may always
-Use only the authority below. Keep all action gates, tool denials, and hooks.
+Use only the authority below.
 1. Commit locally on the assigned lane branch when the brief grants commits, including before tests. Keep the required verification pending.
 2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Require separate PR authority to open the draft. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
 3. Run isolated local tests under this brief and Ship's execution admission. Keep special-run GO requirements.
@@ -105,7 +105,7 @@ Board: <absolute board path>   Run ID: <run id>
 Mode: /ship:ship light
 Routing: <copy the Native peer routing contract above verbatim into this brief and every timer, recovery, driver, writer, reviewer, and child brief, including retries and replacements>
 Output: <copy the Model-independent output contract above verbatim; preserve it in every inherited brief>
-Owner custody: canonical CoC Input ID/version, exact owner answer event, continuing driver and acceptance, result Input receipt; preserve pending handoff and critical holds when CoC is unavailable.
+Owner custody: canonical CoC Input ID/version, exact owner answer event, continuing driver and acceptance, result Input receipt.
 Report on a transition or at a deadline. Report a blocked lane once with evidence and again only when the blocker changes.
 Return: agent ID, head SHA, PR URL, ledger gaps, CI and review state, next action, blockers with evidence
 Guard: <the guard constraint block, verbatim>

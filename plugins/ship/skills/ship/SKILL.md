@@ -10,21 +10,20 @@ Deliver the task in `$ARGUMENTS` to a ready-for-review pull request that passes 
 
 ## You may always
 
-Act within the brief and your role. Keep all tool, hook, and action gates. Routine reads and admitted checks need no new GO.
+Act within the brief, your role, and the applicable gates.
 
-1. Commit locally on the assigned branch when the brief grants commits, including before tests. Keep the required verification pending.
-2. Push the lane's own feature branch for draft CI with push authority and the [step 9 preflight](references/pipeline.md#9-push-and-pr). Opening the draft needs PR authority. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
-3. Run isolated local tests within the brief and [execution admission](#execution-admission). Keep special-run GO requirements.
-4. Rerun permitted CI on the lane's current head under the [babysit rules](../babysit/SKILL.md). Verify the new attempt.
-5. Have the admitted writer re-anchor only named rows the lane's own diff breaks, with the identical mutant. Require one independent Sol review of the frozen head under the [lane-owned row route](#lane-owned-row-route).
-6. Send `/merge` with merge authority when the PR is ready, required CI is green, and independent review covers the exact head. Complete the thread, browser, and other [merge gates](#completion-gate).
-7. Ask your superior for permission at any time. Retry a refused command only under [the refusal rule](references/owner-decisions.md#loaded-instructions-and-refusals). Continue independent work.
+1. Commit locally on the assigned branch with commit authority, including before tests.
+2. Push your lane's feature branch for draft CI with push authority after the [step 9 preflight](references/pipeline.md#9-push-and-pr).
+3. Run isolated local tests under [execution admission](#execution-admission).
+4. Rerun permitted CI on the current head under [Babysit](../babysit/SKILL.md) and verify the new attempt.
+5. Have the admitted writer re-anchor named rows the lane's diff breaks with the identical mutant. Require one independent Sol review at the frozen head under the [lane-owned row route](#lane-owned-row-route).
+6. Send `/merge` with authority for a ready PR with green required CI, independent review on the exact head, and all other [merge gates](#completion-gate) met.
+7. Ask your superior for permission at any time.
 
 ## Only the owner
 
-Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](references/owner-decisions.md#only-the-owner).
+Apply the reserved decisions and triggers in the `Only the owner` section of `owner-decisions:owner-decisions` through the [shared policy](references/owner-decisions.md#only-the-owner).
 Route decisions through the CoC, or the designated driver in standalone Ship.
-Keep product, billing, security policy, and major architecture scope holds. Keep live authority separate.
 
 ## Arguments
 
@@ -44,12 +43,14 @@ Empty input asks for a task. Freeze scope and success checks before any code is 
 The session that runs this skill is the driver. It plans, dispatches, records, and ships. Writers write code.
 
 Use granted authority in the same turn. Routine reads, read-only scripts, admitted checks, lint, and typecheck need no new GO or receipt.
+Retry a refused command only under [the refusal rule](references/owner-decisions.md#loaded-instructions-and-refusals).
 Keep a refused step pending under [Loaded instructions and refusals](references/owner-decisions.md#loaded-instructions-and-refusals). Continue independent work.
 Stop a step for a failed check, a hard rule, an owner refusal, a missing special-run GO, or an owner-only item.
 An unverified detail that no rule names is not a stop: name it in one line and continue. A rule that names a missing receipt or evidence still stops its step.
 End each turn with a forward action: a writer dispatch, a commit, a push, a PR update, or a merge. A board edit alone is not progress.
-In a status message, never restate standing holds; send what changed, what it means, and the next action. Briefs still carry their required restrictions.
-Bad: "Bridge admission remains held; execution credit stays zero." Good: "Tests pass at 1a2b3c4. I push and open the PR now."
+Omit standing holds from routine status reports. Give the outcome, its meaning, and the next action. Keep the required restrictions in briefs.
+For a hold or wait, give `Facts` (direct PR URL, 40-hex head SHA), `Decision` (blocked step, release condition), and `Next` (accountable owner, exact permitted action, UTC deadline).
+The chief refuses an incomplete lane or driver report and asks the sender for all required fields.
 
 Read [owner decisions](references/owner-decisions.md) before dispatch. Apply its chief-managed CoC delivery contract when a chief owns the run.
 Apply its [helper standing request](references/owner-decisions.md#helper-standing-request) contract before helper creation.
@@ -316,6 +317,6 @@ Drivers prepare same-strength evidence; writers verify it before any separately 
 ### General routes and boundaries
 
 Prepare evidence and exact scope under [Task-specific test adaptations](references/owner-decisions.md#task-specific-test-adaptations); designate that owner-event route explicitly.
-Apply [Loaded instructions and refusals](references/owner-decisions.md#loaded-instructions-and-refusals); preserve applicable higher-priority instructions and existing holds.
+Apply [Loaded instructions and refusals](references/owner-decisions.md#loaded-instructions-and-refusals).
 
 Preserve validation, authorization, tenant isolation, atomicity, and logging. Honor permission denials. Skip hook bypasses and force-pushes without explicit user authority. Keep scratch files outside lane worktrees and version control.

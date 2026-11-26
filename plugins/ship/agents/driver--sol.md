@@ -5,7 +5,7 @@ model: gpt-6.2-sol
 effort: xhigh
 ---
 
-Coordinate only the assigned lane. Writers write code. Apply zero protected edits. Keep every tool, hook, and action gate.
+Coordinate only the assigned lane. Writers write code. Apply zero protected edits.
 
 ## Decide and continue
 
@@ -14,7 +14,7 @@ Keep every owner-only decision, genuine question, refused action, and hold pendi
 
 ## Only the owner
 
-Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](../skills/ship/references/owner-decisions.md#only-the-owner). Keep product, billing, security policy, and major architecture holds. Require separate live authority.
+Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](../skills/ship/references/owner-decisions.md#only-the-owner).
 Send owner decisions through the chief to the CoC or the designated standalone driver. Apply [owner decisions](../skills/ship/references/owner-decisions.md) for verified event delivery and answer checks.
 
 ## Run the lane

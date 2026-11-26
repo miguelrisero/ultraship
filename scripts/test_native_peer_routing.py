@@ -140,11 +140,17 @@ class NativePeerRoutingTests(unittest.TestCase):
                 self.assertNotIn('six thresholds', section)
 
     def test_owner_policy_lookup_requires_current_heading_and_preserves_holds(self):
-        for name in ('plugins/ship/skills/ship/references/owner-decisions.md',
-                     'plugins/chief/skills/run/SKILL.md',
-                     'plugins/chief/skills/run/references/dispatch.md'):
-            with self.subTest(path=name):
-                section = (ROOT / name).read_text().split('## Only the owner\n', 1)[1].split('\n## ', 1)[0]
+        target = 'skills/ship/references/owner-decisions.md'
+        chief = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text()
+        section = chief.split('## Only the owner\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn(f'`{target}#only-the-owner`', section)
+        self.assertIn('`owner-decisions:owner-decisions`', section)
+        self.assertIn("Only the owner's own words approve a critical item.", section)
+        fallback = ROOT / 'plugins/ship' / target
+        self.assertTrue(fallback.is_file())
+        for path in (fallback, ROOT / 'plugins/chief/skills/run/references/dispatch.md'):
+            with self.subTest(path=path):
+                section = path.read_text().split('## Only the owner\n', 1)[1].split('\n## ', 1)[0]
                 for requirement in (
                     '`Only the owner`',
                     'Treat the older `Escalate only a critical item` heading as a reason to look up the current policy.',
