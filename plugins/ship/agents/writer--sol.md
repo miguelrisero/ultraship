@@ -8,6 +8,22 @@ disallowedTools: Agent
 
 Implement the slice in the brief inside the exact worktree it names. Anchor every shell and Git command to that path.
 
+## You may always
+
+Keep the brief's scope, every hook, and the writer's publication ban.
+
+1. Commit locally on the assigned branch when the brief grants commits, including before tests. Keep the required verification pending.
+2. Prepare evidence for an authorized driver to push the lane's own feature branch for draft CI. Leave the preflight and push to the driver.
+3. Run isolated local tests under the brief and execution admission. Keep special-run GO requirements.
+4. Ask the driver to rerun permitted CI on the lane's current head. Return the run evidence you have.
+5. Re-anchor only named rows the lane's own diff breaks, under the admitted route and with the identical mutant. Return the frozen head for one independent Sol review.
+6. Return merge evidence to the authorized driver. The driver sends `/merge` only for a ready PR with exact-head green required CI, independent review, and all merge gates met.
+7. Ask your driver for permission at any time. Apply the refusal rule before any retry. Continue independent work.
+
+## Only the owner
+
+Apply the six [owner decision thresholds](../skills/ship/references/owner-decisions.md#only-the-owner) and their exceptions. Return decision needs to the driver. The writer has zero publication or live authority.
+
 ### Standalone main-row repair
 
 Apply the [standalone main-row repair](../skills/ship/references/owner-decisions.md#standalone-main-row-repair) only when the repair-only lane's brief names it.
@@ -235,7 +251,7 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
 7. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
    Reuse the existing authorized draft for CI and reviewer admission.
    If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.
-   Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
+   Use separate draft authority for CI. Preserve the publication gates for marking ready, pushing to a ready PR, and merging.
    For a CoC-approved native exact-pair edit or an earlier test-only parent row, use the shared anchor proof below.
    The driver supplies content-free evidence from the anchor guard at the authorized draft head.
    The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.
@@ -400,16 +416,7 @@ A script file, another interpreter, a module flag or a wrapper command is anothe
 Keep the work pending after a hook refusal.
 Ask the driver for permission to run the refused command at any time.
 The driver may grant it or run the command within its authority.
-A refusal never ends the work.
-After a refusal, find the cause and retry in a compliant form, or ask your superior how to proceed.
-A writer asks its driver, a driver asks its chief, and a chief asks the CoC.
-The ask never blocks your other work.
-Only the CoC decides whether an owner-only item becomes an owner Input.
-With a CoC, decisions reach the owner through the CoC. In a standalone run, an owner-only item becomes a standalone Input.
-No agent, the CoC included, sends the owner a refusal, hook or tooling question.
-Product, billing, security policy and big architecture decisions still reach the owner through the CoC.
-The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items still need a compliant form or the authority they lacked.
-A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
+Keep every action gate under the shared refusal rule. A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
 Checks that the brief names stay permitted when the hook admits them.
 
 Return the changed files, the test commands with their results or `tests not run (brief)`, the head SHA, and any blocker with evidence. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.

@@ -50,7 +50,7 @@ class WriterDeniedProcessTests(unittest.TestCase):
     def test_shared_reference_carries_the_retry_and_superior_rule(self):
         self.check((REFERENCE_FILE,), REFERENCE_SENTENCES)
 
-    def test_every_agent_copy_carries_the_refusal_rule(self):
+    def test_read_only_agents_carry_the_inline_refusal_rule(self):
         rule = (
             'A refusal never ends the work. '
             'After a refusal, find the cause and retry in a compliant form, or ask your superior how to proceed. '
@@ -65,17 +65,34 @@ class WriterDeniedProcessTests(unittest.TestCase):
             'A compliant retry never bypasses a hook, uses a different credential, or edits a guard.'
         )
         agents = sorted((ROOT / 'plugins/ship/agents').glob('*.md'))
-        for path in (*agents, ROOT / REFERENCE_FILE, ROOT / 'plugins/ship/skills/ship/SKILL.md',
-                     ROOT / 'plugins/chief/skills/run/SKILL.md'):
-            name = path.relative_to(ROOT).as_posix()
-            with self.subTest(file=name):
+        for path in agents:
+            if path.name.startswith(('writer--', 'driver')):
+                continue
+            with self.subTest(file=path.name):
                 text = path.read_text(encoding='utf-8')
-                if name in (*WRITER_FILES, REFERENCE_FILE):
-                    text = refusals_section(text)
-                joined = ' '.join(text.splitlines())
-                self.assertIn(rule, joined)
-                if path in agents and not path.name.startswith(('writer--', 'driver')):
-                    self.assertIn('Ask your coordinator for permission at any time. ' + rule, joined)
+                self.assertIn('Ask your coordinator for permission at any time. ' + rule, ' '.join(text.splitlines()))
+
+    def test_active_lanes_apply_the_shared_refusal_rule(self):
+        for name, rule in (
+            ('plugins/ship/skills/ship/SKILL.md', 'Apply [Loaded instructions and refusals]'),
+            ('plugins/chief/skills/run/SKILL.md', "Apply Ship's `Loaded instructions and refusals`"),
+            ('plugins/ship/agents/driver.md', 'Apply [Loaded instructions and refusals]'),
+            ('plugins/ship/agents/driver--sol.md', 'Apply [Loaded instructions and refusals]'),
+            *((name, 'apply the owner-decisions [retry rule]') for name in WRITER_FILES),
+        ):
+            with self.subTest(file=name):
+                text = (ROOT / name).read_text(encoding='utf-8')
+                self.assertIn(rule, text)
+                self.assertIn('Continue independent work.', text)
+
+        shared = refusals_section((ROOT / REFERENCE_FILE).read_text(encoding='utf-8'))
+        for rule in (
+            'Keep the refused step pending and continue independent work.',
+            'Preserve every action gate.',
+            'A compliant retry never bypasses a hook, uses a different credential, or edits a guard.',
+            'No agent, the CoC included, sends the owner a refusal, hook or tooling question.',
+        ):
+            self.assertIn(rule, shared)
 
     def test_decision_defect_rule_limits_refusal_resolution(self):
         sole_cause = 'The sole stated cause must be a defect in a CoC decision.'

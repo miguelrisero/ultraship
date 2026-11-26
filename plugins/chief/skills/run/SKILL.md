@@ -8,6 +8,23 @@ argument-hint: "[review <scope> | <task>]"
 
 Coordinate the task in `$ARGUMENTS` from the main session, at the session model. Keep decisions and the status board here. Delegate planning, research, code, and the ship tail.
 
+## You may always
+
+Use authority within the lane brief and your role. Route lane actions through the assigned writer or driver. Keep every hook and action gate.
+
+1. Allow local commits before tests when the brief grants commits on the assigned lane branch. Keep the required verification pending.
+2. Have the authorized driver push the lane's own feature branch for draft CI after Ship's step 9 preflight. Grant draft creation separately. Allow required CI and independent review to follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
+3. Have the assigned agent run isolated local tests under the brief and Ship's execution admission. Keep special-run GO requirements.
+4. Have the authorized driver rerun permitted CI on the lane's current head under Ship's babysit rules. Verify the new attempt.
+5. Route re-anchors of named rows the lane's own diff breaks through the admitted writer. Keep the identical mutant. Require one independent Sol review at the frozen head.
+6. Send `/merge` with merge authority when the PR is ready, required CI is green, and independent review covers the exact head. Complete the thread, browser, and other [merge gates](references/landing.md#ready-and-merge-authority).
+7. Ask the CoC for permission at any time. Retry a refused command only in a form that meets the named rule or fixes its cause. Continue independent work.
+
+## Only the owner
+
+Apply the six thresholds and exceptions under `Only the owner` in the ship plugin's `skills/ship/references/owner-decisions.md`. Route decisions through the CoC, or the designated driver in a standalone run.
+Keep product, billing, security policy, and major architecture scope holds. Keep live authority separate.
+
 Chief needs the `ship` plugin. Check that `ship:driver` and `ship:writer--sol` are available before the first dispatch.
 
 Read the [native peer routing contract](references/dispatch.md#native-peer-routing-contract) and the shared owner-decision contract at `skills/ship/references/owner-decisions.md` in the installed ship plugin.
@@ -20,20 +37,10 @@ Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simula
 Batch actionable and terminal reports; keep unchanged routine reports silent and CoC peer events out of per-peer user-chat replies.
 Copy the routing and model-independent output contracts into every timer, recovery, driver, writer, reviewer, and child brief, including retries and replacements.
 Act by default: use the authority the owner and the CoC already granted in the same turn, and never ask for it again.
-Stop a step only for a hook denial, a failed check, a hard rule, an owner refusal, a special-run GO, or an owner-only item.
-A refusal never ends the work.
-After a refusal, find the cause and retry in a compliant form, or ask your superior how to proceed.
-A writer asks its driver, a driver asks its chief, and a chief asks the CoC.
-The ask never blocks your other work.
-Only the CoC decides whether an owner-only item becomes an owner Input.
-With a CoC, decisions reach the owner through the CoC. In a standalone run, an owner-only item becomes a standalone Input.
-No agent, the CoC included, sends the owner a refusal, hook or tooling question.
-Product, billing, security policy and big architecture decisions still reach the owner through the CoC.
-The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items still need a compliant form or the authority they lacked.
-A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
-Grant a lane request, or run the refused command yourself, when you consider it appropriate; record the grant or the run in the lane state file.
+Stop a step only for a hook denial, a failed check, a hard rule, an owner refusal, a missing special-run GO, or an owner-only item.
+Apply Ship's `Loaded instructions and refusals` to the refused step. Keep that step pending and continue independent work.
+Grant a lane request or run the refused command only within your authority and tool permissions. Record the grant or run in the lane state file.
 Relay the lane's quoted refusal and defect to the CoC and the corrected decision to the lane under ship's decision-defect rule.
-Owner-only items: product, billing, security policy or tenant isolation, big architecture, customer-data deletion, new recurring spend, flag flips or deploy changes, public output in the owner's name, and credentials only the owner holds.
 An unverified detail that no rule names is not a stop: name it in one line and continue. A rule that names a missing receipt or evidence still stops its step.
 Use each actionable check to advance a lane: dispatch it, make a ruling, merge it, or send a result. A board edit alone leaves lane work open.
 Only the CoC publishes canonical owner decisions and results in CoC workspace Inputs; chief-local Inputs never satisfy delivery.
@@ -165,9 +172,9 @@ Follow [canonical push and contact safeguards](references/landing.md#canonical-p
 
 ## Verify and finish
 
-Require the ship completion gate before a lane reaches ready-for-review. Recheck GitHub state yourself: head SHA, required CI, unresolved threads, mergeability, and branch freshness. Check the file list for scratch artifacts. Compare changed guards and fixtures with the base policy. After the merge, prove merge-critical guards catch a deliberately broken case in an isolated test at the merge commit.
+Apply Ship's completion gate before marking a PR ready. Apply the repository's queue check rule to checks that start only after `/merge`. Require those checks before the actual merge. Recheck the head SHA, applicable CI, unresolved threads, mergeability, and branch freshness. Check the file list for scratch artifacts. Compare changed guards and fixtures with the base policy. Prove merge-critical guards at the merge commit with an isolated test.
 
-Apply the ship skill's proof-after-merge rule: green required CI, an independent review, and every thread dispositioned gate the merge, and the merge goes out within 2 hours of green CI. The mutation proof runs at the merge commit after the merge.
+Apply Ship's proof-after-merge rule. Send `/merge` within 30 minutes after all applicable pre-command gates pass. Keep the repository's merge rules and queue holds. Run the mutation proof at the merge commit.
 
 Every owner or High-priority ticket gets a named driver within 4 hours. The driver opens the PR before any proof work.
 

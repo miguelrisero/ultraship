@@ -12,6 +12,7 @@ Bring the PR in `$ARGUMENTS`, or the current branch's PR, to green required CI a
 ## Brief safety
 
 Apply this rule to every triage, writer and reviewer brief.
+Start each writer brief with `You may always` and `Only the owner` from the loaded writer definition.
 Require this field and these sentences verbatim in every brief:
 
 ```text
@@ -30,6 +31,7 @@ Keep the existing triage outcomes and thread disposition rules.
 
 Before every authorized feature push, including direct invocation, retries, round fixes, and main merges, apply the [resolved destination preflight](../ship/references/pipeline.md#9-push-and-pr). Use only `git push origin HEAD:refs/heads/<feature-branch>` with the verified literal feature branch substituted. Writers prepare evidence only; the authorized driver executes the preflight and push; writers retain zero push authority, including push dry-runs. Preserve existing push authority, approval holds, merge holds, and verification gates.
 
+Return a ready PR to draft before any push that needs later CI or independent review.
 When the PR carries [lane-owned row](../ship/SKILL.md#lane-owned-row-route) changes, return a ready PR to draft before each push. Mark it ready only after the new row review passes at the pushed head.
 
 Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) during polling and guard execution.
@@ -84,4 +86,6 @@ When `gh pr view --json mergeStateStatus` reports `BEHIND` or `DIRTY`, merge cur
 
 ## Done
 
-End when required CI passes on the head, `threads.sh` prints nothing, and a successful Better Review check covers the head where the workflow exists. Append `babysit` with verdict `pass`.
+Require passing pre-command CI, an empty `threads.sh` result, and successful Better Review on the exact head where its workflow exists. Apply the queue check rule above for checks that start after `/merge`.
+Append `babysit` with verdict `pass` for those babysit checks.
+If this run returned a ready PR to draft, obtain independent review on the new head. Restore ready status only with authority after the [readiness gates](../ship/SKILL.md#completion-gate) pass. If another Ship step, authority, or evidence is pending, give the driver the exact head and pending ready transition. Report the PR as draft until GitHub confirms ready status.

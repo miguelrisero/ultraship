@@ -1840,7 +1840,7 @@ class ReceiptCustodyTests(unittest.TestCase):
                     f"grep -l '\"pr\"' {folder}/*.json",
                     f"cat > {folder}/a1b2c3.json <<'EOF'\n{record}EOF\n",
                     f'mkdir -p {folder} && cd {folder} && ls',
-                    f'grep -n context {folder}/a1b2c3.json',
+                    f'grep -n text {folder}/a1b2c3.json',
                     'wc -l ~/.local/state/ultraship/owed/*.tsv',
                     'ls -la ~/.local/state/ultraship/owed/ && wc -l ~/.local/state/ultraship/owed/*')
         for caller in ('', 'ship:driver', 'general-purpose'):
@@ -1857,7 +1857,8 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_state_folder_literal_paths_follow_the_caller_rule(self):
         folder = '~/.local/state/ultraship/row-reanchor'
         literal = (f'ls -la {folder}/', f'cat {folder}/a1b2c3.json', f'chmod 600 {folder}/a1b2c3.json',
-                   f'grep -n expires_at {folder}/a1b2c3.json', f'rm {folder}/a1b2c3.json')
+                   f'grep -n expires_at {folder}/a1b2c3.json', f'grep -n context {folder}/a1b2c3.json',
+                   f'rm {folder}/a1b2c3.json')
         for caller in ('', 'ship:driver'):
             for command in literal:
                 with self.subTest(caller=caller, command=command):

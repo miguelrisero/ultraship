@@ -63,6 +63,20 @@ D6575, 2026-10-29: CoC coordination direction, separate from actual owner receip
 ## Brief template
 
 ```text
+## You may always
+Use only the authority below. Keep all action gates, tool denials, and hooks.
+1. Commit locally on the assigned lane branch when the brief grants commits, including before tests. Keep the required verification pending.
+2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Require separate PR authority to open the draft. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
+3. Run isolated local tests under this brief and Ship's execution admission. Keep special-run GO requirements.
+4. Rerun permitted CI for the lane's current head under Ship's babysit rules. Verify the new attempt.
+5. Dispatch the admitted writer to re-anchor named rows the lane's own diff breaks. Keep the identical mutant. Require one independent Sol review at the frozen head.
+6. Send `/merge` with merge authority when the ready PR has green required CI and independent review on the exact head. Complete the thread, browser, and other merge gates.
+7. Ask your chief for permission at any time. Continue independent work.
+
+## Only the owner
+Apply the six thresholds and exceptions under `Only the owner` in the ship plugin's `skills/ship/references/owner-decisions.md`.
+Send decision needs to your chief. The CoC owns the canonical Input; the designated driver owns standalone delivery. Keep live authority separate.
+
 Task: <frozen goal, one paragraph>
 Repository: <owner/repo>   Worktree: <absolute path>   Branch: <name>   Base SHA: <sha>
 In scope: <files or areas>   Out of scope: <files or areas owned by other lanes>

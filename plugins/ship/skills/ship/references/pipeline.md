@@ -37,7 +37,8 @@ Triage and verifier briefs follow these reviewer search rules.
 An explicit repository-root path does not authorize broader discovery.
 
 For the [lane-owned row route](../SKILL.md#lane-owned-row-route), dispatch a separate admitted reviewer for the named rows at the frozen head.
-Require its independent verdict before publication.
+Use one independent Sol reviewer for a same-mutant re-anchor of rows the lane's own diff breaks.
+Allow the authorized draft push for anchor CI under the lane-owned row route. Require the verdict before marking ready, pushing to a ready PR, or merging.
 For [standalone main-row repair](owner-decisions.md#standalone-main-row-repair), except the default row path exclusion only for the separately admitted reviewer and approved row extents.
 Keep ordinary review briefs free of protected paths and row hunks. Keep pair bytes and row TOML text out of every brief.
 Require the matching frozen review receipt before publication, even when step 9 would otherwise permit it.
@@ -77,7 +78,8 @@ For design-heavy work, run `ship:panel design` on the plan before step 3.
 
 ## 3. Slices
 
-Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into every writer brief that can run the flaky-pattern guard.
+Start every writer brief with `You may always` and `Only the owner` from the loaded writer definition. Keep the exact brief scope and its prohibitions.
+Copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into every writer brief that can run the flaky-pattern guard.
 
 Prepare verified event evidence and exact scope under [Task-specific test adaptations](owner-decisions.md#task-specific-test-adaptations) for an explicitly designated owner-event route.
 Apply [Loaded instructions and refusals](owner-decisions.md#loaded-instructions-and-refusals).
@@ -107,7 +109,7 @@ Give `reviewer--sol` every finding from steps 4 and 5 with its evidence. It retu
 
 ## 7. One fix batch and one fix read
 
-1. Send the accepted list to `writer--sol` as one batch. It returns one fix commit.
+1. Send the accepted list to `writer--sol` as one batch. Follow the [writer brief rules](#3-slices). The writer returns one fix commit.
 2. Dispatch `reviewer--sol` once on the fix diff: did each fix land, and did it break anything?
 3. A new P0 or P1 from the fix read gets one more fix commit and one more read. After that, stop and report.
 
@@ -117,10 +119,16 @@ Freeze the branch head. Run `ship:panel final`. A P0 returns to step 7 with that
 
 ## 9. Push and PR
 
-Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into every writer brief that can run the flaky-pattern guard.
+Apply the [writer brief rules](#3-slices) to every writer dispatched here.
 
-1. Merge current remote main into the branch. Resolve conflicts and rerun affected tests.
-2. Run the full lint and test suite locally.
+Use this step early for authorized draft CI on the lane's own feature branch. Required CI and independent review may follow the draft push.
+Keep the other pipeline steps pending. Require exact-head green CI and independent review before marking ready or sending `/merge`.
+Apply the repository's [queue check rule](../../babysit/SKILL.md#one-round) for checks that start only after `/merge`.
+Return a ready PR to draft before an early CI push. Keep it in draft until all applicable readiness gates pass.
+Apply existing push holds, protected-row receipts, and preflight requirements even for a draft.
+
+1. Merge current remote main into the branch. Resolve conflicts and rerun the affected tests that the brief admits.
+2. Run the full lint and test suite locally when the brief admits it. When the brief bars local tests, use authorized CI or the coordinator's gated run for that proof. Keep any check that the repository requires before push.
 3. Before every authorized feature push, including retries and later pushes, the driver performs this resolved destination preflight in the lane worktree.
    Writers prepare repository, branch, and command evidence only; the authorized driver executes the preflight and push.
    Preserve existing push authority, approval holds, merge holds, and verification gates; writers retain zero push authority, including push dry-runs.
@@ -156,7 +164,7 @@ Drivers copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into 
      Repeat the complete preflight after any change; evidence applies only to this push attempt.
      To execute, remove only `--dry-run --porcelain`: use `git push origin HEAD:refs/heads/<feature-branch>`.
      Never use an abbreviated or default push. Never target a default branch.
-4. Open one PR at the first push, or update the open PR. Open it before any proof work: mutation batteries and live checks run after the PR exists. Put scope, behavior, verification steps, and risks in the body.
+4. Open one PR at the first push with PR authority, or update the open PR. Use a draft for early CI. Open it before mutation batteries or live checks. Put scope, behavior, verification steps, and risks in the body.
 
 ## 10. Babysit
 
