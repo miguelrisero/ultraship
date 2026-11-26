@@ -1026,6 +1026,144 @@ class LedgerDirTests(unittest.TestCase):
             transcript.write_text(''.join(line + '\n' for line in lines))
         return owed, transcript, result, int(epoch)
 
+    def frozen_patch(self, data=b'diff --git a/x b/x\n+frozen\n'):
+        patch = self.base / 'frozen.patch'
+        patch.write_bytes(data)
+        return patch, hashlib.sha256(data).hexdigest()
+
+    def test_account_patch_closes_a_result_on_its_frozen_patch_digest(self):
+        patch, digest = self.frozen_patch()
+        base = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, transcript, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review the uncommitted patch.'),
+            (-1, 'assistant', f'Base: {base}\nOne finding.\n\n**Reviewed patch SHA-256:** `{digest.upper()}`\n'
+                              '**Verdict:** findings')])
+        home = self.resolve()
+        accounted = self.cli('account-patch', str(owed), result['id'], str(patch))
+        self.assertEqual(accounted.returncode, 0, accounted.stderr)
+        self.assertEqual(accounted.stdout,
+                         f"accounted {result['id']} ship:reviewer--sol@reviewer patch:{digest} findings\n")
+        row = ledger.rows(home)[-1]
+        # The subject is the patch the reviewer read; the base commit earns no row.
+        self.assertEqual(row[1:5], ['account-result', 'ship:reviewer--sol@reviewer', f'patch:{digest}', 'findings'])
+        self.assertNotIn(base, row[3])
+        note = json.loads(row[5])
+        self.assertEqual(note['step'], 'review')
+        self.assertEqual(note['evidence'], f'{transcript} at '
+                         f'{datetime.fromtimestamp(epoch, timezone.utc).isoformat()}: findings on {patch}')
+        saved = home.read_bytes()
+        self.assertEqual(self.cli('account-patch', str(owed), result['id'], str(patch)).returncode, 0)
+        self.assertEqual(home.read_bytes(), saved)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+
+    def test_account_patch_leaves_unclear_results_pending(self):
+        patch, digest = self.frozen_patch()
+        other = 'cd' * 32
+        base = self.git(self.checkout, 'rev-parse', 'HEAD')
+        prompt = (-3, 'user', 'Review the uncommitted patch.')
+        link = self.base / 'linked.patch'
+        link.symlink_to(patch)
+        record = f'Patch SHA-256: {digest}\nVerdict: findings'
+        own = f'One finding.\n\n{record}'
+        pass_record = f'Patch SHA-256: {digest}\nVerdict: pass'
+        for case, text, path, reason in (
+            ('changed patch', f'One finding.\n\nPatch SHA-256: {other}\nVerdict: findings', patch,
+             'patch digest differs'),
+            ('missing patch', own, self.base / 'gone.patch', 'patch file unavailable'),
+            ('symlinked patch', own, link, 'patch file unavailable'),
+            ('relative patch', own, 'frozen.patch', 'patch file unavailable'),
+            ('mixed subject', f'Reviewed commit: {base}\n\n{record}', patch, 'mixed review subject'),
+            ('abbreviated commit', f'Reviewed commit: 123abcd\n\n{record}', patch, 'mixed review subject'),
+            ('carriage return hides a commit', f'Summary\rReviewed commit: 123abcd\n\n{record}', patch,
+             'mixed review subject'),
+            ('two digests', f'Tree SHA-256: {other}\n\n{record}', patch, 'expected one patch digest'),
+            ('record not last', f'{record}\n\nMore notes.', patch, 'expected a closing review record'),
+            ('record without a blank line', f'One finding.\n{record}', patch, 'expected a closing review record'),
+            ('record alone', record, patch, 'expected a closing review record'),
+            ('indented record', f'One finding.\n\n    Patch SHA-256: {digest}\n    Verdict: findings', patch,
+             'expected a closing review record'),
+            ('unlabelled digest', f'One finding.\n\nSee {digest}\nVerdict: findings', patch,
+             'expected a closing review record'),
+            ('disclaimed digest', f'One finding.\n\nPatch SHA-256: unknown; the prompt supplied {digest}\n'
+             'Verdict: findings', patch, 'expected a closing review record'),
+            ('qualified verdict', f'One finding.\n\nPatch SHA-256: {digest}\nVerdict: fail, no findings', patch,
+             'expected a closing review record'),
+            ('quoted example', f'> Example from the prompt:\n> {pass_record}\n\n{record}', patch,
+             'expected one verdict'),
+            ('lazy quote continuation', f'> Example from the prompt:\n{pass_record}', patch,
+             'expected a closing review record'),
+            ('fenced example', f'```\n{pass_record}\n```\n\n{record}', patch, 'code fence in review'),
+            ('list fence ended by its item', f'- Example:\n\n  ```\n  sample\n\n```\n\n{pass_record}', patch,
+             'code fence in review'),
+            ('fence after an html block', f'<div>\n```\n</div>\n\n```\n\n{pass_record}', patch, 'code fence in review'),
+            ('tilde fence', f'~~~\n\n{pass_record}', patch, 'code fence in review'),
+            ('ordered list commit', f'1. Reviewed commit: 123abcd\n\n{record}', patch, 'mixed review subject'),
+            ('quoted commit', f'> Reviewed commit: 123abcd\n\n{record}', patch, 'mixed review subject'),
+            ('underscore emphasis commit', f'__Reviewed commit__: 123abcd\n\n{record}', patch,
+             'mixed review subject'),
+            ('underscore emphasis verdict', f'__Verdict__: pass\n\n{record}', patch, 'expected one verdict'),
+            ('underscore emphasis overall', f'_Overall_: pass\n\n{record}', patch, 'expected one verdict'),
+            ('unclosed fence', f'```text\n\n{pass_record}', patch, 'code fence in review'),
+            ('html comment', f'<!--\n\n{pass_record}\n-->', patch, 'html block in review'),
+            ('unclosed html comment', f'<!--\n\n{pass_record}', patch, 'html block in review'),
+            ('unclosed pre block', f'<pre>\n\n{pass_record}', patch, 'html block in review'),
+            ('indented example verdict', f'    Verdict: pass\n\n{record}', patch, 'expected one verdict'),
+            ('nonbreaking space is no blank line', f'> Example from the prompt:\n\u00a0\n{pass_record}', patch,
+             'expected a closing review record'),
+            ('list marker verdict', f'+ Verdict: findings\n\n{pass_record}', patch, 'expected one verdict'),
+            ('ordered list verdict', f'1. Overall: findings\n\n{pass_record}', patch, 'expected one verdict'),
+            ('spaced verdict label', f'Verdict : findings\n\n{pass_record}', patch, 'expected one verdict'),
+            ('later turn', None, patch, 'no final turn text'),
+        ):
+            entries = [prompt, (-1, 'assistant', text)] if text else [
+                prompt, (-1, 'assistant', own), (3, 'user', 'Review it again.'), (4, 'assistant', 'Verdict: pass')]
+            owed, _, result, _ = self.auto_owed(entries)
+            home = self.resolve()
+            before = (owed.read_bytes(), home.read_bytes())
+            with self.subTest(case=case):
+                accounted = self.cli('account-patch', str(owed), result['id'], str(path))
+                self.assertNotEqual(accounted.returncode, 0)
+                self.assertIn(reason, accounted.stderr)
+                self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+
+    def test_account_patch_accepts_fence_free_markdown_before_the_record(self):
+        patch, digest = self.frozen_patch()
+        for case, body in (('list item', '- One finding.\n  Second line.'),
+                           ('block quote', '> The prompt asked for a patch review.'),
+                           ('indented code', 'Notes:\n\n    render(patch)'),
+                           ('identifier ending in verdict', 'The variable render_verdict: str loses its value.'),
+                           ('inline code', 'The `git diff` output matches.')):
+            owed, _, result, _ = self.auto_owed([
+                (-2, 'user', 'Review the patch.'),
+                (-1, 'assistant', f'{body}\n\nPatch SHA-256: {digest}\nVerdict: findings')])
+            with self.subTest(case=case):
+                accounted = self.cli('account-patch', str(owed), result['id'], str(patch))
+                self.assertEqual(accounted.returncode, 0, accounted.stderr)
+
+    def test_account_patch_opens_no_symlinked_parent_and_bounds_the_hash(self):
+        patch, digest = self.frozen_patch()
+        (self.base / 'linked').symlink_to(self.base)
+        for case, path, limit, reason in (
+            # A parent swapped for a symlink after the spelling check still fails at open.
+            ('symlinked parent', self.base / 'linked/frozen.patch', None, 'patch file unavailable'),
+            ('oversized patch', patch, 4, 'patch file exceeds its byte limit'),
+        ):
+            owed, _, result, _ = self.auto_owed([
+                (-2, 'user', 'Review the patch.'),
+                (-1, 'assistant', f'One finding.\n\nPatch SHA-256: {digest}\nVerdict: findings')])
+            home = self.resolve()
+            before = home.read_bytes()
+            real = os.path.realpath
+            with self.subTest(case=case), \
+                    mock.patch.object(ledger.os.path, 'realpath', side_effect=lambda value, *args, **kwargs:
+                                      value if value == str(path) else real(value, *args, **kwargs)), \
+                    mock.patch.object(ledger, 'PATCH_BYTE_LIMIT', limit or ledger.PATCH_BYTE_LIMIT):
+                accounted = self.cli('account-patch', str(owed), result['id'], str(path))
+                self.assertNotEqual(accounted.returncode, 0)
+                self.assertIn(reason, accounted.stderr)
+                self.assertEqual(home.read_bytes(), before)
+
     def test_stop_prints_exact_command_for_commit_bound_findings(self):
         sha = self.git(self.checkout, 'rev-parse', 'HEAD')
         owed, transcript, result, _ = self.auto_owed([
@@ -1124,6 +1262,7 @@ class LedgerDirTests(unittest.TestCase):
         message = json.loads(self.hook('stop'))
         self.assertEqual(message['decision'], 'block')
         self.assertIn('patch digest', message['reason'])
+        self.assertIn(f"account-patch {shlex.quote(str(owed))} <result-id> <absolute-patch-file>", message['reason'])
         self.assertIn('Link a later review on the run board. Keep the original subject and verdict.', message['reason'])
         self.assertIn('The link gives zero accounting or review credit.', message['reason'])
         self.assertFalse(any(line.startswith('python3 ') for line in message['reason'].splitlines()))

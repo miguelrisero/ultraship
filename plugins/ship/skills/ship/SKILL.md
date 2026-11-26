@@ -120,7 +120,13 @@ Use the pending file and result ID from the Stop diagnostic. Supply the actual a
 
 Use a complete result-specific command from Stop when it supplies one. Stop prints it only for findings tied to an explicit reviewed commit and the original ledger and run.
 
-Keep patch-only findings pending. A base commit and a patch digest do not identify the reviewed commit.
+A base commit does not identify a reviewed patch. For a result on a frozen, uncommitted patch, run:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-patch <pending.tsv> <result-id> <absolute-patch-file>
+```
+
+The command reads the subject and verdict from the reviewer's transcript and hashes the patch file itself. The transcript must hold one prompt and no later turn. The review turn must end with a blank line and an unindented two-line record: `Patch SHA-256: <digest>` (or `Reviewed patch SHA-256:`) and `Verdict: pass` or `Verdict: findings`. Emphasis and backticks around the label and digest are allowed. The record cannot be the first line of the turn. The turn must name no other SHA-256 digest and no other line with a `Verdict:` or `Overall:` label, in any container. A blank line holds only spaces or tabs. A `Reviewed commit:` label with a full or abbreviated commit SHA anywhere in a line, any code fence (three backticks or tildes), or an HTML comment, `<pre>`, `<script>`, `<style>` or `<textarea>` block leaves the result pending. The digest must equal the file's digest. The patch path must be absolute and canonical, and no path component may be a symlink. The file must be a regular file of at most 64 MiB. The command records `patch:<digest>` as the subject; a base commit gets no row. The result also needs its recorded agent, ledger and run.
 Record a later independent review separately on the run board. Link the pending result ID, original subject and verdict, and later reviewed commit and result. The link grants zero accounting, review, or publication credit.
 
 When Stop reports a missing original ledger or run binding, end the turn with a blocker report. Keep run completion on hold. Restore the original binding through an approved recovery route before crediting that result.
