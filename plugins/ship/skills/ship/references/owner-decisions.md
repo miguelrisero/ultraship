@@ -237,7 +237,8 @@ The pre hook denies every reviewer read under a `tests/mutation` path unless the
 Use this record for lane-owned row review and standalone main-row repair review.
 
 1. Dispatch `ship:reviewer--sol`, `ship:reviewer--opus`, or, for lane-owned row review only, `ship:reviewer--astra`.
-   Ask the reviewer to return `ready` and read nothing.
+   Send the full reviewer brief at dispatch.
+   Make the admission check the reviewer's first step. Hold protected reads until the driver confirms admission.
 2. Take the agent ID from the Agent tool result.
 3. Write the full record with native Write to `<workspace>/.scratch/ultraship/row-review/<agent ID>.json` or `${XDG_STATE_HOME:-~/.local/state}/ultraship/row-review/<agent ID>.json`.
    Start at the real path of the reviewer's working directory.
@@ -248,7 +249,7 @@ Use this record for lane-owned row review and standalone main-row repair review.
    In the file name, replace each character outside letters, digits, `_`, `.` and `-` with `_`.
 4. The record has four fields: `pr` (the PR URL), `agent_id` (the agent ID), `row_files` (the exact canonical absolute row-file paths) and `expires_at` (`YYYY-MM-DDTHH:MM:SSZ`, UTC, at most 4 hours ahead).
 5. Run `chmod 600` on the file. The hook refuses a file that the group or others can write.
-6. Send the review brief to the reviewer with SendMessage.
+6. Confirm admission to the reviewer with SendMessage after the record is ready.
 7. Delete the file when the review returns.
 
 In Bash, name the record by its literal absolute path for `chmod 600` and the final delete.

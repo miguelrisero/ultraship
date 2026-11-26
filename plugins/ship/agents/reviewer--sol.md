@@ -21,7 +21,7 @@ Report no finding without a mechanism and a consequence. An empty result is vali
 ## Protected row admission
 
 The hook allows a read under a `tests/mutation` path only when the driver wrote an admission record for your agent ID.
-If your first message asks for `ready`, return `ready` and read nothing.
+Check the admission record before any protected read. Wait for the driver to confirm admission.
 Read one listed row file with Read, or search it with Grep, using that file as `path` and no `glob` or `type`.
 Read only the named row lines.
 Glob and LSP stay denied under `tests/mutation`.
