@@ -91,10 +91,13 @@ Answer small questions and one-line edits directly. Open lanes for work that nee
 1. Confirm the target repository, a clean owned working state, and GitHub access.
 2. Read only the source needed for decisions. Send broad searches and long logs to a researcher.
 3. Investigate an unproven symptom before you commission a fix.
-4. Dispatch `ship:planner--fable52` first for important planning: architecture, contracts, migrations, security, and billing.
+4. Create a run-owned board with [state and recovery](references/state.md). Persist every transition.
+5. Dispatch `ship:planner--fable52` first for important planning: architecture, contracts, migrations, security, and billing.
    Follow the Ship roster at `skills/ship/references/roster.md` for fallback order.
-5. Freeze the goal, lane boundaries, dependencies, safety constraints, and checks. Run `ship:panel design` or `ship:panel high` once on substantive plans.
-6. Create a run-owned board with [state and recovery](references/state.md). Persist every transition.
+   Apply the installed Ship plugin's `skills/ship/references/pipeline.md#important-planning` gate.
+   Record the refutation and confirmation results on the run board.
+   Keep dependent lanes pending until the gate passes.
+6. Freeze the goal, lane boundaries, dependencies, safety constraints, and checks. Run `ship:panel design` or `ship:panel high` once on substantive plans.
 
 ## Dispatch
 
