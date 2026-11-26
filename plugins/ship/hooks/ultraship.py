@@ -5190,7 +5190,7 @@ def own_account_call(data, raw):
         # ledger.py hashes the patch and reads the subject and verdict itself; only the file path is caller data.
         if (len(words) == 6 and words[3] == pending
                 and re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', words[4])
-                and words[5].startswith('/') and os.path.normpath(words[5]) == words[5]):
+                and words[5].startswith('/') and os.path.realpath(words[5]) == words[5]):
             return words
         return False
     if len(words) != 10 or words[2] != 'account' or words[3] != pending:
@@ -7421,7 +7421,10 @@ def stop(data):
               'this appends bookkeeping without reopening the run. '
               'Run this command alone on one line with the evidence in single quotes. Never invent review evidence. '
               'Use only the reviewed commit. A base SHA or patch digest gives zero review credit. '
-              'Keep results without a verified reviewed commit pending. '
+              'For a result on a frozen, uncommitted patch, use '
+              f'`python3 {shlex.quote(str(ledger_script()))} account-patch {shlex.quote(str(path))} '
+              '<result-id> <absolute-patch-file>`. '
+              'Keep other results without a verified reviewed commit pending. '
               'Link a later review on the run board. Keep the original subject and verdict. '
               'The link gives zero accounting or review credit.'}))
 

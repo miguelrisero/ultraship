@@ -1530,8 +1530,11 @@ class ReceiptCustodyTests(unittest.TestCase):
                  str(self.cwd / 'frozen.patch')]
         self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
         self.consume(words)
+        linked = self.cwd / 'linked'
+        linked.symlink_to(self.cwd)
         for index, value in ((4, 'invalid'), (5, 'frozen.patch'), (5, str(self.cwd / '../frozen.patch')),
-                             (5, str(self.cwd) + '//frozen.patch'), (5, '')):
+                             (5, str(self.cwd) + '//frozen.patch'), (5, '/' + str(self.cwd / 'frozen.patch')),
+                             (5, str(linked / 'frozen.patch')), (5, '')):
             invalid = words.copy()
             invalid[index] = value
             with self.subTest(index=index, value=value):

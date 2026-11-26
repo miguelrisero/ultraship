@@ -1075,6 +1075,15 @@ class LedgerDirTests(unittest.TestCase):
             ('two digests', f'Patch SHA-256: {digest}\nTree SHA-256: {other}\nVerdict: findings', patch,
              'expected one patch digest'),
             ('no digest', 'Verdict: findings', patch, 'expected one patch digest'),
+            ('unlabelled digest', f'See {digest}\nVerdict: findings', patch, 'expected one patch digest'),
+            ('quoted subject and verdict', f'> Patch SHA-256: {digest}\n> Verdict: pass\nI could not review the patch.',
+             patch, 'expected one patch digest'),
+            ('fenced subject and verdict', f'```\nPatch SHA-256: {digest}\nVerdict: pass\n```\nNo review.', patch,
+             'expected one patch digest'),
+            ('quoted verdict', f'Patch SHA-256: {digest}\n> Verdict: pass\nNo verdict of my own.', patch,
+             'expected one verdict'),
+            ('abbreviated commit', f'Reviewed commit: 123abcd\nPatch SHA-256: {digest}\nVerdict: findings', patch,
+             'mixed review subject'),
             ('second verdict', f'Patch SHA-256: {digest}\nVerdict: findings\nOverall: pass', patch,
              'expected one verdict'),
             ('later turn', None, patch, 'no final turn text'),
@@ -1090,6 +1099,28 @@ class LedgerDirTests(unittest.TestCase):
                 self.assertNotEqual(accounted.returncode, 0)
                 self.assertIn(reason, accounted.stderr)
                 self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+
+    def test_account_patch_opens_no_symlinked_parent_and_bounds_the_hash(self):
+        patch, digest = self.frozen_patch()
+        (self.base / 'linked').symlink_to(self.base)
+        for case, path, limit, reason in (
+            # A parent swapped for a symlink after the spelling check still fails at open.
+            ('symlinked parent', self.base / 'linked/frozen.patch', None, 'patch file unavailable'),
+            ('oversized patch', patch, 4, 'patch file exceeds its byte limit'),
+        ):
+            owed, _, result, _ = self.auto_owed([
+                (-2, 'user', 'Review the patch.'), (-1, 'assistant', f'Patch SHA-256: {digest}\nVerdict: findings')])
+            home = self.resolve()
+            before = home.read_bytes()
+            real = os.path.realpath
+            with self.subTest(case=case), \
+                    mock.patch.object(ledger.os.path, 'realpath', side_effect=lambda value, *args, **kwargs:
+                                      value if value == str(path) else real(value, *args, **kwargs)), \
+                    mock.patch.object(ledger, 'PATCH_BYTE_LIMIT', limit or ledger.PATCH_BYTE_LIMIT):
+                accounted = self.cli('account-patch', str(owed), result['id'], str(path))
+                self.assertNotEqual(accounted.returncode, 0)
+                self.assertIn(reason, accounted.stderr)
+                self.assertEqual(home.read_bytes(), before)
 
     def test_stop_prints_exact_command_for_commit_bound_findings(self):
         sha = self.git(self.checkout, 'rev-parse', 'HEAD')
@@ -1189,6 +1220,7 @@ class LedgerDirTests(unittest.TestCase):
         message = json.loads(self.hook('stop'))
         self.assertEqual(message['decision'], 'block')
         self.assertIn('patch digest', message['reason'])
+        self.assertIn(f"account-patch {shlex.quote(str(owed))} <result-id> <absolute-patch-file>", message['reason'])
         self.assertIn('Link a later review on the run board. Keep the original subject and verdict.', message['reason'])
         self.assertIn('The link gives zero accounting or review credit.', message['reason'])
         self.assertFalse(any(line.startswith('python3 ') for line in message['reason'].splitlines()))

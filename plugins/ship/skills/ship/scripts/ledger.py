@@ -103,9 +103,23 @@ def file_identity(info):
 
 # Stop guidance shares this label rule so both parsers count the same verdict lines.
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
-REVIEWED_COMMIT = re.compile(r'^[\s>*#_\-]*Reviewed commit[*_]*\s*:.*(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])',
+REVIEWED_COMMIT = re.compile(r'^[\s>*#_\-]*Reviewed commit[*_]*\s*:.*(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])',
                              re.I | re.M)
 PATCH_DIGEST = re.compile(r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])', re.I)
+PATCH_LABEL = re.compile(r'^[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:', re.I)
+PATCH_BYTE_LIMIT = 64 * 1024 * 1024
+
+
+def own_lines(text):
+    """Drop quoted lines and fenced blocks, so a reviewer's quotation never supplies a subject or verdict."""
+    kept, fenced = [], False
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(('```', '~~~')):
+            fenced = not fenced
+        elif not fenced and not stripped.startswith('>'):
+            kept.append(line)
+    return '\n'.join(kept)
 
 
 def grant_request(script, argv):
@@ -656,18 +670,33 @@ def account_patch(pending, identifier, patch, *, entries):
         raise ValueError('no final turn text')
     if REVIEWED_COMMIT.search(text):
         raise ValueError('mixed review subject')
+    text = own_lines(text)
     digests = {digest.lower() for digest in PATCH_DIGEST.findall(text)}
-    if len(digests) != 1:
+    labelled = {digest.lower() for line in text.splitlines() if PATCH_LABEL.match(line)
+                for digest in PATCH_DIGEST.findall(line)}
+    if len(digests) != 1 or labelled != digests:
         raise ValueError('expected one patch digest')
     digest = digests.pop()
     verdict = review_verdict(text)
     try:
         if not os.path.isabs(patch) or os.path.realpath(patch) != patch:
             raise OSError
-        with os.fdopen(os.open(patch, READ_FLAGS), 'rb') as source:
-            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+        # Every path component opens without following a symlink, so a swapped parent fails here.
+        with directory_descriptor(Path(patch).parent) as parent, \
+                os.fdopen(os.open(Path(patch).name, READ_FLAGS, dir_fd=parent), 'rb') as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode):
                 raise OSError
-            measured = hashlib.file_digest(source, 'sha256').hexdigest()
+            if info.st_size > PATCH_BYTE_LIMIT:
+                raise ValueError('patch file exceeds its byte limit')
+            data = source.read(PATCH_BYTE_LIMIT + 1)
+            if len(data) > PATCH_BYTE_LIMIT:
+                raise ValueError('patch file exceeds its byte limit')
+            measured = hashlib.sha256(data).hexdigest()
+    except ValueError as exc:
+        if str(exc) == 'patch file exceeds its byte limit':
+            raise
+        raise ValueError('patch file unavailable') from None
     except OSError:
         raise ValueError('patch file unavailable') from None
     if measured != digest:
