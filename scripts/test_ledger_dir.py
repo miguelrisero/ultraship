@@ -1796,6 +1796,48 @@ class LedgerDirTests(unittest.TestCase):
         receipts = json.loads((owed.parent.parent / 'accounted.json').read_bytes())
         self.assertEqual([json.loads(key)[2] for key in receipts], [bound['id']])
 
+    def test_account_auto_accounts_one_result_per_transcript_turn(self):
+        sha = 'ab' * 20
+        owed, transcript, first, _ = self.auto_owed([
+            (-2, 'user', 'Review the commit.'), (-1, 'assistant', f'Verdict: pass\nReviewed commit: {sha}')])
+        payload = {'agent_type': 'ship:reviewer--sol', 'agent_id': first['agent_id'],
+                   'agent_transcript_path': str(transcript)}
+        self.hook('subagent-stop', **payload)
+        second = json.loads(owed.read_text().splitlines()[-1].split('\t')[3])
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertIn(f"pending {second['id']} transcript turn already accounted", auto.stdout)
+        self.assertIn('1 accounted, 1 pending', auto.stdout)
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(set(self.bound()), {first['id']})
+        self.assertIn('0 accounted, 1 pending', self.cli('account-auto', str(owed)).stdout)
+        self.assertEqual(sum(row[1] == 'account-result' for row in ledger.rows(self.resolve())), 1)
+
+    def test_account_auto_keeps_turn_binding_after_stop_clears_the_notice(self):
+        sha = 'ab' * 20
+        owed, transcript, first, _ = self.auto_owed([
+            (-2, 'user', 'Review the commit.'), (-1, 'assistant', f'Verdict: pass\nReviewed commit: {sha}')])
+        self.assertIn('1 accounted, 0 pending', self.cli('account-auto', str(owed)).stdout)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id=first['agent_id'],
+                  agent_transcript_path=str(transcript))
+        self.assertIn('transcript turn already accounted', self.cli('account-auto', str(owed)).stdout)
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(set(self.bound()), {first['id']})
+
+    def test_account_auto_keeps_findings_when_publication_is_blocked(self):
+        sha = 'ab' * 20
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review the commit.'),
+            (-1, 'assistant', f'Verdict: findings — publication is blocked\nReviewed commit: {sha}')])
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertIn('1 accounted, 0 pending', auto.stdout)
+        row = ledger.rows(self.resolve())[-1]
+        self.assertEqual(row[3:5], [sha, 'findings'])
+        self.assertEqual(json.loads(row[5])['step'], 'review')
+
     def test_account_auto_records_blocked_admission_without_review_credit(self):
         sha = 'ab' * 20
         reason = 'protected admission missing'

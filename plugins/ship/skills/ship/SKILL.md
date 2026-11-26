@@ -146,7 +146,7 @@ Run the command alone on one line. Start exactly one line in the review result w
 
 The command reads the transcript at an absolute path without symlinks, ending in `<session>/subagents/agent-<agent-id>.jsonl`. The recorded path must match its normalized and resolved forms. A path with `.` or `..` segments or repeated slashes leaves the result pending. The session matches the pending file's stem. The agent ID matches the recorded result.
 
-The review turn must contain exactly one distinct 40-digit hexadecimal commit SHA. The command counts SHAs between Markdown underscores or backticks. A SHA has no adjacent hexadecimal digits.
+The review turn must contain exactly one distinct 40-digit hexadecimal commit SHA. The command counts SHAs between Markdown underscores or backticks. A SHA has no adjacent hexadecimal digits. The ledger binds each parsed turn to one result. A second notice for the same turn stays pending.
 
 The command strips Markdown markers and whitespace from the value on the label line. The first word must be a verdict word. The command recognizes `pass` as positive and `fail`, `failed`, `fails`, `failing`, `failure`, and `findings` as negative. A `pass` value permits only one verdict word and excludes negations: `not`, `no`, `never`, `without`, and words ending in `n't`. The command records `findings` for a negative value that contains `findings`, or `fail` for other negative values.
 

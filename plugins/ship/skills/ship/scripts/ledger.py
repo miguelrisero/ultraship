@@ -104,6 +104,7 @@ def file_identity(info):
 
 # Stop guidance shares this label rule so both parsers count the same verdict lines.
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
+BLOCKED_VALUE = re.compile(r'[\s*_`]*blocked[\s*_`]*', re.I)
 # A commit label anywhere in a line, including after a list marker or quote, makes the subject mixed.
 REVIEWED_COMMIT = re.compile(r'(?<![A-Za-z0-9_])_*Reviewed commit[*_\s]*:.*(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])',
                              re.I | re.M)
@@ -499,7 +500,7 @@ def accounting_row(row, result_id, run):
     return value['result'] == result_id and value['run'] == run
 
 
-def account(pending, identifier, step, agent, sha, verdict, evidence, *, entries):
+def account(pending, identifier, step, agent, sha, verdict, evidence, *, entries, turn=None):
     """Append bookkeeping for a completed result; preserve the bound run's historical rows and closure."""
     if (not all((step, agent, sha, verdict, evidence.strip())) or verdict == 'owed'
             or any('\t' in f or '\n' in f or '\r' in f for f in (step, agent, sha, verdict))):
@@ -522,6 +523,8 @@ def account(pending, identifier, step, agent, sha, verdict, evidence, *, entries
         raise ValueError('recorded ledger must be an absolute path without symlinks')
     result_id = json.dumps([str(pending), cwd, identifier])
     note = {'result': result_id, 'run': result['run'], 'step': step, 'evidence': evidence}
+    if turn is not None:
+        note['turn'] = turn
     named = f'{kind}@{result["agent_id"]}' if result.get('agent_id') else kind
     row = ['account-result', named, sha, verdict, json.dumps(note)]
     with home.open('r+b') as fh:
@@ -535,6 +538,9 @@ def account(pending, identifier, step, agent, sha, verdict, evidence, *, entries
                 if saved[1:] != row:
                     raise ValueError('result already has a different accounting record')
                 return home
+        if turn is not None and any(saved[1] == 'account-result' and json.loads(saved[5]).get('turn') == turn
+                                    for saved in history):
+            raise ValueError('transcript turn already accounted')
         fh.seek(0, os.SEEK_END)
         if fh.tell():
             fh.seek(-1, os.SEEK_END)
@@ -592,8 +598,11 @@ def stop_time(epoch, result):
     return stopped_at
 
 
-def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=False, stopped_at=None):
+def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=False, stopped_at=None, with_turn=False):
     # sole_turn returns text only when the transcript holds one prompt and nothing after the notice.
+    def output(text, turn=None):
+        return (text, turn) if with_turn else text
+
     prompt_end = epoch * 1_000_000_000 if stopped_at is None else stopped_at
     transcript_end = (epoch + 1) * 1_000_000_000 if stopped_at is None else stopped_at
     texts = []
@@ -623,7 +632,7 @@ def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=F
                 if when > transcript_end:
                     if sole_turn:
                         # A later turn means a second notice for this transcript exists or is on its way.
-                        return ''
+                        return output('')
                     continue
                 content = entry['message']['content']
                 if isinstance(content, str) and role == 'user':
@@ -634,12 +643,18 @@ def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=F
                     if any(block['type'] != 'tool_result' for block in content):
                         if found is not None:
                             # A second prompt means a resumed agent; a timestamp cannot say which turn owns the notice.
-                            return ''
+                            return output('')
                         # A prompt in the grace second makes turn ownership ambiguous.
                         text = '\n'.join(reversed(texts)).strip() if when <= prompt_end else ''
+                        turn = None
+                        if with_turn and text:
+                            prompt_id = entry.get('uuid')
+                            prompt_key = (['uuid', prompt_id] if isinstance(prompt_id, str) and prompt_id
+                                          else ['line', hashlib.sha256(line).hexdigest()])
+                            turn = grant_digest([str(path), *prompt_key])
                         if not (sole_turn and text):
-                            return text
-                        found = text
+                            return output(text, turn)
+                        found = output(text, turn)
                 elif found is not None:
                     continue
                 elif any(block['type'] in ('tool_use', 'server_tool_use') for block in content):
@@ -654,7 +669,7 @@ def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=F
         raise ValueError('transcript unavailable') from None
     except (AttributeError, KeyError, TypeError, OverflowError, RecursionError, ValueError):
         raise ValueError('transcript parse error') from None
-    return found or ''
+    return found or output('')
 
 
 def load_receipts(path, *, root_fd=None):
@@ -693,14 +708,14 @@ def review_verdict(text):
     label = next(labels, None)
     if label is None or next(labels, None) is not None:
         raise ValueError('expected one verdict')
-    if re.fullmatch(r'[\s*_`]*blocked[\s*_`]*', label, re.I):
+    if BLOCKED_VALUE.fullmatch(label):
         return 'blocked'
     words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower()) if (word := token.strip('_'))]
     verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
-    if not words or words[0] not in verdict_words or 'blocked' in words:
+    if not words or words[0] not in verdict_words:
         raise ValueError('expected one verdict')
     if 'pass' in words and (words[0] != 'pass' or any(
-            word in verdict_words or word in ('not', 'no', 'never', 'without')
+            word in verdict_words or word in ('blocked', 'not', 'no', 'never', 'without')
             or word.endswith(("n't", 'n’t')) for word in words[1:])):
         raise ValueError('expected one verdict')
     return 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
@@ -913,11 +928,12 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
                 when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
                 step = 'review'
                 blocked = False
+                turn = None
                 try:
-                    text = final_turn_text(path, epoch, budgets, stopped_at=stop_time(epoch, result))
+                    text, turn = final_turn_text(path, epoch, budgets, stopped_at=stop_time(epoch, result), with_turn=True)
                     if not text:
                         raise ValueError('no final turn text')
-                    blocked = any(re.search(r'(?<![A-Za-z0-9])blocked(?![A-Za-z0-9])', label[1], re.I)
+                    blocked = any(BLOCKED_VALUE.fullmatch(label[1])
                                   for line in text.splitlines() if (label := VERDICT_LABEL.match(line)))
                     commits = re.finditer(r'(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])', text)
                     first = next(commits, None)
@@ -940,7 +956,7 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
                         reason = f'blocked at {sha}: {reasons[0].strip()}'
                         step = sha = 'blocked'
                 account(pending, identifier, step, agent, sha, verdict, f'{source} at {when}: {reason}',
-                        entries=entries)
+                        entries=entries, turn=turn)
                 named = f'{agent}@{result["agent_id"]}' if result.get('agent_id') else agent
         except (json.JSONDecodeError, UnicodeError, OverflowError, RecursionError):
             reason = 'transcript or accounting parse error'
