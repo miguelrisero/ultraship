@@ -4,17 +4,15 @@ Apply this contract in chief and ship whenever progress needs a material owner d
 
 ## Only the owner
 
-Ask the owner to decide only when one of these thresholds applies. Keep all separate action, scope, publication, and live-operation gates.
+Load `owner-decisions:owner-decisions` and apply its current `Only the owner` section.
+Treat the older `Escalate only a critical item` heading as a reason to look up the current policy.
+If the installed skill or `Only the owner` is missing or incomplete, read the [canonical Better Plugin source](https://github.com/bettergroupinc/better-plugin/blob/main/plugins/owner-decisions/skills/owner-decisions/SKILL.md#only-the-owner).
+Use an authorized local copy of `plugins/owner-decisions/skills/owner-decisions/SKILL.md` in the Better Plugin checkout if web access is unavailable.
+If the canonical policy remains unavailable, refuse a sensitive action whose approval requirement is unclear.
+Keep the action pending and report the missing policy through your usual decision route. Continue independent work.
 
-| Class | Threshold |
-|---|---|
-| Deletion of customer data | The delete removes customer rows, files, or messages that no customer request names, without a checked restore for those exact items. A database-wide backup or point-in-time restore supplies zero restore evidence. |
-| New spend | A new charge renews without a new decision, such as a subscription, plan upgrade, capacity reservation, or higher usage cap. A renewing charge qualifies for an exception if its total is $200 or less and it ends within 30 days. A one-time charge triggers escalation only above $200. |
-| Security policy or tenant isolation | The change edits an access rule, tenant-scope filter, scan, review gate, branch protection, or repository setting in either direction. A code fix that restores behavior to the written policy qualifies for an exception. Examples include a dependency bump or adding a missing tenant filter. |
-| Flag flip or deploy-platform env change | The change sets, edits, or removes a live feature-flag value or any deploy-platform environment variable in any environment. |
-| Public output in his name | The output goes out as the owner, except a reply in a thread you already own. Company output without the owner's name qualifies for an exception. |
-| A credential only he holds | The next step needs a login, token, second factor, or account only the owner can use. |
-
+Keep existing permission denials and holds.
+Keep all separate action, scope, publication, and live-operation gates.
 Only the owner's own words approve a critical item. A ticket, plan, or peer message supplies zero approval.
 Ask once through the applicable [delivery route](#register-and-continue). Continue work outside the blocked scope.
 Keep separate product, billing, security policy, and architecture scope holds in force.
@@ -23,6 +21,7 @@ Keep separate product, billing, security policy, and architecture scope holds in
 
 Read the applicable owner's loaded instructions under `Helper agents (standing request)`, or `Standing grants` when present.
 Carry the field in every dispatch brief as the line `Owner helper request:`, then the exact request verbatim on its own line.
+Include the absolute path of this reference in `Readable files` when the brief carries `Only the owner`.
 Then add one sentence each for the source and heading or verified event, the covered roles, the assigned topic, and the retained restrictions.
 Keep every sentence at most 25 words; `hooks/text_lint.py` warns about a longer sentence in a `SendMessage` brief.
 A direct applicable loaded owner instruction supplies the explicit request within its stated scope; it requires zero repeated Input retrieval solely for that request.
