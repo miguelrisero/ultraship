@@ -19,7 +19,7 @@ CONTRACT_PATHS = (
     SHIP / 'skills/ship/SKILL.md',
     *(SHIP / f'agents/{name}.md' for name in (
         'driver', 'driver--sol', 'reviewer--sol', 'reviewer--opus',
-        'writer--sol', 'writer--sonnet', 'writer--fable52',
+        'writer--sol', 'writer--fable52',
     )),
 )
 BODY = '''Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.

@@ -46,7 +46,7 @@ Apply [CI reads and flaky guard locks](../ship/references/ci-and-locks.md) durin
    Save each failed log to `<run-scratch>/ci/<run-id>.log`, and list that path under Readable files in the triage brief.
    Save each thread read to `<run-scratch>/threads/<thread-id>.json`, and list that path under Readable files too.
 4. **Triage.** Give the failures and threads to `ship:triage--sol`. It returns `real`, `false-positive`, `duplicate`, `already-fixed`, or blocked scope for each item, with evidence.
-5. **Fix.** Collect every failing check and every unresolved thread before the fix. Send all `real` items to `ship:writer--sol` as one batch. Rerun the affected tests, unless the brief bans local test execution; then CI reruns them. Push once for the round. Never push a partial batch.
+5. **Fix.** Collect every failing check and every unresolved thread before the fix. Send all `real` items to `ship:writer--sol` as one batch. Apply the [roster](../ship/references/roster.md) when the writer is unavailable. Rerun the affected tests, unless the brief bans local test execution; then CI reruns them. Push once for the round. Never push a partial batch.
 6. **Answer every thread.** Reply with the fix commit or the refuting evidence, then resolve the thread.
    Take each thread ID only from `threads.sh` output for this PR; never build or guess one.
    Save the reply as a UTF-8 file under `.scratch/` in the physical current directory or under `../.scratch/`.

@@ -27,7 +27,7 @@ class ProductLimitInstructionTests(unittest.TestCase):
         blocks = guard_blocks()
         self.assertTrue({
             'plugins/ship/agents/writer--sol.md',
-            'plugins/ship/agents/writer--sonnet.md',
+            'plugins/ship/agents/writer--fable52.md',
             'plugins/ship/skills/ship/SKILL.md',
             'plugins/chief/skills/run/SKILL.md',
         }.issubset(blocks))

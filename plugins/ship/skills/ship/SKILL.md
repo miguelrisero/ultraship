@@ -68,6 +68,7 @@ Preserve every other Input ban, reviewer MCP denial, and independent hook and to
 
 - Read [roster](references/roster.md) before the first dispatch. Use each scoped `ship:*` agent and leave the Agent `model` field unset. A hook denies overrides.
 - On an unavailable agent, dispatch the next agent in its fallback chain and record the substitution in the ledger note.
+- If all admitted writer or planner seats are unavailable, retain the task as pending and report the missing seat.
 - Code goes to `ship:writer--sol`, one slice at a time, in the assigned worktree. Continue an existing writer with SendMessage for fixes on its slice.
 - Writers never push, run `/merge` or `gh pr merge`, deploy, publish, or release; commit grants permit local base-branch merges into their own lane branch.
 - Important planning goes to `ship:planner--sol`. Broad research goes to `ship:researcher--luna`.
