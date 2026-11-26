@@ -5186,6 +5186,11 @@ def own_account_call(data, raw):
                 and re.fullmatch(r'[1-9][0-9]*', words[5]) and words[6].strip()):
             return words
         return False
+    if words[2] == 'account-void':
+        if (len(words) == 5 and words[3] == pending
+                and re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', words[4])):
+            return words
+        return False
     if words[2] == 'account-patch':
         # ledger.py hashes the patch and reads the subject and verdict itself; only the file path is caller data.
         if (len(words) == 6 and words[3] == pending
@@ -5215,9 +5220,14 @@ def account_auto_difference(data):
     if not isinstance(data.get('session_id'), str) or not data.get('session_id'):
         return 'The hook admits `account-auto` only when its input carries a session ID. This call has none.'
     try:
-        expected = shlex.join(['python3', str(ledger_script()), 'account-auto', str(owed_file(data))])
+        pending = owed_file(data)
+        if not stat.S_ISREG(pending.lstat().st_mode):
+            return 'The owed file is unsafe. Ask the driver to check its custody.'
+        expected = shlex.join(['python3', str(ledger_script()), 'account-auto', str(pending)])
+    except FileNotFoundError:
+        return 'This session has no owed file. There is nothing to account.'
     except (OSError, RuntimeError):
-        return 'The hook admits only the exact Stop command for this session, alone and with no other character.'
+        return 'The hook cannot check this session’s owed file. Ask the driver to check its custody.'
     return f'The hook admits only this line for this session, alone and with no other character: `{expected}`.'
 
 
@@ -5227,9 +5237,15 @@ def issue_account_grant(data):
     words = own_account_call(data, (data.get('tool_input') or {}).get('command', ''))
     if words:
         try:
-            load_ledger()._issue_grant(words[1], words[2:], STATE, data['session_id'])
+            ledger = load_ledger()
+            issue = ledger._issue_grant
+            refusal = ledger.GrantIssueError
         except Exception:
-            deny('The ship hook could not issue a fresh accounting grant. Run the exact command again.')
+            deny('The ship hook could not load its ledger. Check the loaded Ship installation.')
+        try:
+            issue(words[1], words[2:], STATE, data['session_id'])
+        except refusal as exc:
+            deny(str(exc))
 
 
 def receipt_custody(data, read_search=False):
@@ -7338,11 +7354,11 @@ def stop(data):
     try:
         reminder = path.with_suffix('.stop-state')
         try:
-            path.stat()
+            pending = path.open('r+')
         except FileNotFoundError:
             reminder.unlink(missing_ok=True)
             return
-        with path.open('r+') as pending:
+        with pending:
             fcntl.flock(pending, fcntl.LOCK_EX)
             owed = [line.split('\t') for line in pending.read().splitlines() if line]
             if not owed:
@@ -7425,6 +7441,9 @@ def stop(data):
               'For a result on a frozen, uncommitted patch, use '
               f'`python3 {shlex.quote(str(ledger_script()))} account-patch {shlex.quote(str(path))} '
               '<result-id> <absolute-patch-file>`. '
+              'For a stopped agent with zero tool calls and no review labels, use '
+              f'`python3 {shlex.quote(str(ledger_script()))} account-void {shlex.quote(str(path))} <result-id>`. '
+              'A void row gives zero review or completion credit. '
               'Keep other results without a verified reviewed commit pending. '
               'Link a later review on the run board. Keep the original subject and verdict. '
               'The link gives zero accounting or review credit.'}))

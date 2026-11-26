@@ -675,11 +675,96 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
         self.consume(words)
 
+    def test_missing_owed_file_has_no_account_auto_offer_or_stop_block(self):
+        event = self.own_account_event()
+        pending = Path(self.account_words[3])
+        pending.unlink()
+        rejected = [*self.account_words[:2], 'account-auto', str(pending.with_name('foreign.tsv'))]
+        event['tool_input']['command'] = shlex.join(rejected)
+        with redirect_stdout(io.StringIO()) as output, self.assertRaises(SystemExit):
+            ultraship.guarded_pre({'cwd': str(self.cwd), **event})
+        reason = json.loads(output.getvalue())['hookSpecificOutput']['permissionDecisionReason']
+        self.assertIn('This session has no owed file. There is nothing to account.', reason)
+        self.assertNotIn(' account-auto ', reason)
+        with redirect_stdout(io.StringIO()) as output:
+            ultraship.stop(event)
+        self.assertEqual(output.getvalue(), '')
+        pending.touch()
+        with patch.object(Path, 'open', side_effect=FileNotFoundError), redirect_stdout(io.StringIO()) as output:
+            ultraship.stop(event)
+        self.assertEqual(output.getvalue(), '')
+
+    def test_account_auto_names_each_grant_issuance_failure(self):
+        event = self.own_account_event()
+        words = [*self.account_words[:2], 'account-auto', self.account_words[3]]
+        event['tool_input']['command'] = shlex.join(words)
+        pending = Path(words[3])
+        for target, field, effect, reason in (
+            (ultraship, 'load_ledger', ImportError, 'The ship hook could not load its ledger. Check the loaded Ship installation.'),
+            (self.ledger, '__file__', None, 'The accounting command does not match the loaded ledger or session. Copy the exact Stop command.'),
+            (self.ledger, 'evidence_root', PermissionError, 'The accounting state directory is unavailable or unsafe. Ask the driver to check its custody.'),
+            (self.ledger, 'owed_status', FileNotFoundError, 'This session has no owed file. There is nothing to account.'),
+            (self.ledger, 'owed_status', ValueError, 'The owed file is unsafe. Ask the driver to check its custody.'),
+            (self.ledger.pwd, 'getpwuid', KeyError, 'The accounting grant directory is unavailable or unsafe. Ask the driver to check its custody.'),
+            (self.ledger, 'read_grant', ValueError, 'The retained accounting grant is unreadable or unsafe. Ask the driver to check its custody.'),
+            (self.ledger, 'publish_at', OSError, 'The ship hook could not save the accounting grant. Ask the driver to check storage access.'),
+        ):
+            with self.subTest(reason=reason):
+                change = (patch.object(target, field, side_effect=effect) if effect
+                          else patch.object(target, field, str(self.cwd / 'different-ledger.py')))
+                if effect is None:
+                    Path(self.cwd / 'different-ledger.py').touch()
+                with change:
+                    self.assert_custody_denial(event, reason)
+        pending.unlink()
+        for _ in range(2):
+            self.assert_custody_denial(event, 'This session has no owed file. There is nothing to account.')
+        pending.touch()
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        self.consume(words)
+
+    def test_account_auto_names_a_conflicting_live_grant(self):
+        event = self.own_account_event()
+        words = [*self.account_words[:2], 'account-auto', self.account_words[3]]
+        event['tool_input']['command'] = shlex.join(words)
+        with patch.object(self.ledger.time, 'time_ns', return_value=10_000_000_000) as clock:
+            self.assert_account_command_allowed(shlex.join(self.account_words), session_id=event['session_id'])
+            clock.return_value += 10_000_000_000
+            for _ in range(2):
+                self.assert_custody_denial(event, 'A different accounting grant expires in 890 seconds. '
+                                         'Wait for it to expire or finish its command.')
+            self.consume(self.account_words)
+            self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+            self.consume(words)
+
+    def test_account_auto_reuses_only_the_same_sessions_exact_grant(self):
+        event = self.own_account_event()
+        event['session_id'] = 'session/context'
+        pending = self.prepare_owed(event)
+        words = [*self.account_words[:2], 'account-auto', str(pending)]
+        command = shlex.join(words)
+        event['tool_input']['command'] = command
+        with patch.object(self.ledger.time, 'time_ns', return_value=10_000_000_000) as clock:
+            self.assert_account_command_allowed(command, session_id=event['session_id'])
+            record, = self.ledger.grant_store().iterdir()
+            original = record.read_bytes()
+            clock.return_value += 30_000_000_000
+            self.assert_account_command_allowed(command, session_id=event['session_id'])
+            # Slash and underscore can sanitize to the same filename.
+            self.assert_custody_denial({**event, 'session_id': 'session_context'},
+                                     'A different accounting grant expires in 870 seconds. '
+                                     'Wait for it to expire or finish its command.')
+            self.assertEqual(record.read_bytes(), original)
+            clock.return_value = 9_000_000_000
+            self.assert_custody_denial(event, 'The accounting grant has a future issue time. Ask the driver to check the clock.')
+            clock.return_value = 40_000_000_000
+            self.consume(words)
+
     def test_grant_issuance_failure_removes_temporary_record(self):
         event = self.own_account_event()
         with patch.object(self.ledger.os, 'fsync', side_effect=OSError):
-            self.assert_custody_denial(event, 'The ship hook could not issue a fresh accounting grant. '
-                                     'Run the exact command again.')
+            self.assert_custody_denial(event, 'The ship hook could not save the accounting grant. '
+                                     'Ask the driver to check storage access.')
         self.assertFalse(any(self.ledger.grant_store().iterdir()))
         with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
             self.consume(self.account_words)
@@ -708,7 +793,7 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_grant_refuses_replacement_and_second_claimant(self):
         event = self.own_account_event()
         words = self.account_words
-        refusal = 'The ship hook could not issue a fresh accounting grant. Run the exact command again.'
+        refusal = 'A different accounting grant expires in 1 second. Wait for it to expire or finish its command.'
         with patch.object(self.ledger.time, 'time_ns', return_value=10_000_000_000) as clock:
             self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
             record, = self.ledger.grant_store().iterdir()
@@ -766,7 +851,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         store.symlink_to(retained, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, 'requires a fresh grant'):
             self.consume(words)
-        self.assert_custody_denial(event, 'The ship hook could not issue a fresh accounting grant. Run the exact command again.')
+        self.assert_custody_denial(event, 'The accounting grant directory is unavailable or unsafe. Ask the driver to check its custody.')
 
     def test_denied_hook_emits_no_grant(self):
         event = self.own_account_event()
@@ -936,8 +1021,8 @@ class ReceiptCustodyTests(unittest.TestCase):
     def test_own_account_call_is_denied_when_the_account_has_no_passwd_entry(self):
         event = self.own_account_event()
         with patch.object(ultraship.pwd, 'getpwuid', side_effect=KeyError('getpwuid(): uid not found')):
-            self.assert_custody_denial(event, 'The ship hook could not issue a fresh accounting grant. '
-                                     'Run the exact command again.')
+            self.assert_custody_denial(event, 'The accounting grant directory is unavailable or unsafe. '
+                                     'Ask the driver to check its custody.')
 
     def test_grant_custody_admits_literal_indexed_array_assignment(self):
         self.assert_account_command_allowed('items=([0]=alpha [1]=beta)', caller='ship:writer--sol')
@@ -1523,6 +1608,18 @@ class ReceiptCustodyTests(unittest.TestCase):
             words[index] = value
             with self.subTest(index=index, value=value):
                 self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(words)}})
+
+    def test_own_account_call_admits_only_its_void_result(self):
+        event = self.own_account_event()
+        words = [*self.account_words[:2], 'account-void', *self.account_words[3:5]]
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        self.consume(words)
+        for invalid in (words[:-1], [*words, 'ready'], [*words[:-1], 'invalid'],
+                        [*words[:3], str(Path(words[3]).with_name('foreign.tsv')), words[4]]):
+            with self.subTest(words=invalid):
+                self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(invalid)}})
+        self.assert_custody_denial({**event, 'agent_type': 'ship:reviewer--sol',
+                                   'tool_input': {'command': shlex.join(words)}})
 
     def test_own_account_call_admits_patch_accounting_with_an_absolute_patch(self):
         event = self.own_account_event()

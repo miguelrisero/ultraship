@@ -32,9 +32,10 @@ USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
        ledger.py account-auto [--fail-unparsed] <pending.tsv>
        ledger.py account-patch <pending.tsv> <result-id> <patch-file>
+       ledger.py account-void <pending.tsv> <result-id>
        ledger.py correct-binding <pending.tsv> <result-id> <ledger-line> <reason>"""
 MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
-ACCOUNT_COMMANDS = ('account', 'account-auto', 'account-patch', 'correct-binding')
+ACCOUNT_COMMANDS = ('account', 'account-auto', 'account-patch', 'account-void', 'correct-binding')
 GRANT_LIFETIME_NS = 900_000_000_000
 GRANT_REFUSAL = 'Accounting requires a fresh grant from the ship hook. Run the exact command again.'
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -50,7 +51,7 @@ def account_pending_arg(argv):
             return args[1]
         if len(args) == 1:
             return args[0]
-    if (cmd, len(args)) in (('account', 7), ('account-patch', 3), ('correct-binding', 4)):
+    if (cmd, len(args)) in (('account', 7), ('account-patch', 3), ('account-void', 2), ('correct-binding', 4)):
         return args[0]
     return None
 
@@ -176,32 +177,57 @@ def owed_status(fd, name):
     return info
 
 
+class GrantIssueError(ValueError):
+    pass
+
+
+NO_OWED_FILE = 'This session has no owed file. There is nothing to account.'
+
+
 def _issue_grant(script, argv, state, session):
-    name, fields, pending = grant_request(script, argv)
-    if (str(state / 'owed' / (re.sub(r'[^\w.-]', '_', session) + '.tsv')) != str(pending)
-            or not session):
-        raise ValueError(GRANT_REFUSAL)
-    root = state.parent.resolve(strict=True) / state.name
-    with evidence_root(root) as evidence_fd:
-        owed_fd = os.open('owed', DIRECTORY_FLAGS, dir_fd=evidence_fd)
-        try:
-            fields.update(session=session, root=str(root), root_id=file_identity(os.fstat(evidence_fd)),
-                          owed_id=file_identity(owed_status(owed_fd, pending.name)))
-        finally:
-            os.close(owed_fd)
-    with locked_grant_store(create=True) as fd:
-        try:
-            saved = read_grant(fd, name)
-        except FileNotFoundError:
-            pass
-        else:
-            age = time.time_ns() - saved.pop('issued_ns')
-            if age < GRANT_LIFETIME_NS:
-                # An identical retry reuses the live grant; its issue time stays, so the window never extends.
-                if 0 <= age and saved == json.loads(grant_bytes(fields)):
-                    return
-                raise ValueError(GRANT_REFUSAL)
-        publish_at(fd, name, grant_bytes(dict(fields, issued_ns=time.time_ns())), sync_directory=False)
+    reason = 'The accounting command does not match the loaded ledger or session. Copy the exact Stop command.'
+    try:
+        name, fields, pending = grant_request(script, argv)
+        if not session or str(state / 'owed' / (re.sub(r'[^\w.-]', '_', session) + '.tsv')) != str(pending):
+            raise GrantIssueError(reason)
+        reason = 'The accounting state directory is unavailable or unsafe. Ask the driver to check its custody.'
+        root = state.parent.resolve(strict=True) / state.name
+        with evidence_root(root) as evidence_fd:
+            try:
+                owed_fd = os.open('owed', DIRECTORY_FLAGS, dir_fd=evidence_fd)
+                try:
+                    reason = 'The owed file is unsafe. Ask the driver to check its custody.'
+                    fields.update(session=session, root=str(root), root_id=file_identity(os.fstat(evidence_fd)),
+                                  owed_id=file_identity(owed_status(owed_fd, pending.name)))
+                finally:
+                    os.close(owed_fd)
+            except FileNotFoundError:
+                raise GrantIssueError(NO_OWED_FILE) from None
+        reason = 'The accounting grant directory is unavailable or unsafe. Ask the driver to check its custody.'
+        with locked_grant_store(create=True) as fd:
+            reason = 'The retained accounting grant is unreadable or unsafe. Ask the driver to check its custody.'
+            try:
+                saved = read_grant(fd, name)
+            except FileNotFoundError:
+                pass
+            else:
+                age = time.time_ns() - saved.pop('issued_ns')
+                if age < 0:
+                    raise GrantIssueError('The accounting grant has a future issue time. Ask the driver to check the clock.')
+                if age < GRANT_LIFETIME_NS:
+                    # Keep the same expiry on an identical retry.
+                    if saved == fields:
+                        return
+                    seconds = (GRANT_LIFETIME_NS - age + 999_999_999) // 1_000_000_000
+                    unit = 'second' if seconds == 1 else 'seconds'
+                    raise GrantIssueError(f'A different accounting grant expires in {seconds} {unit}. '
+                                          'Wait for it to expire or finish its command.')
+            reason = 'The ship hook could not save the accounting grant. Ask the driver to check storage access.'
+            publish_at(fd, name, grant_bytes(dict(fields, issued_ns=time.time_ns())), sync_directory=False)
+    except GrantIssueError:
+        raise
+    except (OSError, ValueError, KeyError, RuntimeError):
+        raise GrantIssueError(reason) from None
 
 
 def publish_at(fd, name, content, *, sync_directory=True):
@@ -653,14 +679,71 @@ def review_verdict(text):
     return 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
 
 
-def account_patch(pending, identifier, patch, *, entries):
-    """Account a result whose sole review turn names one patch digest that the frozen file still matches."""
+def recorded_result(entries, identifier):
     matches = [fields for fields in (line.split('\t') for line in entries)
                if len(fields) == 4 and json.loads(fields[3]).get('id') == identifier]
     if len(matches) != 1:
         raise ValueError('pending result ID must match exactly one notification')
     epoch, agent, _, raw = matches[0]
-    result = json.loads(raw)
+    return int(epoch), agent, json.loads(raw)
+
+
+def account_void(pending, identifier, *, entries):
+    epoch, agent, result = recorded_result(entries, identifier)
+    transcript = recorded_transcript(pending, result)
+    try:
+        with directory_descriptor(transcript.parent) as parent, \
+                os.fdopen(os.open(transcript.name, READ_FLAGS, dir_fd=parent), 'rb', buffering=0) as source:
+            before = os.fstat(source.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise OSError('transcript must be a regular file')
+            turn = False
+            for line in reverse_lines(source, [TRANSCRIPT_SCAN_LIMIT]):
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                role = entry['type']
+                if role not in ('user', 'assistant'):
+                    continue
+                if entry.get('sessionId', pending.stem) != pending.stem:
+                    raise ValueError('transcript path does not match the recorded agent and session')
+                stamp = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
+                if stamp.tzinfo is None:
+                    raise TypeError('transcript timestamp has no time zone')
+                if stamp.timestamp() >= epoch + 1:
+                    raise ValueError('transcript has activity after the stop notice')
+                content = entry['message']['content']
+                if isinstance(content, str) and role == 'user':
+                    content = [{'type': 'text', 'text': content}]
+                if not isinstance(content, list):
+                    raise TypeError('transcript content must have blocks')
+                turn = True
+                texts = []
+                for block in content:
+                    kind = block['type']
+                    if kind in ('tool_use', 'server_tool_use', 'tool_result'):
+                        raise ValueError('transcript contains a tool call')
+                    if role == 'assistant' and kind == 'text':
+                        texts.append(block['text'])
+                text = '\n'.join(texts)
+                if VERDICT_ANY.search(text) or re.search(r'\bReviewed\s+commit[*_\s]*:', text, re.I):
+                    raise ValueError('transcript contains a review label')
+            after = os.fstat(source.fileno())
+            if not turn or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise ValueError('transcript is empty or changed during accounting')
+    except TranscriptLimit:
+        raise ValueError('transcript scan limit reached') from None
+    except (AttributeError, KeyError, TypeError, OverflowError, RecursionError, json.JSONDecodeError, UnicodeError):
+        raise ValueError('transcript parse error') from None
+    when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+    account(pending, identifier, 'void', agent, 'void', 'void', f'{transcript} at {when}: no tool calls or review labels',
+            entries=entries)
+    return f'accounted {identifier} {agent}@{result["agent_id"]} void'
+
+
+def account_patch(pending, identifier, patch, *, entries):
+    """Account a result whose sole review turn names one patch digest that the frozen file still matches."""
+    epoch, agent, result = recorded_result(entries, identifier)
     transcript = recorded_transcript(pending, result)
     # A later turn or a resumed prompt leaves turn ownership ambiguous.
     text = final_turn_text(transcript, int(epoch), {}, sole_turn=True)
@@ -923,6 +1006,8 @@ def main(argv):
                     print(account(pending, *args[1:], entries=source.read().splitlines()))
                 elif cmd == 'account-patch':
                     print(account_patch(pending, *args[1:], entries=source.read().splitlines()))
+                elif cmd == 'account-void':
+                    print(account_void(pending, *args[1:], entries=source.read().splitlines()))
                 else:
                     with locked_receipts(root_fd):
                         account_auto(pending, source.read().splitlines(),

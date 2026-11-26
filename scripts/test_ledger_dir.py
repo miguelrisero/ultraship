@@ -1026,6 +1026,60 @@ class LedgerDirTests(unittest.TestCase):
             transcript.write_text(''.join(line + '\n' for line in lines))
         return owed, transcript, result, int(epoch)
 
+    def test_account_void_closes_its_stopped_result_without_credit(self):
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Return the single word ready.'), (-1, 'assistant', 'ready')])
+        home = self.resolve()
+        gaps = ledger.gaps(ledger.open_run(home))
+        args = ('account-void', str(owed), result['id'])
+        accounted = self.cli(*args)
+        self.assertEqual(accounted.returncode, 0, accounted.stderr)
+        self.assertEqual(ledger.rows(home)[-1][1:5],
+                         ['account-result', 'ship:reviewer--sol@reviewer', 'void', 'void'])
+        self.assertEqual(ledger.gaps(ledger.open_run(home)), gaps)
+        saved = home.read_bytes()
+        self.assertEqual(self.cli(*args).returncode, 0)
+        self.assertEqual(home.read_bytes(), saved)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+        self.assertEqual(set(self.bound()), {result['id']})
+
+    def test_account_void_refuses_uncertain_or_nonempty_review_evidence(self):
+        prompt = (-4, 'user', 'Return the single word ready.')
+        ready = (-1, 'assistant', 'ready')
+        home = self.resolve()
+        for case, entries, reason in (
+            ('earlier tool', [prompt, (-3, 'assistant', [{'type': 'tool_use'}]), ready], 'tool call'),
+            ('server tool', [prompt, (-3, 'assistant', [{'type': 'server_tool_use'}]), ready], 'tool call'),
+            ('earlier verdict', [prompt, (-3, 'assistant', '**Verdict:**'), ready], 'review label'),
+            ('overall', [prompt, (-3, 'assistant', '> oVeRaLl: pass'), ready], 'review label'),
+            ('subject', [prompt, (-3, 'assistant', 'Reviewed commit:'), ready], 'review label'),
+            ('foreign session', [prompt, ready], 'recorded agent and session'),
+            ('later activity', [prompt, ready, (3, 'user', 'Review the diff.')], 'after the stop notice'),
+            ('missing transcript', None, 'no transcript'),
+            ('missing stop notice', [prompt, ready], 'exactly one notification'),
+            ('invalid JSON', [prompt, ready], 'transcript parse error'),
+        ):
+            with self.subTest(case=case):
+                owed, transcript, result, epoch = self.auto_owed(entries)
+                if case == 'foreign session':
+                    foreign = self.base / 's2/subagents' / transcript.name
+                    foreign.parent.mkdir(parents=True)
+                    transcript.rename(foreign)
+                    result['agent_transcript_path'] = str(foreign)
+                    owed.write_text(f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(result)}\n')
+                elif case == 'missing stop notice':
+                    owed.write_text('')
+                elif case == 'invalid JSON':
+                    with transcript.open('a') as source:
+                        source.write('{broken\n')
+                before = (owed.read_bytes(), home.read_bytes())
+                refused = self.cli('account-void', str(owed), result['id'])
+                self.assertEqual(refused.returncode, 1, refused)
+                self.assertIn(reason, refused.stderr)
+                self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+                owed.unlink()
+
     def frozen_patch(self, data=b'diff --git a/x b/x\n+frozen\n'):
         patch = self.base / 'frozen.patch'
         patch.write_bytes(data)
