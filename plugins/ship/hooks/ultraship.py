@@ -5136,8 +5136,8 @@ def literal_bindings_resolved(command, cwd, batch=False):
 RECEIPT_CUSTODY = ('Only the text_lint hook reads or writes refusal receipts (custody rule). '
                    'Report the blocked scope to the driver.')
 STATE_FOLDER_CUSTODY = ('This Bash command names the hook state folder (`.local/state` or `XDG_STATE_HOME`) together with '
-                        '`$`, `{`, `}`, `*`, `?`, `[`, `]`, a backtick, `cd`, `pushd` or the text `text`, also inside '
-                        'a longer word (state folder custody rule). Use the native Read and Write tools with a literal '
+                        '`$`, `{`, `}`, `*`, `?`, `[`, `]`, a backtick, `cd`, `pushd` or a `text` substring outside '
+                        'a longer literal grep pattern (state folder custody rule). Use the native Read and Write tools with a literal '
                         'path, or a Bash command that names the literal path with none of these triggers.')
 ACCOUNT_CUSTODY = ('Use the exact Stop command for your session (account custody rule). '
                    'Report the blocked scope to the driver.')
@@ -6268,9 +6268,15 @@ def receipt_custody(data, read_search=False):
                 or ancestor_operand()
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))):
             deny(RECEIPT_CUSTODY)
+        # A longer search word is inert in a single literal grep call. Keep its path under every custody check.
+        grep_word = re.fullmatch(r"[ \t]*grep[ \t]+-n[ \t]+([A-Za-z0-9]+|'[A-Za-z0-9]+')[ \t]+"
+                                 r"(?:~/)?(?!-)[A-Za-z0-9_./-]+[ \t]*\n?", raw)
+        state_words = command
+        if grep_word and grep_word[1].strip("'").casefold() != 'text':
+            state_words = normalized(raw[:grep_word.start(1)] + raw[grep_word.end(1):])
         # An expansion, glob or directory change near the state root could reach a store.
         if (('.local/state' in command or 'xdg_state_home' in command)
-                and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in command
+                and (re.search(r'\b(?:cd|pushd)\b', command) or 'text' in state_words
                      or any(char in raw for char in '*?[]{}$`'))
                 and not own_account_call(data, raw)):
             # A command keeps the receipt message when it names a store, the text_lint hook or the ledger, names

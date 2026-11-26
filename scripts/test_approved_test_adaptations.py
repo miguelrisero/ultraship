@@ -93,7 +93,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 "The driver supplies a local diff of those subject files from that merge commit's first parent to the merge commit.",
                 'The driver records both SHAs and that lookup result in the reviewer brief.',
                 'If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.',
-                'Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.',
+                'Use separate draft authority for CI. Preserve the publication gates for marking ready, pushing to a ready PR, and merging.',
                 'The driver marks the draft ready only after the review in step 8 passes at the exact head.',
                 'one independent reviewer confirms that every changed, retired, restored or added row is not weaker.',
                 'The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record]',

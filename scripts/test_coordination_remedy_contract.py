@@ -36,7 +36,8 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'when the refusal reason is fixed or the new form meets the rule the refusal names.',
             'An agent may always ask its superior for permission to run the refused command.',
             'A writer asks its driver, a reviewer asks its coordinator, a driver asks its chief, and a chief asks the CoC.',
-            'The CoC asks the owner only for product, billing, security policy or big architecture.',
+            'Route owner-only items under [Only the owner](#only-the-owner).',
+            'No agent, the CoC included, sends the owner a refusal, hook or tooling question.',
             'The superior may grant the request, or run the command itself when it considers that appropriate.',
             'The superior records the grant or the run in the lane state file.',
             'Never ask the owner to paste or run a command.',
@@ -54,8 +55,7 @@ class CoordinationRemedyContractTests(unittest.TestCase):
             'A superior grants or runs a command only within its own authority, and its own hooks and permissions apply.',
             'Protected mutation-row edits use only the [lane-owned row route](../SKILL.md#lane-owned-row-route), '
             'the [standalone main-row repair](#standalone-main-row-repair) and their tools.',
-            'The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items '
-            'still need a compliant form or the authority they lacked.',
+            'Preserve every action gate.',
             'A compliant retry never bypasses a hook, uses a different credential, or edits a guard.',
         ):
             with self.subTest(requirement=requirement):
@@ -99,9 +99,11 @@ class CoordinationRemedyContractTests(unittest.TestCase):
     def test_hook_refusal_keeps_work_pending(self):
         self.assertIn('A refusal never ends the work.', self.refusals)
         ship = (ROOT / 'plugins/ship/skills/ship/SKILL.md').read_text()
-        self.assertIn('Pause a refused tool step and keep the work pending.', ship)
-        self.assertIn('After a refusal, find the cause and retry in a compliant form, '
-                      'or ask your superior how to proceed.', ship)
+        self.assertIn('Keep a refused step pending under [Loaded instructions and refusals]', ship)
+        self.assertIn('Continue independent work.', ship)
+        self.assertIn('Retry a refused command only under [the refusal rule]', ship)
+        self.assertIn('the refusal reason is fixed or the new form meets the rule the refusal names', self.refusals)
+        self.assertIn('An agent may always ask its superior for permission to run the refused command.', self.refusals)
 
     def test_message_warnings_and_receipt_refusals_keep_existing_authority(self):
         for requirement in (

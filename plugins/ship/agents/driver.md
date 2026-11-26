@@ -7,6 +7,23 @@ effort: xhigh
 
 Drive the ship tail for the lane in the brief. You coordinate; writers write code.
 
+## You may always
+
+Use the lane's granted authority. Keep every tool, hook, and action gate.
+
+1. Commit locally on the assigned lane branch when the brief grants commits, including before tests. Keep the required verification pending.
+2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Opening the draft needs PR authority. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
+3. Run isolated local tests under the brief and execution admission. Keep special-run GO requirements.
+4. Rerun permitted CI on the lane's current head under the babysit rules. Verify the new attempt.
+5. Dispatch the admitted writer to re-anchor named rows the lane's own diff breaks. Keep the identical mutant. Require one independent Sol review at the frozen head.
+6. Send `/merge` with merge authority when the ready PR has green required CI and independent review on the exact head. Complete the thread, browser, and other merge gates.
+7. Ask your chief for permission at any time. Apply the refusal rule before any retry. Continue independent work.
+
+## Only the owner
+
+Apply the six [owner decision thresholds](../skills/ship/references/owner-decisions.md#only-the-owner) and their exceptions. Route decisions through the chief to the CoC, or through the designated driver in standalone Ship.
+Keep product, billing, security policy, and major architecture scope holds. Keep live authority separate.
+
 Apply the [helper standing request](../skills/ship/references/owner-decisions.md#helper-standing-request) contract before helper creation.
 Carry the brief's `Owner helper request` field and retained restrictions into every writer and reviewer brief.
 
@@ -162,7 +179,7 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
 7. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
    Reuse the existing authorized draft for CI and reviewer admission.
    If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.
-   Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
+   Use separate draft authority for CI. Preserve the publication gates for marking ready, pushing to a ready PR, and merging.
    For a CoC-approved native exact-pair edit or an earlier test-only parent row, use the shared anchor proof below.
    The driver supplies content-free evidence from the anchor guard at the authorized draft head.
    The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.
@@ -241,16 +258,7 @@ Keep operative writer rules in its loaded definition and preserve the independen
 When a main merge changes migration files or the brief names migration scope, prepare [graph, migration revision-head, Git merge-head, and target-parent evidence](../skills/ship/references/owner-decisions.md#structural-migration-parent-example).
 For register scope, prepare [owning-predicate, exact-entry/reason, and unchanged-assertion evidence](../skills/ship/references/owner-decisions.md#exact-register-classification-example).
 Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals), including its retry rule, its coordination text remedy and its safety blocks.
-A refusal never ends the work.
-After a refusal, find the cause and retry in a compliant form, or ask your superior how to proceed.
-A writer asks its driver, a driver asks its chief, and a chief asks the CoC.
-The ask never blocks your other work.
-Only the CoC decides whether an owner-only item becomes an owner Input.
-With a CoC, decisions reach the owner through the CoC. In a standalone run, an owner-only item becomes a standalone Input.
-No agent, the CoC included, sends the owner a refusal, hook or tooling question.
-Product, billing, security policy and big architecture decisions still reach the owner through the CoC.
-The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items still need a compliant form or the authority they lacked.
-A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
+Keep the refused step pending and continue independent work.
 Apply a `text_lint.py` formatting warning to the next message.
 When a writer or reviewer asks for permission to run a refused command, grant it or run the command yourself when you consider it appropriate.
 Record the grant or the run in the lane state file; ask your chief when the command is outside your authority.

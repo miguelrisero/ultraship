@@ -90,10 +90,11 @@ esac
                 link = '../ship/references/ci-and-locks.md' if path.name == 'SKILL.md' else '../skills/ship/references/ci-and-locks.md'
                 self.assertIn(f']({link})', path.read_text())
         pipeline = (SHIP / 'skills/ship/references/pipeline.md').read_text()
-        for step in ('## 3. Slices', '## 9. Push and PR'):
-            section = pipeline.split(step, 1)[1].split('\n## ', 1)[0]
-            self.assertIn('every writer brief that can run the flaky-pattern guard', section)
-            self.assertIn('ci-and-locks.md#flaky-guard-lock', section)
+        slices = pipeline.split('## 3. Slices', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('every writer brief that can run the flaky-pattern guard', slices)
+        self.assertIn('ci-and-locks.md#flaky-guard-lock', slices)
+        push = pipeline.split('## 9. Push and PR', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('Apply the [writer brief rules](#3-slices) to every writer dispatched here.', push)
         drivers = [path.read_text().split('\n---\n', 1)[1] for path in POLICY_PATHS[:2]]
         self.assertEqual(*drivers)
         babysit = POLICY_PATHS[2].read_text().split('## One round', 1)[1]

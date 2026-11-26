@@ -2,7 +2,7 @@
 
 ## Ready and merge authority
 
-A ready lane meets the shipping gate on its current head: pushed commits, required CI, completed independent reviews, addressed comments, and actual end-to-end evidence. Verify these against GitHub and the diff. Treat missing evidence as an open gate.
+A ready lane meets Ship's completion gate on its current head. Apply its queue check rule for checks that start only after `/merge`. Verify the other evidence against GitHub and the diff. Require the queue checks before the actual merge.
 
 Default to a ready-for-review handoff. Merge only within explicit task or durable repository authority. Required review approval remains mandatory; an admin override needs a specific user instruction. Keep schema, API contracts, migrations, destructive operations, security, billing, authorization, and repository policy invariants under human review. Keep such lanes draft-only until the chief's independent review passes.
 

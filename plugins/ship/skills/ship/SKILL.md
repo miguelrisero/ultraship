@@ -8,6 +8,23 @@ argument-hint: "[full|light|goal] <task> | help"
 
 Deliver the task in `$ARGUMENTS` to a ready-for-review pull request that passes the completion gate. An explicit `/ship:ship` request or a chief lane contract authorizes this workflow within the user's permissions.
 
+## You may always
+
+Act within the brief and your role. Keep all tool, hook, and action gates. Routine reads and admitted checks need no new GO.
+
+1. Commit locally on the assigned branch when the brief grants commits, including before tests. Keep the required verification pending.
+2. Push the lane's own feature branch for draft CI with push authority and the [step 9 preflight](references/pipeline.md#9-push-and-pr). Opening the draft needs PR authority. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
+3. Run isolated local tests within the brief and [execution admission](#execution-admission). Keep special-run GO requirements.
+4. Rerun permitted CI on the lane's current head under the [babysit rules](../babysit/SKILL.md). Verify the new attempt.
+5. Have the admitted writer re-anchor only named rows the lane's own diff breaks, with the identical mutant. Require one independent Sol review of the frozen head under the [lane-owned row route](#lane-owned-row-route).
+6. Send `/merge` with merge authority when the PR is ready, required CI is green, and independent review covers the exact head. Complete the thread, browser, and other [merge gates](#completion-gate).
+7. Ask your superior for permission at any time. Retry a refused command only under [the refusal rule](references/owner-decisions.md#loaded-instructions-and-refusals). Continue independent work.
+
+## Only the owner
+
+Apply the six [owner decision thresholds](references/owner-decisions.md#only-the-owner) and their exceptions. Route decisions through the CoC, or the designated driver in standalone Ship.
+Keep product, billing, security policy, and major architecture scope holds. Keep live authority separate.
+
 ## Arguments
 
 Consume leading `full`, `light`, and `goal` tokens. The rest is the task, verbatim.
@@ -25,21 +42,9 @@ Empty input asks for a task. Freeze scope and success checks before any code is 
 
 The session that runs this skill is the driver. It plans, dispatches, records, and ships. Writers write code.
 
-Act by default. The brief grants this lane's authority; use it in the same turn and never ask for it again.
-Routine lane work needs no new GO or receipt: reads, read-only scripts, touched-file tests, lint, typecheck, commits, pushes, the PR, and a granted merge after its required review and CI.
-Pause a refused tool step and keep the work pending.
-A refusal never ends the work.
-After a refusal, find the cause and retry in a compliant form, or ask your superior how to proceed.
-A writer asks its driver, a driver asks its chief, and a chief asks the CoC.
-The ask never blocks your other work.
-Only the CoC decides whether an owner-only item becomes an owner Input.
-With a CoC, decisions reach the owner through the CoC. In a standalone run, an owner-only item becomes a standalone Input.
-No agent, the CoC included, sends the owner a refusal, hook or tooling question.
-Product, billing, security policy and big architecture decisions still reach the owner through the CoC.
-The refused action keeps its gate: push, merge, protected writes, secrets, production and owner-only items still need a compliant form or the authority they lacked.
-A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
+Use granted authority in the same turn. Routine reads, read-only scripts, admitted checks, lint, and typecheck need no new GO or receipt.
+Keep a refused step pending under [Loaded instructions and refusals](references/owner-decisions.md#loaded-instructions-and-refusals). Continue independent work.
 Stop a step for a failed check, a hard rule, an owner refusal, a missing special-run GO, or an owner-only item.
-Owner-only items: product, billing, security policy or tenant isolation, big architecture, customer-data deletion, new recurring spend, flag flips or deploy changes, public output in the owner's name, and credentials only the owner holds.
 An unverified detail that no rule names is not a stop: name it in one line and continue. A rule that names a missing receipt or evidence still stops its step.
 End each turn with a forward action: a writer dispatch, a commit, a push, a PR update, or a merge. A board edit alone is not progress.
 In a status message, never restate standing holds; send what changed, what it means, and the next action. Briefs still carry their required restrictions.
@@ -166,7 +171,7 @@ gh pr checks "<PR URL>" --required
 All conditions must hold:
 
 1. The intended head is pushed and the working tree is clean.
-2. Required CI passes on that head. An empty required-check list means CI did not start.
+2. Required CI passes on that head. For ready status and `/merge`, apply [Babysit's queue check rule](../babysit/SKILL.md#one-round) only to checks that start after `/merge`. Require those checks before the actual merge. An empty required-check list means CI did not start.
 3. Reviews cover that head, and every P0 and P1 finding is fixed or answered with evidence.
 4. Better Review and human threads are resolved: zero unresolved threads.
 5. End-to-end evidence covers that head at the deepest safe level.
@@ -239,7 +244,8 @@ Mutation proof runs after merge (owner decision, 2026-10-31: merge on green CI a
 The required real-browser UI check runs before merge and remains a merge gate.
 
 - The merge gate requires green CI on the head, an independent review, every review thread dispositioned, and applicable real-browser UI proof.
-- Send the merge within 2 hours of green required CI.
+- Send `/merge` within 30 minutes after all applicable pre-command gates pass. Keep the repository's merge rules and queue holds.
+- Apply [Babysit's queue check rule](../babysit/SKILL.md#one-round) to checks that start only after `/merge`. Keep those checks required before the actual merge.
 - Run the proof once at the merge commit within 24 hours of the merge. Post its record on the merged PR.
 - A survivor's fix ships in a follow-up PR.
 
@@ -369,7 +375,7 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
 7. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.
    Reuse the existing authorized draft for CI and reviewer admission.
    If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.
-   Opening the draft and pushing to it publish nothing. Marking it ready, a push to a ready PR and any merge are publication.
+   Use separate draft authority for CI. Preserve the publication gates for marking ready, pushing to a ready PR, and merging.
    For a CoC-approved native exact-pair edit or an earlier test-only parent row, use the shared anchor proof below.
    The driver supplies content-free evidence from the anchor guard at the authorized draft head.
    The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.
