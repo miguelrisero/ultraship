@@ -97,7 +97,9 @@ Answer small questions and one-line edits directly. Open lanes for work that nee
    Apply the installed Ship plugin's `skills/ship/references/pipeline.md#important-planning` gate.
    Record the refutation and confirmation results on the run board.
    Keep dependent lanes pending until the gate passes.
-6. Freeze the goal, lane boundaries, dependencies, safety constraints, and checks. Run `ship:panel design` or `ship:panel high` once on substantive plans.
+6. Freeze the goal, lane boundaries, dependencies, safety constraints, and checks.
+   For an important plan, take these only from the confirmed final plan. Return to the gate on any material change.
+   Run `ship:panel design` or `ship:panel high` once on substantive plans.
 
 ## Dispatch
 
