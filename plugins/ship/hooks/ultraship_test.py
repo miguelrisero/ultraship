@@ -461,6 +461,105 @@ class CompoundReadHookTests(unittest.TestCase):
                 self.assert_refused(command, self.custody)
 
 
+class LiteralCustodyTests(unittest.TestCase):
+    def setUp(self):
+        self.home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.cwd = self.home / 'repo'
+        self.cwd.mkdir()
+        self.scratch = self.home / '.scratch'
+        self.scratch.mkdir()
+        self.state = self.home / 'state'
+        self.enterContext(patch.dict(os.environ, {'HOME': str(self.home), 'XDG_STATE_HOME': str(self.state),
+                                                   'CLAUDE_CONFIG_DIR': str(self.cwd / '.claude')}))
+        self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(self.home))))
+        self.enterContext(patch.object(ultraship, 'STATE', self.state / 'ultraship'))
+        self.enterContext(patch.object(ultraship.subprocess, 'run', side_effect=AssertionError('fixture ran a process')))
+
+    def pre(self, command, caller='ship:writer--sol'):
+        event = {'cwd': str(self.cwd), 'tool_name': 'Bash', 'agent_type': caller,
+                 'tool_input': {'command': command}}
+        with redirect_stdout(io.StringIO()) as output:
+            try:
+                ultraship.guarded_pre(event)
+            except SystemExit as error:
+                self.assertEqual(error.code, 0)
+        return json.loads(output.getvalue() or '{}').get('hookSpecificOutput', {})
+
+    def assert_allowed(self, command, caller='ship:writer--sol'):
+        decision = self.pre(command, caller)
+        self.assertEqual(decision, {}, decision.get('permissionDecisionReason', decision))
+
+    def assert_denied(self, command, reason, caller='ship:writer--sol'):
+        decision = self.pre(command, caller)
+        self.assertEqual(decision.get('permissionDecision'), 'deny', decision)
+        self.assertIn(reason, decision['permissionDecisionReason'])
+
+    def test_literal_oxlint_with_scratch_output(self):
+        command = ('node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/oxlint/bin/oxlint '
+                   '-c oxlint.config.ts --threads=1 ../lanes/synthetic/.github/scripts/dashboard.test.mjs')
+        self.assert_allowed(command + ' > ../.scratch/dashboard-oxlint.log 2>&1', caller='')
+
+    def test_literal_node_check_in_repository(self):
+        for source in ('.github/scripts/dashboard.test.mjs', '../lanes/synthetic/.github/scripts/dashboard.test.mjs'):
+            with self.subTest(source=source):
+                self.assert_allowed(f'node --check {source}', caller='')
+
+    def test_node_script_parent_traversal_stays_denied(self):
+        self.assert_denied('node --check ../lanes/synthetic/.github/scripts/dashboard.test.mjs',
+                           'inline interpreter code rule')
+
+    def test_literal_scratch_redirect(self):
+        (self.cwd / 'data').symlink_to(self.state / 'ultraship/text-lint', target_is_directory=True)
+        command = r"printf '%s\n' 'Example: ${XDG_STATE_HOME}/sample [text]'"
+        self.assert_allowed(command + ' >> ../.scratch/example.log 2>&1')
+
+    def test_inert_scratch_heredoc(self):
+        command = "cat > ../.scratch/example.md <<'END'\nExample: ${XDG_STATE_HOME}/sample [text]\nEND\n"
+        self.assert_allowed(command)
+
+    def test_literal_grep_on_clone_and_packaged_source(self):
+        (self.cwd / 'clone/.git').mkdir(parents=True)
+        (self.cwd / 'data').symlink_to(self.state / 'ultraship/text-lint', target_is_directory=True)
+        for source in ('clone/plugins/ship/hooks/ultraship.py',
+                       '.claude/plugins/cache/ultraship/ship/0.0.0/hooks/ultraship.py'):
+            target = self.cwd / source
+            target.parent.mkdir(parents=True)
+            target.write_text('Synthetic source.\n')
+            command = f'grep -nE "XDG_STATE_HOME|text_lint.py hook|issue_account_grant" {source}'
+            with self.subTest(source=source):
+                self.assert_allowed(command)
+
+    def test_literal_data_preserves_protected_path_checks(self):
+        store = self.state / 'ultraship/text-lint'
+        grants = self.home / '.local/state/ultraship/account-grants'
+        store.mkdir(parents=True)
+        grants.mkdir(parents=True)
+        (self.scratch / 'fixture-link').symlink_to(store, target_is_directory=True)
+        note = r"printf '%s\n' 'Example: ${XDG_STATE_HOME}/sample [text]'"
+        for command in (f'{note} > {store}/fixture.log 2>&1',
+                        f'{note} > {grants}/fixture.log 2>&1',
+                        f'{note} > ../.scratch/fixture-link/fixture.log 2>&1',
+                        f"cat > ../.scratch/../state/ultraship/text-lint/fixture.log <<'END'\nExample.\nEND\n",
+                        'grep -rnE "XDG_STATE_HOME|text_lint.py hook" ../.scratch/../state',
+                        'grep -nE "XDG_STATE_HOME|text_lint.py hook" ../.scratch/fixture-link/fixture.log',
+                        'grep -n "$(python3 text_lint.py hook)" example.py'):
+            with self.subTest(command=command):
+                self.assert_denied(command, ultraship.RECEIPT_CUSTODY)
+        self.assert_denied('node --unknown-option example.mjs', 'inline interpreter code rule')
+
+    def test_literal_node_keeps_custody_checks(self):
+        store = self.state / 'ultraship/text-lint'
+        store.mkdir(parents=True)
+        (self.cwd / 'fixture-link').symlink_to(store, target_is_directory=True)
+        (self.scratch / 'result.log').symlink_to(store / 'example.log')
+        for command in ('node --check fixture-link/example.mjs',
+                        'node --unknown-option example.mjs',
+                        'node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/oxlint/bin/oxlint '
+                        '-c oxlint.config.ts --threads=1 example.mjs > ../.scratch/result.log 2>&1'):
+            with self.subTest(command=command):
+                self.assert_denied(command, ultraship.RECEIPT_CUSTODY, caller='')
+
+
 class ReceiptCustodyTests(unittest.TestCase):
     def setUp(self):
         temporary = self.enterContext(tempfile.TemporaryDirectory())

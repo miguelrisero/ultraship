@@ -5301,10 +5301,12 @@ def receipt_custody(data, read_search=False):
         search_account_command = (normalized((raw[:search.start(1)] + raw[search.end(1):]).replace('\\\n', ''))
                                   if search else account_command)
         literal = r'''(?:'[^'\x00\r\n]*'|"[^"$`\\!\x00\r\n]*")'''
+        scratch_path = (r'(?!-)(?:[A-Za-z0-9_./-]*/)?\.scratch/'
+                        r'(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*')
         display = re.fullmatch(
             r"[ \t]*(?:echo|printf[ \t]+'%s\\n')[ \t]+("
             + literal + r'(?:[ \t]+' + literal + r')*)'
-            r'(?:[ \t]+>>?[ \t]+[A-Za-z0-9_./-]+)?[ \t]*\n?', raw)
+            rf'(?:[ \t]+>>?[ \t]+(?:{scratch_path}[ \t]+2>&1|[A-Za-z0-9_./-]+))?[ \t]*\n?', raw)
         state_display = re.fullmatch(
             r'''[ \t]*printf[ \t]+'%s\\n'[ \t]+("\$\{XDG_STATE_HOME:-\$HOME/\.local/state\}")[ \t]*\n?''', raw)
         cache_listing = re.fullmatch(
@@ -5323,11 +5325,39 @@ def receipt_custody(data, read_search=False):
                 pass
             except OSError:
                 deny(RECEIPT_CUSTODY)
-        data_match = display or state_display
-        # Printed values are data. Keep the output path and other custody checks intact.
-        path_command = (raw[:data_match.start(1)] + "'data'" + raw[data_match.end(1):]
-                        if data_match else raw)
+        def literal_data_removed():
+            data_match = display or state_display
+            if data_match:
+                return raw[:data_match.start(1)] + raw[data_match.end(1):]
+            header, newline, body = raw.partition('\n')
+            note = re.fullmatch(rf"[ \t]*cat[ \t]+>>?[ \t]*{scratch_path}[ \t]+<<[ \t]*'([A-Za-z_0-9]+)'[ \t]*",
+                                header, re.ASCII)
+            if note and newline and not re.search(r'[\x00\r\v\f\x1c-\x1e\x85  ]', body):
+                lines = body.removesuffix('\n').split('\n')
+                if lines[-1] == note[1] and note[1] not in lines[:-1]:
+                    return header + newline + note[1] + newline
+            grep = re.fullmatch(
+                r'[ \t]*grep(?:[ \t]+-[nilwEFvcoqhHsxL]+)*[ \t]+(' + literal + r')'
+                r'[ \t]+((?!-)[A-Za-z0-9_./-]+)[ \t]*\n?', raw, re.ASCII)
+            if (grep and not grep[1][1:].startswith('-') and '..' not in grep[2].split('/')
+                    and not receipt_path(grep[2], ancestors=True)):
+                source = Path(cwd_path, grep[2]).resolve()
+                config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+                home = Path.home().resolve()
+                if regular_file(source) and (source.is_relative_to((config / 'plugins/cache').resolve()) or any(
+                        (parent / '.git').exists() for parent in source.parents if not home.is_relative_to(parent))):
+                    return raw[:grep.start(1)] + raw[grep.end(1):]
+            return raw
+
+        # Omit data without introducing a word that can resolve to a protected path.
+        path_command = literal_data_removed()
         command = normalized(path_command)
+        # These two Node forms have one literal script operand. The writer guard still checks the original command.
+        node_tool = re.fullmatch(
+            r'[ \t]*node[ \t]+(?:--check[ \t]+(?!-)[A-Za-z0-9_./-]+\.[cm]?js'
+            r'|--disable-warning=MODULE_TYPELESS_PACKAGE_JSON[ \t]+node_modules/oxlint/bin/oxlint'
+            r'[ \t]+-c[ \t]+oxlint\.config\.ts[ \t]+--threads=1[ \t]+(?!-)[A-Za-z0-9_./-]+'
+            rf'[ \t]+>[ \t]*{scratch_path}[ \t]+2>&1)[ \t]*\n?', raw, re.ASCII)
         raw_words = [word.translate(str.maketrans('', '', "\"'\\"))
                      for word in re.split(r'[\s;&|<>()]+', path_command) if word]
         words = [re.sub(r'^\$(?:\{(HOME|XDG_STATE_HOME)\}|(HOME|XDG_STATE_HOME)(?=/|$))',
@@ -5610,8 +5640,8 @@ def receipt_custody(data, read_search=False):
                     first == 'df' or read_only_git(words, [raw for raw, _, _, _ in parts], ending))
 
             comment = pr_comment_body_removed(raw)
-            custody_source = literal_bindings_resolved(path_command if data_match else joined if comment == raw else comment,
-                                                       cwd_path)
+            custody_source = literal_bindings_resolved(
+                path_command if path_command != raw else joined if comment == raw else comment, cwd_path)
             cache_operand = cache_listing[1] if cache_listing else None
             try:
                 masked_source = cat_heredoc_data(custody_source)
@@ -6000,7 +6030,7 @@ def receipt_custody(data, read_search=False):
                                 and not literal_search_shell(source) and not text_search_only(source)):
                             return 'hard'
                         names = executable if evidence_index < 0 else executable[:evidence_index]
-                        for index, (_, name, _, _) in enumerate(names):
+                        for index, (name_raw, name, _, _) in enumerate(names):
                             interpreter = interpreter_name(name)
                             base = os.path.basename(name)
                             if not interpreter and base not in SHELL_INTERPRETERS | {'uv', 'uvx'}:
@@ -6023,7 +6053,10 @@ def receipt_custody(data, read_search=False):
                                         or (len(arguments) > 2 and arguments[2][0] not in {';', '&', '|', ')', '\n'})):
                                     return 'hard'
                                 continue
-                            kind, operand, offset = program_operand(base, interpreter, [token[1] for token in arguments])
+                            if node_tool and source == raw and index == 0 and name_raw == 'node':
+                                kind, operand, offset = 'script', 1, 0
+                            else:
+                                kind, operand, offset = program_operand(base, interpreter, [token[1] for token in arguments])
                             if kind == 'unknown':
                                 return 'hard'
                             if operand >= len(arguments):
