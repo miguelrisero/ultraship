@@ -7,6 +7,7 @@ import io
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 from pathlib import Path
 import subprocess
@@ -1025,6 +1026,269 @@ class LedgerDirTests(unittest.TestCase):
             transcript.write_text(''.join(line + '\n' for line in lines))
         return owed, transcript, result, int(epoch)
 
+    def test_stop_prints_exact_command_for_commit_bound_findings(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, transcript, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        home = self.resolve()
+        before = (owed.read_bytes(), home.read_bytes())
+        message = json.loads(self.hook('stop'))
+        self.assertEqual(message['decision'], 'block')
+        commands = [line for line in message['reason'].splitlines() if line.startswith('python3 ')]
+        self.assertEqual(len(commands), 1)
+        argv = shlex.split(commands[0])
+        self.assertEqual(argv[:9], ['python3', str(LEDGER), 'account', str(owed), result['id'],
+                                    'review', 'ship:reviewer--sol@reviewer', sha, 'findings'])
+        # Custody refuses a command whose words name a receipt store; the transcript path stays out.
+        self.assertNotIn(str(transcript), commands[0])
+        self.assertIn(result['id'], argv[9])
+        self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+        accounted = self.cli(*argv[2:])
+        self.assertEqual(accounted.returncode, 0, accounted.stderr)
+        self.assertEqual(ledger.rows(home)[-1][3:5], [sha, 'findings'])
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+
+    def test_stop_withholds_findings_command_when_accounted_sibling_shares_transcript(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, transcript, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        home = self.resolve()
+        with home.open('ab') as stream:
+            stream.write(f'{epoch}\treview\tship:reviewer--sol@reviewer\t{sha}\tfindings\tSibling review\n'.encode())
+        hardlink = transcript.with_name('agent-other.jsonl')
+        hardlink.hardlink_to(transcript)
+        original = owed.read_bytes()
+        receipts = owed.parent.parent / 'accounted.json'
+        for path in (str(transcript), f'{transcript.parent}/./{transcript.name}', str(hardlink)):
+            with self.subTest(path=path):
+                receipts.unlink(missing_ok=True)
+                sibling = {**result, 'id': '22222222-2222-2222-2222-222222222222',
+                           'agent_transcript_path': path}
+                first = f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(sibling)}\n'.encode()
+                reason = self.non_git_stop_block(owed, first + original, result['id'])
+                self.assertNotIn(sibling['id'], reason)
+                self.assertNotIn('Run each verified findings command', reason)
+                self.assertEqual([json.loads(key)[2] for key in json.loads(receipts.read_text())], [sibling['id']])
+
+    def test_stop_withholds_findings_command_before_bound_run_start(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        home = self.resolve()
+        history = ledger.rows(home)
+        for offset, emits_command in ((1, False), (0, True)):
+            with self.subTest(offset=offset):
+                history[0][0] = str(epoch + offset)
+                home.write_text(''.join('\t'.join(row) + '\n' for row in history))
+                notice = {**result, 'run': ledger.run_identity(0, history[0])}
+                pending = f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(notice)}\n'.encode()
+                reason = self.non_git_stop_block(owed, pending, result['id'])
+                self.assertEqual('Run each verified findings command' in reason, emits_command)
+                self.assertFalse((owed.parent.parent / 'accounted.json').exists())
+
+    def test_stop_retains_v2_null_run_without_review_credit(self):
+        owed, receipts = self.non_git_fixture()
+        home = self.resolve()
+        history = self.history + b'20\treview\tship:reviewer--sol@reviewer\tsha\tpass\t\n'
+        home.write_bytes(history)
+        for binding in ({'ledger': str(home)}, {}):
+            with self.subTest(binding=binding):
+                receipts.unlink(missing_ok=True)
+                pending = self.non_git_notice(cwd=self.checkout, run=None, **binding)
+                owed.write_bytes(pending)
+                output = self.hook('stop')
+                self.assertTrue(output, 'Stop cleared the v2 null-run notice')
+                stopped = json.loads(output)
+                self.assertEqual(stopped['decision'], 'block')
+                self.assertIn('lacks its original ledger or run binding', stopped['reason'])
+                self.assertNotIn('ledger.py append', stopped['reason'])
+                self.assertEqual(self.hook('stop'), '')
+                self.assertEqual(owed.read_bytes(), pending)
+                self.assertFalse(receipts.exists())
+                self.assertEqual(home.read_bytes(), history)
+
+    def test_stop_keeps_legacy_null_run_behavior(self):
+        owed, receipts = self.non_git_fixture()
+        home = self.resolve()
+        owed.write_bytes(self.non_git_notice(cwd=self.checkout, v=1, ledger=str(home), run=None))
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+        self.assertEqual(json.loads(receipts.read_text()), {})
+
+    def test_stop_keeps_patch_only_findings_pending_without_exact_command(self):
+        base = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Base: {base}\nPatch: {"ab" * 32}\nVerdict: findings')])
+        before = owed.read_bytes()
+        message = json.loads(self.hook('stop'))
+        self.assertEqual(message['decision'], 'block')
+        self.assertIn('patch digest', message['reason'])
+        self.assertIn('Link a later review on the run board. Keep the original subject and verdict.', message['reason'])
+        self.assertIn('The link gives zero accounting or review credit.', message['reason'])
+        self.assertFalse(any(line.startswith('python3 ') for line in message['reason'].splitlines()))
+        self.assertNotIn(' account-auto ', message['reason'])
+        self.assertEqual(owed.read_bytes(), before)
+        self.assertFalse((owed.parent.parent / 'accounted.json').exists())
+
+    def test_stop_withholds_guidance_for_mixed_commit_and_patch_subject(self):
+        base = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'),
+            (-1, 'assistant', f'Reviewed commit: {base}\nReviewed patch: {"ab" * 32}\nVerdict: findings')])
+        before = owed.read_bytes()
+        message = json.loads(self.hook('stop'))
+        self.assertEqual(message['decision'], 'block')
+        self.assertFalse(any(line.startswith('python3 ') for line in message['reason'].splitlines()))
+        self.assertNotIn(' account-auto ', message['reason'])
+        self.assertEqual(owed.read_bytes(), before)
+
+    def test_stop_withholds_commands_for_multiple_reviewed_commit_labels(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'),
+            (-1, 'assistant', f'Reviewed commit: {sha}\nReviewed commit: 123abcd\nVerdict: findings')])
+        before = owed.read_bytes()
+        result = json.loads(self.hook('stop'))
+        self.assertEqual(result['decision'], 'block')
+        self.assertFalse(any(line.startswith('python3 ') for line in result['reason'].splitlines()))
+        self.assertEqual(owed.read_bytes(), before)
+
+    def test_stop_withholds_findings_when_line_separator_hides_a_second_label(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        for label in ('Verdict: pass', 'Reviewed commit: 123abcd'):
+            with self.subTest(label=label):
+                owed, _, result, _ = self.auto_owed([
+                    (-2, 'user', 'Review.'),
+                    (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings\nDetails {label}')])
+                pending = owed.read_bytes().splitlines(keepends=True)[-1]
+                reason = self.non_git_stop_block(owed, pending, result['id'])
+                self.assertNotIn('Run each verified findings command', reason)
+                self.assertFalse((owed.parent.parent / 'accounted.json').exists())
+
+    def test_stop_withholds_findings_when_a_hidden_label_starts_with_unicode_space(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        for label in (' Overall: pass', ' Reviewed commit: 123abcd'):
+            with self.subTest(label=label):
+                owed, _, result, _ = self.auto_owed([
+                    (-2, 'user', 'Review.'),
+                    (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings\nDetails {label}')])
+                pending = owed.read_bytes().splitlines(keepends=True)[-1]
+                reason = self.non_git_stop_block(owed, pending, result['id'])
+                self.assertNotIn('Run each verified findings command', reason)
+
+    def test_stop_withholds_findings_when_a_split_sibling_shares_the_transcript(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, result, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        original = owed.read_bytes()
+        sibling = json.dumps({**result, 'id': '33333333-3333-3333-3333-333333333333'}).replace(', ', ',\t', 1)
+        row = f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{sibling}\n'.encode()
+        reason = self.non_git_stop_block(owed, row + original, result['id'])
+        self.assertNotIn('Run each verified findings command', reason)
+
+    def test_stop_withholds_findings_when_the_transcript_has_a_later_turn(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings'),
+            (5, 'user', 'Review again.'), (6, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        reason = self.non_git_stop_block(owed, owed.read_bytes(), result['id'])
+        self.assertNotIn('Run each verified findings command', reason)
+
+    def test_stop_withholds_findings_when_a_resumed_prompt_lands_on_the_notice_second(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, result, _ = self.auto_owed([
+            (-3, 'user', 'Review.'), (-2, 'assistant', f'Reviewed commit: {sha}\nVerdict: pass'),
+            (0, 'user', 'Review again.'), (0.5, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        reason = self.non_git_stop_block(owed, owed.read_bytes(), result['id'])
+        self.assertNotIn('Run each verified findings command', reason)
+
+    def test_stop_withholds_findings_command_that_custody_would_refuse(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        # The state folder name contains a receipt folder name, so custody refuses any command with this path.
+        state = self.base / 'ultraship' / 'text-lint-fixtures'
+        shutil.copytree(self.base / 'state', state)
+        stopped = json.loads(self.hook('stop', env={**self.env, 'XDG_STATE_HOME': str(state)}))
+        self.assertEqual(stopped['decision'], 'block')
+        self.assertIn(result['id'], stopped['reason'])
+        self.assertFalse(any(line.startswith('python3 ') for line in stopped['reason'].splitlines()))
+
+    def test_stop_retains_malformed_notice_beside_commit_findings(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, _, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        with owed.open('a') as stream:
+            stream.write(f'{epoch}\tship:reviewer--sol\t{self.checkout}\t' + '[' * 2000 + ']' * 2000 + '\n')
+        before = owed.read_bytes()
+        result = json.loads(self.hook('stop'))
+        self.assertEqual(result['decision'], 'block')
+        self.assertFalse(any(line.startswith('python3 ') for line in result['reason'].splitlines()))
+        self.assertEqual(owed.read_bytes(), before)
+
+    def test_stop_withholds_findings_command_for_symlinked_pending_file(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        saved = owed.with_suffix('.saved')
+        owed.rename(saved)
+        owed.symlink_to(saved)
+        before = saved.read_bytes()
+        stopped = json.loads(self.hook('stop'))
+        self.assertEqual(stopped['decision'], 'block')
+        self.assertFalse(any(line.startswith('python3 ') for line in stopped['reason'].splitlines()))
+        self.assertEqual(saved.read_bytes(), before)
+
+    def test_stop_withholds_findings_command_for_noncanonical_pending_path(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        env = {**self.env, 'XDG_STATE_HOME': str(self.base / 'state/../state')}
+        pending = Path(env['XDG_STATE_HOME']) / 'ultraship/owed/s1.tsv'
+        before = owed.read_bytes()
+        self.assertEqual(pending.read_bytes(), before)
+        stopped = json.loads(self.hook('stop', env=env))
+        self.assertEqual(stopped['decision'], 'block')
+        self.assertIn(result['id'], stopped['reason'])
+        self.assertFalse(any(line.startswith('python3 ') for line in stopped['reason'].splitlines()))
+        self.assertEqual(owed.read_bytes(), before)
+
+    def test_stop_limits_mixed_batch_guidance_to_original_runs(self):
+        sha = self.git(self.checkout, 'rev-parse', 'HEAD')
+        owed, _, _, epoch = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', f'Reviewed commit: {sha}\nVerdict: findings')])
+        with owed.open('ab') as stream:
+            stream.write(self.non_git_notice(cwd=self.checkout, epoch=epoch, identifier='unbound', agent_id='other'))
+        before = owed.read_bytes()
+        stopped = json.loads(self.hook('stop'))
+        self.assertEqual(stopped['decision'], 'block')
+        self.assertIn('1 pending result lacks its original ledger or run binding.', stopped['reason'])
+        self.assertIn('Record only results with their original ledger and run binding', stopped['reason'])
+        self.assertNotIn('Record each result with', stopped['reason'])
+        self.assertEqual(len([line for line in stopped['reason'].splitlines() if line.startswith('python3 ')]), 1)
+        self.assertEqual(owed.read_bytes(), before)
+        self.assertFalse((owed.parent.parent / 'accounted.json').exists())
+
+    def test_stop_reports_missing_original_binding_and_allows_blocker_report(self):
+        (self.workspace / '.scratch').rmdir()
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review.'), (-1, 'assistant', 'Verdict: findings')])
+        self.assertNotIn('ledger', result)
+        self.assertNotIn('run', result)
+        before = (owed.read_bytes(), self.legacy.read_bytes())
+        stopped = json.loads(self.hook('stop'))
+        self.assertEqual(stopped['decision'], 'block')
+        self.assertIn(result['id'], stopped['reason'])
+        self.assertIn('1 pending result lacks its original ledger or run binding.', stopped['reason'])
+        self.assertIn('End this turn with a blocker report. Keep run completion on hold.', stopped['reason'])
+        self.assertNotIn('ledger.py append', stopped['reason'])
+        self.assertNotIn(' account ', stopped['reason'])
+        self.assertNotIn('account-auto', stopped['reason'])
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual((owed.read_bytes(), self.legacy.read_bytes()), before)
+        self.assertFalse((owed.parent.parent / 'accounted.json').exists())
+
     def assert_account_auto_refuses_grant(self, session, *, foreign=False):
         sha = 'ab' * 20
         owed, _, _, _ = self.auto_owed([
@@ -1753,7 +2017,7 @@ class LedgerDirTests(unittest.TestCase):
 
     def test_account_auto_skill_describes_evidence_requirements(self):
         skill = (LEDGER.parent.parent / 'SKILL.md').read_text()
-        guidance = skill.split('Use the Stop diagnostic\'s `account-auto` command', 1)[1].split('`correct-binding`', 1)[0]
+        guidance = skill.split('Use `account-auto` only after verifying', 1)[1].split('`correct-binding`', 1)[0]
         for phrase in ('`<session>/subagents/agent-<agent-id>.jsonl`', 'The first word must be a verdict word.',
                        'exactly one `run-start` row', 'The receipt must name the same ledger and run.'):
             with self.subTest(phrase=phrase):
@@ -1761,7 +2025,7 @@ class LedgerDirTests(unittest.TestCase):
 
     def test_account_auto_skill_describes_path_row_and_commit_boundaries(self):
         skill = (LEDGER.parent.parent / 'SKILL.md').read_text()
-        guidance = skill.split('Use the Stop diagnostic\'s `account-auto` command', 1)[1].split('`correct-binding`', 1)[0]
+        guidance = skill.split('Use `account-auto` only after verifying', 1)[1].split('`correct-binding`', 1)[0]
         for phrase in ('match its normalized and resolved forms', '`..` segments or repeated slashes',
                        'The first `run-end` or next `run-start`', 'outside that range',
                        'exactly one distinct 40-digit hexadecimal commit SHA', 'underscores or backticks'):

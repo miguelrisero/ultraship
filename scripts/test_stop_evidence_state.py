@@ -66,8 +66,10 @@ class StopEvidenceStateTests(unittest.TestCase):
         self.account.side_effect = ValueError('no ledger row for first-agent')
         reason = self.assert_blocked()['reason']
         self.assertIn('no ledger row for first-agent', reason)
-        self.assertIn('Read every retained result and use its exact agent identity', reason)
-        self.assertIn('including @agent_id when present', reason)
+        self.assertIn('Record each result with', reason)
+        self.assertIn('Use the exact agent identity, including @agent_id when present.', reason)
+        self.assertIn('\none ship:reviewer--sol@first-agent ', reason)
+        self.assertIn('\ntwo ship:reviewer--opus@second-agent ', reason)
         self.assertEqual(self.path.read_bytes(), pending)
         self.assertIsNone(self.stop())
 
@@ -137,7 +139,7 @@ class StopEvidenceStateTests(unittest.TestCase):
         self.assertEqual(lines, [f'result-{i:02d} ship:reviewer--sol@seat 1970-01-01T00:01:40+00:00'
                                  for i in range(20)])
         self.assertIn('2 more results (22 total pending)', reason.splitlines())
-        self.assertIn(f'account-auto {self.path}', reason)
+        self.assertNotIn(' account-auto ', reason)
 
     def test_empty_pending_clears_reminder(self):
         self.assert_blocked()
@@ -223,7 +225,7 @@ class StopEvidenceStateTests(unittest.TestCase):
 
 
 class StopAccountingGrantTests(unittest.TestCase):
-    def test_printed_commands_work_through_the_hook_and_cli(self):
+    def test_accounting_commands_work_through_the_hook_and_cli(self):
         for form in ('account', 'account-auto', '--fail-unparsed', 'driver-batch'):
             with self.subTest(form=form), tempfile.TemporaryDirectory() as temporary:
                 base = Path(temporary).resolve() / 'with spaces'
@@ -275,9 +277,9 @@ class StopAccountingGrantTests(unittest.TestCase):
                                 (identifier, 'review', 'ship:reviewer--sol@seat', 'abcdef1', 'pass', 'review file')):
                             command = command.replace(placeholder, value)
                     else:
-                        command, = re.findall(r'`([^`]* account-auto [^`]*)`', diagnostic['reason'])
-                        if form == '--fail-unparsed':
-                            command = command.replace(' account-auto ', ' account-auto --fail-unparsed ', 1)
+                        self.assertNotIn(' account-auto ', diagnostic['reason'])
+                        flags = ['--fail-unparsed'] if form == '--fail-unparsed' else []
+                        command = shlex.join(['python3', str(script), 'account-auto', *flags, str(owed)])
                     event = {**data, 'tool_name': 'Bash', 'tool_input': {'command': command}}
                     if form == 'driver-batch':
                         event['agent_type'] = 'ship:driver'
