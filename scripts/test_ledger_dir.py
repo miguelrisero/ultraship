@@ -703,9 +703,52 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(len(snapshots), 1)
         self.assertEqual(snapshots[0].read_bytes(), self.history)
 
+    def test_review_gaps_require_a_reviewer_at_current_head(self):
+        self.legacy.unlink()
+        self.assertEqual(self.cli('run-start', 'full', 'review-gaps').returncode, 0)
+        home = self.resolve()
+        old_head = self.git(self.checkout, 'rev-parse', 'HEAD')
+        self.git(self.checkout, '-c', 'user.name=t', '-c', 'user.email=t@t',
+                 'commit', '-q', '--allow-empty', '-m', 'advance head')
+        head = self.git(self.checkout, 'rev-parse', 'HEAD')
+        for step in ('plan', 'slices', 'pr', 'babysit', 'gate'):
+            ledger.append(home, step, 'driver', old_head, 'pass', '')
+        reviewers = {
+            'panel-high': 'ship:reviewer--astra@high', 'simplify': 'ship:reviewer--opus@simplify',
+            'deep-review': 'ship:reviewer--sol@deep', 'select': 'ship:reviewer--sol@select',
+            'fix-read': 'ship:reviewer--sol@fix', 'panel-final': 'ship:reviewer--opus-panel@final',
+            'closing': 'reviewer--sol',
+        }
+        for step in reviewers:
+            ledger.append(home, step, 'ship:writer--sol@writer', head, 'pass', '')
+            ledger.append(home, step, 'ship:reviewer--sol@owed', head, 'owed', '')
+        wrong_role = ' '.join(f'{step} (wrong role)' for step in reviewers)
+        gaps = self.cli('gaps')
+        self.assertEqual(gaps.stdout, f'gaps: {wrong_role}\n')
+        self.assertEqual(gaps.returncode, 1)
+        self.assertIn(f'Gaps: {wrong_role}.', self.hook('compact'))
+
+        for step, reviewer in reviewers.items():
+            ledger.append(home, step, reviewer, old_head, 'pass', '')
+        stale = ' '.join(f'{step} (stale head)' for step in reviewers)
+        self.assertTrue(self.cli('status').stdout.endswith(f'gaps: {stale}\n'))
+        closed = self.cli('run-end')
+        self.assertEqual(closed.returncode, 1)
+        self.assertEqual(closed.stderr, f'refusing run-end; gaps: {stale}\n')
+
+        for step, reviewer in reviewers.items():
+            ledger.append(home, step, reviewer, head, 'findings', '')
+        gaps = self.cli('gaps')
+        self.assertEqual((gaps.returncode, gaps.stdout), (0, 'gaps: none\n'))
+        self.assertEqual(self.cli('run-end').returncode, 0)
+        self.assertEqual(ledger.rows(home)[-1][1:5], ['run-end', '', head, 'closed'])
+
     def finish_run(self):
+        head = self.git(self.checkout, 'rev-parse', 'HEAD')
         for step in ledger.REQUIRED['light']:
-            self.assertEqual(self.cli('append', step, 'driver', 'sha', 'pass').returncode, 0)
+            agent, sha = ('ship:reviewer--sol@finish', head) if step in (
+                'simplify', 'deep-review', 'fix-read') else ('driver', 'sha')
+            self.assertEqual(self.cli('append', step, agent, sha, 'pass').returncode, 0)
         self.assertEqual(self.cli('run-end').returncode, 0)
 
     def test_stop_accounts_closed_run_and_refuses_next_run_evidence(self):

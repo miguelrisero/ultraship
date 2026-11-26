@@ -26,6 +26,7 @@ REQUIRED = {
              'fix-read', 'panel-final', 'pr', 'babysit', 'closing', 'gate'],
     'light': ['slices', 'simplify', 'deep-review', 'fix-read', 'pr', 'babysit', 'gate'],
 }
+REVIEW_STEPS = {'panel-high', 'simplify', 'deep-review', 'select', 'fix-read', 'panel-final', 'closing'}
 USAGE = """usage: ledger.py path | status | gaps | run-end
        ledger.py run-start <full|light> <run-id> [board-path]
        ledger.py append <step> <agent>[@<agent-id>] <sha> <verdict> [note]
@@ -410,10 +411,24 @@ def open_run(path):
     return None
 
 
-def gaps(run):
+def gaps(run, head):
     start, after = run
-    done = {r[1] for r in after if r[4] != 'owed'}
-    return [s for s in REQUIRED[start[2]] if s not in done]
+    done = {}
+    for row in after:
+        if row[4] != 'owed':
+            done.setdefault(row[1], []).append(row)
+    missing = []
+    for step in REQUIRED[start[2]]:
+        if step not in done:
+            missing.append(step)
+        elif step in REVIEW_STEPS:
+            reviews = [row for row in done[step]
+                       if agent_key(row[2])[0].startswith(('ship:reviewer--', 'reviewer--'))]
+            if not reviews:
+                missing.append(f'{step} (wrong role)')
+            elif not any(row[3] == head for row in reviews):
+                missing.append(f'{step} (stale head)')
+    return missing
 
 
 def append(path, *fields):
@@ -869,7 +884,7 @@ def main(argv):
         if not run:
             print('no open run')
             return
-        missing = gaps(run)
+        missing = gaps(run, git('.', 'rev-parse', 'HEAD'))
         if cmd == 'status':
             print(f'run: {run[0][5]} mode={run[0][2]} ledger={path}')
             for r in run[1]:
@@ -880,10 +895,11 @@ def main(argv):
     elif cmd == 'run-end':
         if not run:
             sys.exit('no open run')
-        missing = gaps(run)
+        head = git('.', 'rev-parse', 'HEAD')
+        missing = gaps(run, head)
         if missing:
             sys.exit('refusing run-end; gaps: ' + ' '.join(missing))
-        append(path, 'run-end', '', git('.', 'rev-parse', 'HEAD'), 'closed', run[0][5])
+        append(path, 'run-end', '', head, 'closed', run[0][5])
     else:
         sys.exit(USAGE)
 

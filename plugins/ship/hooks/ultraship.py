@@ -7424,19 +7424,20 @@ def compact(data):
              'git diff --stat, re-read the active plan and run board, and never guess dropped state.']
     try:
         ledger = load_ledger()
-        path = ledger.ledger_path(data.get('cwd') or '.')
+        cwd = data.get('cwd') or '.'
+        path = ledger.ledger_path(cwd)
         run = ledger.open_run(path)
         pending = owed_file(data)
         if pending.exists() and pending.stat().st_size:
             lines.append(f'Pending review evidence remains at {pending}. '
                          'Account each result with ledger.py before declaring the run complete.')
+        if run:
+            missing = ledger.gaps(run, ledger.git(cwd, 'rev-parse', 'HEAD'))
+            lines.append(f'Open ship run: {run[0][5]} (mode {run[0][2]}). Ledger: {path}. '
+                         f'Gaps: {" ".join(missing) or "none"}. The run note names the board path.')
     except Exception as exc:
         lines.append(f'Ledger resolution failed: {exc}. Pending review evidence remains at {owed_file(data)}. '
                      'Restore ledger access or set SHIP_LEDGER_DIR to an absolute permitted directory before continuing.')
-        run = None
-    if run:
-        lines.append(f'Open ship run: {run[0][5]} (mode {run[0][2]}). Ledger: {path}. '
-                     f'Gaps: {" ".join(ledger.gaps(run)) or "none"}. The run note names the board path.')
     print('\n'.join(lines))
 
 

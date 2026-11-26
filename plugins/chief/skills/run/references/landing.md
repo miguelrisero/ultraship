@@ -14,7 +14,7 @@ Billing and authorization require an independent adversarial verification lane, 
 Before dispatch, confirm that the current session lists the exact native route `ship:verifier--opus`.
 Use the subagent types registered with the native Agent tool. Source and cache files supply zero evidence of session registration.
 If the route is absent or cannot be confirmed, hold verification and record its status on the board.
-Report Ship `1.15.52` as the required plugin version and Chief `1.8.7` as its paired version.
+Report Ship `1.15.53` as the required plugin version and Chief `1.8.8` as its paired version.
 Resume verification only after you confirm the route in a session with both plugins loaded.
 Dispatch `ship:verifier--opus` with the Agent `model` field unset.
 Use the `ship:verifier--astra` fallback only when the exact Opus route is registered but unavailable.
