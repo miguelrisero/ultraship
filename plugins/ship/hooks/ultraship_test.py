@@ -483,6 +483,8 @@ class LiteralCustodyTests(unittest.TestCase):
         self.state = self.home / 'state'
         self.enterContext(patch.dict(os.environ, {'HOME': str(self.home), 'XDG_STATE_HOME': str(self.state),
                                                    'CLAUDE_CONFIG_DIR': str(self.cwd / '.claude')}))
+        for name in ('P', 'COC_CONFIG', 'CHILD'):
+            os.environ.pop(name, None)
         self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(self.home))))
         self.enterContext(patch.object(ultraship, 'STATE', self.state / 'ultraship'))
         self.enterContext(patch.object(ultraship.subprocess, 'run', side_effect=AssertionError('fixture ran a process')))
@@ -606,6 +608,27 @@ class LiteralCustodyTests(unittest.TestCase):
                 f'P={self.cwd}/$CHILD; python3 $P', f'P={self.cwd}/a.py; python3 $P > out.txt'):
             with self.subTest(command=command):
                 self.assertIsNone(ultraship.custody_bound_command(command))
+
+    def test_bound_command_refuses_relative_and_parent_directory_operands(self):
+        grant = self.home / '.local/state/ultraship/account-grants/fixture.json'
+        grant.parent.mkdir(parents=True)
+        grant.touch()
+        logical = self.cwd / 'logical'
+        logical.mkdir()
+        physical = self.scratch / 'physical/child'
+        physical.mkdir(parents=True)
+        (logical / 'link').symlink_to(physical, target_is_directory=True)
+        (logical / 'draft.txt').symlink_to(grant)
+        script = self.cwd / 'helper.py'
+        script.touch()
+        tail = (f"printf '%s\\n' x > draft.txt && P={script} "
+                f'&& COC_CONFIG={self.cwd}/config.json python3 $P | tail -c 120')
+        for directory in (logical / 'link/..', 'logical'):
+            command = f'cd {directory} && {tail}'
+            with self.subTest(directory=directory):
+                self.assertIsNone(ultraship.custody_bound_command(command))
+                for caller in ('', 'ship:driver--sol'):
+                    self.assert_denied(command, ultraship.RECEIPT_CUSTODY, caller)
 
     def test_main_custody_gaps_receive_no_allowance(self):
         writer = HOOK.with_name('text_lint.py')

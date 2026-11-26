@@ -5273,6 +5273,10 @@ def custody_bound_command(command):
         if not match:
             continue
         name, value = match['name'], match['value']
+        directory = match.groupdict().get('directory')
+        # Logical cd removes symlink/.. pairs before the filesystem resolves them.
+        if directory is not None and '..' in Path(directory).parts:
+            return None
         if (name in SHELL_SPECIAL_NAMES or name in os.environ
                 or name.startswith(('BASH', 'EPOCH', 'ZSH', 'PYTHON', 'LD_', 'DYLD_', 'GIT_'))):
             return None
@@ -5280,7 +5284,7 @@ def custody_bound_command(command):
         prefix, rest = command[:match.end('value')], command[match.end('value'):]
         expanded, uses = re.subn(rf'\${name}\b', lambda _: value, rest)
         if len(re.findall(rf'\b{name}\b', command)) == uses + 1:
-            return prefix + expanded, value, match.groupdict().get('directory')
+            return prefix + expanded, value, directory
     return None
 
 
