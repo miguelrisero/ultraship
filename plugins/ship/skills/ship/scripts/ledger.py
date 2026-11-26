@@ -100,6 +100,10 @@ def file_identity(info):
     return [info.st_dev, info.st_ino]
 
 
+# Stop guidance shares this label rule so both parsers count the same verdict lines.
+VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
+
+
 def grant_request(script, argv):
     owed = account_pending_arg(argv)
     if not owed:
@@ -430,6 +434,10 @@ def run_identity(index, row):
     return [index, hashlib.sha256(json.dumps(row).encode()).hexdigest()]
 
 
+def notification_precedes_run(epoch, start_epoch):
+    return int(epoch) < int(start_epoch)
+
+
 def accounting_row(row, result_id, run):
     """An explicit accounting row binds one pending result to its original run, even after run-end."""
     if row[1] != 'account-result':
@@ -467,7 +475,7 @@ def account(pending, identifier, step, agent, sha, verdict, evidence, *, entries
         fcntl.flock(fh, fcntl.LOCK_EX)
         history = [line.split('\t') for line in fh.read().decode().splitlines() if line]
         starts = [i for i, r in enumerate(history) if r[1] == 'run-start' and run_identity(i, r) == result['run']]
-        if len(starts) != 1 or int(epoch) < int(history[starts[0]][0]):
+        if len(starts) != 1 or notification_precedes_run(epoch, history[starts[0]][0]):
             raise ValueError('recorded run is missing or differs')
         for saved in history:
             if accounting_row(saved, result_id, result['run']):
@@ -516,8 +524,10 @@ def reverse_lines(fh, budget):
     yield b''.join(reversed(fragments))
 
 
-def final_turn_text(path, epoch, budgets):
+def final_turn_text(path, epoch, budgets, *, expected_identity=None, sole_turn=False):
+    # sole_turn returns text only when the transcript holds one prompt and nothing after the notice.
     texts = []
+    found = None
     after_tool = True
     newest = float('inf')
     try:
@@ -525,7 +535,10 @@ def final_turn_text(path, epoch, budgets):
             info = os.fstat(fh.fileno())
             if not stat.S_ISREG(info.st_mode):
                 raise OSError('transcript must be a regular file')
-            budget = budgets.setdefault((info.st_dev, info.st_ino), [TRANSCRIPT_SCAN_LIMIT])
+            identity = (info.st_dev, info.st_ino)
+            if expected_identity is not None and identity != expected_identity:
+                raise OSError('transcript identity changed')
+            budget = budgets.setdefault(identity, [TRANSCRIPT_SCAN_LIMIT])
             for line in reverse_lines(fh, budget):
                 if not line.strip():
                     continue
@@ -541,6 +554,9 @@ def final_turn_text(path, epoch, budgets):
                     raise ValueError('transcript timestamps out of order')
                 newest = when
                 if when > epoch + 1:
+                    if sole_turn:
+                        # A later turn means a second notice for this transcript exists or is on its way.
+                        return ''
                     continue
                 content = entry['message']['content']
                 if isinstance(content, str) and role == 'user':
@@ -549,8 +565,16 @@ def final_turn_text(path, epoch, budgets):
                     raise TypeError('transcript content must have blocks')
                 if role == 'user':
                     if any(block['type'] != 'tool_result' for block in content):
+                        if found is not None:
+                            # A second prompt means a resumed agent; a timestamp cannot say which turn owns the notice.
+                            return ''
                         # A prompt in the grace second makes turn ownership ambiguous.
-                        return '\n'.join(reversed(texts)).strip() if when <= epoch else ''
+                        text = '\n'.join(reversed(texts)).strip() if when <= epoch else ''
+                        if not (sole_turn and text):
+                            return text
+                        found = text
+                elif found is not None:
+                    continue
                 elif any(block['type'] in ('tool_use', 'server_tool_use') for block in content):
                     after_tool = False
                 elif after_tool:
@@ -563,7 +587,7 @@ def final_turn_text(path, epoch, budgets):
         raise ValueError('transcript unavailable') from None
     except (AttributeError, KeyError, TypeError, OverflowError, RecursionError, ValueError):
         raise ValueError('transcript parse error') from None
-    return ''
+    return found or ''
 
 
 def load_receipts(path, *, root_fd=None):
@@ -576,6 +600,25 @@ def load_receipts(path, *, root_fd=None):
             return json.load(source)
     except FileNotFoundError:
         return {}
+
+
+def recorded_transcript(pending, result):
+    source = result.get('agent_transcript_path')
+    if not source:
+        raise ValueError('no transcript')
+    path = Path(source)
+    agent_id = result.get('agent_id')
+    if (not isinstance(agent_id, str) or not agent_id or not path.is_absolute()
+            or path.name != f'agent-{agent_id}.jsonl' or path.parent.name != 'subagents'
+            or path.parent.parent.name != pending.stem):
+        raise ValueError('transcript path does not match the recorded agent and session')
+    try:
+        canonical = source == str(path) == os.path.realpath(source)
+    except (OSError, RuntimeError):
+        canonical = False
+    if not canonical:
+        raise ValueError('transcript path does not match the recorded agent and session')
+    return path
 
 
 def account_auto(pending, entries, receipts, *, fail_unparsed=False):
@@ -632,21 +675,8 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
                     awaiting += 1
                 continue
             else:
-                source = result.get('agent_transcript_path')
-                if not source:
-                    raise ValueError('no transcript')
-                path = Path(source)
-                agent_id = result.get('agent_id')
-                if (not isinstance(agent_id, str) or not agent_id or not path.is_absolute()
-                        or path.name != f'agent-{agent_id}.jsonl' or path.parent.name != 'subagents'
-                        or path.parent.parent.name != pending.stem):
-                    raise ValueError('transcript path does not match the recorded agent and session')
-                try:
-                    canonical = source == str(path) == os.path.realpath(source)
-                except (OSError, RuntimeError):
-                    canonical = False
-                if not canonical:
-                    raise ValueError('transcript path does not match the recorded agent and session')
+                path = recorded_transcript(pending, result)
+                source = str(path)
                 epoch = int(epoch)
                 when = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
                 try:
@@ -658,8 +688,7 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
                     if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
                         raise ValueError('expected one commit')
                     sha = first[0].lower()
-                    label_pattern = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
-                    labels = (match[1] for line in text.splitlines() if (match := label_pattern.match(line)))
+                    labels = (match[1] for line in text.splitlines() if (match := VERDICT_LABEL.match(line)))
                     label = next(labels, None)
                     if label is None or next(labels, None) is not None:
                         raise ValueError('expected one verdict')

@@ -1233,8 +1233,8 @@ class ReceiptCustodyTests(unittest.TestCase):
             self.assertEqual(output.getvalue(), '')
 
             self.consume(shlex.split(command))
-            auto, = re.findall(r'`([^`]* account-auto [^`]*)`', diagnostic['reason'])
-            self.assertEqual(shlex.split(auto), ['python3', str(script), 'account-auto', str(pending)])
+            self.assertNotIn(' account-auto ', diagnostic['reason'])
+            auto = shlex.join(['python3', str(script), 'account-auto', str(pending)])
             for caller in ('', 'ship:driver--sol'):
                 with self.subTest(caller=caller):
                     output = io.StringIO()

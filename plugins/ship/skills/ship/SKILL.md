@@ -115,7 +115,14 @@ Copy both paths from the Stop diagnostic; run the command alone on one line with
 
 Use the pending file and result ID from the Stop diagnostic. Supply the actual agent, reviewed SHA, verdict and evidence from the completed result. The command appends an `account-result` record to the recorded ledger. It preserves all existing rows and the run's closure, and exact retries append nothing. This bookkeeping covers only the named result; it grants no pipeline step, review or completion evidence of its own. Never reopen a closed run or invent review rows to clear Stop.
 
-Use the Stop diagnostic's `account-auto` command to account for results with a clear commit and verdict in their recorded turns:
+Use a complete result-specific command from Stop when it supplies one. Stop prints it only for findings tied to an explicit reviewed commit and the original ledger and run.
+
+Keep patch-only findings pending. A base commit and a patch digest do not identify the reviewed commit.
+Record a later independent review separately on the run board. Link the pending result ID, original subject and verdict, and later reviewed commit and result. The link grants zero accounting, review, or publication credit.
+
+When Stop reports a missing original ledger or run binding, end the turn with a blocker report. Keep run completion on hold. Restore the original binding through an approved recovery route before crediting that result.
+
+Use `account-auto` only after verifying the reviewed commit and verdict for every result in the pending file:
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto "<pending.tsv>"
