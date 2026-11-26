@@ -630,6 +630,44 @@ class LiteralCustodyTests(unittest.TestCase):
                 for caller in ('', 'ship:driver--sol'):
                     self.assert_denied(command, ultraship.RECEIPT_CUSTODY, caller)
 
+    def test_bound_command_with_literal_cdpath_keeps_the_original_custody_verdict(self):
+        grant = self.home / '.local/state/ultraship/account-grants/fixture.json'
+        grant.parent.mkdir(parents=True)
+        grant.touch()
+        directory = self.cwd / 'entered'
+        directory.mkdir()
+        (directory / 'draft.txt').symlink_to(grant)
+        script = self.cwd / 'helper.py'
+        script.touch()
+        for draft in ('ordinary.txt', 'draft.txt'):
+            command = (f'cd {directory} && printf \'%s\\n\' "cdpath" > {draft} && P={script} '
+                       f'&& COC_CONFIG={self.cwd}/config.json python3 $P | tail -c 120')
+            expanded, _, _ = ultraship.custody_bound_command(command)
+            event = {'cwd': str(self.cwd), 'tool_name': 'Bash', 'tool_input': {'command': expanded}}
+            with self.subTest(draft=draft):
+                if draft == 'draft.txt':
+                    with redirect_stdout(io.StringIO()) as output, self.assertRaises(SystemExit):
+                        ultraship.receipt_custody(event, exact_forms=False, verified_cd=str(directory))
+                    self.assertIn('Rule: store-operand.', output.getvalue())
+                else:
+                    self.assertEqual(ultraship.receipt_custody(event, exact_forms=False, verified_cd=str(directory)), 'soft')
+                for caller in ('', 'ship:driver--sol'):
+                    self.assert_denied(command, 'Rule: custody-scope.', caller)
+
+    def test_clean_custody_rescan_discards_warning_and_emitted_decision(self):
+        def warning(*args, **kwargs):
+            ultraship.warn('S2', 'fixture warning')
+
+        def ask(*args, **kwargs):
+            print('{"hookSpecificOutput": {"permissionDecision": "ask"}}')
+
+        with patch.object(ultraship, 'WARNINGS', ['existing warning']), redirect_stdout(io.StringIO()) as output:
+            for scan in (warning, ask):
+                with self.subTest(scan=scan.__name__), patch.object(ultraship, 'receipt_custody', side_effect=scan):
+                    self.assertFalse(ultraship.clean_custody_rescan({'tool_name': 'Bash'}, None))
+                    self.assertEqual(ultraship.WARNINGS, ['existing warning'])
+            self.assertEqual(output.getvalue(), '')
+
     def test_main_custody_gaps_receive_no_allowance(self):
         writer = HOOK.with_name('text_lint.py')
         commands = (

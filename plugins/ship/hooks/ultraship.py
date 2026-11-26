@@ -7,6 +7,7 @@ import fcntl
 import fnmatch
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import posixpath
@@ -22,6 +23,7 @@ import unicodedata
 import urllib.parse
 import uuid
 from collections import Counter
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -5288,7 +5290,23 @@ def custody_bound_command(command):
     return None
 
 
-def receipt_custody(data, read_search=False, *, exact_forms=True):
+def clean_custody_rescan(data, directory):
+    # A speculative scan must not emit a decision or leave an advisory on the original call.
+    warnings = WARNINGS[:]
+    WARNINGS.clear()
+    try:
+        with redirect_stdout(io.StringIO()) as output:
+            verdict = receipt_custody(data, exact_forms=False, verified_cd=directory)
+        return (verdict is None or verdict is False) and not WARNINGS and not output.getvalue()
+    except SystemExit as error:
+        if error.code != 0:
+            raise
+        return False
+    finally:
+        WARNINGS[:] = warnings
+
+
+def receipt_custody(data, read_search=False, *, exact_forms=True, verified_cd=None):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     if read_search and tool not in ('Read', 'Grep', 'Glob', 'LSP') and not tool.startswith('mcp__fff__'):
         return
@@ -5297,8 +5315,8 @@ def receipt_custody(data, read_search=False, *, exact_forms=True):
 
     normalized = custody_normalized
 
-    # Folders that a `cd` or `pushd` in the command can enter; a relative word resolves against each of them too.
-    cd_bases = []
+    # Check relative words from each possible directory, including the verified cd if inference skips it.
+    cd_bases = [verified_cd] if verified_cd is not None else []
     cwd_path = os.path.abspath(data.get('cwd') or os.getcwd())
 
     def resolved(value):
@@ -5382,8 +5400,9 @@ def receipt_custody(data, read_search=False, *, exact_forms=True):
                 target = Path(path).resolve()
                 if (not receipt_path(path, ancestors=True) and not receipt_path(directory, ancestors=True)
                         and target.is_file()
-                        and target.name.casefold() not in {'text_lint.py', 'ultraship.py', 'ledger.py'}):
-                    return receipt_custody({**data, 'tool_input': {**tin, 'command': expanded}}, exact_forms=False)
+                        and target.name.casefold() not in {'text_lint.py', 'ultraship.py', 'ledger.py'}
+                        and clean_custody_rescan({**data, 'tool_input': {**tin, 'command': expanded}}, directory)):
+                    return
         joined = raw.replace('\\\n', '')
         account_command = normalized(joined)
         # A leading literal search pattern is data. Keep the full command for path and executable checks.
