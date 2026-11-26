@@ -966,7 +966,8 @@ class ReviewerSearchTests(unittest.TestCase):
         self.assertEqual(decision.get('permissionDecision'), 'deny')
         reason, _, retry = decision['permissionDecisionReason'].partition('\n')
         self.assertTrue(reason.endswith('NFC form. Report the blocked scope to the coordinator.'), reason)
-        self.assertIn('Keep the work pending.', retry)
+        self.assertEqual(retry, 'Retry in a compliant form now, or start the next task. '
+                         'If the step stays blocked, send the CoC one line.')
         rule = reason[reason.index('no `~`'):reason.index(' Report the blocked scope')]
         agents = LEDGER_AGENTS
         self.assertTrue(agents)
