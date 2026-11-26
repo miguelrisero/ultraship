@@ -1037,46 +1037,44 @@ def main(argv):
             sys.exit(str(exc))
         return
     path = ledger_path()
-    if cmd in ('run-anchor', 'run-end'):
-        if cmd == 'run-anchor' and args:
+    if cmd in ('run-start', 'append', 'run-anchor', 'run-end'):
+        if ((cmd == 'run-start' and (len(args) not in (2, 3) or args[0] not in REQUIRED))
+                or (cmd == 'append' and len(args) not in (4, 5))
+                or (cmd == 'run-anchor' and args)):
             sys.exit(USAGE)
-        no_run = 'no open run; start one with run-start' if cmd == 'run-anchor' else 'no open run'
-        if not path.exists():
+        no_run = 'no open run' if cmd == 'run-end' else 'no open run; start one with run-start'
+        if cmd != 'run-start' and not path.exists():
             sys.exit(no_run)
         with locked_ledger(path) as fh:
             fh.seek(0)
             run = find_open_run(parse_rows(fh.read().decode('utf-8')))
-            if not run:
+            if cmd == 'run-start':
+                if run:
+                    sys.exit(f'run {run[0][5]} is still open; finish it with run-end first')
+                append_locked(fh, 'run-start', args[0], git('.', 'rev-parse', 'HEAD'), 'open', ' '.join(args[1:]))
+            elif not run:
                 sys.exit(no_run)
-            head = git('.', '--no-replace-objects', 'rev-parse', '--verify', 'HEAD^{commit}')
-            if cmd == 'run-anchor':
-                append_locked(fh, 'run-anchor', '', head, 'open', run[0][5])
+            elif cmd == 'append':
+                if args[0] in MARKS:
+                    sys.exit(f'{args[0]} rows come only from their own command')
+                append_locked(fh, *args, *([''] * (5 - len(args))))
             else:
-                missing, notice = gaps(run, head)
-                if notice:
-                    print(notice)
-                if missing:
-                    sys.exit('refusing run-end; gaps: ' + ' '.join(missing))
-                append_locked(fh, 'run-end', '', head, 'closed', run[0][5])
+                head = git('.', '--no-replace-objects', 'rev-parse', '--verify', 'HEAD^{commit}')
+                if cmd == 'run-anchor':
+                    append_locked(fh, 'run-anchor', '', head, 'open', run[0][5])
+                else:
+                    missing, notice = gaps(run, head)
+                    if notice:
+                        print(notice)
+                    if missing:
+                        sys.exit('refusing run-end; gaps: ' + ' '.join(missing))
+                    append_locked(fh, 'run-end', '', head, 'closed', run[0][5])
+        if cmd == 'run-start':
+            print(path)
         return
     run = open_run(path)
     if cmd == 'path':
         print(path)
-    elif cmd == 'run-start':
-        if len(args) not in (2, 3) or args[0] not in REQUIRED:
-            sys.exit(USAGE)
-        if run:
-            sys.exit(f'run {run[0][5]} is still open; finish it with run-end first')
-        append(path, 'run-start', args[0], git('.', 'rev-parse', 'HEAD'), 'open', ' '.join(args[1:]))
-        print(path)
-    elif cmd == 'append':
-        if len(args) not in (4, 5):
-            sys.exit(USAGE)
-        if not run:
-            sys.exit('no open run; start one with run-start')
-        if args[0] in MARKS:
-            sys.exit(f'{args[0]} rows come only from their own command')
-        append(path, *args, *([''] * (5 - len(args))))
     elif cmd in ('gaps', 'status'):
         if not run:
             print('no open run')

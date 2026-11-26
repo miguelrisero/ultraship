@@ -818,58 +818,73 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(gaps.stdout.splitlines().count(notice), 1)
         self.assertIn('deep-review (', gaps.stdout.splitlines()[-1])
 
+    def ordered_ledger_writes(self, home, first, second):
+        checking, waiting, release, first_done = Event(), Event(), Event(), Event()
+        real_git, real_gaps, real_flock = ledger.git, ledger.gaps, ledger.fcntl.flock
+
+        def pause():
+            checking.set()
+            self.assertTrue(release.wait(10), 'first writer did not resume')
+
+        def check_head(_, *args):
+            if first[0] != 'run-end' and not checking.is_set():
+                pause()
+            return real_git(self.checkout, *args)
+
+        def check_gaps(*args):
+            if not checking.is_set():
+                pause()
+            return real_gaps(*args)
+
+        def check_lock(fd, flags):
+            flags |= ledger.fcntl.LOCK_NB
+            if checking.is_set() and not release.is_set():
+                with self.assertRaises(BlockingIOError):
+                    real_flock(fd, flags)
+                waiting.set()
+                self.assertTrue(first_done.wait(10), 'first writer did not finish')
+            real_flock(fd, flags)
+
+        def invoke(args, *, lead=False):
+            try:
+                ledger.main(list(args))
+            except SystemExit as exc:
+                return exc.code
+            finally:
+                if lead:
+                    first_done.set()
+            return None
+
+        with mock.patch.object(ledger, 'git', side_effect=check_head), \
+                mock.patch.object(ledger, 'gaps', side_effect=check_gaps), \
+                mock.patch.object(ledger, 'ledger_path', return_value=home), \
+                mock.patch.object(ledger.fcntl, 'flock', side_effect=check_lock), \
+                redirect_stdout(io.StringIO()), ThreadPoolExecutor(max_workers=2) as pool:
+            lead = pool.submit(invoke, first, lead=True)
+            try:
+                self.assertTrue(checking.wait(10), 'first writer did not reach run validation')
+                follow = pool.submit(invoke, second)
+                self.assertTrue(waiting.wait(10), 'second writer did not wait for the lock')
+            finally:
+                release.set()
+            return lead.result(timeout=10), follow.result(timeout=10)
+
+    def open_run_fixture(self, *, complete=True):
+        self.legacy.unlink(missing_ok=True)
+        self.assertEqual(self.cli('run-start', 'light', 'serialized').returncode, 0)
+        home = self.resolve()
+        head = self.git(self.checkout, 'rev-parse', 'HEAD')
+        for step in ledger.REQUIRED['light']:
+            if complete or step != 'deep-review':
+                ledger.append(home, step, 'ship:reviewer--sol', head, 'pass', '')
+        return home, head
+
     def test_run_anchor_waits_for_run_end(self):
         for complete in (True, False):
             with self.subTest(complete=complete):
                 self.git(self.checkout, 'switch', '-qc', f'lock-{complete}')
-                self.assertEqual(self.cli('run-start', 'light', 'serialized').returncode, 0)
-                home = self.resolve()
-                head = self.git(self.checkout, 'rev-parse', 'HEAD')
-                for step in ledger.REQUIRED['light']:
-                    if complete or step != 'deep-review':
-                        ledger.append(home, step, 'ship:reviewer--sol', head, 'pass', '')
-
-                checking, waiting, release, end_done = Event(), Event(), Event(), Event()
-                real_gaps, real_git, real_flock = ledger.gaps, ledger.git, ledger.fcntl.flock
-
-                def pause_gaps(*args):
-                    checking.set()
-                    self.assertTrue(release.wait(10), 'run-end did not resume')
-                    return real_gaps(*args)
-
-                def check_lock(fd, flags):
-                    flags |= ledger.fcntl.LOCK_NB
-                    if checking.is_set() and not release.is_set():
-                        with self.assertRaises(BlockingIOError):
-                            real_flock(fd, flags)
-                        waiting.set()
-                        self.assertTrue(end_done.wait(10), 'run-end did not release the lock')
-                    return real_flock(fd, flags)
-
-                def invoke(command):
-                    try:
-                        ledger.main([command])
-                    except SystemExit as exc:
-                        return exc.code
-                    finally:
-                        if command == 'run-end':
-                            end_done.set()
-                    return None
-
-                with mock.patch.object(ledger, 'gaps', side_effect=pause_gaps), \
-                        mock.patch.object(ledger, 'git', side_effect=lambda _, *a: real_git(self.checkout, *a)), \
-                        mock.patch.object(ledger, 'ledger_path', return_value=home), \
-                        mock.patch.object(ledger.fcntl, 'flock', side_effect=check_lock), \
-                        ThreadPoolExecutor(max_workers=2) as pool:
-                    end = pool.submit(invoke, 'run-end')
-                    try:
-                        self.assertTrue(checking.wait(10), 'run-end did not reach gaps')
-                        anchor = pool.submit(invoke, 'run-anchor')
-                        self.assertTrue(waiting.wait(10), 'run-anchor did not wait for run-end')
-                    finally:
-                        release.set()
-                    ended, anchored = end.result(timeout=10), anchor.result(timeout=10)
-
+                home, head = self.open_run_fixture(complete=complete)
+                ended, anchored = self.ordered_ledger_writes(home, ('run-end',), ('run-anchor',))
                 if complete:
                     self.assertIsNone(ended)
                     self.assertIn('no open run', anchored)
@@ -880,6 +895,30 @@ class LedgerDirTests(unittest.TestCase):
                     self.assertIsNone(anchored)
                     self.assertEqual(ledger.rows(home)[-1][1:5], ['run-anchor', '', head, 'open'])
                     self.assertIn('simplify (', self.cli('gaps').stdout)
+
+    def test_run_end_waits_for_run_anchor(self):
+        home, head = self.open_run_fixture()
+        anchored, ended = self.ordered_ledger_writes(home, ('run-anchor',), ('run-end',))
+        self.assertIsNone(anchored)
+        self.assertIn('refusing run-end; gaps: simplify (', ended)
+        self.assertEqual(ledger.rows(home)[-1][1:5], ['run-anchor', '', head, 'open'])
+
+    def test_append_waits_for_run_end(self):
+        home, head = self.open_run_fixture()
+        ended, appended = self.ordered_ledger_writes(
+            home, ('run-end',), ('append', 'deep-review', 'ship:reviewer--sol', head, 'pass'))
+        self.assertIsNone(ended)
+        self.assertIn('no open run', appended)
+        self.assertEqual(ledger.rows(home)[-1][1], 'run-end')
+
+    def test_run_start_waits_for_another_run_start(self):
+        self.legacy.unlink()
+        home = self.resolve()
+        started, refused = self.ordered_ledger_writes(
+            home, ('run-start', 'light', 'first'), ('run-start', 'light', 'second'))
+        self.assertIsNone(started)
+        self.assertIn('run first is still open', refused)
+        self.assertEqual([(row[1], row[5]) for row in ledger.rows(home)], [('run-start', 'first')])
 
     def test_review_gaps_report_bad_roles_and_commits(self):
         before_run = self.git(self.checkout, 'rev-parse', 'HEAD')
