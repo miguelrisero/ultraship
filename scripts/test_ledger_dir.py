@@ -1036,7 +1036,7 @@ class LedgerDirTests(unittest.TestCase):
         base = self.git(self.checkout, 'rev-parse', 'HEAD')
         owed, transcript, result, epoch = self.auto_owed([
             (-2, 'user', 'Review the uncommitted patch.'),
-            (-1, 'assistant', f'Reviewed patch SHA-256: `{digest.upper()}`\nBase: {base}\n**Verdict:** findings')])
+            (-1, 'assistant', f'**Reviewed patch SHA-256:** `{digest.upper()}`\nBase: {base}\n**Verdict:** findings')])
         home = self.resolve()
         accounted = self.cli('account-patch', str(owed), result['id'], str(patch))
         self.assertEqual(accounted.returncode, 0, accounted.stderr)
@@ -1089,6 +1089,11 @@ class LedgerDirTests(unittest.TestCase):
              f'````markdown\n```text\nPatch SHA-256: {digest}\nVerdict: pass\n```\n````\nI could not review the patch.',
              patch, 'expected one patch digest'),
             ('disclaimed digest', f'Patch SHA-256: unknown; the prompt supplied {digest}\nVerdict: findings', patch,
+             'expected one patch digest'),
+            ('indented markers inside a fence',
+             f'```text\n    ```\nPatch SHA-256: {digest}\nVerdict: pass\n    ```\n```\nI could not review the patch.',
+             patch, 'expected one patch digest'),
+            ('indented code block', f'Example:\n\n    Patch SHA-256: {digest}\n    Verdict: pass\n\nNo review.', patch,
              'expected one patch digest'),
             ('unclosed fence', f'Patch SHA-256: {digest}\nVerdict: findings\n```\nnotes', patch, 'unclosed code fence'),
             ('quoted digest beside an own digest', f'Patch SHA-256: {digest}\n> Patch SHA-256: {other}\nVerdict: pass',

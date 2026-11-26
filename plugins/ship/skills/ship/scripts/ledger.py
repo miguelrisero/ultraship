@@ -106,7 +106,8 @@ VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
 REVIEWED_COMMIT = re.compile(r'^[\s>*#_\-]*Reviewed commit[*_]*\s*:.*(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])',
                              re.I | re.M)
 PATCH_DIGEST = re.compile(r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])', re.I)
-PATCH_LABEL = re.compile(r'[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:\s*`?([0-9a-f]{64})`?[*_]*\s*', re.I)
+PATCH_LABEL = re.compile(r'[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:[*_]*\s*`?([0-9a-f]{64})`?[*_]*\s*',
+                         re.I)
 PATCH_BYTE_LIMIT = 64 * 1024 * 1024
 FENCE = re.compile(r'(`{3,}|~{3,})')
 
@@ -116,15 +117,18 @@ def own_lines(text):
     kept, fence = [], None
     for line in text.splitlines():
         stripped = line.lstrip()
+        indent = len(line.expandtabs(4)) - len(stripped)
         opener = FENCE.match(stripped)
         if fence:
-            # A fence closes only on the same character, at least as long, with nothing after it.
-            if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence) \
+            # Markdown closes a fence only on the same character, at least as long, indented at most three
+            # spaces, with nothing after it.
+            if opener and indent <= 3 and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence) \
                     and not stripped[opener.end():].strip():
                 fence = None
         elif opener:
             fence = opener.group(1)
-        elif not stripped.startswith('>'):
+        elif indent < 4 and not stripped.startswith('>'):
+            # A line indented four or more spaces is an indented code block.
             kept.append(line)
     if fence:
         raise ValueError('unclosed code fence')
