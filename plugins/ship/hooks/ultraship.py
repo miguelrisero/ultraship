@@ -5190,7 +5190,8 @@ def own_account_call(data, raw):
         # ledger.py hashes the patch and reads the subject and verdict itself; only the file path is caller data.
         if (len(words) == 6 and words[3] == pending
                 and re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', words[4])
-                and words[5].startswith('/') and os.path.realpath(words[5]) == words[5]):
+                and words[5].startswith('/') and os.path.realpath(words[5]) == words[5]
+                and link_free_path(words[5])):
             return words
         return False
     if len(words) != 10 or words[2] != 'account' or words[3] != pending:

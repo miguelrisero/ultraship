@@ -1532,9 +1532,11 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.consume(words)
         linked = self.cwd / 'linked'
         linked.symlink_to(self.cwd)
+        loop = self.cwd / 'loop.patch'
+        loop.symlink_to(loop)
         for index, value in ((4, 'invalid'), (5, 'frozen.patch'), (5, str(self.cwd / '../frozen.patch')),
                              (5, str(self.cwd) + '//frozen.patch'), (5, '/' + str(self.cwd / 'frozen.patch')),
-                             (5, str(linked / 'frozen.patch')), (5, '')):
+                             (5, str(linked / 'frozen.patch')), (5, str(loop)), (5, '')):
             invalid = words.copy()
             invalid[index] = value
             with self.subTest(index=index, value=value):

@@ -106,19 +106,28 @@ VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
 REVIEWED_COMMIT = re.compile(r'^[\s>*#_\-]*Reviewed commit[*_]*\s*:.*(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])',
                              re.I | re.M)
 PATCH_DIGEST = re.compile(r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])', re.I)
-PATCH_LABEL = re.compile(r'^[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:', re.I)
+PATCH_LABEL = re.compile(r'[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:\s*`?([0-9a-f]{64})`?[*_]*\s*', re.I)
 PATCH_BYTE_LIMIT = 64 * 1024 * 1024
+FENCE = re.compile(r'(`{3,}|~{3,})')
 
 
 def own_lines(text):
     """Drop quoted lines and fenced blocks, so a reviewer's quotation never supplies a subject or verdict."""
-    kept, fenced = [], False
+    kept, fence = [], None
     for line in text.splitlines():
         stripped = line.lstrip()
-        if stripped.startswith(('```', '~~~')):
-            fenced = not fenced
-        elif not fenced and not stripped.startswith('>'):
+        opener = FENCE.match(stripped)
+        if fence:
+            # A fence closes only on the same character, at least as long, with nothing after it.
+            if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence) \
+                    and not stripped[opener.end():].strip():
+                fence = None
+        elif opener:
+            fence = opener.group(1)
+        elif not stripped.startswith('>'):
             kept.append(line)
+    if fence:
+        raise ValueError('unclosed code fence')
     return '\n'.join(kept)
 
 
@@ -672,8 +681,8 @@ def account_patch(pending, identifier, patch, *, entries):
         raise ValueError('mixed review subject')
     raw, text = text, own_lines(text)
     digests = {digest.lower() for digest in PATCH_DIGEST.findall(text)}
-    labelled = {digest.lower() for line in text.splitlines() if PATCH_LABEL.match(line)
-                for digest in PATCH_DIGEST.findall(line)}
+    # The whole field value must be the digest, so a disclaimed or annotated value never counts.
+    labelled = {match.group(1).lower() for line in text.splitlines() if (match := PATCH_LABEL.fullmatch(line))}
     # A digest or verdict inside a quotation or fence fails closed, whatever the fence structure.
     if len(digests) != 1 or labelled != digests or {d.lower() for d in PATCH_DIGEST.findall(raw)} != digests:
         raise ValueError('expected one patch digest')
