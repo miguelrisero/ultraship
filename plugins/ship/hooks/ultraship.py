@@ -5232,7 +5232,59 @@ def issue_account_grant(data):
             deny('The ship hook could not issue a fresh accounting grant. Run the exact command again.')
 
 
-def receipt_custody(data, read_search=False):
+CUSTODY_LITERAL_PATH = r'(?!-)[A-Za-z0-9_./-]+'
+CUSTODY_GIT_GREP = (r"git[ \t]+grep(?:[ \t]+-[niwFElc])*[ \t]+(?:-e[ \t]+)?"
+                    r"'(?!-)[^'\x00-\x1f\x7f$`;|<>&]+'[ \t]+--"
+                    rf"(?:[ \t]+{CUSTODY_LITERAL_PATH})+")
+CUSTODY_LINT = re.compile(rf'[ \t]*python3[ \t]+({CUSTODY_LITERAL_PATH}/text_lint\.py)'
+                          rf'[ \t]+(?:peer|decision|result)[ \t]+<[ \t]+({CUSTODY_LITERAL_PATH})[ \t]*')
+
+
+def custody_grep_paths(command):
+    paths = []
+    for part in command.split('&&'):
+        if not re.fullmatch(CUSTODY_GIT_GREP, part.strip(' \t')):
+            return ()
+        words = shlex.split(part)
+        paths.extend(words[words.index('--') + 1:])
+    return tuple(paths)
+
+
+def custody_bound_command(command):
+    """Expand a whole path word only in a verified straight-line command list."""
+    # shortcut: cover the two CoC setup lists and a standalone binding; use a shell parser for other lists.
+    path = CUSTODY_LITERAL_PATH
+    absolute = r'/[A-Za-z0-9_./-]+'
+    word = r'''(?:(?!=)[A-Za-z0-9_./@%+=:-]+|'[^'\x00-\x1f\x7f$`]*'|"[^"$`\\!\x00-\x1f\x7f]*")'''
+    gap, space = r'[ \t]+', r'[ \t]*'
+    cd = rf'cd{gap}(?P<directory>{absolute}){gap}&&{gap}'
+    bind = rf'(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>{absolute})'
+    config = rf'COC_CONFIG={absolute}'
+    use = r'(?:\$(?P=name)|"\$(?P=name)")'
+    operands = rf'(?:{gap}(?:{word}|{use}))*'
+    for lead, middle, programs in (
+            ('', rf'{space};{space}', r'(?:python3|cat|head|tail|wc|stat)'),
+            (rf'{cd}python3{gap}{path}(?:{gap}{word})*{space};{space}',
+             rf'{space};{space}export{gap}{config}{space};{space}', 'python3'),
+            (rf"{cd}printf{gap}'%s\\n'{gap}{word}{gap}>{space}{path}{gap}&&{gap}",
+             rf'{gap}&&{gap}{config}{gap}', 'python3')):
+        match = re.fullmatch(rf'{space}{lead}{bind}{middle}{programs}{gap}{use}{operands}'
+                             rf'(?:{gap}\|{gap}(?:grep|tail)(?:{gap}{word})+)?{space}', command)
+        if not match:
+            continue
+        name, value = match['name'], match['value']
+        if (name in SHELL_SPECIAL_NAMES or name in os.environ
+                or name.startswith(('BASH', 'EPOCH', 'ZSH', 'PYTHON', 'LD_', 'DYLD_', 'GIT_'))):
+            return None
+        # The grammar excludes all other expansions. Count bare mentions to exclude another assignment.
+        prefix, rest = command[:match.end('value')], command[match.end('value'):]
+        expanded, uses = re.subn(rf'\${name}\b', lambda _: value, rest)
+        if len(re.findall(rf'\b{name}\b', command)) == uses + 1:
+            return prefix + expanded, value, match.groupdict().get('directory')
+    return None
+
+
+def receipt_custody(data, read_search=False, *, exact_forms=True):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     if read_search and tool not in ('Read', 'Grep', 'Glob', 'LSP') and not tool.startswith('mcp__fff__'):
         return
@@ -5312,6 +5364,22 @@ def receipt_custody(data, read_search=False):
     # shortcut: shell text checks cannot isolate same-user code; upgrade to isolated state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
+        if exact_forms and not receipt_text(raw) and not receipt_path(cwd_path, ancestors=True):
+            grep_paths = custody_grep_paths(raw)
+            if grep_paths and not any(receipt_path(path, ancestors=True) for path in grep_paths):
+                return
+            lint = CUSTODY_LINT.fullmatch(raw)
+            if (lint and not any(receipt_path(path, ancestors=True) for path in lint.groups())
+                    and Path(cwd_path, lint[1]).resolve() == Path(__file__).resolve().with_name('text_lint.py')):
+                return
+            binding = custody_bound_command(raw)
+            if binding:
+                expanded, path, directory = binding
+                target = Path(path).resolve()
+                if (not receipt_path(path, ancestors=True) and not receipt_path(directory, ancestors=True)
+                        and target.is_file()
+                        and target.name.casefold() not in {'text_lint.py', 'ultraship.py', 'ledger.py'}):
+                    return receipt_custody({**data, 'tool_input': {**tin, 'command': expanded}}, exact_forms=False)
         joined = raw.replace('\\\n', '')
         account_command = normalized(joined)
         # A leading literal search pattern is data. Keep the full command for path and executable checks.
@@ -6279,15 +6347,15 @@ def receipt_custody(data, read_search=False):
             return False
 
         if receipt_text(path_command):
-            deny(RECEIPT_CUSTODY)
+            deny(RECEIPT_CUSTODY + '\nRule: store-text.')
         if ('ledger.py' in search_account_command and 'account-auto' in search_account_command
                 and not own_account_call(data, raw) and not plain_reader(raw)):
             # The first line stays the receipt message; the next line names what differs from the Stop command.
-            deny(RECEIPT_CUSTODY + '\n' + account_auto_difference(data))
+            deny(RECEIPT_CUSTODY + '\n' + account_auto_difference(data) + '\nRule: account-auto.')
         if (any(receipt_path(word) for word in words)
                 or ancestor_operand()
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))):
-            deny(RECEIPT_CUSTODY)
+            deny(RECEIPT_CUSTODY + '\nRule: store-operand.')
         # A longer search word is inert in a single literal grep call. Keep its path under every custody check.
         grep_word = re.fullmatch(r"[ \t]*grep[ \t]+-n[ \t]+([A-Za-z0-9]+|'[A-Za-z0-9]+')[ \t]+"
                                  r"(?:~/)?(?!-)[A-Za-z0-9_./-]+[ \t]*\n?", raw)
@@ -6668,11 +6736,11 @@ def checks(data):
                  + (' If the brief names no superior, report it here.' if superior == 'the superior named in your brief' else '')
                  + ' Continue independent work within your authority.')
         if grant_custody_denied == 'hard':
-            deny(RECEIPT_CUSTODY)
+            deny(RECEIPT_CUSTODY + '\nRule: custody-scope.')
         if grant_custody_denied:
             # An unresolved word proceeds with a warning only when no hidden program can hide behind it.
             if obfuscated_shell(str(tin.get('command', ''))):
-                deny(OBFUSCATED_COMMAND)
+                deny(OBFUSCATED_COMMAND + '\nRule: obfuscated-command.')
             warn('S2', CUSTODY_ADVISORY)
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')

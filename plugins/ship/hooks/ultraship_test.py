@@ -559,6 +559,67 @@ class LiteralCustodyTests(unittest.TestCase):
                 self.assert_denied(command, ultraship.RECEIPT_CUSTODY)
         self.assert_denied('node --unknown-option example.mjs', 'inline interpreter code rule')
 
+    def test_exact_custody_forms_allow_both_callers(self):
+        repo = str(self.cwd)
+        writer = HOOK.with_name('text_lint.py')
+        for name in ('promises.py', 'slack_post.py'):
+            (self.cwd / name).touch()
+        commands = (
+            "git grep -n 'text_lint hook' -- plugins/ship/hooks/ultraship.py"
+            " && git grep -i -w -F -l -e 'example' -- README.md docs/",
+            f'cd {repo} && python3 tools/ledger_answers.py "00000000-0000-4000-8000-000000000001=x"; '
+            f'P={repo}/promises.py; export COC_CONFIG={repo}/config.json; '
+            'python3 $P add --promise "x" --due 2026-11-27T10:00Z --driver "y" | grep \'"id"\'',
+            f'cd {repo} && printf \'%s\\n\' "x" > slack-x.txt && P={repo}/slack_post.py '
+            f'&& COC_CONFIG={repo}/config.json python3 $P --channel D0 --text-file {repo}/slack-x.txt | tail -c 120',
+            f'P={repo}/promises.py; python3 "$P" "$P"',
+            *(f'python3 {writer} {kind} < draft.txt' for kind in ('peer', 'decision', 'result')),
+        )
+        for caller in ('', 'ship:driver--sol'):
+            for command in commands:
+                with self.subTest(caller=caller, command=command):
+                    decision = self.pre(command, caller)
+                    self.assertNotEqual(decision.get('permissionDecision'), 'deny', decision)
+
+    def test_exact_custody_forms_check_public_paths_and_keep_main_denials(self):
+        store = self.home / '.local/state/ultraship/account-grants'
+        store.mkdir(parents=True)
+        (store / 'fixture.py').touch()
+        (self.cwd / 'fixture-alias').symlink_to(store, target_is_directory=True)
+        writer = HOOK.with_name('text_lint.py')
+        search = "git grep -n 'text_lint hook' -- README.md"
+        for caller in ('', 'ship:driver--sol'):
+            for command in (
+                    search.replace('-n', '-O'), search.replace('-n', '--open-files-in-pager'),
+                    search.replace('-n', '--output=out.txt'), search + ' > out.txt', search + '; true',
+                    search + ' | cat', search + '\ntrue', search.replace('hook', 'hook $X'),
+                    search.replace('hook', 'hook `pwd`'), search.replace('README.md', 'fixture-alias/fixture.py'),
+                    f'python3 {writer} hook < draft.txt', f'python3 {writer} peer < fixture-alias/fixture.py',
+                    f'P={self.cwd}/fixture-alias/fixture.py; python3 $P',
+                    f'P={self.cwd}/$CHILD; python3 $P', 'python3 $P', "python3 -c 'import text_lint'"):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_denied(command, ultraship.RECEIPT_CUSTODY, caller)
+        for command in (
+                f'P={self.cwd}/a.py; P={self.cwd}/b.py; python3 $P',
+                f'P={self.cwd}/a.py; python3 ${{P}}', f'P={self.cwd}/a.py; python3 $P:h',
+                f'P={self.cwd}/a.py; python3 "$(cat $P)"', f'P={self.cwd}/a.py; python3 "$P" `pwd`',
+                f'P={self.cwd}/$CHILD; python3 $P', f'P={self.cwd}/a.py; python3 $P > out.txt'):
+            with self.subTest(command=command):
+                self.assertIsNone(ultraship.custody_bound_command(command))
+
+    def test_main_custody_gaps_receive_no_allowance(self):
+        writer = HOOK.with_name('text_lint.py')
+        commands = (
+            f"git grep -n 'text_lint hook' -- README.md && git diff --output={writer} -- README.md",
+            f"sed --in-pl -e 's/a/b/' {writer}", f'cat {writer} | python3 -',
+            'd=/fixture; ((\n  1 << 2\n)); cat "$d/fixture.json"\n2\n',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFalse(ultraship.custody_grep_paths(command))
+                self.assertIsNone(ultraship.custody_bound_command(command))
+                self.assertIsNone(ultraship.CUSTODY_LINT.fullmatch(command))
+
     def test_literal_node_keeps_custody_checks(self):
         store = self.state / 'ultraship/text-lint'
         store.mkdir(parents=True)
