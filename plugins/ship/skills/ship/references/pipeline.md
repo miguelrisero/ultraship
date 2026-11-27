@@ -80,6 +80,9 @@ Use a full commit SHA or an unambiguous abbreviated commit SHA. The ledger accep
 2. Stop on the default branch. Create a branch and worktree first.
 3. Run `ledger.py run-start <mode> <run-id> [board-path]`. Reuse an open run on the same branch.
 
+**Known custody limits:** The shell scan has gaps for heredoc comments, multiline arithmetic shifts, parameter quotes, and interpreter input from a pipe.
+It also has gaps for Git output options, abbreviated GNU sed options, renamed or hard-linked writer files, and zsh special parameters.
+
 ## 2. Plan and premises
 
 Start normal plans with `ship:planner--opus`. Follow the normal planner chain in the [roster](roster.md).
