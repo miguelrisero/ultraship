@@ -61,6 +61,19 @@ Preserve execution admission and the reviewer MCP ban under both [scoped decisio
 | 12 | Completion gate | `gate` | driver |
 | 13 | Handoff | — | driver |
 
+### Ledger review evidence
+
+Record `<seat>@<agent-id>` and the actual reviewed commit in each new review row.
+Use a nonempty agent ID with neither whitespace nor `@`.
+The ledger checks the seat against the Ship reviewer agent files and also accepts a bare declared seat.
+For `panel-high`, `simplify`, `deep-review`, `select`, `fix-read`, and `panel-final`, use a commit between the run base and HEAD, inclusive, by Git ancestry.
+The latest `run-anchor` supplies the run base when present. Otherwise, the `run-start` row supplies it.
+If the run base leaves HEAD history, run `ledger.py run-anchor` to record the current HEAD.
+Repeat the six history reviews that apply to the run mode. Only rows after the latest anchor qualify for those steps.
+In full mode, record `closing` at HEAD. Light mode has no `closing` step.
+Use a full commit SHA or an unambiguous abbreviated commit SHA. The ledger accepts uppercase hexadecimal digits.
+`append` trusts the supplied agent name; the role check detects label errors only.
+
 ## 1. Guard and open
 
 1. Confirm the repository, a clean owned worktree, GitHub access, and a branch based on current remote main.
