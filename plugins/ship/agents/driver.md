@@ -186,6 +186,20 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The driver supplies content-free evidence from the anchor guard at the authorized draft head.
    The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.
    The reviewer brief names both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count.
+   Named main checkout: a CI checkout that merges the head into a named main commit counts as the row-review CI tree when both receipts hold.
+   That main commit may be older than the newest main. For this checkout, the frozen tree SHA is the merge-tree result below.
+   Tree tie: the CI checkout tree equals `git merge-tree --write-tree <that main> <head>`.
+   Main delta: the main commits after the head's main parent touch no PR file and no row file.
+   Print the list with `git diff --name-only <head main parent> <that main>`, filtered against the PR file list and the row file paths.
+   Census overlap: when the filtered list holds only a census pin test file that both main and the PR change, accept it only when all four conditions hold.
+   Census condition 1: main's hunk touches none of the PR's approved pin lines. Give the line numbers.
+   Census condition 2: the merged census file passes the census test in CI at that merge head.
+   Census condition 3: the tree tie holds.
+   Census condition 4: no other path is in the filtered list.
+   Put both receipts, and the census line numbers and census test result when used, in the PR's row record comment.
+   The reviewer brief also names that main commit and both receipts.
+   The merge queue merges current main and reruns the gate, the anchor guard included, before the squash.
+   If a receipt or condition fails, merge main once more and report. This rule lifts no owner hold.
    Include proof that the guard selected the row and that a count mismatch on that row fails the job.
    Report an observed count only when the evidence gives it directly.
 8. Review: one independent reviewer confirms that every changed, retired, restored or added row is not weaker.
