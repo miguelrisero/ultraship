@@ -460,6 +460,25 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 ):
                     self.assertTrue(requirement in native, requirement)
 
+    def test_named_main_checkout_needs_tree_tie_and_main_delta_receipts(self):
+        for name in ROUTE_CARRIERS:
+            route = section((SHIP / name).read_text(), '### Lane-owned row route')
+            ci = route.split('\n7. CI:', 1)[1].split('\n8. Review:', 1)[0]
+            for requirement in (
+                'Tree tie: the CI checkout tree equals `git merge-tree --write-tree <that main> <head>`.',
+                "Main delta: the main commits after the head's main parent touch no PR file and no row file.",
+                'Census condition 4: no other path is in the filtered list.',
+                "Put both receipts, and the census line numbers and census test result when used, in the PR's row record comment.",
+                'The merge queue merges current main and reruns the gate, the anchor guard included, before the squash.',
+            ):
+                with self.subTest(path=name, requirement=requirement):
+                    self.assertIn(requirement, ci)
+        for name in REVIEWERS:
+            route = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
+            native = route.split('For a CoC-approved native exact-pair edit,', 1)[1].split('\n\n', 1)[0]
+            with self.subTest(reviewer=name):
+                self.assertIn('Block approval if a receipt or census condition is missing or fails.', native)
+
     def test_added_row_id_proof_keeps_count_evidence_and_read_admission_separate(self):
         reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
         proof = section(reference, '## Added row ID proof')
