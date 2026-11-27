@@ -22,7 +22,7 @@ import traceback
 import unicodedata
 import urllib.parse
 import uuid
-from collections import Counter
+from collections import Counter, deque
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -1714,9 +1714,12 @@ def stdin_program_path(value):
             or resolved.startswith(('/dev/', '/proc/')))
 
 
+PROCESS_PATH_ROOTS = ('/proc', '/dev')
+
+
 def unsafe_script_path(value, base):
     path = os.path.realpath(os.path.join(base, value))
-    return path in {'/proc', '/dev'} or path.startswith(('/proc/', '/dev/'))
+    return path in PROCESS_PATH_ROOTS or path.startswith(tuple(root + '/' for root in PROCESS_PATH_ROOTS))
 
 
 def chdir_wrapper_present(command, env_directories):
@@ -4422,10 +4425,8 @@ def custody_read_only_shell(command, cwd, *, check_path=None):
                 # A failed cd must skip the whole chain; logical cd can also differ from physical traversal.
                 if ending != '&&' or any(sep in {';', '||', '\n'} for _, sep in parts[1:-1]):
                     return False
-                physical = target.resolve(strict=True)
-                if physical != Path(os.path.normpath(target)).resolve(strict=True):
-                    return False
-                if not check_path(target, ancestors=False):
+                physical = check_path(target, ancestors=False)
+                if physical is None or physical != check_path(Path(os.path.normpath(target)), ancestors=False):
                     return False
                 cwd = physical
             else:
@@ -4464,11 +4465,16 @@ def custody_read_only_shell(command, cwd, *, check_path=None):
                     return False
             if (flags is None or name == 'diff' and (moved or fallback)
                     or any(word.startswith('-') and word not in {'-', '--'}
-                           and not re.fullmatch(rf'-[{flags}0-9]+', word) for word in args)
-                    or name == 'uniq' and (sum(not word.startswith('-') or word == '-' for word in args) > 1
-                                           or '--' in args and args.index('--') < len(args) - 2)):
+                           and not re.fullmatch(rf'-[{flags}0-9]+', word) for word in args)):
                 return False
-        if fallback and any(not check_path(Path(cwd, word), ancestors=True) for word in args):
+            if name == 'uniq':
+                first = next((i for i, word in enumerate(args)
+                              if word in {'-', '--'} or not word.startswith('-')), len(args))
+                if first < len(args) and args[first] == '--':
+                    first += 1
+                if len(args) - first > 1:
+                    return False
+        if fallback and any(check_path(Path(cwd, word), ancestors=True) is None for word in args):
             return False
     return True
 
@@ -7657,11 +7663,34 @@ def compact(data):
 def custody_read_after_error(data):
     """Prove a Bash read without calling the normal custody parser."""
     def canonical(path):
-        try:
-            return path.resolve(strict=True)
-        except FileNotFoundError:
-            # Missing paths cannot be opened. Other resolution failures must reach the denial.
-            return path.resolve()
+        path = path.absolute()
+        pending = deque(path.parts[1:])
+        resolved = Path('/')
+        links = 0
+        # Resolve each link before the kernel can interpret process-relative paths in the hook's context.
+        while pending:
+            part = pending.popleft()
+            if part == '..':
+                resolved = resolved.parent
+                continue
+            candidate = resolved / part
+            if str(candidate).casefold() in PROCESS_PATH_ROOTS:
+                raise ValueError('process-relative path')
+            try:
+                target = Path(os.readlink(candidate))
+            except OSError as error:
+                if error.errno not in {errno.EINVAL, errno.ENOENT}:
+                    raise
+                resolved = candidate
+                continue
+            links += 1
+            if links > 40:
+                raise ValueError('too many symbolic links')
+            if target.is_absolute():
+                resolved = Path('/')
+                target = target.relative_to(target.anchor)
+            pending.extendleft(reversed(target.parts))
+        return resolved
 
     def overlaps(path, root, ancestors):
         path, root = PurePosixPath(str(path).casefold()), PurePosixPath(str(root).casefold())
@@ -7675,7 +7704,7 @@ def custody_read_after_error(data):
         trigger = custody_normalized(command)
         if any(option in trigger for option in ('--row-file', '--row-id')):
             return False
-        real_cwd = cwd.resolve(strict=True)
+        real_cwd = canonical(cwd)
         if not real_cwd.is_dir():
             return False
         receipt = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'ultraship/text-lint'
@@ -7691,17 +7720,18 @@ def custody_read_after_error(data):
         rows = [(path, canonical(path)) for path in row_paths]
 
         def public_path(path, *, ancestors):
-            paths = (Path(os.path.abspath(path)), canonical(path))
+            real = canonical(path)
+            paths = (Path(os.path.abspath(path)), real)
             if any(overlaps(value, root, ancestors) for value in paths for pair in receipts for root in pair):
                 deny(RECEIPT_CUSTODY)
-            return not any(
-                overlaps(value, root, ancestors) for value in paths for pair in rows for root in pair
-            ) and not any(
-                re.search(r'/ultraship/(?:' + '|'.join(ROW_RECORD_FOLDERS) + r')(?:/|$)', str(value), re.I)
-                for value in paths
-            )
+            if any(overlaps(value, root, ancestors) for value in paths for pair in rows for root in pair) or any(
+                    re.search(r'/ultraship/(?:' + '|'.join(ROW_RECORD_FOLDERS) + r')(?:/|$)', str(value), re.I)
+                    for value in paths):
+                return None
+            return real
 
-        return public_path(cwd, ancestors=False) and custody_read_only_shell(command, cwd, check_path=public_path)
+        return public_path(cwd, ancestors=False) is not None and custody_read_only_shell(
+            command, cwd, check_path=public_path)
     except Exception:
         return False
 
