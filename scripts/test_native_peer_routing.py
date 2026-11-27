@@ -212,6 +212,14 @@ class BriefSafetyTests(unittest.TestCase):
         self.addCleanup(environment.stop)
         os.environ.pop('SHIP_LINT_OFF', None)
 
+    def test_draft_push_is_never_blocked_by_a_publication_hold(self):
+        # A Sol lane held its draft push on a brief's "publication holds" wording (CoC replay, 26 Nov).
+        for name in ('plugins/ship/skills/ship/SKILL.md', 'plugins/chief/skills/run/SKILL.md'):
+            item = next(line for line in (ROOT / name).read_text().splitlines() if line.startswith('2. ') and 'draft CI' in line)
+            with self.subTest(path=name):
+                self.assertTrue(item.endswith(
+                    'A draft PR is not publication, so a publication or activation hold never blocks a draft push.'))
+
     def test_each_template_requires_read_scope_and_safety_sentences(self):
         for name, heading in (
             ('plugins/chief/skills/run/references/dispatch.md', '## Brief template'),
