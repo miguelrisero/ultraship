@@ -305,6 +305,10 @@ The record authorizes zero retries and gives zero retry credit.
 
 Use this rule only to count earlier row re-anchor tool invocations for a lane-owned CoC-approved native exact-pair edit.
 Keep any prior tool admission with the earlier tool route and its refusal.
+Bind any prior tool admission to the invocation through the historical evidence referenced by `prior_tool_refusal`.
+Verify that the driver removed that admission before the native edit.
+Apply the removal step in the [row re-anchor tool admission record](#row-re-anchor-tool-admission-record).
+Use historical evidence only. Read no live admission store.
 The native route admits and runs no row re-anchor tool.
 
 Count a prior invocation as zero runs only when all checks below pass.

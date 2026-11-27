@@ -79,6 +79,8 @@ Confirm that those fields name the frozen head, the row ID, the expected count, 
 For a CoC-approved native exact-pair edit, require zero counted tool runs and no generated authorization record.
 Require zero row re-anchor tool admissions on the native route.
 Verify any prior refusal proof in the brief under the [native exact-pair tool attempt accounting](../skills/ship/references/owner-decisions.md#native-exact-pair-tool-attempt-accounting) rule.
+Verify from that proof that any prior tool admission ended before the native edit.
+Block approval if the prior admission or its removal cannot be verified.
 Block approval if a prior invocation counts as a run.
 Require the frozen CoC decision by absolute path and SHA256.
 Require the driver's digest and binding verification at the frozen head.
