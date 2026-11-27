@@ -2237,6 +2237,23 @@ class ReceiptCustodyTests(unittest.TestCase):
                         self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
                                                    ultraship.PRE_FAILED)
 
+    def test_pre_error_denies_process_relative_paths(self):
+        state = self.store.parent
+        (state / 'row-review').mkdir(parents=True)
+        (state / 'row-review/fixture.json').touch()
+        self.store.mkdir()
+        (self.store / 'key').touch()
+        (state / 'here').symlink_to('/proc/self/cwd', target_is_directory=True)
+        for failing_check in ('pre_output', 'receipt_custody'):
+            for anchor in ('/proc/self/cwd', 'here'):
+                for record in ('row-review/fixture.json', 'text-lint/key'):
+                    command = f'cd {shlex.quote(str(state))} && cat {anchor}/{record}'
+                    with self.subTest(check=failing_check, anchor=anchor, record=record), \
+                            patch.object(ultraship, failing_check, side_effect=RuntimeError):
+                        reason = (ultraship.PRE_FAILED if failing_check == 'pre_output'
+                                  else ultraship.RECEIPT_CUSTODY_FAILED)
+                        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}}, reason)
+
     def test_custody_read_classifier_excludes_git_with_side_effects(self):
         for command in ('git status --short', 'git show HEAD:file.txt | head'):
             with self.subTest(command=command):
