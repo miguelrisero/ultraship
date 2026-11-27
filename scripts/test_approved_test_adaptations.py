@@ -130,6 +130,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             "The driver's ledger record of that review cites the ruling's locator, time and verbatim text.",
             'The locator is the CoC workspace and message or event ID, or a file path with its SHA256.',
             'The driver checks the ruling at that locator before dispatch.',
+            'The driver also confirms that no later CoC ruling revokes it; a revoked ruling returns this seat to `ship:reviewer--sol`.',
             'This seat rule changes no other gate of this route.',
         ):
             with self.subTest(check=requirement):
