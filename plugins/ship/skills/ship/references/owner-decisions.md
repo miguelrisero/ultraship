@@ -369,6 +369,7 @@ Decision:
 - After the writer verifies the frozen corrected decision under that rule, the refused attempt counts as zero runs.
 - The writer gets one new attempt under the corrected decision.
 - The driver re-dispatches it with a fresh admission record.
+- Removing a guard to prove a test fails is a mutant cycle and needs a GO.
 - Commit only the row file on success.
 - Keep the row pending on a refusal.
 - Report the refusal to the driver.

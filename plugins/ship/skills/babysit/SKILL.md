@@ -13,6 +13,7 @@ Bring the PR in `$ARGUMENTS`, or the current branch's PR, to green required CI a
 
 Apply this rule to every triage, writer and reviewer brief.
 Start each writer brief with `You may always` and `Only the owner` from the loaded writer definition.
+Put this sentence in every writer brief: "Removing a guard to prove a test fails is a mutant cycle and needs a GO."
 Require this field and these sentences verbatim in every brief:
 
 ```text
