@@ -418,6 +418,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 native = 'For a CoC-approved native exact-pair edit, use zero row re-anchor tool admissions and run no row re-anchor tool.'
                 tool_run = '2. Tool re-anchor: the writer runs the sanctioned re-anchor tool once per row'
                 self.assertEqual(route.count('[row re-anchor tool admission record]'), 1)
+                self.assertIn(native, route)
                 self.assertLess(route.index(selection), route.index(admission))
                 self.assertLess(route.index(admission), route.index(native))
                 self.assertLess(route.index(native), route.index(tool_run))
