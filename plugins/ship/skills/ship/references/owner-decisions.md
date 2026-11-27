@@ -277,6 +277,8 @@ Keep one content-free record per authorized lane-owned protected row change at t
 Include every changed, added, retired or restored protected row.
 Keep it in the lane state file and copy it into the reviewer brief before dispatch.
 
+Each record requires `repository`, `pr`, `row_id`, `row_file`, `worktree` and `head`.
+
 - `repository`: the repository's `owner/name`.
 - `pr`: the verified URL of the authorized draft PR.
 - `row_id`: the exact row ID.
