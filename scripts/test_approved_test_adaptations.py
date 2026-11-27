@@ -48,6 +48,28 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             (SHIP / 'agents/driver--sol.md').read_text(),
         )
 
+    def test_protected_merge_review_accounts_for_every_resolution_change(self):
+        skill = (SHIP / 'skills/ship/SKILL.md').read_text()
+        pipeline = (SHIP / 'skills/ship/references/pipeline.md').read_text()
+        for policy, clauses in (
+            (section(pipeline, '## 9. Push and PR'), (
+                'Immediately after the merge starts and before any resolution',
+                'capture the complete protected index entries with `git ls-files --stage -z`',
+                'Bind the index record and the exact paths and actions in the writer brief to both merge parents.',
+                'Give the reviewer the before-resolution index record, the writer brief and the complete protected tree entries at the merge commit.',
+            )),
+            (section(skill, '### Protected row merge review'), (
+                'Compare the complete before-resolution index with the merge commit tree by exact path.',
+                'Account for every added, removed, modified or resolved protected entry with a named action or a separately reviewed route.',
+                'Use the recorded index stages to identify conflicts.',
+                'Flag a named checkout for explicit disposition when the first-parent blob differs from the merge-base blob.',
+                'Block release until every flagged checkout has an explicit disposition.',
+            )),
+        ):
+            for clause in clauses:
+                with self.subTest(clause=clause):
+                    self.assertIn(clause, policy)
+
     def test_writers_can_create_only_the_absent_rows_file_named_by_the_decision(self):
         rules = []
         for name in ('writer--sol.md', 'writer--fable52.md'):
