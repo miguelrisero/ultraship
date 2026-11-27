@@ -208,6 +208,33 @@ Return a ready PR to draft before an early CI push. Keep it in draft until all a
 Apply existing push holds, protected-row receipts, and preflight requirements even for a draft.
 
 1. Merge current remote main into the branch. Resolve conflicts and rerun the affected tests that the brief admits.
+   For qualifying whole-file actions, use [protected row merge resolution](../SKILL.md#protected-row-merge-resolution).
+   Verify the repository identity of `origin` without exposing credentials.
+   After the fetch, record the `refs/heads/main` SHA from `git ls-remote --exit-code origin refs/heads/main` before starting the merge.
+   Match that SHA to `origin/main`. Match it to the sole `MERGE_HEAD` during resolution.
+   Require an empty `refs/replace` namespace when collecting evidence.
+   Immediately after the merge starts and before any resolution, capture the complete protected index entries with `git ls-files --stage -z` from the repository root.
+   <a id="protected-path-filter"></a>Apply the same protected-path filter to the complete Git index and tree metadata.
+   Match adjacent `tests` and `mutation` path components at the root or any depth, without regard to case.
+   Apply the filter to the path field of each NUL-delimited record.
+   Preserve each entry's exact path spelling for comparison. Keep the mode, object ID and stage, including stage 0 and all unmerged stages.
+   Record `HEAD` and `MERGE_HEAD` as the first and second parents. Keep resolution pending if the capture is missing or incomplete.
+   Bind the index record and the exact paths and actions in the writer brief to both merge parents.
+   Name the source commit for each checkout. Use the recorded index stages to identify conflicts.
+   Give one independent Sol reviewer the [merge review checklist](../SKILL.md#protected-row-merge-review) in the brief.
+   Include the remote evidence, the merge commit, both parents and their merge base.
+   Collect complete protected tree entries from both parents, their merge base and the merge commit.
+   Use recursive `git ls-tree -rz` metadata from the repository root for each tree.
+   Give the reviewer the before-resolution index record, the writer brief and the complete protected tree entries at the merge commit.
+   Include the complete protected entries from both parents and their merge base.
+   Record the exact capture and filter commands for each inventory.
+   Record the total and protected entry counts for each inventory.
+   Count NUL-delimited records before and after filtering the same capture. Count each index stage entry separately.
+   Give the reviewer the commands and counts for each inventory.
+   Pass only protected index and tree entries to the reviewer. Exclude unrelated paths and all file content.
+   Include any separate review records that cover protected changes, including deletions outside the merge route.
+   Keep row text and protected read grants out of this review.
+   Require the passing CI anchor guard at the exact pushed head.
 2. Run the full lint and test suite locally when the brief admits it. When the brief bars local tests, use authorized CI or the coordinator's gated run for that proof. Keep any check that the repository requires before push.
 3. Before every authorized feature push, including retries and later pushes, the driver performs this resolved destination preflight in the lane worktree.
    Writers prepare repository, branch, and command evidence only; the authorized driver executes the preflight and push.
