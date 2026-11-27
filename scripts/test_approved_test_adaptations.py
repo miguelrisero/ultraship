@@ -73,6 +73,32 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 with self.subTest(clause=clause):
                     self.assertIn(clause, policy)
 
+    def test_protected_merge_review_blocks_unexplained_parent_path_loss(self):
+        skill = (SHIP / 'skills/ship/SKILL.md').read_text()
+        pipeline = (SHIP / 'skills/ship/references/pipeline.md').read_text()
+        for policy, clauses in (
+            (section(pipeline, '## 9. Push and PR'), (
+                'Collect complete protected tree entries from both parents, their merge base and the merge commit.',
+                'Apply the same protected-path filter to the complete Git index and tree metadata.',
+                'Match adjacent `tests` and `mutation` path components at the root or any depth, without regard to case.',
+                'Pass only protected index and tree entries to the reviewer.',
+            )),
+            (section(skill, '### Protected row merge review'), (
+                'Reconcile the before-resolution index with both parent inventories by exact path.',
+                'Block on an omitted parent path unless the metadata establishes a clean deletion before resolution.',
+                'Require a separate review for every deletion outside this merge route.',
+                'Confirm that every protected path in the second parent exists at the same path in the merge commit.',
+                "Match each checked-out path's mode and blob ID at the merge commit to the second parent.",
+                'Only the first parent contains `backend/Tests/Mutation/lane-only.toml`.',
+                'The before-resolution index and merge commit both omit that path.',
+                'The evidence establishes no clean deletion.',
+                'Return `Verdict: blocked` for the unexplained loss of `backend/Tests/Mutation/lane-only.toml`.',
+            )),
+        ):
+            for clause in clauses:
+                with self.subTest(clause=clause):
+                    self.assertIn(clause, policy)
+
     def test_writers_can_create_only_the_absent_rows_file_named_by_the_decision(self):
         rules = []
         for name in ('writer--sol.md', 'writer--fable52.md'):
