@@ -52,6 +52,29 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
         self.assertEqual(fields['tools'], 'Read, Grep, Glob, LSP, WebFetch, WebSearch')
         self.assertEqual(fields['effort'], 'xhigh')
 
+    def test_row_evidence_requires_the_exact_lane_identity(self):
+        policy = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        evidence = policy.split('## Lane-owned row evidence record\n', 1)[-1].split('\n## ', 1)[0]
+        for field in ('repository', 'pr', 'row_id', 'row_file', 'worktree', 'head'):
+            with self.subTest(field=field):
+                self.assertRegex(evidence, rf'(?m)^- `{field}`: .+')
+        self.assertIn('Match every identity field to the verified lane scope.', evidence)
+        self.assertIn('Keep the row pending if the record or any identity field is missing or mismatched.', evidence)
+
+    def test_drivers_supply_the_record_in_the_review_brief(self):
+        link = '[lane-owned row evidence record](../skills/ship/references/owner-decisions.md#lane-owned-row-evidence-record)'
+        for name in ('driver.md', 'driver--sol.md'):
+            with self.subTest(driver=name):
+                self.assertIn(f'Include the {link} for each changed row in the reviewer brief.',
+                              (AGENTS / name).read_text())
+
+    def test_lane_owned_review_checks_identity_and_keeps_separate_admission(self):
+        review = self.sections[REVIEW]
+        self.assertIn('Match every identity field to the scope in the brief.', review)
+        self.assertIn('Block approval if the record or any identity field is missing or mismatched.', review)
+        self.assertIn("Read rows only under the driver's reviewer admission record.", review)
+        self.assertIn('The evidence record grants zero protected access.', review)
+
     def test_protected_reviewer_stops_only_on_the_hook_admission_refusal(self):
         policy = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
         admission = policy.split('## Reviewer admission record for protected row reads\n', 1)[1].split('\n## ', 1)[0]
