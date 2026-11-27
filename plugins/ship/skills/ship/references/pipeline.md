@@ -159,6 +159,7 @@ The review gives zero authority for implementation or publication.
 
 Start every writer brief with `You may always` and `Only the owner` from the loaded writer definition. Keep the exact brief scope and its prohibitions.
 Copy the [flaky guard lock rule](ci-and-locks.md#flaky-guard-lock) into every writer brief that can run the flaky-pattern guard.
+Put this sentence in every writer brief: "Removing a guard to prove a test fails is a mutant cycle and needs a GO."
 
 Prepare verified event evidence and exact scope under [Task-specific test adaptations](owner-decisions.md#task-specific-test-adaptations) for an explicitly designated owner-event route.
 Apply [Loaded instructions and refusals](owner-decisions.md#loaded-instructions-and-refusals).
