@@ -214,11 +214,34 @@ class BriefSafetyTests(unittest.TestCase):
 
     def test_draft_push_is_never_blocked_by_a_publication_hold(self):
         # A Sol lane held its draft push on a brief's "publication holds" wording (CoC replay, 26 Nov).
-        for name in ('plugins/ship/skills/ship/SKILL.md', 'plugins/chief/skills/run/SKILL.md'):
+        for name in ('plugins/ship/skills/ship/SKILL.md', 'plugins/chief/skills/run/SKILL.md',
+                     'plugins/chief/skills/run/references/dispatch.md', 'plugins/ship/agents/driver.md'):
             item = next(line for line in (ROOT / name).read_text().splitlines() if line.startswith('2. ') and 'draft CI' in line)
             with self.subTest(path=name):
                 self.assertTrue(item.endswith(
                     'A draft PR is not publication, so a publication or activation hold never blocks a draft push.'))
+
+    def test_hold_report_names_pr_sha_and_next_step(self):
+        for name in ('plugins/ship/skills/ship/SKILL.md', 'plugins/chief/skills/run/SKILL.md'):
+            text = (ROOT / name).read_text()
+            with self.subTest(path=name):
+                self.assertIn('In a peer hold or wait report, give `Facts` (direct PR URL, or `no PR:` with the reason, and the 40-hex '
+                              'head SHA), `Decision` (blocked step, release condition), and `Next` (accountable owner, exact permitted '
+                              'action, UTC deadline).', text)
+                self.assertIn('The chief refuses an incomplete hold or wait report and asks the sender for all required fields.', text)
+
+    def test_lane_cap_follows_the_quota_tier(self):
+        skill = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text()
+        self.assertIn('There is no lane cap in the Green and Amber quota tiers', skill)
+        self.assertIn('In the Red and Critical tiers, apply the CoC emergency lane limits', skill)
+        self.assertIn('- Lanes: no cap in the Green and Amber quota tiers; the CoC emergency limits apply in Red and Critical;',
+                      (ROOT / 'plugins/chief/README.md').read_text())
+
+    def test_decision_options_run_a_to_d_with_the_three_option_line(self):
+        line = '`Options` A–D with effects (three only with the line "Only three real paths exist. A fourth would be padding.")'
+        self.assertIn(line, (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text())
+        self.assertIn('<p>With three real options, add: Only three real paths exist. A fourth would be padding.</p>',
+                      (ROOT / 'plugins/ship/hooks/text_lint.py').read_text())
 
     def test_each_template_requires_read_scope_and_safety_sentences(self):
         for name, heading in (

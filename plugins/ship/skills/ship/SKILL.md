@@ -49,8 +49,8 @@ Stop a step for a failed check, a hard rule, an owner refusal, a missing special
 An unverified detail that no rule names is not a stop: name it in one line and continue. A rule that names a missing receipt or evidence still stops its step.
 End each turn with a forward action: a writer dispatch, a commit, a push, a PR update, or a merge. A board edit alone is not progress.
 Omit standing holds from routine status reports. Give the outcome, its meaning, and the next action. Keep the required restrictions in briefs.
-In a peer hold or wait report, give `Facts` (direct PR URL, 40-hex head SHA), `Decision` (blocked step, release condition), and `Next` (accountable owner, exact permitted action, UTC deadline).
-The chief refuses an incomplete lane or driver report and asks the sender for all required fields.
+In a peer hold or wait report, give `Facts` (direct PR URL, or `no PR:` with the reason, and the 40-hex head SHA), `Decision` (blocked step, release condition), and `Next` (accountable owner, exact permitted action, UTC deadline).
+The chief refuses an incomplete hold or wait report and asks the sender for all required fields.
 
 Read [owner decisions](references/owner-decisions.md) before dispatch. Apply its chief-managed CoC delivery contract when a chief owns the run.
 Apply its [helper standing request](references/owner-decisions.md#helper-standing-request) contract before helper creation.

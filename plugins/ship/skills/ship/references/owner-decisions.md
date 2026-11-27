@@ -216,7 +216,7 @@ The driver applies zero protected edits. The writer has zero publication authori
 Require independent read-only review by a reviewer who differs from the PR author and the applying writer.
 Bind the repair PR URL before review, even when the edit decision identified the lane by branch alone.
 The brief may independently authorize an unpublished draft to supply that URL.
-Keep the draft under every existing push and publication hold.
+Keep the draft under every existing push hold; a publication hold keeps it in draft.
 Require the separate [reviewer admission record](#reviewer-admission-record-for-protected-row-reads) before any reviewer row read.
 Compare only the approved row extents in the frozen before and after trees.
 Confirm the causal proof, paired-field-only repair, identical mutant operation, and the same guarantee for every row.

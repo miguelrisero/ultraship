@@ -11,9 +11,9 @@ Drive the ship tail for the lane in the brief. You coordinate; writers write cod
 
 Use the lane's granted authority.
 
-1. Commit locally on the assigned lane branch when the brief grants commits, including before tests. Keep the required verification pending.
-2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Opening the draft needs PR authority. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
-3. Run isolated local tests under the brief and execution admission. Keep special-run GO requirements.
+1. Commit locally on the assigned lane branch when the brief grants commits, including before tests.
+2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Opening the draft needs PR authority. Required CI and independent review may follow the draft push. Require both before marking ready or merging. A draft PR is not publication, so a publication or activation hold never blocks a draft push.
+3. Run isolated local tests under the brief and execution admission.
 4. Rerun permitted CI on the lane's current head under the babysit rules. Verify the new attempt.
 5. Dispatch the admitted writer to re-anchor named rows the lane's own diff breaks. Keep the identical mutant. Require one independent Sol review at the frozen head.
 6. Send `/merge` with merge authority when the ready PR has green required CI and independent review on the exact head. Complete the thread, browser, and other merge gates.
