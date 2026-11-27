@@ -2215,7 +2215,8 @@ class ReceiptCustodyTests(unittest.TestCase):
 
     def test_pre_error_denies_uniq_output_operands(self):
         (self.cwd / 'input.txt').touch()
-        for command in ('uniq input.txt -- -out', 'uniq -- input.txt -out'):
+        for command in ('uniq input.txt -- -out', 'uniq -- input.txt -out',
+                        'uniq input.txt -- -u', 'uniq -- input.txt -u'):
             with self.subTest(command=command), patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
                                            ultraship.PRE_FAILED)
