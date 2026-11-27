@@ -2206,6 +2206,52 @@ class ReceiptCustodyTests(unittest.TestCase):
             self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'wc -l file'}},
                                        ultraship.PRE_FAILED)
 
+    def test_pre_error_denies_commands_that_can_write_or_execute(self):
+        for command in ('cat "$(printf file)"', 'tee output.txt', 'find . -exec true {} +',
+                        'vi file.txt', 'git add -- file.txt', 'sort file.txt', 'make api-test'):
+            with self.subTest(command=command), patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
+                                           ultraship.PRE_FAILED)
+
+    def test_pre_error_denies_resolved_row_record_paths(self):
+        state = self.state / 'ultraship'
+        with patch.object(ultraship, 'STATE', state), patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+            for directory in (state / 'row-review', self.cwd / '.scratch/ultraship/row-reanchor'):
+                directory.mkdir(parents=True)
+                record = directory / 'fixture.json'
+                record.touch()
+                alias = self.cwd / f'{directory.name}-link'
+                alias.symlink_to(directory, target_is_directory=True)
+                relative = os.path.relpath(directory.parent, self.cwd)
+                for command in (f'cat {record}', f'cat {alias.name}/fixture.json',
+                                f'cd {relative} && cat {directory.name}/fixture.json',
+                                f'cd {alias.name} && cat fixture.json'):
+                    with self.subTest(command=command):
+                        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
+                                                   ultraship.PRE_FAILED)
+
+    def test_custody_read_classifier_excludes_git_with_side_effects(self):
+        for command in ('git status --short', 'git show HEAD:file.txt | head'):
+            with self.subTest(command=command):
+                self.assertFalse(ultraship.custody_read_only_shell(command, str(self.cwd)))
+
+    def test_pre_error_denies_git_with_side_effects(self):
+        for command in ('git status --short', 'git show HEAD:file.txt | head'):
+            with self.subTest(command=command), patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
+                                           ultraship.PRE_FAILED)
+
+    def test_custody_parser_error_warns_for_a_proven_literal_read(self):
+        directory = self.cwd / 'docs'
+        directory.mkdir()
+        (directory / 'file.txt').touch()
+        with patch.object(ultraship, 'receipt_custody', side_effect=OSError('custody parser failed')):
+            self.assert_custody_warning({'tool_name': 'Bash',
+                                         'tool_input': {'command': 'cd docs && wc -l file.txt'}})
+
+    def test_normal_pre_allows_make_api_test(self):
+        self.assert_account_command_allowed('make api-test', caller='ship:writer--sol')
+
     def test_pre_error_denies_malformed_tool_names(self):
         """Catch malformed tool names escaping denial through an error in the custody fallback."""
         for tool in (None, 1, ['Read'], {'name': 'Read'}):
