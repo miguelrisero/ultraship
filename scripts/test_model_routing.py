@@ -257,7 +257,7 @@ class ModelRoutingTests(unittest.TestCase):
     def test_chief_holds_verification_when_the_paired_native_route_is_missing(self):
         for plugin in ('chief', 'ship'):
             readme = (ROOT / f'plugins/{plugin}/README.md').read_text()
-            self.assertIn('Upgrade Chief to `1.8.7` and Ship to `1.15.55` together', readme)
+            self.assertIn('Upgrade Chief to `1.8.9` and Ship to `1.15.57` together', readme)
         run = ROOT / 'plugins/chief/skills/run'
         skill = (run / 'SKILL.md').read_text()
         self.assertIn('[verifier dispatch check](references/landing.md#verifier-dispatch-check)', skill)
@@ -267,7 +267,7 @@ class ModelRoutingTests(unittest.TestCase):
         check = check[1].split('\n## ', 1)[0]
         self.assertIn('Before dispatch, confirm that the current session lists the exact native route `ship:verifier--opus`.', check)
         self.assertIn('If the route is absent or cannot be confirmed, hold verification', check)
-        self.assertIn('Report Ship `1.15.55` as the required plugin version and Chief `1.8.7` as its paired version.', check)
+        self.assertIn('Report Ship `1.15.57` as the required plugin version and Chief `1.8.9` as its paired version.', check)
         self.assertIn('Use the `ship:verifier--astra` fallback only when the exact Opus route is registered but unavailable.', check)
 
     def test_ledger_keeps_historical_seat_names_and_agent_ids(self):
