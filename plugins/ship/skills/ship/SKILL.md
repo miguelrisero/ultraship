@@ -316,7 +316,9 @@ Stop and report the conflict to the driver if `origin/main` advances during the 
 Refuse this route in a repository with Git replacement refs.
 Use the CoC's CI, testing and tooling standing grant. Keep the local commit grant and all refusal and publication rules.
 
-1. Name each exact repository-relative path under `tests/mutation/` in the writer brief.
+1. Require the driver's complete before-resolution index record for this merge.
+   Bind the writer brief to both merge parents. Name each exact repository-relative path under `tests/mutation/` and its approved action.
+   Name the source commit for each checkout. Keep resolution pending if the record or brief is missing or mismatched.
 2. For a conflicted file, run `git checkout origin/main -- <path>` to take `origin/main:<path>`.
    Use `git checkout <full-merge-base-sha> -- <path>` only when that exact path has the same blob ID at the merge base and `origin/main`.
    Resolve the full SHA with `git merge-base HEAD origin/main`. Send every other base restore through the existing lane-owned row route.
@@ -341,11 +343,25 @@ Dispatch only an independent `ship:reviewer--sol` for this review. Choose a revi
 Use only the driver's content-free Git evidence. This review grants zero protected reads or tool permissions.
 
 - Require the second parent to match the verified remote main commit used for the merge.
+- Match the before-resolution record and writer brief to the merge commit's two parents.
+- Compare the complete before-resolution index with the merge commit tree by exact path.
+- Account for every added, removed, modified or resolved protected entry with a named action or a separately reviewed route.
+  Compare mode and object ID for stage 0 entries. Treat each unmerged path as a resolution, even if its final blob matches a recorded stage.
+  Match the exact path, action and expected result. Block any change that neither route covers.
+- Use the recorded index stages to identify conflicts. Parent blob differences alone supply no conflict evidence.
+- Flag a named checkout for explicit disposition when the first-parent blob differs from the merge-base blob.
+  Treat an entry missing from one of those trees as a difference. Include the path, parent and base IDs, and disposition in the evidence.
+  Record who approved the disposition under existing authority. Block release until every flagged checkout has an explicit disposition.
 - Confirm that every protected path in the second parent exists at the same path in the merge commit.
 - Match each checked-out path's blob ID at the merge commit to its blob ID in the second parent.
 - For a merge-base checkout, confirm the same blob ID at that path in the merge base.
 - For a removal, confirm the path exists in the first parent and is absent at the merge base, second parent and merge commit.
 - Block on missing or conflicting evidence. Return the verdict for the merge commit.
+
+Synthetic acceptance case: The brief names only a checkout of `tests/mutation/named.toml`.
+The merge commit changes the blob ID of `tests/mutation/extra.toml` from its stage 0 entry.
+The brief and the separate review records do not cover `tests/mutation/extra.toml`.
+Return `Verdict: blocked` for the unapproved change to `tests/mutation/extra.toml`.
 
 ### Same-strength adaptations
 
