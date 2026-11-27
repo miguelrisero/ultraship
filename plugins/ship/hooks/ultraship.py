@@ -6593,8 +6593,8 @@ def writer_row_merge_denial(command, cwd):
             r'(?:[^-\s;&|][^\s;&|]*[ \t]+)?)*)(?:checkout|rm)\b', trigger):
         return None
     reason = ('Protected rows checkout or removal requires the in-progress origin/main merge route. '
-              'From the repository root, run one literal `git checkout <source> -- <path>` or '
-              '`git rm -- <path>` command. Report the blocked scope to your driver.')
+              'Use one literal `git checkout <source> -- <path>` or `git rm -- <path>` from the repository root. '
+              'You may use `git -C <absolute-root>` in either form. Report the blocked scope to your driver.')
     match = re.fullmatch(
         r'git(?: -C (/[A-Za-z0-9_./-]+))? (?:checkout (origin/main|[0-9a-f]{40}|[0-9a-f]{64}) -- |rm (?:-- )?)'
         r'((?!-)[A-Za-z0-9_./-]+)', command.strip(' \t\n'))
@@ -6622,16 +6622,22 @@ def writer_row_merge_denial(command, cwd):
                 or git('symbolic-ref', 'HEAD').strip() == 'refs/heads/main'
                 or git('rev-parse', '--symbolic-full-name', 'origin/main').strip() != 'refs/remotes/origin/main'):
             return reason
+        if git('for-each-ref', '--count=1', '--format=%(refname)', 'refs/replace'):
+            return 'Protected row merge resolution refuses Git replacement refs. Report the blocked scope to your driver.'
         main = git('rev-parse', '--verify', 'refs/remotes/origin/main^{commit}').strip()
         merge_head = git('rev-parse', '--path-format=absolute', '--git-path', 'MERGE_HEAD').rstrip('\n')
         if not regular_file(merge_head):
             return reason
         with open(merge_head, 'rb') as handle:
             if handle.read(66) != (main + '\n').encode():
-                return reason
+                return 'MERGE_HEAD differs from origin/main or does not name a single commit. Stop and report the conflict to your driver.'
         base = git('merge-base', 'HEAD', main).strip()
         if source is None:
             if not tree_entry(main) and not tree_entry(base) and file_entry(tree_entry('HEAD')):
+                deleted = git('diff', '--cached', '--no-renames', '--no-ext-diff', '--no-textconv',
+                              '--diff-filter=D', '--name-only', '-z', '--ignore-submodules=none', main, '--')
+                if any(re.search(PROTECTED_ROW, path, re.I) for path in deleted.split('\x00')):
+                    return 'The index omits a protected path from origin/main. Stop and report the conflict to your driver.'
                 return None
         elif (source in ('origin/main', base) and file_entry(tree_entry(main if source == 'origin/main' else base))
               and git('ls-files', '-u', '-z', '--', path)):

@@ -312,6 +312,8 @@ Follow the [lane-owned row route](../../agents/driver.md#lane-owned-row-route) f
 Use this route only in the assigned PR worktree during a merge of `origin/main`.
 It covers whole-file conflict resolution and removal of PR-added rows files, as in [Patricia PR 8707](https://github.com/bettergroupinc/patricia-monorepo/pull/8707).
 Require `MERGE_HEAD` to name the single commit at `origin/main`.
+Stop and report the conflict to the driver if `origin/main` advances during the merge.
+Refuse this route in a repository with Git replacement refs.
 Use the CoC's CI, testing and tooling standing grant. Keep the local commit grant and all refusal and publication rules.
 
 1. Name each exact repository-relative path under `tests/mutation/` in the writer brief.
@@ -319,16 +321,18 @@ Use the CoC's CI, testing and tooling standing grant. Keep the local commit gran
    To restore the file to its pre-merge base, resolve `git merge-base HEAD origin/main` first.
    Run `git checkout <full-merge-base-sha> -- <path>` to take that commit's blob.
    For a file the PR added, run `git rm -- <path>` only if main and the merge base both lack the path.
-   Run one literal command per file from the repository root, or use `git -C <absolute-root>`.
+   Preserve every protected path from the second parent. Stop if the index already omits one before a removal.
+   Run one literal command per file from the repository root. Use `git -C <absolute-root>` to name the root explicitly.
 3. Compare `git hash-object <path>` and the staged blob ID with the named blob ID.
    For a removal, confirm the path is absent from the worktree and the index.
    Stop on a mismatch. Do not read or print row contents under this route.
-4. Commit the resolution in the merge commit. Give the driver the merge SHA, both parent SHAs, and the path and ID or absence evidence.
-5. Have one independent Sol reviewer compare the blob IDs or absence at the frozen head with the named source and verify the merge parents.
+4. Verify that the staged resolution preserves all protected paths from the second parent. Use Git metadata with rename detection off.
+   Commit the resolution in the merge commit. Give the driver the merge SHA, both parent SHAs, and the path and ID or absence evidence.
+5. Follow the [driver evidence requirements](references/pipeline.md#9-push-and-pr) for one independent Sol review of the merge commit.
    Require a passing CI anchor guard at the exact pushed head. Use the existing draft and publication gates.
 
 This route needs zero per-row anchor CI failures, replacement row IDs, field bindings, or row-tool runs.
-Apply the lane-owned row routes to all other protected row edits, including re-anchor, restoration and retirement.
+Apply the lane-owned row routes to all other protected row edits, including edits after the merge commit.
 
 ### Same-strength adaptations
 
