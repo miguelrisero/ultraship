@@ -301,6 +301,32 @@ The record grants zero authority.
 Apply the [existing refusal rules](#loaded-instructions-and-refusals) to the referenced refusal.
 The record authorizes zero retries and gives zero retry credit.
 
+## Native exact-pair tool attempt accounting
+
+Use this rule only to count earlier row re-anchor tool invocations for a lane-owned CoC-approved native exact-pair edit.
+Keep any prior tool admission with the earlier tool route and its refusal.
+The native route admits and runs no row re-anchor tool.
+
+Count a prior invocation as zero runs only when all checks below pass.
+
+- Bind the proof to the exact invocation, row ID, row file, worktree, frozen head and tool version.
+- Verify the exact refusal against the named tool version's pre-write checks.
+- Require a nonzero exit and zero generated authorization records from that invocation.
+- Require identical row-file blob IDs immediately before and after that same invocation.
+
+Use content-free evidence from a producer with existing read authority.
+Confirm that the tool refused before any write to the row file. Equal blob IDs alone prove no write order.
+Record the full head SHA frozen for the invocation. Verify its link to the native edit under review.
+Identify the exact tool version by a commit SHA or file digest.
+Count every successful invocation and every invocation that writes, even if a later action restores the file.
+Count the invocation if evidence is missing, ambiguous, or belongs to a different invocation.
+Count the invocation if any other check fails, including an identity mismatch.
+
+Reference the proof in `prior_tool_refusal` in the lane-owned row evidence record. Keep the record content-free.
+Keep every existing admission, refusal, retry, decision and review gate in force.
+This rule grants zero retry or write authority.
+Require separate authority for any route change. Keep unresolved refusals pending.
+
 ## Added row ID proof
 
 Use this proof for each added row in the lane-owned row review, including the earlier-code parent route.

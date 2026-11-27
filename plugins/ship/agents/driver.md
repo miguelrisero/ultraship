@@ -91,7 +91,9 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
 
 1. Select the route for each row before any tool admission or tool run.
    For tool re-anchor or restoration only: Admit the writer with the [row re-anchor tool admission record](../skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
-   For a CoC-approved native exact-pair edit, use zero row re-anchor tool admissions and zero row re-anchor tool runs.
+   For a CoC-approved native exact-pair edit, use zero row re-anchor tool admissions and run no row re-anchor tool.
+   Apply the [native exact-pair tool attempt accounting](../skills/ship/references/owner-decisions.md#native-exact-pair-tool-attempt-accounting) rule.
+   Keep the native edit pending unless there are zero counted tool runs and no generated authorization record for the row.
 2. Tool re-anchor: the writer runs the sanctioned re-anchor tool once per row, then commits the row file alone.
    The tool derives the paired `old` and `new` fields from the subject's new source text and keeps the identical mutant.
    It refuses a change to any other field, and it prints no row text.
@@ -180,6 +182,7 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The driver copies the printed fields of the frozen-head run into the reviewer brief. The reviewer reads no file under `.git`.
    A CoC-approved row change gets no tool run. Its decision file and the review in step 8 cover it.
    For a CoC-approved native exact-pair edit, the driver names the frozen decision path, SHA256 and verification result in the reviewer brief.
+   Include the verified proof in the reviewer brief when a prior refusal is necessary to establish zero counted runs.
    The driver lists the decision file under `Readable files` in the reviewer brief.
    The driver verifies the decision against the applying writer, repository, lane, PR, row file, row ID, source commit and exact edit.
 7. CI: the anchor guard requires each anchor count to equal the row's expected count, not only a nonzero count.

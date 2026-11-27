@@ -47,7 +47,10 @@ Read no file under `.git`.
 For each tool re-anchor or restoration, require the generated record fields that the brief copies from the tool output.
 Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.
 
-For a CoC-approved native exact-pair edit, require zero row re-anchor tool runs and no generated record.
+For a CoC-approved native exact-pair edit, require zero counted tool runs and no generated authorization record.
+Require zero row re-anchor tool admissions on the native route.
+Verify any prior refusal proof in the brief under the [native exact-pair tool attempt accounting](../skills/ship/references/owner-decisions.md#native-exact-pair-tool-attempt-accounting) rule.
+Block approval if a prior invocation counts as a run.
 Require the frozen CoC decision by absolute path and SHA256.
 Require the driver's digest and binding verification at the frozen head.
 Match the decision to the applying writer, repository, lane, PR, row file, row ID and source commit.
