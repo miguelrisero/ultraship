@@ -703,6 +703,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.cwd.mkdir()
         self.enterContext(patch.dict(os.environ, {'HOME': temporary, 'XDG_STATE_HOME': str(self.state)}))
         self.store = self.state / 'ultraship' / 'text-lint'
+        self.enterContext(patch.object(ultraship, 'STATE', self.store.parent))
         self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=temporary)))
         self.ledger = ultraship.load_ledger()
         self.enterContext(patch.object(ultraship, 'load_ledger', return_value=self.ledger))
@@ -1116,7 +1117,6 @@ class ReceiptCustodyTests(unittest.TestCase):
                         f'grep -c print {source}; grep -c def {source}',
                         'git grep -n print -- plugins/ship/hooks',
                         "cd plugins/ship/hooks && grep -n 'def pre' ultraship.py | head",
-                        f'git show origin/main:{source} | grep -n print',
                         f'python3 {estimator} eta --size S', f'E={estimator}; python3 $E eta --size S',
                         f"cat {source} | awk '{{print $1}}' | sort | uniq | cut -c1"):
             with self.subTest(command=command):
@@ -2214,9 +2214,8 @@ class ReceiptCustodyTests(unittest.TestCase):
                                            ultraship.PRE_FAILED)
 
     def test_pre_error_denies_resolved_row_record_paths(self):
-        state = self.state / 'ultraship'
-        with patch.object(ultraship, 'STATE', state), patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
-            for directory in (state / 'row-review', self.cwd / '.scratch/ultraship/row-reanchor'):
+        with patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+            for directory in (self.store.parent / 'row-review', self.cwd / '.scratch/ultraship/row-reanchor'):
                 directory.mkdir(parents=True)
                 record = directory / 'fixture.json'
                 record.touch()
@@ -2248,6 +2247,14 @@ class ReceiptCustodyTests(unittest.TestCase):
         with patch.object(ultraship, 'receipt_custody', side_effect=OSError('custody parser failed')):
             self.assert_custody_warning({'tool_name': 'Bash',
                                          'tool_input': {'command': 'cd docs && wc -l file.txt'}})
+
+    def test_normal_pre_preserves_git_custody_verdicts(self):
+        source = self.clone_source()
+        for caller in ('ship:writer--sol', 'ship:driver--sol'):
+            with self.subTest(caller=caller):
+                self.assert_account_command_allowed('git grep -n print -- plugins/ship/hooks', caller=caller)
+                self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                           'tool_input': {'command': f'git show origin/main:{source} | grep -n print'}})
 
     def test_normal_pre_allows_make_api_test(self):
         self.assert_account_command_allowed('make api-test', caller='ship:writer--sol')

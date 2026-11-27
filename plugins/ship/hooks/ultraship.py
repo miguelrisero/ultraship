@@ -4399,8 +4399,9 @@ def clone_source_file(cwd, word):
             and any((parent / '.git').exists() for parent in real.parents if not home.is_relative_to(parent)))
 
 
-def custody_read_only_shell(command, cwd, *, fallback=False):
-    """Classify literal reads without granting access to any path."""
+def custody_read_only_shell(command, cwd, *, check_path=None):
+    """Classify literal reads, and check each operand when the full custody scan fails."""
+    fallback = check_path is not None
     home_cd = re.match(r'[ \t]*cd[ \t]+(~/[\w./-]+)(?=[ \t\n;&|]|$)', command, re.ASCII)
     if home_cd:
         start, end = home_cd.span(1)
@@ -4412,19 +4413,31 @@ def custody_read_only_shell(command, cwd, *, fallback=False):
     for index, (words, ending) in enumerate(parts):
         name, args = words[0], words[1:]
         if name == 'cd':
-            # Follow one leading cd so the directory custody scan has every possible base.
-            if (index or len(args) != 1 or args[0].startswith(('-', '~')) or ending not in {'&&', ''}
+            if (index or len(args) != 1 or not args[0] or args[0].startswith(('-', '~'))
+                    or ending not in {'&&', ''}
                     or (os.environ.get('CDPATH') or os.environ.get('cdpath')) and not os.path.isabs(args[0])):
                 return False
-            cwd = os.path.join(cwd, args[0])
+            target = Path(cwd, args[0])
+            if fallback:
+                # A failed cd must skip the whole chain; logical cd can also differ from physical traversal.
+                if ending != '&&' or any(sep in {';', '||', '\n'} for _, sep in parts[1:-1]):
+                    return False
+                physical = target.resolve(strict=True)
+                if physical != Path(os.path.normpath(target)).resolve(strict=True):
+                    return False
+                if not check_path(target, ancestors=False):
+                    return False
+                cwd = physical
+            else:
+                cwd = target
             if not os.path.isdir(cwd):
                 return False
             moved = True
-        elif name == 'git':
-            # Use -C for Git; a cd prefix retains the existing hook-source restriction.
-            if moved or not custody_git_read(args, piped=ending == '|', fallback=fallback):
-                return False
-        elif name == 'awk':
+            continue
+        # Git can run repository-configured programs or fetch missing objects.
+        if name == 'git' or fallback and name in {'sort', 'file'}:
+            return False
+        if name == 'awk':
             # shortcut: admit literal field printing; use an awk parser for broader programs.
             if (not args or not re.fullmatch(r'\{[ \t]*print(?:[ \t]+\$(?:[0-9]+|NF))?[ \t]*\}', args[0])
                     or any(word.startswith('-') or SHELL_ASSIGNMENT.match(word) for word in args[1:])):
@@ -4455,27 +4468,9 @@ def custody_read_only_shell(command, cwd, *, fallback=False):
                     or name == 'uniq' and (sum(not word.startswith('-') or word == '-' for word in args) > 1
                                            or '--' in args and args.index('--') < len(args) - 2)):
                 return False
+        if fallback and any(not check_path(Path(cwd, word), ancestors=True) for word in args):
+            return False
     return True
-
-
-def custody_git_read(args, *, piped, fallback):
-    """Recognize Git reads with literal options and keep configurable programs out of the fallback."""
-    if args[:2] == ['--no-pager', '--no-optional-locks']:
-        return (not git_read_argv(['git', *args[2:]])
-                and ('diff' not in args or {'--no-ext-diff', '--no-textconv'} <= set(args)))
-    words = args
-    while words[:1] == ['-C'] and len(words) > 1 and not words[1].startswith('-'):
-        words = words[2:]
-    if not words:
-        return False
-    name, operands = words[0], words[1:]
-    if name == 'show' and (piped or not fallback):
-        return not git_read_argv(['git', '-c', 'core.fsmonitor=false', *words])
-    if fallback:
-        return name == 'rev-parse' and not git_read_argv(['git', '-c', 'core.fsmonitor=false', *words])
-    return git_read_words(words) or not git_read_argv(['git', '-c', 'core.fsmonitor=false', *words]) or (
-        name == 'cat-file' and len(operands) == 2 and operands[0] in {'-t', '-s', '-p', '-e'}
-        and not operands[1].startswith('-'))
 
 
 def literal_data_assignment(words):
@@ -5262,7 +5257,7 @@ RECEIPT_CUSTODY_FAILED = ('The ship hook could not check refusal-receipt custody
                           'Report the blocked scope to the driver.')
 PRE_FAILED = ('The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
               'Report the blocked scope to the driver.')
-PRE_READ_WARNING = ('S2: The ship hook failed. Only a confirmed read-only Bash call can proceed. '
+PRE_READ_WARNING = ('The ship hook failed. Only a confirmed read-only Bash call can proceed. '
                     'The traceback is on stderr. Report the error to the driver.')
 PRE_INPUT_INVALID = ('The ship hook could not read its input as a JSON object, so it denies this call. '
                      'Report the blocked scope to the driver.')
@@ -5409,6 +5404,14 @@ def clean_custody_rescan(data, directory):
         WARNINGS[:] = warnings
 
 
+def account_state_root():
+    try:
+        return Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state'
+    except KeyError:
+        # Without a passwd entry the ledger cannot open a grant store.
+        return None
+
+
 def receipt_custody(data, read_search=False, *, exact_forms=True, verified_cd=None):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     if read_search and tool not in ('Read', 'Grep', 'Glob', 'LSP') and not tool.startswith('mcp__fff__'):
@@ -5429,11 +5432,7 @@ def receipt_custody(data, read_search=False, *, exact_forms=True, verified_cd=No
             found |= {normalized(os.path.abspath(path)), normalized(os.path.realpath(path))}
         return found
 
-    try:
-        account_state = Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state'
-    except KeyError:
-        # Without a passwd entry the ledger cannot open any grant store, so accounting refuses and none can be issued.
-        account_state = None
+    account_state = account_state_root()
     grant_paths = {normalized(str(account_state / 'ultraship/account-grants'))} if account_state else set()
     receipt_paths = resolved(str(receipt_store)) | grant_paths
     state_paths = resolved(str(state_root)) | ({normalized(str(account_state))} if account_state else set())
@@ -6699,7 +6698,10 @@ def checks(data):
         grant_custody_denied = receipt_custody(data)
     except Exception:
         traceback.print_exc()
-        deny(RECEIPT_CUSTODY_FAILED)
+        if tool != 'Bash' or not custody_read_after_error(data):
+            deny(RECEIPT_CUSTODY_FAILED)
+        grant_custody_denied = False
+        warn('S2', PRE_READ_WARNING)
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
         deny('ship agents pin their own model. Remove the `model` field and call the scoped agent '
              'or the next agent in its fallback chain.')
@@ -7652,6 +7654,58 @@ def compact(data):
     print('\n'.join(lines))
 
 
+def custody_read_after_error(data):
+    """Prove a Bash read without calling the normal custody parser."""
+    def canonical(path):
+        try:
+            return path.resolve(strict=True)
+        except FileNotFoundError:
+            # Missing paths cannot be opened. Other resolution failures must reach the denial.
+            return path.resolve()
+
+    def overlaps(path, root, ancestors):
+        path, root = PurePosixPath(str(path).casefold()), PurePosixPath(str(root).casefold())
+        return path.is_relative_to(root) or ancestors and root.is_relative_to(path)
+
+    try:
+        command = (data.get('tool_input') or {}).get('command')
+        cwd = Path(data.get('cwd') or os.getcwd())
+        if not isinstance(command, str) or not cwd.is_absolute():
+            return False
+        trigger = custody_normalized(command)
+        if any(option in trigger for option in ('--row-file', '--row-id')):
+            return False
+        real_cwd = cwd.resolve(strict=True)
+        if not real_cwd.is_dir():
+            return False
+        receipt = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'ultraship/text-lint'
+        receipt_paths = [receipt]
+        account_state = account_state_root()
+        if account_state is not None:
+            receipt_paths.append(account_state / 'ultraship/account-grants')
+        row_paths = [STATE / folder for folder in ROW_RECORD_FOLDERS]
+        for base in {cwd, real_cwd}:
+            row_paths.extend(parent / '.scratch/ultraship' / folder
+                             for parent in (base, *base.parents) for folder in ROW_RECORD_FOLDERS)
+        receipts = [(path, canonical(path)) for path in receipt_paths]
+        rows = [(path, canonical(path)) for path in row_paths]
+
+        def public_path(path, *, ancestors):
+            paths = (Path(os.path.abspath(path)), canonical(path))
+            if any(overlaps(value, root, ancestors) for value in paths for pair in receipts for root in pair):
+                deny(RECEIPT_CUSTODY)
+            return not any(
+                overlaps(value, root, ancestors) for value in paths for pair in rows for root in pair
+            ) and not any(
+                re.search(r'/ultraship/(?:' + '|'.join(ROW_RECORD_FOLDERS) + r')(?:/|$)', str(value), re.I)
+                for value in paths
+            )
+
+        return public_path(cwd, ancestors=False) and custody_read_only_shell(command, cwd, check_path=public_path)
+    except Exception:
+        return False
+
+
 def guarded_pre(data):
     """Keep unexpected errors closed unless a Bash read passes classification and custody."""
     try:
@@ -7663,25 +7717,14 @@ def guarded_pre(data):
     except Exception:
         traceback.print_exc()
         tool = data.get('tool_name') if isinstance(data, dict) else ''
-        try:
-            receipt_custody(data, read_search=True)
-            if tool == 'Bash':
-                command = (data.get('tool_input') or {}).get('command')
-                cwd = data.get('cwd') or os.getcwd()
-                if isinstance(command, str) and custody_read_only_shell(command, cwd, fallback=True):
-                    trigger = custody_normalized(command)
-                    if (any('ultraship/' + folder in trigger for folder in ROW_RECORD_FOLDERS)
-                            or '--row-file' in trigger or '--row-id' in trigger):
-                        deny(PRE_FAILED)
-                    verdict = receipt_custody(data)
-                    if verdict == 'hard':
-                        deny(RECEIPT_CUSTODY)
-                    if verdict is False:
-                        print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
-                                                                 'additionalContext': PRE_READ_WARNING}}))
-                        return
-        except Exception:
-            if isinstance(tool, str) and (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')):
+        if tool == 'Bash' and custody_read_after_error(data):
+            print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
+                                                     'additionalContext': 'S2: ' + PRE_READ_WARNING}}))
+            return
+        if isinstance(tool, str) and (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')):
+            try:
+                receipt_custody(data, read_search=True)
+            except Exception:
                 deny(RECEIPT_CUSTODY)
         deny(PRE_FAILED)
 
