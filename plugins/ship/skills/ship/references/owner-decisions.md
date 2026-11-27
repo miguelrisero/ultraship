@@ -271,6 +271,66 @@ Glob, LSP, and every other read under `tests/mutation` stay denied.
 The reviewer reads only the named row lines.
 The hook denies Write, Edit, and NotebookEdit to both record folders for every agent except the driver and the main session. For Bash it only checks the command text.
 
+## Lane-owned row evidence record
+
+Keep one content-free record per authorized lane-owned protected row change at the frozen head.
+Include every changed, added, retired or restored protected row.
+Keep it in the lane state file and copy it into the reviewer brief before dispatch.
+
+Each record requires `repository`, `pr`, `row_id`, `row_file`, `worktree` and `head`.
+
+- `repository`: the repository's `owner/name`.
+- `pr`: the verified URL of the authorized draft PR.
+- `row_id`: the exact row ID.
+- `row_file`: the exact repository-relative path of the protected row file.
+- `worktree`: the canonical absolute path of the lane worktree that holds the frozen head.
+- `head`: the full frozen head commit SHA.
+- `decision`: the frozen decision's absolute path and SHA256, when the route requires a decision.
+- `tool`: references to applicable tool runs and any generated authorization record the route requires.
+- `verification`: references to the applicable decision binding check, CI evidence and separate row proofs.
+- `prior_tool_refusal`: references to each prior tool refusal for this row change, when applicable.
+
+Match every identity field to the verified lane scope.
+Give the reviewer that scope separately in the brief.
+Keep the row pending if the record or any identity field is missing or mismatched.
+Rebuild the record from verified evidence at each new frozen head.
+Use only identifiers, paths, digests and evidence references. Keep row text, pair bytes, credentials and raw tool output out of the record.
+Keep the underlying proofs, grants and independent review mandatory.
+Keep reviewer admission, tool admission and execution admission separate.
+The record grants zero authority.
+Apply the [existing refusal rules](#loaded-instructions-and-refusals) to the referenced refusal.
+The record authorizes zero retries and gives zero retry credit.
+
+## Native exact-pair tool attempt accounting
+
+Use this rule only to count earlier row re-anchor tool invocations for a lane-owned CoC-approved native exact-pair edit.
+Keep any prior tool admission with the earlier tool route and its refusal.
+Bind any prior tool admission to the invocation through the historical evidence referenced by `prior_tool_refusal`.
+Verify that the driver removed that admission before the native edit.
+Apply the removal step in the [row re-anchor tool admission record](#row-re-anchor-tool-admission-record).
+Use historical evidence only. Read no live admission store.
+The native route admits and runs no row re-anchor tool.
+
+Count a prior invocation as zero runs only when all checks below pass.
+
+- Bind the proof to the exact invocation, row ID, row file, worktree, frozen head and tool version.
+- Verify the exact refusal against the named tool version's pre-write checks.
+- Require a nonzero exit and zero generated authorization records from that invocation.
+- Require identical row-file blob IDs immediately before and after that same invocation.
+
+Use content-free evidence from a producer with existing read authority.
+Confirm that the tool refused before any write to the row file. Equal blob IDs alone prove no write order.
+Record the full head SHA frozen for the invocation. Verify its link to the native edit under review.
+Identify the exact tool version by a commit SHA or file digest.
+Count every successful invocation and every invocation that writes, even if a later action restores the file.
+Count the invocation if evidence is missing, ambiguous, or belongs to a different invocation.
+Count the invocation if any other check fails, including an identity mismatch.
+
+Reference the proof in `prior_tool_refusal` in the lane-owned row evidence record. Keep the record content-free.
+Keep every existing admission, refusal, retry, decision and review gate in force.
+This rule grants zero retry or write authority.
+Require separate authority for any route change. Keep unresolved refusals pending.
+
 ## Added row ID proof
 
 Use this proof for each added row in the lane-owned row review, including the earlier-code parent route.

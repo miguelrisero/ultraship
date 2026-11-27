@@ -92,7 +92,10 @@ class ToolTests(unittest.TestCase):
     def test_long_span_preserves_interior_and_all_other_bytes(self):
         self.setup_pair()
         self.assertEqual(self.head.count(self.old), 0)
+        before_blob = self.git('hash-object', '--no-filters', '--', self.row.name)
         before, output = self.invoke()
+        after_blob = self.git('hash-object', '--no-filters', '--', self.row.name)
+        self.assertNotEqual(before_blob, after_blob)
         after = self.row.read_bytes()
         parsed_before, parsed_after = tomllib.loads(before.decode()), tomllib.loads(after.decode())
         row = parsed_after['row'][0]
@@ -962,7 +965,14 @@ class ToolTests(unittest.TestCase):
         block = SENTINEL + '\nbegin()\n' + ''.join('    deleted_%s()\n' % i for i in range(11))
         self.subject.write_text(self.subject.read_text() + block)
         self.head_sha = self.commit()
-        self.invoke(2, 'anchor 1 must be unique')
+        record = self.record_path()
+        self.assertFalse(record.exists())
+        before_blob = self.git('hash-object', '--no-filters', '--', self.row.name)
+        _, output = self.invoke(2, 'anchor 1 must be unique')
+        after_blob = self.git('hash-object', '--no-filters', '--', self.row.name)
+        self.assertEqual(output, 'REFUSED: anchor 1 must be unique\n')
+        self.assertEqual(before_blob, after_blob)
+        self.assertFalse(record.exists())
 
     def test_edit_site_must_exist_at_head(self):
         self.setup_pair()

@@ -65,6 +65,10 @@ Use this review when the brief names the lane-owned row route.
 Authority: the owner's global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.
 Read rows only under the driver's reviewer admission record. Read only the named row lines at the named commits.
 You differ from the PR author and the writer.
+Require exactly one [lane-owned row evidence record](../skills/ship/references/owner-decisions.md#lane-owned-row-evidence-record) in the brief for each changed, added, retired or restored row.
+Match every identity field to the scope in the brief.
+Block approval if the record or any identity field is missing or mismatched.
+The evidence record grants zero protected access. Verify the referenced evidence under its own route.
 For each re-anchored row, confirm the same test, the same claim and the same mutant intent at the base and the frozen head.
 Confirm that the paired `old` and `new` fields are the only changed fields of that row.
 Read no file under `.git`.
@@ -72,7 +76,12 @@ Read no file under `.git`.
 For each tool re-anchor or restoration, require the generated record fields that the brief copies from the tool output.
 Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.
 
-For a CoC-approved native exact-pair edit, require zero row re-anchor tool runs and no generated record.
+For a CoC-approved native exact-pair edit, require zero counted tool runs and no generated authorization record.
+Require zero row re-anchor tool admissions on the native route.
+Verify any prior refusal proof in the brief under the [native exact-pair tool attempt accounting](../skills/ship/references/owner-decisions.md#native-exact-pair-tool-attempt-accounting) rule.
+Verify from that proof that any prior tool admission ended before the native edit.
+Block approval if the prior admission or its removal cannot be verified.
+Block approval if a prior invocation counts as a run.
 Require the frozen CoC decision by absolute path and SHA256.
 Require the driver's digest and binding verification at the frozen head.
 Match the decision to the applying writer, repository, lane, PR, row file, row ID and source commit.

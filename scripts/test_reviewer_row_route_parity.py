@@ -12,6 +12,7 @@ AGENTS = ROOT / 'plugins/ship/agents'
 REVIEW = '## Lane-owned row review'
 ADMISSION = '## Protected row admission'
 REPAIR = '## Standalone main-row repair review'
+EVIDENCE_LINK = '[lane-owned row evidence record](../skills/ship/references/owner-decisions.md#lane-owned-row-evidence-record)'
 SOL_ADMISSION = 'Use this admission for lane-owned row review and standalone main-row repair review, as applicable to the brief.'
 ASTRA_ADMISSION = 'Use this admission for lane-owned row review, as applicable to the brief.'
 
@@ -27,6 +28,8 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
     def setUp(self):
         self.sol = (AGENTS / 'reviewer--sol.md').read_text()
         self.base, self.sections = split_body(self.sol)
+        policy = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        self.evidence = policy.partition('## Lane-owned row evidence record\n')[2].split('\n## ', 1)[0]
 
     def test_astra_base_and_exact_route_scope(self):
         base, sections = split_body((AGENTS / 'reviewer--astra.md').read_text())
@@ -51,6 +54,44 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
         fields = checks.frontmatter((AGENTS / 'reviewer--astra.md').read_text())
         self.assertEqual(fields['tools'], 'Read, Grep, Glob, LSP, WebFetch, WebSearch')
         self.assertEqual(fields['effort'], 'xhigh')
+
+    def test_row_evidence_requires_the_exact_lane_identity(self):
+        self.assertIn('Each record requires `repository`, `pr`, `row_id`, `row_file`, `worktree` and `head`.', self.evidence)
+        for definition in (
+            "`repository`: the repository's `owner/name`.",
+            '`pr`: the verified URL of the authorized draft PR.',
+            '`row_id`: the exact row ID.',
+            '`row_file`: the exact repository-relative path of the protected row file.',
+            '`worktree`: the canonical absolute path of the lane worktree that holds the frozen head.',
+            '`head`: the full frozen head commit SHA.',
+        ):
+            with self.subTest(definition=definition):
+                self.assertIn(f'- {definition}', self.evidence)
+        self.assertIn('Match every identity field to the verified lane scope.', self.evidence)
+        self.assertIn('Keep the row pending if the record or any identity field is missing or mismatched.', self.evidence)
+
+    def test_row_evidence_keeps_separate_admissions_and_gives_zero_authority_or_retry_credit(self):
+        self.assertIn('Keep reviewer admission, tool admission and execution admission separate.', self.evidence)
+        self.assertIn('The record grants zero authority.', self.evidence)
+        self.assertIn('The record authorizes zero retries and gives zero retry credit.', self.evidence)
+
+    def test_drivers_supply_the_record_for_all_four_row_actions(self):
+        self.assertIn('Keep one content-free record per authorized lane-owned protected row change at the frozen head.',
+                      self.evidence)
+        self.assertIn('Include every changed, added, retired or restored protected row.', self.evidence)
+        for name in ('driver.md', 'driver--sol.md'):
+            with self.subTest(driver=name):
+                self.assertIn(f'Include the {EVIDENCE_LINK} in the reviewer brief for each changed, added, retired or restored row.',
+                              (AGENTS / name).read_text())
+
+    def test_lane_owned_review_checks_identity_and_keeps_separate_admission(self):
+        review = self.sections[REVIEW]
+        self.assertIn(f'Require exactly one {EVIDENCE_LINK} in the brief for each changed, added, retired or restored row.',
+                      review)
+        self.assertIn('Match every identity field to the scope in the brief.', review)
+        self.assertIn('Block approval if the record or any identity field is missing or mismatched.', review)
+        self.assertIn("Read rows only under the driver's reviewer admission record.", review)
+        self.assertIn('The evidence record grants zero protected access.', review)
 
     def test_protected_reviewer_stops_only_on_the_hook_admission_refusal(self):
         policy = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
