@@ -78,7 +78,7 @@ class ExplicitFeaturePushTests(unittest.TestCase):
         for requirement in (
             "inspect the lane's commit stack and upstream state",
             'Retain all existing tracking checks',
-            'A missing upstream alone establishes neither publication nor unpushed work',
+            'A missing upstream alone establishes neither a pushed head nor unpushed work',
             'Within existing read permission',
             "intended feature destination's repository identity",
             "Compare its exact `refs/heads/<feature-branch>` remote head OID with the lane's current HEAD.",

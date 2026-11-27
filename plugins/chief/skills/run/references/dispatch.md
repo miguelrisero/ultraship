@@ -66,7 +66,7 @@ D6575, 2026-10-29: CoC coordination direction, separate from actual owner receip
 ## You may always
 Use only the authority below.
 1. Commit locally on the assigned lane branch when the brief grants commits, including before tests.
-2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Require separate PR authority to open the draft. Required CI and independent review may follow the draft push. Require both before marking ready or merging. A draft PR is not publication, so a publication or activation hold never blocks a draft push.
+2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Require separate PR authority to open the draft. Required CI and independent review may follow the draft push. Require both before marking ready or merging. A draft PR in a private repository is not publication, so a publication or activation hold never blocks its draft push. An owner hold that names the push still applies.
 3. Run isolated local tests under this brief and Ship's execution admission.
 4. Rerun permitted CI for the lane's current head under Ship's babysit rules. Verify the new attempt.
 5. Dispatch the admitted writer to re-anchor named rows the lane's own diff breaks. Keep the identical mutant. Require one independent Sol review at the frozen head.

@@ -13,7 +13,7 @@ Deliver the task in `$ARGUMENTS` to a ready-for-review pull request that passes 
 Act within the brief, your role, and the applicable gates.
 
 1. Commit locally on the assigned branch with commit authority, including before tests.
-2. Push your lane's feature branch for draft CI with push authority after the [step 9 preflight](references/pipeline.md#9-push-and-pr). A draft PR is not publication, so a publication or activation hold never blocks a draft push.
+2. Push your lane's feature branch for draft CI with push authority after the [step 9 preflight](references/pipeline.md#9-push-and-pr). A draft PR in a private repository is not publication, so a publication or activation hold never blocks its draft push. An owner hold that names the push still applies.
 3. Run isolated local tests under [execution admission](#execution-admission).
 4. Rerun permitted CI on the current head under [Babysit](../babysit/SKILL.md) and verify the new attempt.
 5. Have the admitted writer re-anchor named rows the lane's diff breaks with the identical mutant. Require one independent Sol review at the frozen head under the [lane-owned row route](#lane-owned-row-route).

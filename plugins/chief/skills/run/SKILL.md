@@ -13,7 +13,7 @@ Coordinate the task in `$ARGUMENTS` from the main session, at the session model.
 Act within the brief, your role, and the applicable gates. Route lane actions through the assigned writer or driver.
 
 1. Allow local commits on the assigned branch with commit authority, including before tests.
-2. Have the authorized driver push the lane's feature branch for draft CI after Ship's step 9 preflight. A draft PR is not publication, so a publication or activation hold never blocks a draft push.
+2. Have the authorized driver push the lane's feature branch for draft CI after Ship's step 9 preflight. A draft PR in a private repository is not publication, so a publication or activation hold never blocks its draft push. An owner hold that names the push still applies.
 3. Have the assigned agent run isolated local tests under Ship's execution admission.
 4. Have the authorized driver rerun permitted CI on the current head under Ship's babysit rules and verify the new attempt.
 5. Have the admitted writer re-anchor named rows the lane's diff breaks with the identical mutant. Require one independent Sol review at the frozen head.

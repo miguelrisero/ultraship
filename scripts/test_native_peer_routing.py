@@ -205,6 +205,10 @@ class NativePeerRoutingTests(unittest.TestCase):
         self.assertIn('result Input receipt with ID/version/owner URL', state)
 
 
+DRAFT_PUSH = ('A draft PR in a private repository is not publication, so a publication or activation hold never blocks its draft push. '
+              'An owner hold that names the push still applies.')
+
+
 class BriefSafetyTests(unittest.TestCase):
     def setUp(self):
         environment = patch.dict(os.environ)
@@ -218,8 +222,8 @@ class BriefSafetyTests(unittest.TestCase):
                      'plugins/chief/skills/run/references/dispatch.md', 'plugins/ship/agents/driver.md'):
             item = next(line for line in (ROOT / name).read_text().splitlines() if line.startswith('2. ') and 'draft CI' in line)
             with self.subTest(path=name):
-                self.assertTrue(item.endswith(
-                    'A draft PR is not publication, so a publication or activation hold never blocks a draft push.'))
+                self.assertTrue(item.endswith(DRAFT_PUSH))
+        self.assertIn('before marking ready. ' + DRAFT_PUSH, (ROOT / 'plugins/ship/agents/driver--sol.md').read_text())
 
     def test_hold_report_names_pr_sha_and_next_step(self):
         for name in ('plugins/ship/skills/ship/SKILL.md', 'plugins/chief/skills/run/SKILL.md'):
