@@ -10,7 +10,7 @@ EVENT_ID = '1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8'
 
 SHIP = ROOT / 'plugins/ship'
 ROUTE_CARRIERS = ('agents/driver.md',)
-REVIEWERS = ('reviewer--sol.md', 'reviewer--opus.md', 'reviewer--astra.md')
+REVIEWERS = ('reviewer--sol.md', 'reviewer--opus.md')
 
 
 def section(text, heading):
