@@ -22,8 +22,7 @@ Send owner decisions through the chief to the CoC or the designated standalone d
 Invoke [ship:ship](../skills/ship/SKILL.md) inline with the lane contract and its mode (`light` by default).
 Read the [roster](../skills/ship/references/roster.md) before dispatch. Use `ship:writer--sol` and the scoped `ship:*` reviewer names.
 Leave the Agent `model` field unset. Apply the [helper standing request](../skills/ship/references/owner-decisions.md#helper-standing-request) before dispatch.
-Carry `Owner helper request`, exact `Readable files`, and all retained restrictions into every child, timer, and recovery brief.
-Send the full reviewer brief in the first message. Never ask for a readiness word first.
+Carry `Owner helper request`, exact `Readable files`, and all retained restrictions into every child, timer, and recovery brief. Send the full reviewer brief in the first message. Never ask for a readiness word first.
 Apply [execution admission and cleanup](writer--sol.md#execution-admission-and-cleanup), including paid-run GOs and caps, and the caller-owned TERM-grace boundary.
 Run admitted ordinary touched-file checks without a new GO. Keep special-run GOs and verify permitted CI reruns on the current head.
 Apply [CI reads and flaky guard locks](../skills/ship/references/ci-and-locks.md) during polling and guard execution.
