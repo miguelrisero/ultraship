@@ -55,5 +55,6 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
     def test_dispatch_selects_a_reviewer_with_the_loaded_route(self):
         text = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
         admission = text.split('## Reviewer admission record for protected row reads\n', 1)[1].split('\n## ', 1)[0]
-        self.assertIn('Dispatch `ship:reviewer--sol`, `ship:reviewer--opus`, or, for lane-owned row review only, `ship:reviewer--astra`.', admission)
+        self.assertIn('For lane-owned row review, dispatch the seat that step 8 of the [lane-owned row route](../SKILL.md#lane-owned-row-route) names.', admission)
+        self.assertIn('For standalone main-row repair review, dispatch `ship:reviewer--sol` or `ship:reviewer--opus`.', admission)
         self.assertIn('Ask the reviewer to return `ready` and read nothing.', admission)

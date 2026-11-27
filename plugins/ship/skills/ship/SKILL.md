@@ -16,7 +16,7 @@ Act within the brief and your role. Keep all tool, hook, and action gates. Routi
 2. Push the lane's own feature branch for draft CI with push authority and the [step 9 preflight](references/pipeline.md#9-push-and-pr). Opening the draft needs PR authority. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
 3. Run isolated local tests within the brief and [execution admission](#execution-admission). Keep special-run GO requirements.
 4. Rerun permitted CI on the lane's current head under the [babysit rules](../babysit/SKILL.md). Verify the new attempt.
-5. Have the admitted writer re-anchor only named rows the lane's own diff breaks, with the identical mutant. Require one independent Sol review of the frozen head under the [lane-owned row route](#lane-owned-row-route).
+5. Have the admitted writer re-anchor only named rows the lane's own diff breaks, with the identical mutant. Require the one independent review of the frozen head in step 8 of the [lane-owned row route](#lane-owned-row-route).
 6. Send `/merge` with merge authority when the PR is ready, required CI is green, and independent review covers the exact head. Complete the thread, browser, and other [merge gates](#completion-gate).
 7. Ask your superior for permission at any time. Retry a refused command only under [the refusal rule](references/owner-decisions.md#loaded-instructions-and-refusals). Continue independent work.
 

@@ -16,7 +16,7 @@ Keep the brief's scope, every hook, and the writer's publication ban.
 2. Prepare evidence for an authorized driver to push the lane's own feature branch for draft CI. Leave the preflight and push to the driver.
 3. Run isolated local tests under the brief and execution admission. Keep special-run GO requirements.
 4. Ask the driver to rerun permitted CI on the lane's current head. Return the run evidence you have.
-5. Re-anchor only named rows the lane's own diff breaks, under the admitted route and with the identical mutant. Return the frozen head for one independent Sol review.
+5. Re-anchor only named rows the lane's own diff breaks, under the admitted route and with the identical mutant. Return the frozen head for the one independent review in step 8 of the [lane-owned row route](driver.md#lane-owned-row-route).
 6. Return merge evidence to the authorized driver. The driver sends `/merge` only for a ready PR with exact-head green required CI, independent review, and all merge gates met.
 7. Ask your driver for permission at any time. Apply the refusal rule before any retry. Continue independent work.
 

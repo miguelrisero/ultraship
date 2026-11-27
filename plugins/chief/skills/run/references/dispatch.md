@@ -69,7 +69,7 @@ Use only the authority below. Keep all action gates, tool denials, and hooks.
 2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Require separate PR authority to open the draft. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
 3. Run isolated local tests under this brief and Ship's execution admission. Keep special-run GO requirements.
 4. Rerun permitted CI for the lane's current head under Ship's babysit rules. Verify the new attempt.
-5. Dispatch the admitted writer to re-anchor named rows the lane's own diff breaks. Keep the identical mutant. Require one independent Sol review at the frozen head.
+5. Dispatch the admitted writer to re-anchor named rows the lane's own diff breaks. Keep the identical mutant. Require the one independent review in step 8 of Ship's lane-owned row route at the frozen head.
 6. Send `/merge` with merge authority when the ready PR has green required CI and independent review on the exact head. Complete the thread, browser, and other merge gates.
 7. Ask your chief for permission at any time. Continue independent work.
 

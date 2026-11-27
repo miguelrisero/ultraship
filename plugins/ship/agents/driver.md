@@ -15,7 +15,7 @@ Use the lane's granted authority. Keep every tool, hook, and action gate.
 2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Opening the draft needs PR authority. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
 3. Run isolated local tests under the brief and execution admission. Keep special-run GO requirements.
 4. Rerun permitted CI on the lane's current head under the babysit rules. Verify the new attempt.
-5. Dispatch the admitted writer to re-anchor named rows the lane's own diff breaks. Keep the identical mutant. Require one independent Sol review at the frozen head.
+5. Dispatch the admitted writer to re-anchor named rows the lane's own diff breaks. Keep the identical mutant. Require the one independent review in step 8 of the [lane-owned row route](#lane-owned-row-route) at the frozen head.
 6. Send `/merge` with merge authority when the ready PR has green required CI and independent review on the exact head. Complete the thread, browser, and other merge gates.
 7. Ask your chief for permission at any time. Apply the refusal rule before any retry. Continue independent work.
 
@@ -192,6 +192,12 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The driver marks the draft ready only after the review in step 8 passes at the exact head.
    Not weaker means the same test and the same mutant intent with the same claim or a CoC-approved narrowed claim, or a replacement that guards as tightly.
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](../skills/ship/references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
+   The reviewer seat is `ship:reviewer--sol`.
+   When a CoC ruling records a Claude-only seat rule, `ship:reviewer--opus` takes this seat.
+   The driver's ledger record of that review cites the ruling's locator, time and verbatim text.
+   The locator is the CoC workspace and message or event ID, or a file path with its SHA256.
+   The driver checks the ruling at that locator before dispatch.
+   This seat rule changes no other gate of this route.
    The driver supplies read-only checkouts at the base and the frozen head. Admit each copy only when it contains an approved extent for that review.
    The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.
    For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
