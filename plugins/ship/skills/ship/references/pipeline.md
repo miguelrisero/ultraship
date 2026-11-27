@@ -208,6 +208,10 @@ Return a ready PR to draft before an early CI push. Keep it in draft until all a
 Apply existing push holds, protected-row receipts, and preflight requirements even for a draft.
 
 1. Merge current remote main into the branch. Resolve conflicts and rerun the affected tests that the brief admits.
+   For qualifying whole-file actions, use [protected row merge resolution](../SKILL.md#protected-row-merge-resolution).
+   Give one independent Sol reviewer the merge parents, the verified main and merge-base SHAs, and exact-path metadata for the named sources and frozen head.
+   Include the first parent's entry for a removal. Keep row text and protected read grants out of this review.
+   Require the passing CI anchor guard at the exact pushed head.
 2. Run the full lint and test suite locally when the brief admits it. When the brief bars local tests, use authorized CI or the coordinator's gated run for that proof. Keep any check that the repository requires before push.
 3. Before every authorized feature push, including retries and later pushes, the driver performs this resolved destination preflight in the lane worktree.
    Writers prepare repository, branch, and command evidence only; the authorized driver executes the preflight and push.

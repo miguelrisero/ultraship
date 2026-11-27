@@ -305,7 +305,30 @@ Every other commit keeps the containment requirement unchanged.
 
 ### Lane-owned row route
 
-Follow the [lane-owned row route](../../agents/driver.md#lane-owned-row-route) for protected mutation rows.
+Follow the [lane-owned row route](../../agents/driver.md#lane-owned-row-route) for the PR's own protected row edits.
+
+### Protected row merge resolution
+
+Use this route only in the assigned PR worktree during a merge of `origin/main`.
+It covers whole-file conflict resolution and removal of PR-added rows files, as in [Patricia PR 8707](https://github.com/bettergroupinc/patricia-monorepo/pull/8707).
+Require `MERGE_HEAD` to name the single commit at `origin/main`.
+Use the CoC's CI, testing and tooling standing grant. Keep the local commit grant and all refusal and publication rules.
+
+1. Name each exact repository-relative path under `tests/mutation/` in the writer brief.
+2. For a conflicted file, run `git checkout origin/main -- <path>` to take `origin/main:<path>`.
+   To restore the file to its pre-merge base, resolve `git merge-base HEAD origin/main` first.
+   Run `git checkout <full-merge-base-sha> -- <path>` to take that commit's blob.
+   For a file the PR added, run `git rm -- <path>` only if main and the merge base both lack the path.
+   Run one literal command per file from the repository root, or use `git -C <absolute-root>`.
+3. Compare `git hash-object <path>` and the staged blob ID with the named blob ID.
+   For a removal, confirm the path is absent from the worktree and the index.
+   Stop on a mismatch. Do not read or print row contents under this route.
+4. Commit the resolution in the merge commit. Give the driver the merge SHA, both parent SHAs, and the path and ID or absence evidence.
+5. Have one independent Sol reviewer compare the blob IDs or absence at the frozen head with the named source and verify the merge parents.
+   Require a passing CI anchor guard at the exact pushed head. Use the existing draft and publication gates.
+
+This route needs zero per-row anchor CI failures, replacement row IDs, field bindings, or row-tool runs.
+Apply the lane-owned row routes to all other protected row edits, including re-anchor, restoration and retirement.
 
 ### Same-strength adaptations
 

@@ -298,6 +298,7 @@ Block approval if any proof, binding, extent or admission is missing, stale, amb
 ## Row re-anchor tool admission record
 
 Use this record to admit the sanctioned re-anchor command on the lane-owned row route.
+Use the separate [protected row merge resolution](../SKILL.md#protected-row-merge-resolution) route for qualifying whole-file actions during an `origin/main` merge.
 
 1. Dispatch the writer with a first message that asks for `ready` and permits zero row reads.
 2. Take the agent ID from the Agent tool result.

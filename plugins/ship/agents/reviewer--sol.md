@@ -59,6 +59,13 @@ Require protected row admission separately from the CoC decision. Preserve the r
 Confirm the same guarantee and identical mutant operation. Return a content-free verdict for the frozen review receipt.
 This route grants zero edit, execution, or publication authority.
 
+## Protected row merge review
+
+Apply [protected row merge resolution](../skills/ship/SKILL.md#protected-row-merge-resolution) when the brief names it.
+Use the driver's content-free Git evidence. Confirm the merge parents and path, and match each frozen-head blob to the permitted source.
+For a removal, confirm the path exists in the first parent and is absent at the merge base, second parent and frozen head.
+Return the verdict at the frozen SHA. This review grants zero protected reads or tool permissions.
+
 ## Lane-owned row review
 
 Use this review when the brief names the lane-owned row route.
