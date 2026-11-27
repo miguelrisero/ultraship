@@ -77,17 +77,27 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         skill = (SHIP / 'skills/ship/SKILL.md').read_text()
         pipeline = (SHIP / 'skills/ship/references/pipeline.md').read_text()
         for policy, clauses in (
+            (section(skill, '### Protected row merge resolution'), (
+                'Limit the writer brief to paths that match the [protected-path filter](references/pipeline.md#protected-path-filter).',
+            )),
             (section(pipeline, '## 9. Push and PR'), (
                 'Collect complete protected tree entries from both parents, their merge base and the merge commit.',
                 'Apply the same protected-path filter to the complete Git index and tree metadata.',
                 'Match adjacent `tests` and `mutation` path components at the root or any depth, without regard to case.',
                 'Pass only protected index and tree entries to the reviewer.',
+                'Record the exact capture and filter commands for each inventory.',
+                'Record the total and protected entry counts for each inventory.',
+                'Give the reviewer the commands and counts for each inventory.',
             )),
             (section(skill, '### Protected row merge review'), (
+                'Block if any capture uses the wrong filter or has inconsistent counts.',
                 'Reconcile the before-resolution index with both parent inventories by exact path.',
                 'Block on an omitted parent path unless the metadata establishes a clean deletion before resolution.',
+                'Require the first parent to retain the exact path with its merge-base mode and object ID.',
+                'Require the second parent to omit that exact path.',
                 'Require a separate review for every deletion outside this merge route.',
                 'Confirm that every protected path in the second parent exists at the same path in the merge commit.',
+                'Keep lane-side deletions of second-parent protected paths outside this route.',
                 "Match each checked-out path's mode and blob ID at the merge commit to the second parent.",
                 'Only the first parent contains `backend/Tests/Mutation/lane-only.toml`.',
                 'The before-resolution index and merge commit both omit that path.',
