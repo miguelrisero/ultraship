@@ -212,7 +212,8 @@ Apply existing push holds, protected-row receipts, and preflight requirements ev
    Verify the repository identity of `origin` without exposing credentials.
    After the fetch, record the `refs/heads/main` SHA from `git ls-remote --exit-code origin refs/heads/main` before starting the merge.
    Match that SHA to `origin/main`. Match it to the sole `MERGE_HEAD` during resolution.
-   Give one independent Sol reviewer that evidence, the merge commit and both parents, and the merge base of the parents.
+   Give one independent Sol reviewer the [merge review checklist](../SKILL.md#protected-row-merge-review) in the brief.
+   Include the remote evidence, the merge commit, both parents and their merge base.
    Require an empty `refs/replace` namespace when collecting the review evidence.
    Supply the complete protected path inventories at the second parent and merge commit. Use recursive `git ls-tree` metadata only.
    Include the exact-path entries or absence at the second parent and merge commit. Include the merge-base entry for a checkout from that commit.

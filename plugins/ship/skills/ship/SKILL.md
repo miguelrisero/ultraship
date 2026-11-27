@@ -305,7 +305,7 @@ Every other commit keeps the containment requirement unchanged.
 
 ### Lane-owned row route
 
-Follow the [lane-owned row route](../../agents/driver.md#lane-owned-row-route) for the PR's own protected row edits.
+Follow the [lane-owned row route](../../agents/driver.md#lane-owned-row-route) for protected mutation rows.
 
 ### Protected row merge resolution
 
@@ -329,10 +329,23 @@ Use the CoC's CI, testing and tooling standing grant. Keep the local commit gran
 4. Verify that the staged resolution preserves all protected paths from the second parent. Use Git metadata with rename detection off.
    Commit the resolution in the merge commit. Give the driver the merge SHA, both parent SHAs, and the path and ID or absence evidence.
 5. Follow the [driver evidence requirements](references/pipeline.md#9-push-and-pr) for one independent Sol review of the merge commit.
+   Give the reviewer the [checklist below](#protected-row-merge-review) in the brief.
    Require a passing CI anchor guard at the exact pushed head. Use the existing draft and publication gates.
 
 This route needs zero per-row anchor CI failures, replacement row IDs, field bindings, or row-tool runs.
 Apply the lane-owned row routes to all other protected row edits, including edits after the merge commit.
+
+### Protected row merge review
+
+Dispatch only an independent `ship:reviewer--sol` for this review. Choose a reviewer who differs from the PR author and writer.
+Use only the driver's content-free Git evidence. This review grants zero protected reads or tool permissions.
+
+- Require the second parent to match the verified remote main commit used for the merge.
+- Confirm that every protected path in the second parent exists at the same path in the merge commit.
+- Match each checked-out path's blob ID at the merge commit to its blob ID in the second parent.
+- For a merge-base checkout, confirm the same blob ID at that path in the merge base.
+- For a removal, confirm the path exists in the first parent and is absent at the merge base, second parent and merge commit.
+- Block on missing or conflicting evidence. Return the verdict for the merge commit.
 
 ### Same-strength adaptations
 

@@ -59,17 +59,6 @@ Require protected row admission separately from the CoC decision. Preserve the r
 Confirm the same guarantee and identical mutant operation. Return a content-free verdict for the frozen review receipt.
 This route grants zero edit, execution, or publication authority.
 
-## Protected row merge review
-
-Apply [protected row merge resolution](../skills/ship/SKILL.md#protected-row-merge-resolution) when the brief names it.
-Use the driver's content-free Git evidence. Require the second parent to match the verified remote main commit used for the merge.
-Confirm that every protected path in the second parent exists at the same path in the merge commit.
-Match each checked-out path's blob ID at the merge commit to the blob ID at the same path in the second parent.
-For a checkout from the merge base, confirm the same blob ID at that path in the merge base.
-For a removal, confirm the path exists in the first parent and is absent at the merge base, second parent and merge commit.
-Block on missing or conflicting evidence. Return the verdict for the merge commit.
-Send later protected edits through the applicable row route. This review grants zero protected reads or tool permissions.
-
 ## Lane-owned row review
 
 Use this review when the brief names the lane-owned row route.

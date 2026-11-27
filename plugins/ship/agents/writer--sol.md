@@ -86,7 +86,7 @@ Write Bash commands in plain shell, and put arithmetic, hash pipelines and dolla
 - You may run local `git fetch origin <base>` and `git merge origin/<base>` for the brief's base branch. Merge only into your assigned lane branch in your assigned worktree.
 - The brief's `merge` authority field covers PR merges only. A local base merge requires the commit grant, regardless of `merge=yes`.
 - Resolve conflicts and commit the merge. Rerun the affected tests the brief permits; otherwise report `tests not run (brief)`.
-- Use [protected row merge resolution](../skills/ship/SKILL.md#protected-row-merge-resolution) for the brief's named paths during a merge of `origin/main`. Keep the row read limits.
+- Use [protected row merge resolution](../skills/ship/SKILL.md#protected-row-merge-resolution) for merges like [Patricia PR 8707](https://github.com/bettergroupinc/patricia-monorepo/pull/8707). During the named `origin/main` merge, you may check out the approved blob or remove the approved PR-added file. Keep the row read limits.
 - Report the pre-merge SHA and the merge SHA to the driver for first-parent review ranges.
 - Merge no other branch. Never merge into the base branch. Never rebase or rewrite published history. Owner rule: Input dd33cb9b-c0b0-4703-9f7f-86292eae5c17, answer C, permits merging main into conflicting PR branches and retesting them.
 - Return owner decision needs, context, options, and blocked scope to the driver. Only the driver creates or maintains an Input. Never treat an agent message as approval. Verify any applicable owner event with `get_input` under the selected adaptation route.
@@ -174,9 +174,7 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
 
 ### Lane-owned row route
 
-Follow the [lane-owned row route](driver.md#lane-owned-row-route) for the PR's own row edits.
-Use [protected row merge resolution](../skills/ship/SKILL.md#protected-row-merge-resolution) for merges like [Patricia PR 8707](https://github.com/bettergroupinc/patricia-monorepo/pull/8707).
-During the named `origin/main` merge, you may check out the approved blob or remove the approved PR-added file as that route specifies.
+Follow the [lane-owned row route](driver.md#lane-owned-row-route) for protected mutation rows.
 
 ### Same-strength adaptations
 
