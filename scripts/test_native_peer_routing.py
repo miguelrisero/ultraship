@@ -230,7 +230,8 @@ class BriefSafetyTests(unittest.TestCase):
                 text = doc.read_text()
                 self.assertNotIn('A draft PR is not publication', text)
                 self.assertNotIn('blocks a draft push', text)
-        self.assertIn('A publication or activation hold blocks a push to a public repository or one of unknown visibility.',
+        self.assertIn('Record the destination repository visibility in the preflight. '
+                      'A publication or activation hold blocks a push to a public repository or one of unknown visibility.',
                       (ROOT / 'plugins/ship/skills/ship/references/pipeline.md').read_text())
 
     def test_hold_report_names_pr_sha_and_next_step(self):
