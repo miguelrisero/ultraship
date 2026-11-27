@@ -476,6 +476,10 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             "Verify the exact refusal against the named tool version's pre-write checks.",
             'Require a nonzero exit and zero generated authorization records from that invocation.',
             'Require identical row-file blob IDs immediately before and after that same invocation.',
+            'Confirm that the tool refused before any write to the row file.',
+            'Equal blob IDs alone prove no write order.',
+            'Reference the proof in `prior_tool_refusal` in the lane-owned row evidence record.',
+            'Keep the record content-free.',
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, rule)
@@ -486,11 +490,28 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         for requirement in (
             'Count every successful invocation and every invocation that writes, even if a later action restores the file.',
             'Count the invocation if evidence is missing, ambiguous, or belongs to a different invocation.',
+            'Count the invocation if any other check fails, including an identity mismatch.',
             'Keep every existing admission, refusal, retry, decision and review gate in force.',
             'This rule grants zero retry or write authority.',
+            'Require separate authority for any route change.',
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, rule)
+
+    def test_prior_tool_admission_stays_with_the_invocation_and_ends_before_native_edit(self):
+        reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        rule = section(reference, '## Native exact-pair tool attempt accounting')
+        for requirement in (
+            'Keep any prior tool admission with the earlier tool route and its refusal.',
+            'Bind any prior tool admission to the invocation through the historical evidence referenced by `prior_tool_refusal`.',
+            'Verify that the driver removed that admission before the native edit.',
+            'Use historical evidence only. Read no live admission store.',
+            'The native route admits and runs no row re-anchor tool.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, rule)
+        admission = section(reference, '## Row re-anchor tool admission record')
+        self.assertIn('Remove the record when the writer returns.', admission)
 
     def test_native_exact_pair_attempt_proof_reaches_independent_review(self):
         link = '[native exact-pair tool attempt accounting](../skills/ship/references/owner-decisions.md#native-exact-pair-tool-attempt-accounting)'
@@ -502,6 +523,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 review = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
                 native = review.split('For a CoC-approved native exact-pair edit,', 1)[1].split('\n\n', 1)[0]
                 self.assertIn(f'Verify any prior refusal proof in the brief under the {link} rule.', native)
+                self.assertIn('Verify from that proof that any prior tool admission ended before the native edit.', native)
+                self.assertIn('Block approval if the prior admission or its removal cannot be verified.', native)
 
     def test_native_exact_pair_review_uses_decision_and_exact_head_ci(self):
         for name in REVIEWERS:
@@ -514,6 +537,8 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertIn('Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.', tool)
                 for requirement in (
                     'For a CoC-approved native exact-pair edit, require zero counted tool runs and no generated authorization record.',
+                    'Require zero row re-anchor tool admissions on the native route.',
+                    'Block approval if a prior invocation counts as a run.',
                     'Require the frozen CoC decision by absolute path and SHA256.',
                     "Require the driver's digest and binding verification at the frozen head.",
                     'Match the decision to the applying writer, repository, lane, PR, row file, row ID and source commit.',
