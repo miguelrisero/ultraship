@@ -139,12 +139,6 @@ class BriefTests(unittest.TestCase):
             'Admission record: `<admission record path>`, expires at `<expiry time>`.',
             'Read the standing grant directly.',
             'Verify each binding before running the tool.',
-            'A hook denial before the tool starts counts as zero runs.',
-            'After that denial, the writer may retry once in a compliant form; the driver re-dispatches it.',
-            'The decision-defect rule requires a CoC decision defect as the sole stated cause, with zero bytes written and zero commits.',
-            'After the writer verifies the frozen corrected decision under that rule, the refused attempt counts as zero runs.',
-            'The writer gets one new attempt under the corrected decision.',
-            'The driver re-dispatches it with a fresh admission record.',
             'Commit only the row file on success.',
             'Keep the row pending on a refusal.',
             'Report the refusal to the driver.',
@@ -155,6 +149,61 @@ class BriefTests(unittest.TestCase):
         self.assertIn('Keep all row TOML text and pair bytes out of the brief.', self.reference)
         self.assertIn("Apply the [helper standing request](#helper-standing-request) and the brief's routing and output contracts.", self.reference)
         self.assertIn('Include the global grant and this reference in `Readable files`.', self.reference)
+
+    def test_shared_ordinary_retry_gates_both_refusal_types(self):
+        _, heading, rule = self.reference.partition('\n## Ordinary row re-anchor retries\n')
+        self.assertTrue(heading, 'The reference needs a shared ordinary retry gate.')
+        rule = rule.split('\n## ', 1)[0]
+        for clause in (
+            'Use this rule for pre-start hook refusals and pre-write tool refusals.',
+            'Use [per-row re-anchor attempt accounting](#per-row-re-anchor-attempt-accounting) to verify the count.',
+            'Require a verified zero count and an unused per-row attempt before any ordinary re-dispatch.',
+            'Keep a counted tool refusal pending without ordinary re-dispatch.',
+            'The driver verifies separate retry authority under [Loaded instructions and refusals](#loaded-instructions-and-refusals) before re-dispatch.',
+            'The driver confirms [row re-anchor tool admission](#row-re-anchor-tool-admission-record) for the exact retry before re-dispatch.',
+            'The driver re-dispatches at most one compliant ordinary retry per row.',
+            'Keep the tool\'s own refusal rule in force.',
+            'Apply the decision-defect rule separately.',
+        ):
+            with self.subTest(clause=clause):
+                self.assertTrue(clause in rule, clause)
+
+    def test_brief_routes_both_refusal_types_to_the_shared_retry_gate(self):
+        brief = self.reference.split('## Row re-anchor tool brief\n', 1)[1].split('\n## ', 1)[0]
+        link = '[ordinary row re-anchor retry rule](#ordinary-row-re-anchor-retries)'
+        self.assertTrue(link in brief, link)
+        before_defect, marker, _ = self.template.partition('- The decision-defect rule')
+        self.assertTrue(marker)
+        self.assertIn('Apply the ordinary row re-anchor retry rule to a pre-start hook refusal or a pre-write tool refusal.', before_defect)
+        self.assertIn('Wait for the driver to re-dispatch any ordinary retry.', before_defect)
+        self.assertNotIn('Before a hook retry', before_defect)
+
+    def test_drivers_and_writers_link_the_shared_retry_gate(self):
+        link = '../skills/ship/references/owner-decisions.md#ordinary-row-re-anchor-retries'
+        for name in ('driver.md', 'driver--sol.md', 'writer--sol.md', 'writer--fable52.md'):
+            with self.subTest(carrier=name):
+                text = (ROOT / 'plugins/ship/agents' / name).read_text()
+                clause = f'Apply the [ordinary row re-anchor retry rule]({link})'
+                self.assertTrue(clause in text, clause)
+
+    def test_ordinary_retry_runs_only_through_the_admitted_writer(self):
+        rule = self.reference.split('## Ordinary row re-anchor retries\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('Only the admitted writer runs the retry.', rule)
+        refusals = self.reference.split('## Loaded instructions and refusals\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('The general refusal rule grants no direct row re-anchor tool retry authority.', refusals)
+        for name in ('driver.md', 'driver--sol.md'):
+            with self.subTest(driver=name):
+                text = (ROOT / 'plugins/ship/agents' / name).read_text()
+                self.assertIn('Never run an ordinary row re-anchor tool retry yourself.', text)
+
+    def test_decision_defect_keeps_its_separate_retry(self):
+        self.assertIn(
+            '- The decision-defect rule requires a CoC decision defect as the sole stated cause, with zero bytes written and zero commits.\n'
+            '- After the writer verifies the frozen corrected decision under that rule, the refused attempt counts as zero runs.\n'
+            '- The writer gets one new attempt under the corrected decision.\n'
+            '- The driver re-dispatches it with a fresh admission record.',
+            self.template,
+        )
 
     def test_carriers_and_admission_flow_link_the_brief(self):
         carriers = [Path('plugins/ship/agents') / name for name in

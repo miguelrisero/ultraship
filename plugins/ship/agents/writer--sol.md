@@ -97,6 +97,7 @@ Never widen, raise, or relax a limit, cap, timeout, budget, bound, or guard cons
 
 Authority route: apply an exact edit when the brief carries an `owner_ui` answer that names it, verified as in Approved test adaptations below, or a CoC decision on that exact test, CI, or tooling change (owner standing grant: "The CoC decides CI/CD, testing and tooling items for me"). Apply the [lane-owned row route](#lane-owned-row-route) for qualifying protected rows. The ban on weakening a test and the independent not-weaker review still apply.
 A CoC decision never covers product, billing, security-policy, architecture, resource, host, or spend bounds; those use the `owner_ui` route or the product-limit exception.
+For a verified owner grant that covers a resource bound for one run, use [Exact-run resource bounds](#exact-run-resource-bounds).
 
 ### Execution admission and cleanup
 
@@ -206,7 +207,24 @@ Refuse stale, superseded, cancelled, missing, inconsistent, or invented provenan
 A stale or missing citation supplies zero authority.
 An independent route requires complete applicable authority and a recorded reason; it cannot override an effective denial or hold.
 Apply only the authorized same-guarantee test, fixture, register, or census edit; preserve unrelated assertions, bounds, higher-priority instructions, and protected holds.
-Route product or resource bound changes through their existing dedicated exception and boundary proofs.
+Use the existing product-limit exception and its boundary tests for product-limit changes.
+
+### Exact-run resource bounds
+
+Use this separate route only for an exact resource-bound edit under a verified owner grant.
+Require the brief to name the runtime execution ID, repository, and workspace.
+Require the CoC-frozen verifier record by absolute path and SHA256.
+Reuse the owner-event provenance checks in [Task-specific owner decision](#task-specific-owner-decision).
+Use only the CoC-frozen record for verifier fallback.
+Keep an authoritative mismatch blocked without fallback.
+Match the owner answer and verifier record to independent evidence of the current active execution.
+Verify that match before editing or applying a bound.
+Keep repository defaults if the trusted runtime cannot prove that match.
+Require authoritative confirmation of current owner approval immediately before each exact-bound edit and each application.
+Apply the [point-of-use approval rule](../skills/ship/references/owner-decisions.md#exact-run-resource-bounds).
+The frozen verifier record supplies provenance only.
+Keep repository defaults when confirmation is unavailable, stale, or mismatched.
+Follow [Exact-run resource bounds](../skills/ship/SKILL.md#exact-run-resource-bounds) for the scope, record checks, tests, and separate execution admission.
 
 ### Migration parent pins
 
@@ -237,6 +255,14 @@ An explicit owner refusal blocks every route for that edit until applicable owne
 Apply your own loaded definition; checkout, cache, and version supply zero additional authority.
 Report available identity evidence and unknown fields honestly when diagnosing a loaded-contract mismatch.
 Lift a refusal only after its cause is fixed or applicable authority resolves it; version, restart, or executor replacement alone lifts nothing.
+Apply the decision-defect rule with its own count and retry conditions.
+For other refused row re-anchor attempts, apply [per-row re-anchor attempt accounting](../skills/ship/references/owner-decisions.md#per-row-re-anchor-attempt-accounting).
+Use this rule only to count attempts under the existing row re-anchor limits.
+Count a proven pre-start hook refusal or pre-write tool refusal as zero per-row runs.
+Require the verbatim refusal receipt and proof of zero writes.
+Count the attempt if any proof is missing, ambiguous, or mismatched.
+Keep the refusal effective. Counting grants zero retry, edit, or route authority.
+Apply the [ordinary row re-anchor retry rule](../skills/ship/references/owner-decisions.md#ordinary-row-re-anchor-retries) and wait for the driver to re-dispatch any ordinary retry.
 This [decision-defect rule](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals) applies only to your own refusal or a refusal from the row re-anchor tool.
 The sole stated cause must be a defect in a CoC decision.
 The refusal must come before the refused action writes anything, with zero bytes written and zero commits.

@@ -126,6 +126,43 @@ Retain that record for the fallback when the writer lacks the tool or its call f
 Preserve a direct authoritative mismatch as blocked; the fallback supplies verified provenance, never a substitute owner approval.
 Record the accepted evidence and exact scope in the brief and PR body.
 
+## Exact-run resource bounds
+
+Use this separate route only for the exact scope of a current owner answer for one execution.
+Require a trusted runtime to assign a non-reusable execution ID before owner approval.
+Require a distinct ID for every Ship execution, even within the same session.
+Accept a BetterCoding execution ID only when the runtime ties it to this Ship invocation.
+Require the owner answer to name that execution ID, repository, and workspace.
+Use the [owner answer checks](#consume-and-finish) to verify the current `owner_ui` answer.
+Reuse only the owner-event provenance checks from [Task-specific test adaptations](#task-specific-test-adaptations).
+Require the CoC to verify the answer and freeze the verifier record before dispatch.
+Bind the record to the verified answer, execution ID, repository, and workspace.
+Include the authorized scope, exact bounds, and exact files and edits.
+
+Use trusted runtime evidence independent of the owner answer, verifier record, and writer brief.
+Use only evidence available through existing permissions.
+Require runtime evidence that ties the active execution ID to the repository and workspace.
+A historical record alone cannot prove which execution is active.
+Verify the digest before dispatch or retry.
+Match every binding to the answer and the current active execution before dispatch or retry.
+Recheck the current version, status, and answer provenance before dispatch or retry.
+Keep missing, stale, or mismatched evidence pending and keep repository defaults.
+
+Name the record by absolute path and SHA256 in the writer brief.
+List the record under `Readable files`.
+Select the exact-run subsection in the loaded writer definition.
+Keep execution admission separate.
+The verifier record supplies evidence only. The verified owner answer supplies the scoped grant.
+
+Require authoritative confirmation of current owner approval immediately before each exact-bound edit and each application.
+Use only the existing authorized owner-answer verification route for confirmation.
+Match the current Input version, status, and answer provenance to the grant.
+Confirm that the status permits the action and that the same owner answer still authorizes the exact scope.
+The frozen verifier record supplies provenance only.
+Require fresh confirmation at each use, even when the frozen record and active execution match.
+Keep repository defaults when confirmation is unavailable, stale, or mismatched.
+Keep the exact-bound edit or application pending in that case.
+
 ## Scoped owner event verification
 
 Apply this exception only to future briefs after verified runtime adoption.
@@ -301,27 +338,59 @@ The record grants zero authority.
 Apply the [existing refusal rules](#loaded-instructions-and-refusals) to the referenced refusal.
 The record authorizes zero retries and gives zero retry credit.
 
+## Per-row re-anchor attempt accounting
+
+Use this rule only to count attempts under the existing row re-anchor limits.
+Apply the decision-defect rule with its own count and retry conditions.
+Use the checks below for other refusals and for the separate native review proof.
+Require the verbatim refusal receipt and proof of zero writes by the refused action.
+Bind the receipt and proof to the same invocation, row ID, row file, worktree, frozen head, and tool version.
+Identify the exact tool version by a commit SHA or file digest.
+Use only evidence from a producer with existing read authority.
+
+For a hook refusal, use the pre-start check.
+Require proof that the hook refused the exact invocation before the tool started.
+For a pre-write tool refusal, require the same-invocation pre-write proof below.
+
+- Verify the exact refusal against the named tool version's pre-write checks.
+- Require a nonzero exit and zero generated authorization records from that invocation.
+- Require identical row-file blob IDs immediately before and after that same invocation.
+- Confirm that the tool refused before any write to the row file. Equal blob IDs alone prove no write order.
+
+Count a proven pre-start hook refusal or pre-write tool refusal as zero per-row runs.
+Count the attempt if any proof is missing, ambiguous, or mismatched.
+Keep the verbatim receipt in authorized evidence and reference it without copying raw output into the row record.
+Keep the refusal effective.
+Counting grants zero retry, edit, or route authority.
+
+## Ordinary row re-anchor retries
+
+Use this rule for pre-start hook refusals and pre-write tool refusals.
+Use [per-row re-anchor attempt accounting](#per-row-re-anchor-attempt-accounting) to verify the count.
+Require a verified zero count and an unused per-row attempt before any ordinary re-dispatch.
+Keep a counted tool refusal pending without ordinary re-dispatch.
+The driver verifies separate retry authority under [Loaded instructions and refusals](#loaded-instructions-and-refusals) before re-dispatch.
+The driver confirms [row re-anchor tool admission](#row-re-anchor-tool-admission-record) for the exact retry before re-dispatch.
+The driver re-dispatches at most one compliant ordinary retry per row.
+Only the admitted writer runs the retry.
+Keep the tool's own refusal rule in force.
+Apply the decision-defect rule separately.
+
 ## Native exact-pair tool attempt accounting
 
 Use this rule only to count earlier row re-anchor tool invocations for a lane-owned CoC-approved native exact-pair edit.
+Apply [per-row re-anchor attempt accounting](#per-row-re-anchor-attempt-accounting) to any prior refusal.
+Require the shared refusal proof for native review even when the decision-defect rule controls a corrected-decision retry.
 Keep any prior tool admission with the earlier tool route and its refusal.
 Bind any prior tool admission to the invocation through the historical evidence referenced by `prior_tool_refusal`.
 Verify that the driver removed that admission before the native edit.
 Apply the removal step in the [row re-anchor tool admission record](#row-re-anchor-tool-admission-record).
 Use historical evidence only. Read no live admission store.
 The native route admits and runs no row re-anchor tool.
-
-Count a prior invocation as zero runs only when all checks below pass.
-
-- Bind the proof to the exact invocation, row ID, row file, worktree, frozen head and tool version.
-- Verify the exact refusal against the named tool version's pre-write checks.
-- Require a nonzero exit and zero generated authorization records from that invocation.
-- Require identical row-file blob IDs immediately before and after that same invocation.
-
+For a pre-start hook refusal, require the pre-start proof above and zero generated authorization records.
+Keep the prior admission and removal checks for both types of refusal.
 Use content-free evidence from a producer with existing read authority.
-Confirm that the tool refused before any write to the row file. Equal blob IDs alone prove no write order.
 Record the full head SHA frozen for the invocation. Verify its link to the native edit under review.
-Identify the exact tool version by a commit SHA or file digest.
 Count every successful invocation and every invocation that writes, even if a later action restores the file.
 Count the invocation if evidence is missing, ambiguous, or belongs to a different invocation.
 Count the invocation if any other check fails, including an identity mismatch.
@@ -407,6 +476,7 @@ Apply the [helper standing request](#helper-standing-request) and the brief's ro
 Include the global grant and this reference in `Readable files`.
 Keep each sentence at most 25 words.
 Keep all row TOML text and pair bytes out of the brief.
+Apply the [ordinary row re-anchor retry rule](#ordinary-row-re-anchor-retries) before any ordinary re-dispatch.
 
 ```text
 Re-anchor row `<row ID>` of `<PR URL>` under the lane-owned row route.
@@ -424,8 +494,8 @@ Decision:
 - Read the standing grant directly.
 - Verify each binding before running the tool.
 - Run once, alone: `<tool command>`.
-- A hook denial before the tool starts counts as zero runs.
-- After that denial, the writer may retry once in a compliant form; the driver re-dispatches it.
+- Apply the ordinary row re-anchor retry rule to a pre-start hook refusal or a pre-write tool refusal.
+- Wait for the driver to re-dispatch any ordinary retry.
 - The decision-defect rule requires a CoC decision defect as the sole stated cause, with zero bytes written and zero commits.
 - After the writer verifies the frozen corrected decision under that rule, the refused attempt counts as zero runs.
 - The writer gets one new attempt under the corrected decision.
@@ -474,7 +544,7 @@ For a policy change, supply its applicable dedicated authority; a register label
 
 An explicit owner refusal blocks all routes for that edit until applicable owner authority resolves it. Apply your own loaded definition; a checkout, cache entry, or version supplies zero additional authority. Prospective source changes and their delivery supply zero runtime-adoption, affected-retry, or action authority. Preserve existing loaded-session restrictions and affected-session holds. Keep each helper within its assigned lane and authority. When diagnosing a contract mismatch, report the loaded identity evidence available and identify unknown fields without inference. Repairing missing verification evidence resolves only that evidence gap; it cannot override a binding prohibition or tool denial.
 Retry rule: after a hook or permission refusal, an agent may retry in another form when the refusal reason is fixed or the new form meets the rule the refusal names. A script file, another interpreter, a module flag or a wrapper command is another form; it must meet that rule too. An agent may always ask its superior for permission to run the refused command.
-A refusal never ends the work. Keep the refused step pending and continue independent work. Preserve every action gate. A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
+A refusal never ends the work. Keep the refused step pending and continue independent work. Preserve every action gate. A compliant retry never bypasses a hook, uses a different credential, or edits a guard. The general refusal rule grants no direct row re-anchor tool retry authority. Use the [ordinary retry rule](#ordinary-row-re-anchor-retries) or the separate decision-defect rule below.
 A writer asks its driver, a reviewer asks its coordinator, a driver asks its chief, and a chief asks the CoC. Route owner-only items under [Only the owner](#only-the-owner). No agent, the CoC included, sends the owner a refusal, hook or tooling question. The superior may grant the request, or run the command itself when it considers that appropriate. The superior records the grant or the run in the lane state file. Never ask the owner to paste or run a command. A version, restart, or new session alone lifts nothing. Checks that the brief names stay permitted when the hook admits them. Safety blocks: keep destructive actions, secrets, production data writes, flag flips, deploys, customer-data deletion, protected paths, and approval, GO, installation, and publication holds blocked as their own rules say. A retry in another form never bypasses a safety block. A superior grants or runs a command only within its own authority, and its own hooks and permissions apply. Protected mutation-row edits use only the [lane-owned row route](../SKILL.md#lane-owned-row-route), the [standalone main-row repair](#standalone-main-row-repair) and their tools. Whole-file actions during a qualifying `origin/main` merge use only [protected row merge resolution](../SKILL.md#protected-row-merge-resolution). For a held scope refusal, use the scope-refusal rule below and route the decision to the CoC. The merge route grants zero retry authority after a hook refusal.
 Decision-defect rule: it applies only to an agent's own refusal or a refusal from the row re-anchor tool. The sole stated cause must be a defect in a CoC decision. The refusal must come before the refused action writes anything, with zero bytes written and zero commits. For protected writes, this rule covers only row re-anchor tool attempts and native-Edit attempts on a CoC-approved row that a frozen CoC decision file binds. For the row re-anchor tool, it covers your refusal before the run and the tool's refusal during the run. For protected native Edit, this rule covers only your own refusal before the Edit call on the lane-owned row route's CoC-approved path. The defect is a wrong SHA, a wrong path, a stale head, a missing field, or an internal contradiction. A digest, extent or other binding without an exact definition in the decision counts as a missing field or an internal contradiction. Quote the refusal and the defect to your superior, who relays them up the superior chain to the CoC. Only a corrected CoC decision with a new SHA256 can resolve that refusal for that cause. Require the corrected decision to quote the refusal verbatim, name the defective decision by path and SHA256, and name the defect it corrects. A corrected decision grants nothing beyond what the defective decision grants and changes only the defective fields. Wait for the CoC to freeze the corrected decision. Before the next attempt, verify the corrected decision in full and compare its actor, action, target and scope with the defective decision's grant. Keep the refusal pending when that comparison is inconclusive or shows a wider grant. Then the refused row-tool attempt counts as zero runs, and the writer gets one new attempt under the corrected decision. The driver re-dispatches that attempt with a fresh admission record. Then the refused protected native-Edit attempt counts as zero attempts, and the writer gets one new protected native-Edit attempt under the corrected decision. For protected native Edit, the driver verifies the corrected decision again at the frozen head. The driver records the result in the reviewer brief. Follow every other route requirement, including the independent review. This rule lifts no hook, permission or owner refusal, and no security, secret or production gate. It lifts no refusal of a push or a merge, and no tool refusal with any other cause. It lifts no refusal of a protected write that already wrote bytes or made a commit. Outside row re-anchor tool attempts, it lifts no refusal of a protected write that no frozen CoC decision file binds. Follow the retry rule for hook and permission refusals, and the tool's own rule for a tool refusal with any other cause.
 Scope-refusal rule: it applies only to an agent's own refusal or an earlier writer's refusal on the same lane, PR and edit. The sole stated cause must be that a CoC decision asks for an action the writer contract forbids. Quote the refusal and its cause to your superior, who relays them up the superior chain to the CoC. Only a new CoC decision with a new SHA256 can resolve that refusal for that cause. Require the new decision to quote the refusal verbatim. Require it to name the earlier decision by path and SHA256. Require it to name the same lane, PR and edit for an earlier writer's refusal. Require it to remove the cause so that every action it grants fits the writer contract. The new decision grants nothing the writer contract forbids, and widens no read scope, protected row authority or other guard. Each action it grants still needs its own route and the authority that route names; this rule grants no authority. Never run the refused action under either decision. Verify the new decision in full before the next attempt. Compare each action it grants with the writer contract and its route before the next attempt. Keep the refusal pending when that comparison is inconclusive or finds an action the writer contract forbids. Follow every other route requirement. This rule lifts no hook, permission, tool or owner refusal, and no security, secret or production gate. It lifts no refusal of a push or a merge, and an explicit owner refusal still needs applicable owner authority.
