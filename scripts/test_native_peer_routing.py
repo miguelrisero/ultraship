@@ -223,7 +223,15 @@ class BriefSafetyTests(unittest.TestCase):
             item = next(line for line in (ROOT / name).read_text().splitlines() if line.startswith('2. ') and 'draft CI' in line)
             with self.subTest(path=name):
                 self.assertTrue(item.endswith(DRAFT_PUSH))
+                self.assertEqual(item.count('is not publication'), 1)
         self.assertIn('before marking ready. ' + DRAFT_PUSH, (ROOT / 'plugins/ship/agents/driver--sol.md').read_text())
+        for doc in sorted((ROOT / 'plugins').rglob('*.md')):
+            with self.subTest(broad_rule=str(doc.relative_to(ROOT))):
+                text = doc.read_text()
+                self.assertNotIn('A draft PR is not publication', text)
+                self.assertNotIn('blocks a draft push', text)
+        self.assertIn('A publication or activation hold blocks a push to a public repository or one of unknown visibility.',
+                      (ROOT / 'plugins/ship/skills/ship/references/pipeline.md').read_text())
 
     def test_hold_report_names_pr_sha_and_next_step(self):
         for name in ('plugins/ship/skills/ship/SKILL.md', 'plugins/chief/skills/run/SKILL.md'):
