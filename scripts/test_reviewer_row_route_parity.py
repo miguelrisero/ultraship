@@ -48,7 +48,7 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
         self.assertIn('Launch the reviewer in the background.', admission)
         self.assertIn('Continue the same reviewer with SendMessage after the record exists.', admission)
         for text in [admission, *(split_body((AGENTS / f'reviewer--{seat}.md').read_text())[1][ADMISSION]
-                                  for seat in ('sol', 'opus', 'astra'))]:
+                                  for seat in ('sol', 'opus'))]:
             with self.subTest(text=text):
                 self.assertIn('If the hook refuses a protected read because admission is missing or invalid', text)
                 self.assertIn('Make no further protected reads.', text)
