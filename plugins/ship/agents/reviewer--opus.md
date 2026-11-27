@@ -65,7 +65,7 @@ Use this review when the brief names the lane-owned row route.
 Authority: the owner's global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.
 Read rows only under the driver's reviewer admission record. Read only the named row lines at the named commits.
 You differ from the PR author and the writer.
-Require exactly one [lane-owned row evidence record](../skills/ship/references/owner-decisions.md#lane-owned-row-evidence-record) in the brief for each changed row.
+Require exactly one [lane-owned row evidence record](../skills/ship/references/owner-decisions.md#lane-owned-row-evidence-record) in the brief for each changed, added, retired or restored row.
 Match every identity field to the scope in the brief.
 Block approval if the record or any identity field is missing or mismatched.
 The evidence record grants zero protected access. Verify the referenced evidence under its own route.

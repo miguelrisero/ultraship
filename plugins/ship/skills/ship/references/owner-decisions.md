@@ -274,6 +274,7 @@ The hook denies Write, Edit, and NotebookEdit to both record folders for every a
 ## Lane-owned row evidence record
 
 Keep one content-free record per authorized lane-owned protected row change at the frozen head.
+Include every changed, added, retired or restored protected row.
 Keep it in the lane state file and copy it into the reviewer brief before dispatch.
 
 - `repository`: the repository's `owner/name`.
@@ -292,8 +293,11 @@ Give the reviewer that scope separately in the brief.
 Keep the row pending if the record or any identity field is missing or mismatched.
 Rebuild the record from verified evidence at each new frozen head.
 Use only identifiers, paths, digests and evidence references. Keep row text, pair bytes, credentials and raw tool output out of the record.
-Keep the underlying proofs, separate admissions, grants and independent review mandatory. The record grants zero authority.
-Apply the [existing refusal rules](#loaded-instructions-and-refusals) to the referenced refusal. The record authorizes zero retries.
+Keep the underlying proofs, grants and independent review mandatory.
+Keep reviewer admission, tool admission and execution admission separate.
+The record grants zero authority.
+Apply the [existing refusal rules](#loaded-instructions-and-refusals) to the referenced refusal.
+The record authorizes zero retries and gives zero retry credit.
 
 ## Added row ID proof
 
