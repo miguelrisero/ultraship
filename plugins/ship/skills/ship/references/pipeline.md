@@ -214,8 +214,9 @@ Apply existing push holds, protected-row receipts, and preflight requirements ev
    Match that SHA to `origin/main`. Match it to the sole `MERGE_HEAD` during resolution.
    Require an empty `refs/replace` namespace when collecting evidence.
    Immediately after the merge starts and before any resolution, capture the complete protected index entries with `git ls-files --stage -z` from the repository root.
-   Apply the same protected-path filter to the complete Git index and tree metadata.
+   <a id="protected-path-filter"></a>Apply the same protected-path filter to the complete Git index and tree metadata.
    Match adjacent `tests` and `mutation` path components at the root or any depth, without regard to case.
+   Apply the filter to the path field of each NUL-delimited record.
    Preserve each entry's exact path spelling for comparison. Keep the mode, object ID and stage, including stage 0 and all unmerged stages.
    Record `HEAD` and `MERGE_HEAD` as the first and second parents. Keep resolution pending if the capture is missing or incomplete.
    Bind the index record and the exact paths and actions in the writer brief to both merge parents.
@@ -226,7 +227,11 @@ Apply existing push holds, protected-row receipts, and preflight requirements ev
    Use recursive `git ls-tree -rz` metadata from the repository root for each tree.
    Give the reviewer the before-resolution index record, the writer brief and the complete protected tree entries at the merge commit.
    Include the complete protected entries from both parents and their merge base.
-   Pass only protected index and tree entries to the reviewer.
+   Record the exact capture and filter commands for each inventory.
+   Record the total and protected entry counts for each inventory.
+   Count NUL-delimited records before and after filtering the same capture. Count each index stage entry separately.
+   Give the reviewer the commands and counts for each inventory.
+   Pass only protected index and tree entries to the reviewer. Exclude unrelated paths and all file content.
    Include any separate review records that cover protected changes, including deletions outside the merge route.
    Keep row text and protected read grants out of this review.
    Require the passing CI anchor guard at the exact pushed head.

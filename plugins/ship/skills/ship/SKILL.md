@@ -317,7 +317,9 @@ Refuse this route in a repository with Git replacement refs.
 Use the CoC's CI, testing and tooling standing grant. Keep the local commit grant and all refusal and publication rules.
 
 1. Require the driver's complete before-resolution index record for this merge.
-   Bind the writer brief to both merge parents. Name each exact repository-relative path under `tests/mutation/` and its approved action.
+   Bind the writer brief to both merge parents.
+   Limit the writer brief to paths that match the [protected-path filter](references/pipeline.md#protected-path-filter).
+   Name each exact repository-relative path and its approved action.
    Name the source commit for each checkout. Keep resolution pending if the record or brief is missing or mismatched.
 2. For a conflicted file, run `git checkout origin/main -- <path>` to take `origin/main:<path>`.
    Use `git checkout <full-merge-base-sha> -- <path>` only when that exact path has the same blob ID at the merge base and `origin/main`.
@@ -345,9 +347,14 @@ Use only the driver's content-free Git evidence. This review grants zero protect
 
 - Require the second parent to match the verified remote main commit used for the merge.
 - Match the before-resolution record and writer brief to the merge commit's two parents.
+- Check the capture and filter commands against the [protected-path filter](references/pipeline.md#protected-path-filter).
+  Match each protected count to the number of supplied entries. Require nonnegative integer counts and a total at least as large as the protected count.
+  Block if any capture uses the wrong filter or has inconsistent counts. Block if commands or counts are missing.
 - Reconcile the before-resolution index with both parent inventories by exact path.
   Block on an omitted parent path unless the metadata establishes a clean deletion before resolution.
-  For that proof, require the merge base to contain the exact path. Require one parent to retain its base mode and object ID and the other parent to omit it.
+  For that exception, require the merge base to contain the exact path.
+  Require the first parent to retain the exact path with its merge-base mode and object ID.
+  Require the second parent to omit that exact path.
   Treat a rename as a loss at the old path and an addition at the new path. Block release on ambiguous evidence.
   Require a separate review for every deletion outside this merge route.
   Include clean deletions before resolution in that requirement.
@@ -360,6 +367,7 @@ Use only the driver's content-free Git evidence. This review grants zero protect
   Treat an entry missing from one of those trees as a difference. Include the path, parent and base IDs, and disposition in the evidence.
   Record who approved the disposition under existing authority. Block release until every flagged checkout has an explicit disposition.
 - Confirm that every protected path in the second parent exists at the same path in the merge commit.
+  Keep lane-side deletions of second-parent protected paths outside this route.
 - Match each checked-out path's mode and blob ID at the merge commit to the second parent.
 - For a merge-base checkout, confirm the same blob ID at that path in the merge base.
 - For a removal, confirm the path exists in the first parent and is absent at the merge base, second parent and merge commit.
