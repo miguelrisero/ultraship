@@ -1,4 +1,5 @@
 """Synthetic linked-worktree ledger and hook regressions."""
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 import errno
@@ -13,6 +14,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from threading import Event
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -48,9 +50,10 @@ class LedgerDirTests(unittest.TestCase):
         self.git(self.common, 'worktree', 'add', '-q', '-b', 'feat/nested/x', str(self.checkout))
         self.legacy = self.common / '.git/ship/ledger/feat__nested__x.tsv'
         self.legacy.parent.mkdir(parents=True)
-        self.history = (b'1\trun-start\tlight\tsha\topen\trun-1 /board\n'
-                        b'2\tslices\twriter\tsha\tpass\tall evidence\n'
-                        b'3\tdeep-review\treviewer\tsha\towed\tkeep this\n')
+        start = self.git(self.checkout, 'rev-parse', 'HEAD')
+        self.history = (f'1\trun-start\tlight\t{start}\topen\trun-1 /board\n'.encode()
+                        + b'2\tslices\twriter\tsha\tpass\tall evidence\n'
+                        + b'3\tdeep-review\treviewer\tsha\towed\tkeep this\n')
         self.legacy.write_bytes(self.history)
 
     def git(self, cwd, *args):
@@ -703,9 +706,255 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(len(snapshots), 1)
         self.assertEqual(snapshots[0].read_bytes(), self.history)
 
-    def finish_run(self):
+    def commit_fixture(self, cwd, *args):
+        self.git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', *args)
+        return self.git(cwd, 'rev-parse', 'HEAD')
+
+    def test_review_gaps_follow_the_run_history(self):
+        self.legacy.unlink()
+        before_run = self.git(self.checkout, 'rev-parse', 'HEAD')
+        start = self.commit_fixture(self.checkout, 'commit', '--allow-empty', '-qm', 'start')
+        for mode in ('full', 'light'):
+            with self.subTest(mode=mode):
+                self.git(self.checkout, 'switch', '-qc', f'review-gaps-{mode}', start)
+                self.assertEqual(self.cli('run-start', mode, 'review-gaps').returncode, 0)
+                home = self.resolve()
+                reviewed = self.commit_fixture(self.checkout, 'commit', '--allow-empty', '-qm', f'review {mode}')
+                ledger.append(home, 'simplify', 'ship:reviewer--opus@simplify', reviewed, 'pass', '')
+                if mode == 'full':
+                    ledger.append(home, 'panel-high', 'ship:reviewer--astra@high', reviewed, 'pass', '')
+                    ledger.append(home, 'select', 'ship:reviewer--sol@select', reviewed, 'pass', '')
+                fixed = self.commit_fixture(self.checkout, 'commit', '--allow-empty', '-qm', f'fix {mode}')
+                ledger.append(home, 'fix-read', 'ship:reviewer--sonnet@fix', fixed, 'pass', '')
+                if mode == 'full':
+                    ledger.append(home, 'panel-final', 'ship:reviewer--opus-panel@final', fixed, 'pass', '')
+                self.commit_fixture(self.common, 'commit', '--allow-empty', '-qm', f'main {mode}')
+                head = self.commit_fixture(self.checkout, 'merge', '--no-ff', '--no-edit', 'main')
+                short_sha = self.git(self.checkout, 'rev-parse', '--short', reviewed).upper()
+                ledger.append(home, 'deep-review', 'ship:reviewer--sol@reviewer-terminal-1', short_sha, 'findings', '')
+                for step in ('plan', 'slices', 'pr', 'babysit', 'gate'):
+                    ledger.append(home, step, 'driver', before_run, 'pass', '')
+
+                if mode == 'full':
+                    ledger.append(home, 'closing', 'reviewer--sol', fixed, 'pass', '')
+                    status = self.cli('status').stdout.splitlines()[-1]
+                    self.assertIn('gaps: closing (', status)
+                    self.assertIn(f'HEAD {head}', status)
+                    closed = self.cli('run-end')
+                    self.assertEqual(closed.returncode, 1)
+                    self.assertEqual(closed.stderr, f'refusing run-end; {status}\n')
+                    ledger.append(home, 'closing', 'reviewer--sol', head, 'pass', '')
+                gaps = self.cli('gaps')
+                self.assertEqual((gaps.returncode, gaps.stdout), (0, 'gaps: none\n'))
+                self.assertEqual(self.cli('run-end').returncode, 0)
+                self.assertEqual(ledger.rows(home)[-1][1:5], ['run-end', '', head, 'closed'])
+
+    def test_rewritten_run_requires_reviews_after_the_anchor(self):
+        self.legacy.unlink()
+        base = self.git(self.checkout, 'rev-parse', 'HEAD')
+        pre_run = self.commit_fixture(self.common, 'commit', '--allow-empty', '-qm', 'pre-run main')
+        start = self.commit_fixture(self.checkout, 'commit', '--allow-empty', '-qm', 'old run start')
+        self.assertNotEqual(self.cli('run-anchor').returncode, 0)
+        self.assertEqual(self.cli('run-start', 'light', 'rewritten').returncode, 0)
+        home = self.resolve()
+        self.git(self.checkout, 'reset', '--keep', pre_run)
+        head = self.commit_fixture(self.checkout, 'commit', '--allow-empty', '-qm', 'new head')
+        self.assertEqual(self.git(self.checkout, 'merge-base', start, head), base)
+        reviewer = 'ship:reviewer--sol@reviewer_terminal_1'
+        ledger.append(home, 'deep-review', reviewer, pre_run, 'pass', '')
+        ledger.append(home, 'simplify', reviewer, head, 'pass', '')
+        for step in ('slices', 'pr', 'babysit', 'gate'):
+            ledger.append(home, step, 'driver', base, 'pass', '')
+        notice = f'run start {start} is not in HEAD history; run ledger.py run-anchor and repeat the reviews'
+        gaps = self.cli('gaps')
+        self.assertEqual(gaps.returncode, 1)
+        self.assertEqual(gaps.stdout.splitlines().count(notice), 1)
+        self.assertIn('deep-review (', gaps.stdout.splitlines()[-1])
+        self.assertEqual(self.hook('compact').splitlines().count(notice), 1)
+
+        self.assertEqual(self.cli('run-anchor').returncode, 0)
+        self.assertEqual(ledger.rows(home)[-1][1:5], ['run-anchor', '', head, 'open'])
+        ledger.append(home, 'deep-review', reviewer, pre_run, 'pass', '')
+        ledger.append(home, 'fix-read', reviewer, head, 'pass', '')
+        gaps = self.cli('gaps')
+        self.assertEqual(gaps.returncode, 1)
+        self.assertNotIn(notice, gaps.stdout)
+        self.assertIn('simplify (needs a declared reviewer seat', gaps.stdout)
+        self.assertIn(f'does not descend from run anchor {head}', gaps.stdout)
+        self.assertNotIn('fix-read (', gaps.stdout)
+
+        for step in ('deep-review', 'simplify'):
+            ledger.append(home, step, reviewer, head, 'pass', '')
+        gaps = self.cli('gaps')
+        self.assertEqual((gaps.returncode, gaps.stdout), (0, 'gaps: none\n'))
+        self.assertEqual(self.cli('run-end').returncode, 0)
+        self.assertEqual(ledger.rows(home)[-1][1:5], ['run-end', '', head, 'closed'])
+
+    def test_review_gaps_report_a_run_start_on_unrelated_history(self):
+        self.legacy.unlink()
+        start = self.git(self.checkout, 'rev-parse', 'HEAD')
+        self.assertEqual(self.cli('run-start', 'light', 'unrelated').returncode, 0)
+        tree = self.git(self.checkout, 'rev-parse', 'HEAD^{tree}')
+        head = self.git(self.checkout, '-c', 'user.name=t', '-c', 'user.email=t@t',
+                        'commit-tree', tree, '-m', 'unrelated root')
+        self.git(self.checkout, 'reset', '--keep', head)
+        for step in ('simplify', 'deep-review', 'fix-read'):
+            ledger.append(self.resolve(), step, 'ship:reviewer--sol', head, 'pass', '')
+        gaps = self.cli('gaps')
+        self.assertEqual(gaps.returncode, 1)
+        notice = f'run start {start} is not in HEAD history; run ledger.py run-anchor and repeat the reviews'
+        self.assertEqual(gaps.stdout.splitlines().count(notice), 1)
+        for step in ('simplify', 'deep-review', 'fix-read'):
+            self.assertIn(f'{step} (', gaps.stdout.splitlines()[-1])
+
+    def test_review_gaps_report_an_unresolvable_base_without_review_rows(self):
+        self.legacy.unlink()
+        head = self.git(self.checkout, 'rev-parse', 'HEAD')
+        missing = '0' * len(head)
+        ledger.append(self.resolve(), 'run-start', 'light', missing, 'open', 'pruned')
+        gaps = self.cli('gaps')
+        self.assertEqual(gaps.returncode, 1)
+        notice = f'run start {missing} is not in HEAD history; run ledger.py run-anchor and repeat the reviews'
+        self.assertEqual(gaps.stdout.splitlines().count(notice), 1)
+        self.assertIn('deep-review (', gaps.stdout.splitlines()[-1])
+
+    def ordered_ledger_writes(self, home, first, second):
+        checking, waiting, release, first_done = Event(), Event(), Event(), Event()
+        real_git, real_gaps, real_flock = ledger.git, ledger.gaps, ledger.fcntl.flock
+
+        def pause():
+            checking.set()
+            self.assertTrue(release.wait(10), 'first writer did not resume')
+
+        def check_head(_, *args):
+            if first[0] != 'run-end' and not checking.is_set():
+                pause()
+            return real_git(self.checkout, *args)
+
+        def check_gaps(*args):
+            if not checking.is_set():
+                pause()
+            return real_gaps(*args)
+
+        def check_lock(fd, flags):
+            flags |= ledger.fcntl.LOCK_NB
+            if checking.is_set() and not release.is_set():
+                with self.assertRaises(BlockingIOError):
+                    real_flock(fd, flags)
+                waiting.set()
+                self.assertTrue(first_done.wait(10), 'first writer did not finish')
+            real_flock(fd, flags)
+
+        def invoke(args, *, lead=False):
+            try:
+                ledger.main(list(args))
+            except SystemExit as exc:
+                return exc.code
+            finally:
+                if lead:
+                    first_done.set()
+            return None
+
+        with mock.patch.object(ledger, 'git', side_effect=check_head), \
+                mock.patch.object(ledger, 'gaps', side_effect=check_gaps), \
+                mock.patch.object(ledger, 'ledger_path', return_value=home), \
+                mock.patch.object(ledger.fcntl, 'flock', side_effect=check_lock), \
+                redirect_stdout(io.StringIO()), ThreadPoolExecutor(max_workers=2) as pool:
+            lead = pool.submit(invoke, first, lead=True)
+            try:
+                self.assertTrue(checking.wait(10), 'first writer did not reach run validation')
+                follow = pool.submit(invoke, second)
+                self.assertTrue(waiting.wait(10), 'second writer did not wait for the lock')
+            finally:
+                release.set()
+            return lead.result(timeout=10), follow.result(timeout=10)
+
+    def open_run_fixture(self, *, complete=True):
+        self.legacy.unlink(missing_ok=True)
+        self.assertEqual(self.cli('run-start', 'light', 'serialized').returncode, 0)
+        home = self.resolve()
+        head = self.git(self.checkout, 'rev-parse', 'HEAD')
         for step in ledger.REQUIRED['light']:
-            self.assertEqual(self.cli('append', step, 'driver', 'sha', 'pass').returncode, 0)
+            if complete or step != 'deep-review':
+                ledger.append(home, step, 'ship:reviewer--sol', head, 'pass', '')
+        return home, head
+
+    def test_run_anchor_waits_for_run_end(self):
+        for complete in (True, False):
+            with self.subTest(complete=complete):
+                self.git(self.checkout, 'switch', '-qc', f'lock-{complete}')
+                home, head = self.open_run_fixture(complete=complete)
+                ended, anchored = self.ordered_ledger_writes(home, ('run-end',), ('run-anchor',))
+                if complete:
+                    self.assertIsNone(ended)
+                    self.assertIn('no open run', anchored)
+                    self.assertEqual(ledger.rows(home)[-1][1], 'run-end')
+                    self.assertEqual(self.cli('gaps').stdout, 'no open run\n')
+                else:
+                    self.assertIn('refusing run-end; gaps: deep-review (', ended)
+                    self.assertIsNone(anchored)
+                    self.assertEqual(ledger.rows(home)[-1][1:5], ['run-anchor', '', head, 'open'])
+                    self.assertIn('simplify (', self.cli('gaps').stdout)
+
+    def test_run_end_waits_for_run_anchor(self):
+        home, head = self.open_run_fixture()
+        anchored, ended = self.ordered_ledger_writes(home, ('run-anchor',), ('run-end',))
+        self.assertIsNone(anchored)
+        self.assertIn('refusing run-end; gaps: simplify (', ended)
+        self.assertEqual(ledger.rows(home)[-1][1:5], ['run-anchor', '', head, 'open'])
+
+    def test_append_waits_for_run_end(self):
+        home, head = self.open_run_fixture()
+        ended, appended = self.ordered_ledger_writes(
+            home, ('run-end',), ('append', 'deep-review', 'ship:reviewer--sol', head, 'pass'))
+        self.assertIsNone(ended)
+        self.assertIn('no open run', appended)
+        self.assertEqual(ledger.rows(home)[-1][1], 'run-end')
+
+    def test_run_start_waits_for_another_run_start(self):
+        self.legacy.unlink()
+        home = self.resolve()
+        started, refused = self.ordered_ledger_writes(
+            home, ('run-start', 'light', 'first'), ('run-start', 'light', 'second'))
+        self.assertIsNone(started)
+        self.assertIn('run first is still open', refused)
+        self.assertEqual([(row[1], row[5]) for row in ledger.rows(home)], [('run-start', 'first')])
+
+    def test_review_gaps_report_bad_roles_and_commits(self):
+        before_run = self.git(self.checkout, 'rev-parse', 'HEAD')
+        self.git(self.common, 'switch', '-qc', 'unmerged')
+        unmerged = self.commit_fixture(self.common, 'commit', '--allow-empty', '-qm', 'unmerged')
+        self.legacy.unlink()
+        start = self.commit_fixture(self.checkout, 'commit', '--allow-empty', '-qm', 'start')
+        self.assertEqual(self.cli('run-start', 'light', 'review-gaps').returncode, 0)
+        home = self.resolve()
+        head = self.commit_fixture(self.checkout, 'commit', '--allow-empty', '-qm', 'head')
+        ledger.append(home, 'simplify', 'ship:reviewer--x-writer', head, 'pass', '')
+        ledger.append(home, 'simplify', 'ship:reviewer--sol@owed', head, 'owed', '')
+        ledger.append(home, 'deep-review', 'ship:reviewer--sol', unmerged, 'pass', '')
+        ledger.append(home, 'fix-read', 'ship:reviewer--sol', before_run, 'pass', '')
+        gaps = self.cli('gaps')
+        self.assertEqual(gaps.returncode, 1)
+        for reason in ('simplify (needs a declared reviewer seat', "wrong role 'ship:reviewer--x-writer'",
+                       'declared seats: reviewer--astra',
+                       f'newest reviewer row {unmerged!r}; is not an ancestor of HEAD {head}',
+                       f'newest reviewer row {before_run!r}; does not descend from run start {start}'):
+            self.assertIn(reason, gaps.stdout)
+
+        missing = '0' * len(head)
+        for sha, suffix in ((head, '; declared seats:'), (missing, '; unknown commit; declared seats:')):
+            ledger.append(home, 'simplify', 'ship:writer--sol', sha, 'pass', '')
+            gaps = self.cli('gaps')
+            self.assertEqual(gaps.returncode, 1)
+            self.assertIn(f"wrong role 'ship:writer--sol' at {sha!r}{suffix}", gaps.stdout)
+        self.assertIn(gaps.stdout.strip().replace('gaps:', 'Gaps:', 1), self.hook('compact'))
+
+    def finish_run(self):
+        head = self.git(self.checkout, 'rev-parse', 'HEAD')
+        for step in ledger.REQUIRED['light']:
+            agent, sha = ('ship:reviewer--sol@finish', head) if step in (
+                'simplify', 'deep-review', 'fix-read') else ('driver', 'sha')
+            self.assertEqual(self.cli('append', step, agent, sha, 'pass').returncode, 0)
         self.assertEqual(self.cli('run-end').returncode, 0)
 
     def test_stop_accounts_closed_run_and_refuses_next_run_evidence(self):
