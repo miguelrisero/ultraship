@@ -2213,6 +2213,13 @@ class ReceiptCustodyTests(unittest.TestCase):
                 self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
                                            ultraship.PRE_FAILED)
 
+    def test_pre_error_denies_uniq_output_operands(self):
+        (self.cwd / 'input.txt').touch()
+        for command in ('uniq input.txt -- -out', 'uniq -- input.txt -out'):
+            with self.subTest(command=command), patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
+                                           ultraship.PRE_FAILED)
+
     def test_pre_error_denies_resolved_row_record_paths(self):
         with patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
             for directory in (self.store.parent / 'row-review', self.cwd / '.scratch/ultraship/row-reanchor'):
