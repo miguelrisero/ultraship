@@ -38,7 +38,7 @@ Triage and verifier briefs follow these reviewer search rules.
 An explicit repository-root path does not authorize broader discovery.
 
 For the [lane-owned row route](../SKILL.md#lane-owned-row-route), dispatch a separate admitted reviewer for the named rows at the frozen head.
-Use one independent Sol reviewer for a same-mutant re-anchor of rows the lane's own diff breaks.
+Use one independent reviewer, seated under step 8 of that route, for a same-mutant re-anchor of rows the lane's own diff breaks.
 Allow the authorized draft push for anchor CI under the lane-owned row route. Require the verdict before marking ready, pushing to a ready PR, or merging.
 For [standalone main-row repair](owner-decisions.md#standalone-main-row-repair), except the default row path exclusion only for the separately admitted reviewer and approved row extents.
 Keep ordinary review briefs free of protected paths and row hunks. Keep pair bytes and row TOML text out of every brief.

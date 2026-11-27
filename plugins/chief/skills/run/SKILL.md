@@ -16,7 +16,7 @@ Use authority within the lane brief and your role. Route lane actions through th
 2. Have the authorized driver push the lane's own feature branch for draft CI after Ship's step 9 preflight. Grant draft creation separately. Allow required CI and independent review to follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
 3. Have the assigned agent run isolated local tests under the brief and Ship's execution admission. Keep special-run GO requirements.
 4. Have the authorized driver rerun permitted CI on the lane's current head under Ship's babysit rules. Verify the new attempt.
-5. Route re-anchors of named rows the lane's own diff breaks through the admitted writer. Keep the identical mutant. Require one independent Sol review at the frozen head.
+5. Route re-anchors of named rows the lane's own diff breaks through the admitted writer. Keep the identical mutant. Require the one independent review in step 8 of Ship's lane-owned row route at the frozen head.
 6. Send `/merge` with merge authority when the PR is ready, required CI is green, and independent review covers the exact head. Complete the thread, browser, and other [merge gates](references/landing.md#ready-and-merge-authority).
 7. Ask the CoC for permission at any time. Retry a refused command only in a form that meets the named rule or fixes its cause. Continue independent work.
 

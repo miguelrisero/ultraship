@@ -10,7 +10,7 @@ EVENT_ID = '1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8'
 
 SHIP = ROOT / 'plugins/ship'
 ROUTE_CARRIERS = ('agents/driver.md',)
-REVIEWERS = ('reviewer--sol.md', 'reviewer--opus.md', 'reviewer--astra.md')
+REVIEWERS = ('reviewer--sol.md', 'reviewer--opus.md')
 
 
 def section(text, heading):
@@ -120,6 +120,26 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
         ):
             with self.subTest(check=requirement):
                 self.assertTrue(requirement in review, requirement)
+
+    def test_row_review_seat_takes_opus_only_under_a_claude_only_coc_ruling(self):
+        route = section((SHIP / 'agents/driver.md').read_text(), '### Lane-owned row route')
+        review = route.split('\n8. Review:', 1)[1].split('\n9.', 1)[0]
+        for requirement in (
+            'The reviewer seat is `ship:reviewer--sol`.',
+            'When a CoC ruling records a Claude-only seat rule, `ship:reviewer--opus` takes this seat.',
+            "The driver's ledger record of that review cites the ruling's locator, time and verbatim text.",
+            'The locator is the CoC workspace and message or event ID, or a file path with its SHA256.',
+            'The driver checks the ruling at that locator before dispatch.',
+            'The driver also confirms that no later CoC ruling revokes it; a revoked ruling returns this seat to `ship:reviewer--sol`.',
+            'This seat rule changes no other gate of this route.',
+        ):
+            with self.subTest(check=requirement):
+                self.assertIn(requirement, review)
+        for path in (ROOT / 'plugins').rglob('*.md'):
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertNotIn('Sol review', path.read_text())
+        roster = (SHIP / 'skills/ship/references/roster.md').read_text()
+        self.assertIn('the fallback chain does not apply to a protected row review.', roster)
 
     def test_writer_briefs_admit_the_canonical_route_document(self):
         policy = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()

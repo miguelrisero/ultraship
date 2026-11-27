@@ -4,7 +4,7 @@ Dispatch the scoped name. Leave the Agent `model` field unset. On an unavailable
 
 Select the plan class before each planning attempt. Within one attempt, stop at the first available seat or at the end of the chain, and never revisit a seat. A rework attempt starts again at the first seat of its class.
 
-Use [reviewer admission for protected row reads](owner-decisions.md#reviewer-admission-record-for-protected-row-reads) to select a seat for a protected row review.
+Use [reviewer admission for protected row reads](owner-decisions.md#reviewer-admission-record-for-protected-row-reads) to select a seat for a protected row review; the fallback chain does not apply to a protected row review.
 
 | Agent | Model | Effort | Use | Fallback chain |
 |---|---|---|---|---|

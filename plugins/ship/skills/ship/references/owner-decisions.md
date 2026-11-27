@@ -236,7 +236,7 @@ Preserve all other routes, higher-priority instructions, effective refusals, hoo
 The pre hook denies every reviewer read under a `tests/mutation` path unless the driver admits it first.
 Use this record for lane-owned row review and standalone main-row repair review.
 
-1. Dispatch `ship:reviewer--sol`, `ship:reviewer--opus`, or, for lane-owned row review only, `ship:reviewer--astra`.
+1. For lane-owned row review, dispatch the seat that step 8 of the [lane-owned row route](../SKILL.md#lane-owned-row-route) names. For standalone main-row repair review, dispatch `ship:reviewer--sol` or `ship:reviewer--opus`.
    Launch the reviewer in the background.
    Send the full reviewer brief at dispatch. Give the full 40-digit commit SHA.
    If the hook refuses a protected read because admission is missing or invalid, end the turn.
