@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -242,8 +243,9 @@ class PreciseMatcherTests(unittest.TestCase):
                 self.assert_denied(command, start='Only the text_lint hook reads or writes refusal receipts')
         self.assert_allowed('D=/tmp/x; cd "$D" && git status')
         # A folder the scan cannot read warns, as main admits it.
-        for command in ('cd "$D" && cat key; D=/tmp', 'D=/tmp; read D; cd "$D" && cat key',
-                        'D=/tmp; declare D; cd "$D" && cat key'):
+        target = shlex.quote(str(self.cwd))
+        for command in ('cd "$D" && cat key; D=/tmp', f'D={target}; read D; cd "$D" && cat key',
+                        f'D={target}; declare D; cd "$D" && cat key'):
             with self.subTest(command=command):
                 self.assert_not_denied(command)
 
@@ -291,7 +293,7 @@ class PreciseMatcherTests(unittest.TestCase):
     def test_quoted_literal_and_repository_top_cd_targets_are_read(self):
         subprocess.run(['git', 'init', '-q', str(self.cwd)], check=True)
         (self.cwd / 'backend').mkdir()
-        for command in ('cd "/tmp" && git status', "cd '/tmp/my dir' && ls",
+        for command in (f'cd "{self.cwd}" && git status', "cd '/tmp/my dir' && ls",
                         'cd "$(git rev-parse --show-toplevel)/backend" && uv run pytest -q',
                         'cd "$(git rev-parse --show-toplevel)" && cd backend && uv run pytest -q'):
             with self.subTest(command=command):
