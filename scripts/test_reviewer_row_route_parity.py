@@ -27,6 +27,8 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
     def setUp(self):
         self.sol = (AGENTS / 'reviewer--sol.md').read_text()
         self.base, self.sections = split_body(self.sol)
+        policy = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        self.evidence = policy.partition('## Lane-owned row evidence record\n')[2].split('\n## ', 1)[0]
 
     def test_astra_base_and_exact_route_scope(self):
         base, sections = split_body((AGENTS / 'reviewer--astra.md').read_text())
@@ -53,23 +55,35 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
         self.assertEqual(fields['effort'], 'xhigh')
 
     def test_row_evidence_requires_the_exact_lane_identity(self):
-        policy = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
-        evidence = policy.split('## Lane-owned row evidence record\n', 1)[-1].split('\n## ', 1)[0]
-        for field in ('repository', 'pr', 'row_id', 'row_file', 'worktree', 'head'):
-            with self.subTest(field=field):
-                self.assertRegex(evidence, rf'(?m)^- `{field}`: .+')
-        self.assertIn('Match every identity field to the verified lane scope.', evidence)
-        self.assertIn('Keep the row pending if the record or any identity field is missing or mismatched.', evidence)
+        for definition in (
+            "`repository`: the repository's `owner/name`.",
+            '`pr`: the verified URL of the authorized draft PR.',
+            '`row_id`: the exact row ID.',
+            '`row_file`: the exact repository-relative path of the protected row file.',
+            '`worktree`: the canonical absolute path of the lane worktree that holds the frozen head.',
+            '`head`: the full frozen head commit SHA.',
+        ):
+            with self.subTest(definition=definition):
+                self.assertIn(f'- {definition}', self.evidence)
+        self.assertIn('Match every identity field to the verified lane scope.', self.evidence)
+        self.assertIn('Keep the row pending if the record or any identity field is missing or mismatched.', self.evidence)
 
-    def test_drivers_supply_the_record_in_the_review_brief(self):
+    def test_row_evidence_keeps_separate_admissions_and_gives_zero_authority_or_retry_credit(self):
+        self.assertIn('Keep reviewer admission, tool admission and execution admission separate.', self.evidence)
+        self.assertIn('The record grants zero authority.', self.evidence)
+        self.assertIn('The record authorizes zero retries and gives zero retry credit.', self.evidence)
+
+    def test_drivers_supply_the_record_for_all_four_row_actions(self):
         link = '[lane-owned row evidence record](../skills/ship/references/owner-decisions.md#lane-owned-row-evidence-record)'
+        self.assertIn('Include every changed, added, retired or restored protected row.', self.evidence)
         for name in ('driver.md', 'driver--sol.md'):
             with self.subTest(driver=name):
-                self.assertIn(f'Include the {link} for each changed row in the reviewer brief.',
+                self.assertIn(f'Include the {link} in the reviewer brief for each changed, added, retired or restored row.',
                               (AGENTS / name).read_text())
 
     def test_lane_owned_review_checks_identity_and_keeps_separate_admission(self):
         review = self.sections[REVIEW]
+        self.assertIn('in the brief for each changed, added, retired or restored row.', review)
         self.assertIn('Match every identity field to the scope in the brief.', review)
         self.assertIn('Block approval if the record or any identity field is missing or mismatched.', review)
         self.assertIn("Read rows only under the driver's reviewer admission record.", review)
