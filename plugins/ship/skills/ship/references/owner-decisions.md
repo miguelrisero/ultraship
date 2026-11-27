@@ -271,6 +271,30 @@ Glob, LSP, and every other read under `tests/mutation` stay denied.
 The reviewer reads only the named row lines.
 The hook denies Write, Edit, and NotebookEdit to both record folders for every agent except the driver and the main session. For Bash it only checks the command text.
 
+## Lane-owned row evidence record
+
+Keep one content-free record per authorized lane-owned protected row change at the frozen head.
+Keep it in the lane state file and copy it into the reviewer brief before dispatch.
+
+- `repository`: the repository's `owner/name`.
+- `pr`: the verified URL of the authorized draft PR.
+- `row_id`: the exact row ID.
+- `row_file`: the exact repository-relative path of the protected row file.
+- `worktree`: the canonical absolute path of the lane worktree that holds the frozen head.
+- `head`: the full frozen head commit SHA.
+- `decision`: the frozen decision's absolute path and SHA256, when the route requires a decision.
+- `tool`: references to applicable tool runs and any generated authorization record the route requires.
+- `verification`: references to the applicable decision binding check, CI evidence and separate row proofs.
+- `prior_tool_refusal`: references to each prior tool refusal for this row change, when applicable.
+
+Match every identity field to the verified lane scope.
+Give the reviewer that scope separately in the brief.
+Keep the row pending if the record or any identity field is missing or mismatched.
+Rebuild the record from verified evidence at each new frozen head.
+Use only identifiers, paths, digests and evidence references. Keep row text, pair bytes, credentials and raw tool output out of the record.
+Keep the underlying proofs, separate admissions, grants and independent review mandatory. The record grants zero authority.
+Apply the [existing refusal rules](#loaded-instructions-and-refusals) to the referenced refusal. The record authorizes zero retries.
+
 ## Added row ID proof
 
 Use this proof for each added row in the lane-owned row review, including the earlier-code parent route.

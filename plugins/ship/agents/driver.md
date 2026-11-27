@@ -204,6 +204,7 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    Include proof that the guard selected the row and that a count mismatch on that row fails the job.
    Report an observed count only when the evidence gives it directly.
 8. Review: one independent reviewer confirms that every changed, retired, restored or added row is not weaker.
+   Include the [lane-owned row evidence record](../skills/ship/references/owner-decisions.md#lane-owned-row-evidence-record) for each changed row in the reviewer brief.
    The driver marks the draft ready only after the review in step 8 passes at the exact head.
    Not weaker means the same test and the same mutant intent with the same claim or a CoC-approved narrowed claim, or a replacement that guards as tightly.
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](../skills/ship/references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
