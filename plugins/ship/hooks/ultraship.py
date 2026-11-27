@@ -22,7 +22,7 @@ import traceback
 import unicodedata
 import urllib.parse
 import uuid
-from collections import Counter
+from collections import Counter, deque
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -699,45 +699,50 @@ def outside_single_quotes(command):
     return ''.join(kept)
 
 
-def read_only_shell(command):
-    # Only literal read commands qualify; expansions and redirections can execute or create another program.
+def literal_shell_segments(command, *, strict=False):
+    """Return literal argv lists and their separators, or None for out-of-scope syntax."""
+    # Expansions and redirections can execute or create another program.
     # A backslash, a glob bracket or a quoted operator outside single quotes changes the words the shell runs.
-    if re.search(r"[^\w \t\n./,:=@%+\-'\";&|]", outside_single_quotes(command)):
-        return False
+    if (strict and '\x00' in command) or re.search(r"[^\w \t\n./,:=@%+\-'\";&|]", outside_single_quotes(command)):
+        return None
     # A quote may only wrap a whole word: the shell joins a quoted span with the text or span beside it, and the
     # non-POSIX lexer below does not. Without backslashes, each span ends at the next matching quote.
     for span in re.finditer(r"'[^']*'|\"[^\"]*\"", command):
         if (span.start() and command[span.start() - 1] not in ' \t\n;&|'
                 or span.end() < len(command) and command[span.end()] not in ' \t\n;&|'):
-            return False
+            return None
     try:
         # Non-POSIX tokens keep their quotes, so only an unquoted operator separates commands.
-        lexer = shlex.shlex(command, posix=False, punctuation_chars=';&|\n')
+        lexer = shlex.shlex(command.strip(' \t\n') if strict else command,
+                            posix=False, punctuation_chars=';&|\n')
         lexer.whitespace = ' \t\r'
         lexer.whitespace_split = True
         lexer.commenters = ''
-        tokens = list(lexer)
-    except ValueError:
-        return False
-    parts, current = [], []
-    for token in tokens:
-        if token and all(char in ';&|\n' for char in token):
-            if token not in {';', '&&', '||', '|', '\n'}:
-                return False
-            if current:
-                parts.append(current)
-                current = []
-        else:
-            try:
+        parts, current = [], []
+        for token in lexer:
+            if token and all(char in ';&|\n' for char in token):
+                if (strict and not current) or token not in {';', '&&', '||', '|', '\n'}:
+                    return None
+                if current:
+                    parts.append((current, token))
+                    current = []
+            else:
                 word = shlex.split(token)
-            except ValueError:
-                return False
-            if len(word) != 1:
-                return False
-            current.append(word[0])
-    if current:
-        parts.append(current)
-    for words in parts:
+                if len(word) != 1 or strict and token.startswith('='):
+                    return None
+                current.append(word[0])
+        if current:
+            parts.append((current, ''))
+        return parts if not strict or not parts or parts[-1][1] in {'', ';'} else None
+    except ValueError:
+        return None
+
+
+def read_only_shell(command):
+    parts = literal_shell_segments(command)
+    if parts is None:
+        return False
+    for words, _ in parts:
         if words[0] not in READ_ONLY_COMMANDS:
             return False
         if words[0] == 'sed' and not (
@@ -1709,9 +1714,12 @@ def stdin_program_path(value):
             or resolved.startswith(('/dev/', '/proc/')))
 
 
+PROCESS_PATH_ROOTS = ('/proc', '/dev')
+
+
 def unsafe_script_path(value, base):
     path = os.path.realpath(os.path.join(base, value))
-    return path in {'/proc', '/dev'} or path.startswith(('/proc/', '/dev/'))
+    return path in PROCESS_PATH_ROOTS or path.startswith(tuple(root + '/' for root in PROCESS_PATH_ROOTS))
 
 
 def chdir_wrapper_present(command, env_directories):
@@ -3441,13 +3449,19 @@ def quoted_variable(command, token):
             and re.search(rf'\$(?:{name}\b|\{{{name}\b)', rest) is None)
 
 
-def git_read_words(words):
-    """Whether shell words after `git` are `-C <path>`, then `ls-files`, `ls-tree` or `grep` with only listed options."""
-    while words[:1] == ['-C'] and len(words) > 1 and re.fullmatch(r'[\w./-]+', words[1]):
-        words = words[2:]
-    return bool(words) and words[0] in {'ls-files', 'ls-tree', 'grep'} and all(
-        # A word after the subcommand is a pattern or path, whatever it holds, unless it is an option.
-        re.fullmatch(r'-[nilwEFvz]+|-[ABC][0-9]*|--|(?!-).*', word, re.S) for word in words[1:])
+def git_read_words(words, *, exact_grep=False):
+    """Recognize Git search and listing argv with only literal options."""
+    if exact_grep:
+        # The exact form has a quoted pattern and explicit pathspecs. Only it takes these single-letter flags.
+        options = r'-[niwFElc]|-e'
+        commands = {'grep'}
+    else:
+        while words[:1] == ['-C'] and len(words) > 1 and re.fullmatch(r'[\w./-]+', words[1]):
+            words = words[2:]
+        options = r'-[nilwEFvz]+|-[ABC][0-9]*'
+        commands = {'ls-files', 'ls-tree', 'grep'}
+    return bool(words) and words[0] in commands and all(
+        re.fullmatch(rf'{options}|--|(?!-).*', word, re.S) for word in words[1:])
 
 
 SAFE_GREP_LETTERS = 'nilwEFvcoqhHsxrRL'
@@ -4379,6 +4393,92 @@ def review_data_segment(words):
     return True
 
 
+def clone_source_file(cwd, word):
+    real = Path(os.path.realpath(os.path.join(cwd, os.path.expanduser(word))))
+    home = Path.home().resolve()
+    config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or home / '.claude')
+    return (real.is_file() and not real.is_relative_to(Path(__file__).resolve().parents[1])
+            and not real.is_relative_to((config / 'plugins').resolve())
+            and any((parent / '.git').exists() for parent in real.parents if not home.is_relative_to(parent)))
+
+
+def custody_read_only_shell(command, cwd, *, check_path=None):
+    """Classify literal reads, and check each operand when the full custody scan fails."""
+    fallback = check_path is not None
+    home_cd = re.match(r'[ \t]*cd[ \t]+(~/[\w./-]+)(?=[ \t\n;&|]|$)', command, re.ASCII)
+    if home_cd:
+        start, end = home_cd.span(1)
+        command = command[:start] + shlex.quote(os.path.expanduser(home_cd[1])) + command[end:]
+    parts = literal_shell_segments(command, strict=True)
+    if not parts:
+        return False
+    moved = False
+    for index, (words, ending) in enumerate(parts):
+        name, args = words[0], words[1:]
+        if name == 'cd':
+            if (index or len(args) != 1 or not args[0] or args[0].startswith(('-', '~'))
+                    or ending not in {'&&', ''}
+                    or (os.environ.get('CDPATH') or os.environ.get('cdpath')) and not os.path.isabs(args[0])):
+                return False
+            target = Path(cwd, args[0])
+            if fallback:
+                # A failed cd must skip the whole chain; logical cd can also differ from physical traversal.
+                if ending != '&&' or any(sep in {';', '||', '\n'} for _, sep in parts[1:-1]):
+                    return False
+                physical = check_path(target, ancestors=False)
+                if physical is None or physical != check_path(Path(os.path.normpath(target)), ancestors=False):
+                    return False
+                cwd = physical
+            else:
+                cwd = target
+            if not os.path.isdir(cwd):
+                return False
+            moved = True
+            continue
+        # Git can run repository-configured programs or fetch missing objects.
+        if name == 'git' or fallback and name in {'sort', 'file'}:
+            return False
+        if name == 'awk':
+            # shortcut: admit literal field printing; use an awk parser for broader programs.
+            if (not args or not re.fullmatch(r'\{[ \t]*print(?:[ \t]+\$(?:[0-9]+|NF))?[ \t]*\}', args[0])
+                    or any(word.startswith('-') or SHELL_ASSIGNMENT.match(word) for word in args[1:])):
+                return False
+        elif name == 'sed':
+            if not read_only_shell(shlex.join(words)) or not all(clone_source_file(cwd, word) for word in args[2:]):
+                return False
+        elif name == 'rg':
+            # The configuration file can inject a program option. The fallback avoids implicit recursive reads.
+            if fallback or args[:1] != ['--no-config'] or not reader_options_known('rg', args[1:]):
+                return False
+        elif name == 'grep':
+            letters = SAFE_GREP_LETTERS.translate(str.maketrans('', '', 'rR')) if fallback else SAFE_GREP_LETTERS
+            if not all(not word.startswith('-') or word == '--' or word in {'-A', '-B', '-C', '-e', '-m'}
+                       or re.fullmatch(r'-[' + letters + r'0-9]+', word) for word in args):
+                return False
+        else:
+            flags = {'cat': 'AbEnstTuv', 'head': 'cnqv', 'tail': 'cnqv', 'wc': 'clLmw', 'sort': 'bdfghiMnrsuV',
+                     'uniq': 'cdiu', 'cut': 'bcdfnsz', 'ls': 'aAhdilnRStU', 'stat': 'cLf', 'file': 'bhiLN',
+                     'diff': 'uU'}.get(name)
+            if name == 'ls' and fallback:
+                flags = flags.replace('R', '')
+                if not any(not word.startswith('-') for word in args):
+                    return False
+            if (flags is None or name == 'diff' and (moved or fallback)
+                    or any(word.startswith('-') and word not in {'-', '--'}
+                           and not re.fullmatch(rf'-[{flags}0-9]+', word) for word in args)):
+                return False
+            if name == 'uniq':
+                first = next((i for i, word in enumerate(args)
+                              if word in {'-', '--'} or not word.startswith('-')), len(args))
+                if first < len(args) and args[first] == '--':
+                    first += 1
+                if len(args) - first > 1:
+                    return False
+        if fallback and any(check_path(Path(cwd, word), ancestors=True) is None for word in args):
+            return False
+    return True
+
+
 def literal_data_assignment(words):
     # shortcut: names use a deny list; upgrade to a fixed name allowlist when a new case needs more.
     denied = {'path', 'fpath', 'cdpath', 'module_path', 'ifs', 'env', 'bash_env', 'home', 'zdotdir',
@@ -5163,6 +5263,8 @@ RECEIPT_CUSTODY_FAILED = ('The ship hook could not check refusal-receipt custody
                           'Report the blocked scope to the driver.')
 PRE_FAILED = ('The ship hook failed, so it denies every tool call. Its traceback is on stderr. '
               'Report the blocked scope to the driver.')
+PRE_READ_WARNING = ('The ship hook failed. Only a confirmed read-only Bash call can proceed. '
+                    'The traceback is on stderr. Report the error to the driver.')
 PRE_INPUT_INVALID = ('The ship hook could not read its input as a JSON object, so it denies this call. '
                      'Report the blocked scope to the driver.')
 
@@ -5253,7 +5355,7 @@ def issue_account_grant(data):
 
 
 CUSTODY_LITERAL_PATH = r'(?!-)[A-Za-z0-9_./-]+'
-CUSTODY_GIT_GREP = (r"git[ \t]+grep(?:[ \t]+-[niwFElc])*[ \t]+(?:-e[ \t]+)?"
+CUSTODY_GIT_GREP = (r"git[ \t]+grep(?:[ \t]+-(?!e)[A-Za-z])*[ \t]+(?:-e[ \t]+)?"
                     r"'(?!-)[^'\x00-\x1f\x7f$`;|<>&]+'[ \t]+--"
                     rf"(?:[ \t]+{CUSTODY_LITERAL_PATH})+")
 CUSTODY_LINT = re.compile(rf'[ \t]*python3[ \t]+({CUSTODY_LITERAL_PATH}/text_lint\.py)'
@@ -5266,6 +5368,8 @@ def custody_grep_paths(command):
         if not re.fullmatch(CUSTODY_GIT_GREP, part.strip(' \t')):
             return ()
         words = shlex.split(part)
+        if not git_read_words(words[1:], exact_grep=True):
+            return ()
         paths.extend(words[words.index('--') + 1:])
     return tuple(paths)
 
@@ -5324,6 +5428,14 @@ def clean_custody_rescan(data, directory):
         WARNINGS[:] = warnings
 
 
+def account_state_root():
+    try:
+        return Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state'
+    except KeyError:
+        # Without a passwd entry the ledger cannot open a grant store.
+        return None
+
+
 def receipt_custody(data, read_search=False, *, exact_forms=True, verified_cd=None):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     if read_search and tool not in ('Read', 'Grep', 'Glob', 'LSP') and not tool.startswith('mcp__fff__'):
@@ -5344,11 +5456,7 @@ def receipt_custody(data, read_search=False, *, exact_forms=True, verified_cd=No
             found |= {normalized(os.path.abspath(path)), normalized(os.path.realpath(path))}
         return found
 
-    try:
-        account_state = Path(pwd.getpwuid(os.geteuid()).pw_dir) / '.local/state'
-    except KeyError:
-        # Without a passwd entry the ledger cannot open any grant store, so accounting refuses and none can be issued.
-        account_state = None
+    account_state = account_state_root()
     grant_paths = {normalized(str(account_state / 'ultraship/account-grants'))} if account_state else set()
     receipt_paths = resolved(str(receipt_store)) | grant_paths
     state_paths = resolved(str(state_root)) | ({normalized(str(account_state))} if account_state else set())
@@ -5582,23 +5690,12 @@ def receipt_custody(data, read_search=False, *, exact_forms=True, verified_cd=No
             if not words:
                 return False
             if words[0] == 'sed':
-                def clone_file(word):
-                    # A regular file inside a Git work tree, outside the plugin that runs this hook and outside the
-                    # folder that holds installed plugins. A repository at the home folder itself makes no clone.
-                    real = Path(os.path.realpath(os.path.join(folder, os.path.expanduser(word))))
-                    home = Path(os.path.realpath(os.path.expanduser('~')))
-                    config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or home / '.claude')
-                    return (real.is_file() and not real.is_relative_to(Path(__file__).resolve().parents[1])
-                            and not real.is_relative_to(Path(os.path.realpath(config / 'plugins')))
-                            and any((parent / '.git').exists() for parent in real.parents
-                                    if not home.is_relative_to(parent)))
-
                 # Only `-n` with one print range reads; any other sed script or option can write a file or run a program.
                 # A backslash could hide a line continuation, which changes the file name the shell opens.
                 return ('\\' not in raw and len(words) > 3 and words[1] == '-n'
                         and bool(re.fullmatch(r'[0-9]+(?:,[0-9]+)?p', words[2]))
                         and not any(word.startswith('-') for word in words[3:])
-                        and all(clone_file(word) for word in words[3:]))
+                        and all(clone_source_file(folder, word) for word in words[3:]))
             # `diff` opens a file inside a folder operand, and a repository can configure programs that git runs,
             # so only the `sed` form takes the `cd` prefix; git takes its folder through `-C`.
             if moved:
@@ -5769,8 +5866,22 @@ def receipt_custody(data, read_search=False, *, exact_forms=True, verified_cd=No
                     first == 'df' or read_only_git(words, [raw for raw, _, _, _ in parts], ending))
 
             comment = pr_comment_body_removed(raw)
-            custody_source = literal_bindings_resolved(
-                path_command if path_command != raw else joined if comment == raw else comment, cwd_path)
+            scan_source = path_command if path_command != raw else joined if comment == raw else comment
+            # The estimator path has no whitespace or glob characters, so its bare expansion is one word.
+            eta = re.fullmatch(r'([ \t]*(?P<var>[A-Za-z_]\w*)=(?P<path>/[\w./-]+);[ \t]+python3[ \t]+)'
+                               r'(?P<use>\$(?P=var)|\$\{(?P=var)\})([ \t]+eta[ \t]+--size[ \t]+[SML][ \t]*\n?)',
+                               raw, re.ASCII)
+            if eta:
+                config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+                cache = (config / 'plugins/cache/better-plugin/chief-of-chiefs').resolve()
+                script = Path(eta['path'])
+                if (script.is_relative_to(cache) and str(script.resolve()) == eta['path'] and regular_file(script)
+                        and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+/skills/estimate/scripts/estimate\.py',
+                                         str(script.relative_to(cache)))):
+                    start, end = eta.span('use')
+                    scan_source = raw[:start] + '"' + eta['use'] + '"' + raw[end:]
+            custody_source = literal_bindings_resolved(scan_source, cwd_path)
+            literal_read = custody_read_only_shell(raw, cwd_path)
             cache_operand = cache_listing[1] if cache_listing else None
             try:
                 masked_source = cat_heredoc_data(custody_source)
@@ -6150,7 +6261,8 @@ def receipt_custody(data, read_search=False, *, exact_forms=True, verified_cd=No
                         return 'hard'
                     evidence_index = len(tokens) - 1 if account_words and account_words[2] != 'account-auto' else -1
                     name_source = source[:tokens[evidence_index][2]] if evidence_index >= 0 else source
-                    plain_source = source == text and plain_hook_source_command(source, tokens)
+                    plain_source = source == text and (plain_hook_source_command(source, tokens)
+                                                       or source == custody_source and literal_read)
                     if not plain_source:
                         # An inert quoted-delimiter script cannot run a process or import a module; its names are file text.
                         name_text = python_heredoc_shell(cat_heredoc_data(name_source), inert_only=True)
@@ -6323,7 +6435,7 @@ def receipt_custody(data, read_search=False, *, exact_forms=True, verified_cd=No
                                     or globbed and changes_dir and not listing[index]
                                     and glob_window(path, receipt_paths | grant_paths)
                                     or globbed and not listing[index] and glob_prefix(path, stores={hook_folder})
-                                    or (modifies_paths and installed_hook in resolved(path))):
+                                    or (modifies_paths and not literal_read and installed_hook in resolved(path))):
                                 return 'hard'
                             hook_glob = hook_glob or globbed and glob_prefix(path, stores={hook_folder})
                             if ((globbed and glob_prefix(path, stores={hook_folder}))
@@ -6610,7 +6722,10 @@ def checks(data):
         grant_custody_denied = receipt_custody(data)
     except Exception:
         traceback.print_exc()
-        deny(RECEIPT_CUSTODY_FAILED)
+        if tool != 'Bash' or not custody_read_after_error(data):
+            deny(RECEIPT_CUSTODY_FAILED)
+        grant_custody_denied = False
+        warn('S2', PRE_READ_WARNING)
     if tool in ('Agent', 'Task') and str(tin.get('subagent_type', '')).startswith('ship:') and tin.get('model'):
         deny('ship agents pin their own model. Remove the `model` field and call the scoped agent '
              'or the next agent in its fallback chain.')
@@ -7567,8 +7682,84 @@ def compact(data):
     print('\n'.join(lines))
 
 
+def custody_read_after_error(data):
+    """Prove a Bash read without calling the normal custody parser."""
+    def canonical(path):
+        path = path.absolute()
+        pending = deque(path.parts[1:])
+        resolved = Path('/')
+        links = 0
+        # Resolve each link before the kernel can interpret process-relative paths in the hook's context.
+        while pending:
+            part = pending.popleft()
+            if part == '..':
+                resolved = resolved.parent
+                continue
+            candidate = resolved / part
+            if str(candidate).casefold() in PROCESS_PATH_ROOTS:
+                raise ValueError('process-relative path')
+            try:
+                target = Path(os.readlink(candidate))
+            except OSError as error:
+                if error.errno not in {errno.EINVAL, errno.ENOENT}:
+                    raise
+                resolved = candidate
+                continue
+            links += 1
+            if links > 40:
+                raise ValueError('too many symbolic links')
+            if target.is_absolute():
+                resolved = Path('/')
+                target = target.relative_to(target.anchor)
+            pending.extendleft(reversed(target.parts))
+        return resolved
+
+    def overlaps(path, root, ancestors):
+        path, root = PurePosixPath(str(path).casefold()), PurePosixPath(str(root).casefold())
+        return path.is_relative_to(root) or ancestors and root.is_relative_to(path)
+
+    try:
+        command = (data.get('tool_input') or {}).get('command')
+        cwd = Path(data.get('cwd') or os.getcwd())
+        if not isinstance(command, str) or not cwd.is_absolute():
+            return False
+        trigger = custody_normalized(command)
+        if any(option in trigger for option in ('--row-file', '--row-id')):
+            return False
+        real_cwd = canonical(cwd)
+        if not real_cwd.is_dir():
+            return False
+        receipt = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'ultraship/text-lint'
+        receipt_paths = [receipt]
+        account_state = account_state_root()
+        if account_state is not None:
+            receipt_paths.append(account_state / 'ultraship/account-grants')
+        row_paths = [STATE / folder for folder in ROW_RECORD_FOLDERS]
+        for base in {cwd, real_cwd}:
+            row_paths.extend(parent / '.scratch/ultraship' / folder
+                             for parent in (base, *base.parents) for folder in ROW_RECORD_FOLDERS)
+        receipts = [(path, canonical(path)) for path in receipt_paths]
+        rows = [(path, canonical(path)) for path in row_paths]
+
+        def public_path(path, *, ancestors):
+            real = canonical(path)
+            paths = (Path(os.path.abspath(path)), real)
+            if any(overlaps(value, root, ancestors) for value in paths for pair in receipts for root in pair):
+                deny(RECEIPT_CUSTODY)
+            if any(overlaps(value, root, ancestors) for value in paths for pair in rows for root in pair) or any(
+                    re.search(r'/ultraship/(?:' + '|'.join(ROW_RECORD_FOLDERS) + r')(?:/|$)', str(value), re.I)
+                    for value in paths):
+                return None
+            return real
+
+        return public_path(cwd, ancestors=False) is not None and custody_read_only_shell(
+            command, cwd, check_path=public_path)
+    except Exception:
+        return False
+
+
 def guarded_pre(data):
-    """Deny every tool for every caller when `pre` raises an exception."""
+    """Keep unexpected errors closed unless a Bash read passes classification and custody."""
     try:
         output = pre_output(data)
         issue_account_grant(data)
@@ -7577,11 +7768,15 @@ def guarded_pre(data):
             print(json.dumps({'hookSpecificOutput': output}))
     except Exception:
         traceback.print_exc()
-        try:
-            receipt_custody(data, read_search=True)
-        except Exception:
-            tool = data.get('tool_name') if isinstance(data, dict) else ''
-            if isinstance(tool, str) and (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')):
+        tool = data.get('tool_name') if isinstance(data, dict) else ''
+        if tool == 'Bash' and custody_read_after_error(data):
+            print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
+                                                     'additionalContext': 'S2: ' + PRE_READ_WARNING}}))
+            return
+        if isinstance(tool, str) and (tool in ('Read', 'Grep', 'Glob', 'LSP') or tool.startswith('mcp__fff__')):
+            try:
+                receipt_custody(data, read_search=True)
+            except Exception:
                 deny(RECEIPT_CUSTODY)
         deny(PRE_FAILED)
 

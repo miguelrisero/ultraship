@@ -704,6 +704,7 @@ class ReceiptCustodyTests(unittest.TestCase):
         self.cwd.mkdir()
         self.enterContext(patch.dict(os.environ, {'HOME': temporary, 'XDG_STATE_HOME': str(self.state)}))
         self.store = self.state / 'ultraship' / 'text-lint'
+        self.enterContext(patch.object(ultraship, 'STATE', self.store.parent))
         self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=temporary)))
         self.ledger = ultraship.load_ledger()
         self.enterContext(patch.object(ultraship, 'load_ledger', return_value=self.ledger))
@@ -1213,6 +1214,41 @@ class ReceiptCustodyTests(unittest.TestCase):
         (self.cwd / source).parent.mkdir(parents=True)
         (self.cwd / source).write_text('print(1)\n')
         return source
+
+    def test_custody_allows_read_only_shell_lists_and_pipelines(self):
+        source = self.clone_source()
+        cache = Path.home() / '.claude/plugins/cache'
+        hooks = cache / 'ultraship/ship/1.15.52/hooks'
+        hooks.mkdir(parents=True)
+        (hooks / 'ultraship.py').write_text('print(1)\n')
+        estimator = cache / 'better-plugin/chief-of-chiefs/1.103.13/skills/estimate/scripts/estimate.py'
+        estimator.parent.mkdir(parents=True)
+        estimator.write_text('print(1)\n')
+        for command in (f'cd {shlex.quote(str(hooks))} && wc -l ultraship.py',
+                        f'cd ~/{hooks.relative_to(Path.home())} && wc -l ultraship.py',
+                        f'grep -c print {source}; grep -c def {source}',
+                        'git grep -n print -- plugins/ship/hooks',
+                        "cd plugins/ship/hooks && grep -n 'def pre' ultraship.py | head",
+                        f'python3 {estimator} eta --size S', f'E={estimator}; python3 $E eta --size S',
+                        f"cat {source} | awk '{{print $1}}' | sort | uniq | cut -c1"):
+            with self.subTest(command=command):
+                self.assert_account_command_allowed(command, caller='')
+
+    def test_custody_read_only_shell_exemption_keeps_refusals(self):
+        source = self.clone_source()
+        receipt = shlex.quote(str(self.store / 'key'))
+        grant = shlex.quote(str(self.ledger.grant_store() / 'key'))
+        for command in (f'cd plugins/ship/hooks && wc -l ultraship.py > {receipt}',
+                        f'grep -c print {source}; sed -i 1d {source}',
+                        f'git grep -n print -- plugins/ship/hooks | tee {grant}',
+                        f"cd plugins/ship/hooks && grep -n 'def pre' ultraship.py | head; cp ultraship.py {grant}",
+                        f'git show origin/main:{source} | grep -n print; python3 {source} pre',
+                        f'E=/{source}; python3 $E pre', f'cat {receipt} | head', f'cat {grant} | head',
+                        f"cat {source} | awk '{{print > \"out\"}}'", f"cat {source} | awk '{{system(\"echo x\")}}'",
+                        f'cat {source} | sort -o out', f'cat {source} | uniq input out',
+                        f'cat {source} | grep "$(tee {receipt})"'):
+            with self.subTest(command=command):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}})
 
     def test_grant_custody_allows_a_line_range_read_of_hook_source_in_a_clone(self):
         source = self.clone_source()
@@ -2259,6 +2295,119 @@ class ReceiptCustodyTests(unittest.TestCase):
                                      'Report the blocked scope to the driver.')
                     self.assertIn('Traceback (most recent call last):', errors.getvalue())
                     self.assertIn('RuntimeError: pre failed', errors.getvalue())
+
+    def test_pre_error_warns_for_a_literal_read_only_shell_line(self):
+        source = self.clone_source()
+        errors, output = io.StringIO(), io.StringIO()
+        event = {'cwd': str(self.cwd), 'tool_name': 'Bash',
+                 'tool_input': {'command': f'grep -c print {source}; wc -l {source} | head'}}
+        with patch.object(ultraship, 'pre_output', side_effect=RuntimeError('pre failed')), \
+                redirect_stdout(output), redirect_stderr(errors):
+            try:
+                ultraship.guarded_pre(event)
+            except SystemExit:
+                self.fail(output.getvalue())
+        result = json.loads(output.getvalue())['hookSpecificOutput']
+        self.assertNotIn('permissionDecision', result)
+        self.assertIn('hook failed', result['additionalContext'])
+        self.assertIn('RuntimeError: pre failed', errors.getvalue())
+
+    def test_pre_error_denies_unproven_shell_lines_and_protected_reads(self):
+        source = self.clone_source()
+        receipt = shlex.quote(str(self.store / 'key'))
+        grant = shlex.quote(str(self.ledger.grant_store() / 'key'))
+        for command, reason in ((f'wc -l {source} > out', ultraship.PRE_FAILED),
+                                ("grep 'unfinished", ultraship.PRE_FAILED),
+                                ('unknown-command file', ultraship.PRE_FAILED),
+                                (f'cat {receipt} | head', ultraship.RECEIPT_CUSTODY),
+                                (f'cat {grant} | head', ultraship.RECEIPT_CUSTODY),
+                                (f'cat {source} | sort -o out', ultraship.PRE_FAILED),
+                                ('git show --output=out HEAD:file', ultraship.PRE_FAILED),
+                                ('cat .scratch/ultraship/row-review/claim.json', ultraship.PRE_FAILED)):
+            with self.subTest(command=command), patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}}, reason)
+        with patch.object(ultraship, 'pre_output', side_effect=RuntimeError), \
+                patch.object(ultraship, 'literal_shell_segments', side_effect=RuntimeError):
+            self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': 'wc -l file'}},
+                                       ultraship.PRE_FAILED)
+
+    def test_pre_error_denies_commands_that_can_write_or_execute(self):
+        for command in ('cat "$(printf file)"', 'tee output.txt', 'find . -exec true {} +',
+                        'vi file.txt', 'git add -- file.txt', 'sort file.txt', 'make api-test'):
+            with self.subTest(command=command), patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
+                                           ultraship.PRE_FAILED)
+
+    def test_pre_error_denies_uniq_output_operands(self):
+        (self.cwd / 'input.txt').touch()
+        for command in ('uniq input.txt -- -out', 'uniq -- input.txt -out',
+                        'uniq input.txt -- -u', 'uniq -- input.txt -u'):
+            with self.subTest(command=command), patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
+                                           ultraship.PRE_FAILED)
+
+    def test_pre_error_denies_resolved_row_record_paths(self):
+        with patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+            for directory in (self.store.parent / 'row-review', self.cwd / '.scratch/ultraship/row-reanchor'):
+                directory.mkdir(parents=True)
+                record = directory / 'fixture.json'
+                record.touch()
+                alias = self.cwd / f'{directory.name}-link'
+                alias.symlink_to(directory, target_is_directory=True)
+                relative = os.path.relpath(directory.parent, self.cwd)
+                for command in (f'cat {record}', f'cat {alias.name}/fixture.json',
+                                f'cd {relative} && cat {directory.name}/fixture.json',
+                                f'cd {alias.name} && cat fixture.json'):
+                    with self.subTest(command=command):
+                        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
+                                                   ultraship.PRE_FAILED)
+
+    def test_pre_error_denies_process_relative_paths(self):
+        state = self.store.parent
+        (state / 'row-review').mkdir(parents=True)
+        (state / 'row-review/fixture.json').touch()
+        self.store.mkdir()
+        (self.store / 'key').touch()
+        (state / 'here').symlink_to('/proc/self/cwd', target_is_directory=True)
+        for failing_check in ('pre_output', 'receipt_custody'):
+            for anchor in ('/proc/self/cwd', 'here'):
+                for record in ('row-review/fixture.json', 'text-lint/key'):
+                    command = f'cd {shlex.quote(str(state))} && cat {anchor}/{record}'
+                    with self.subTest(check=failing_check, anchor=anchor, record=record), \
+                            patch.object(ultraship, failing_check, side_effect=RuntimeError):
+                        reason = (ultraship.PRE_FAILED if failing_check == 'pre_output'
+                                  else ultraship.RECEIPT_CUSTODY_FAILED)
+                        self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}}, reason)
+
+    def test_custody_read_classifier_excludes_git_with_side_effects(self):
+        for command in ('git status --short', 'git show HEAD:file.txt | head'):
+            with self.subTest(command=command):
+                self.assertFalse(ultraship.custody_read_only_shell(command, str(self.cwd)))
+
+    def test_pre_error_denies_git_with_side_effects(self):
+        for command in ('git status --short', 'git show HEAD:file.txt | head'):
+            with self.subTest(command=command), patch.object(ultraship, 'pre_output', side_effect=RuntimeError):
+                self.assert_custody_denial({'tool_name': 'Bash', 'tool_input': {'command': command}},
+                                           ultraship.PRE_FAILED)
+
+    def test_custody_parser_error_warns_for_a_proven_literal_read(self):
+        directory = self.cwd / 'docs'
+        directory.mkdir()
+        (directory / 'file.txt').touch()
+        with patch.object(ultraship, 'receipt_custody', side_effect=OSError('custody parser failed')):
+            self.assert_custody_warning({'tool_name': 'Bash',
+                                         'tool_input': {'command': 'cd docs && wc -l file.txt'}})
+
+    def test_normal_pre_preserves_git_custody_verdicts(self):
+        source = self.clone_source()
+        for caller in ('ship:writer--sol', 'ship:driver--sol'):
+            with self.subTest(caller=caller):
+                self.assert_account_command_allowed('git grep -n print -- plugins/ship/hooks', caller=caller)
+                self.assert_custody_denial({'agent_type': caller, 'tool_name': 'Bash',
+                                           'tool_input': {'command': f'git show origin/main:{source} | grep -n print'}})
+
+    def test_normal_pre_allows_make_api_test(self):
+        self.assert_account_command_allowed('make api-test', caller='ship:writer--sol')
 
     def test_pre_error_denies_malformed_tool_names(self):
         """Catch malformed tool names escaping denial through an error in the custody fallback."""
