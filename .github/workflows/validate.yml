@@ -22,17 +22,38 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: python3 scripts/check-plugins.py ${BASE:+--base "$BASE"}
-      - name: Test plugin rules
+      - name: Run validation suites
         run: |
           mkdir -p .scratch
-          TMPDIR="$PWD/.scratch" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py' -v
-      - name: Test hooks and ledger
-        run: |
-          mkdir -p .scratch
-          TMPDIR="$PWD/.scratch" python3 plugins/ship/hooks/ultraship_test.py
-      - name: Test worktree teardown
-        run: |
-          mkdir -p .scratch
-          TMPDIR="$PWD/.scratch" bash plugins/chief/skills/run/scripts/lane-teardown.test.sh
-      - name: Check shell scripts
-        run: bash -n plugins/ship/skills/*/scripts/*.sh plugins/chief/skills/run/scripts/*.sh
+          scratch=$(mktemp -d "$PWD/.scratch/v.XXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          declare -A pids=()
+          run_suite() {
+            local name=$1
+            shift
+            (
+              export TMPDIR="$scratch/$name"
+              status=0
+              { mkdir "$TMPDIR" && "$@"; } >"$scratch/$name.log" 2>&1 || status=$?
+              {
+                flock 9 || exit 1
+                printf '%s: exit %s\n' "$name" "$status" && cat "$scratch/$name.log" && printf '\n'
+              } 9>>"$scratch/output.lock" || exit 1
+              exit "$status"
+            ) &
+            pids[$name]=$!
+          }
+          run_suite rules env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py' -v
+          run_suite ledger python3 plugins/ship/hooks/ultraship_test.py
+          run_suite teardown bash plugins/chief/skills/run/scripts/lane-teardown.test.sh
+          run_suite shell bash -n plugins/ship/skills/*/scripts/*.sh plugins/chief/skills/run/scripts/*.sh
+          failed=0
+          for name in rules ledger teardown shell; do
+            if [[ -n ${pids[$name]:-} ]]; then
+              wait "${pids[$name]}" || failed=1
+            else
+              printf '%s: missing result\n' "$name"
+              failed=1
+            fi
+          done
+          exit "$failed"

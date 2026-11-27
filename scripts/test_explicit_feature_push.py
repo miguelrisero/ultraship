@@ -144,7 +144,6 @@ class ExplicitFeaturePushTests(unittest.TestCase):
     def test_ci_discovers_push_and_model_regressions(self):
         workflow = (ROOT / '.github/workflows/validate.yml').read_text()
         self.assertIn("python3 -m unittest discover -s scripts -p 'test_*.py' -v", workflow)
-        self.assertIn('TMPDIR="$PWD/.scratch"', workflow)
 
     def test_both_drivers_use_the_shared_preflight_without_writer_authority(self):
         for name in ('driver', 'driver--sol'):
