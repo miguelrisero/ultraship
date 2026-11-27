@@ -287,19 +287,30 @@ Approved test adaptations follow the writer contract (owner rule, Input `32c223a
 ### Exact-run resource bounds
 
 This guidance grants zero authority.
-Use the [driver reference for exact-run bounds](references/owner-decisions.md#exact-run-resource-bounds) before dispatch.
-Require an already verified `owner_ui` answer that names one run by its unique ID.
+This guidance adds no live lookup, tool grant, or resource change.
+Use the [driver reference for exact-run bounds](references/owner-decisions.md#exact-run-resource-bounds) before dispatch or retry.
+Require a verified `owner_ui` answer that names the trusted runtime execution ID, repository, and workspace.
 Match each exact bound and its authorized scope to that answer.
 Keep the existing owner-event provenance checks.
 Require a CoC-frozen verifier record by absolute path and SHA256.
-Before editing, verify the digest and match the answer, exact bounds, exact files and edits, and unique run ID.
+Verify the record digest before editing and before applying each bound.
+Match the exact files, edits, bounds, and scope to the answer.
 Stop if the verifier record is missing, stale, or mismatched.
-One grant covers one named run.
-Apply each approved bound only on an exact match to the approved run ID and within the verified scope.
+Require authoritative confirmation of current owner approval immediately before each exact-bound edit and each application.
+Apply the [point-of-use approval rule](references/owner-decisions.md#exact-run-resource-bounds).
+
+For execution identity, treat the Ship run label, branch, and SHA as descriptive only.
+Before applying each bound, match the active execution ID, repository, and workspace to the answer and the record.
+Use independent evidence from the trusted runtime for that match.
+Keep repository defaults when the trusted runtime cannot prove the current execution or the match.
+Apply only the exact bound within the verified scope.
 Keep repository defaults and all unrelated limits unchanged.
-Require a test that proves the named run stops at each approved bound.
-Require tests that show other runs keep the repository defaults.
-Cover a different run ID and an absent run ID.
+
+Require a test that proves the approved execution stops at each approved bound.
+Test that a different or missing execution ID keeps repository defaults.
+Test that a second execution that reuses the Ship run label keeps repository defaults.
+Test that an answer superseded after dispatch blocks the edit and each application.
+Keep repository defaults in that case even when the record and active execution match.
 Keep separate execution admission and every effective denial in force.
 Preserve all existing holds, refusals, and product-limit rules.
 

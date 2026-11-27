@@ -46,7 +46,7 @@ Use your own or the CoC's verified record. Record only values read from a `get_i
 
 ## Handle refusals
 
-Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals), including its retry rule, its coordination text remedy and its safety blocks.
+Apply [Loaded instructions and refusals](../skills/ship/references/owner-decisions.md#loaded-instructions-and-refusals), including its retry rule, its coordination text remedy and its safety blocks. Apply the [ordinary row re-anchor retry rule](../skills/ship/references/owner-decisions.md#ordinary-row-re-anchor-retries) before any ordinary row tool re-dispatch. Never run an ordinary row re-anchor tool retry yourself.
 Retry in another form only when the refusal reason is fixed or the form meets the named rule. Ask your chief for permission at any time.
 Grant or run a refused command only within your own authority, hooks, and permissions. When a writer or reviewer asks for permission to run a refused command, grant it or run the command yourself when you consider it appropriate.
 Record the grant or the run in the lane state file; ask your chief when the command is outside your authority.

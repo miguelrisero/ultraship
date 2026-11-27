@@ -883,57 +883,111 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 rule = section(text, '### Exact-run resource bounds')
                 for requirement in (
                     'Use this separate route only for an exact resource-bound edit under a verified owner grant.',
-                    'Require the brief to name the unique run ID and the CoC-frozen verifier record by absolute path and SHA256.',
+                    'Require the brief to name the runtime execution ID, repository, and workspace.',
+                    'Require the CoC-frozen verifier record by absolute path and SHA256.',
                     'Reuse the owner-event provenance checks in [Task-specific owner decision](#task-specific-owner-decision).',
                     'Use only the CoC-frozen record for verifier fallback.',
                     'Keep an authoritative mismatch blocked without fallback.',
-                    'Follow [Exact-run resource bounds](../skills/ship/SKILL.md#exact-run-resource-bounds)',
+                    'Match the owner answer and verifier record to independent evidence of the current active execution.',
+                    'Verify that match before editing or applying a bound.',
+                    'Keep repository defaults if the trusted runtime cannot prove that match.',
+                    'Follow [Exact-run resource bounds](../skills/ship/SKILL.md#exact-run-resource-bounds) for the scope, record checks, tests, and separate execution admission.',
                 ):
-                    self.assertIn(requirement, rule)
+                    with self.subTest(requirement=requirement):
+                        self.assertTrue(requirement in rule, requirement)
 
-    def test_driver_requires_a_coc_record_for_the_unique_run_and_exact_edit(self):
+    def test_driver_binds_approval_to_an_independently_verified_active_execution(self):
         reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
         rule = section(reference, '## Exact-run resource bounds')
         for requirement in (
             'Use the [owner answer checks](#consume-and-finish)',
             'Reuse only the owner-event provenance checks from [Task-specific test adaptations](#task-specific-test-adaptations).',
+            'Require a trusted runtime to assign a non-reusable execution ID before owner approval.',
+            'Require a distinct ID for every Ship execution, even within the same session.',
+            'Accept a BetterCoding execution ID only when the runtime ties it to this Ship invocation.',
+            'Require the owner answer to name that execution ID, repository, and workspace.',
             'Require the CoC to verify the answer and freeze the verifier record before dispatch.',
-            'Bind the record to the verified answer, unique run ID, authorized scope, exact bounds, and exact files and edits.',
-            'Verify the record digest and match every binding before dispatch.',
+            'Bind the record to the verified answer, execution ID, repository, and workspace.',
+            'Include the authorized scope, exact bounds, and exact files and edits.',
+            'Use trusted runtime evidence independent of the owner answer, verifier record, and writer brief.',
+            'Use only evidence available through existing permissions.',
+            'Require runtime evidence that ties the active execution ID to the repository and workspace.',
+            'A historical record alone cannot prove which execution is active.',
+            'Verify the digest before dispatch or retry.',
+            'Match every binding to the answer and the current active execution before dispatch or retry.',
             'Recheck the current version, status, and answer provenance before dispatch or retry.',
+            'Keep missing, stale, or mismatched evidence pending and keep repository defaults.',
             'Name the record by absolute path and SHA256 in the writer brief.',
             'Select the exact-run subsection in the loaded writer definition.',
             'Keep execution admission separate.',
         ):
             with self.subTest(requirement=requirement):
-                self.assertIn(requirement, rule)
+                self.assertTrue(requirement in rule, requirement)
 
-    def test_resource_bound_guidance_requires_a_verified_grant_for_one_run(self):
+    def test_resource_bound_guidance_keeps_defaults_outside_the_verified_execution(self):
         guidance = section((SHIP / 'skills/ship/SKILL.md').read_text(), '### Exact-run resource bounds')
         for requirement in (
-            'Require an already verified `owner_ui` answer that names one run by its unique ID.',
+            'Require a verified `owner_ui` answer that names the trusted runtime execution ID, repository, and workspace.',
             'Match each exact bound and its authorized scope to that answer.',
             'Keep the existing owner-event provenance checks.',
             'Require a CoC-frozen verifier record by absolute path and SHA256.',
-            'Before editing, verify the digest and match the answer, exact bounds, exact files and edits, and unique run ID.',
+            'Verify the record digest before editing and before applying each bound.',
+            'Match the exact files, edits, bounds, and scope to the answer.',
             'Stop if the verifier record is missing, stale, or mismatched.',
-            'Require a test that proves the named run stops at each approved bound.',
-            'Require tests that show other runs keep the repository defaults.',
-            'One grant covers one named run.',
-            'Apply each approved bound only on an exact match to the approved run ID and within the verified scope.',
+            'For execution identity, treat the Ship run label, branch, and SHA as descriptive only.',
+            'Before applying each bound, match the active execution ID, repository, and workspace to the answer and the record.',
+            'Use independent evidence from the trusted runtime for that match.',
+            'Keep repository defaults when the trusted runtime cannot prove the current execution or the match.',
+            'Apply only the exact bound within the verified scope.',
             'Keep repository defaults and all unrelated limits unchanged.',
-            'Cover a different run ID and an absent run ID.',
+            'Require a test that proves the approved execution stops at each approved bound.',
+            'Test that a different or missing execution ID keeps repository defaults.',
+            'Test that a second execution that reuses the Ship run label keeps repository defaults.',
             'Keep separate execution admission and every effective denial in force.',
+            'Preserve all existing holds, refusals, and product-limit rules.',
+            'This guidance adds no live lookup, tool grant, or resource change.',
             'This guidance grants zero authority.',
         ):
             with self.subTest(requirement=requirement):
                 self.assertTrue(requirement in guidance, requirement)
 
+    def test_exact_run_requires_current_owner_approval_at_each_use(self):
+        confirmation = (
+            'Require authoritative confirmation of current owner approval '
+            'immediately before each exact-bound edit and each application.'
+        )
+        reference = 'skills/ship/references/owner-decisions.md'
+        anchor = 'owner-decisions.md#exact-run-resource-bounds'
+        paths = (
+            (reference, '##', (
+                'Match the current Input version, status, and answer provenance to the grant.',
+                'Use only the existing authorized owner-answer verification route for confirmation.',
+                'The frozen verifier record supplies provenance only.',
+                'Keep repository defaults when confirmation is unavailable, stale, or mismatched.',
+            )),
+            ('skills/ship/SKILL.md', '###', (
+                f'Apply the [point-of-use approval rule](references/{anchor}).',
+                'Test that an answer superseded after dispatch blocks the edit and each application.',
+                'Keep repository defaults in that case even when the record and active execution match.',
+            )),
+            *((f'agents/{name}', '###', (
+                f'Apply the [point-of-use approval rule](../skills/ship/references/{anchor}).',
+                'The frozen verifier record supplies provenance only.',
+            )) for name in ('writer--sol.md', 'writer--fable52.md')),
+        )
+        for path, heading, clauses in paths:
+            rule = section((SHIP / path).read_text(), f'{heading} Exact-run resource bounds')
+            for clause in (confirmation, *clauses):
+                with self.subTest(path=path, clause=clause):
+                    self.assertTrue(clause in rule, clause)
+
     def test_per_row_accounting_requires_proven_refusals_and_grants_no_authority(self):
         reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
         rule = section(reference, '## Per-row re-anchor attempt accounting')
+        scope = 'Use this rule only to count attempts under the existing row re-anchor limits.'
         separate = 'Apply the decision-defect rule with its own count and retry conditions.'
         for requirement in (
+            scope,
             separate,
             'Require the verbatim refusal receipt and proof of zero writes by the refused action.',
             'Require proof that the hook refused the exact invocation before the tool started.',
@@ -949,27 +1003,16 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 text = (SHIP / 'agents' / name).read_text()
                 refusals = section(text, '### Loaded instructions and refusals')
                 before_defect = refusals.split('This [decision-defect rule]', 1)[0]
-                self.assertIn('owner-decisions.md#per-row-re-anchor-attempt-accounting', before_defect)
-                self.assertIn(separate, before_defect)
-                self.assertIn('Counting grants zero retry, edit, or route authority.', before_defect)
-
-    def test_row_tool_brief_conditions_hook_zero_count_on_verified_per_row_evidence(self):
-        reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
-        brief = section(reference, '## Row re-anchor tool brief')
-        self.assertIn('Use the [per-row re-anchor attempt accounting](#per-row-re-anchor-attempt-accounting) rule to verify refusal evidence.', brief)
-        self.assertNotIn('A hook denial before the tool starts counts as zero runs.', brief)
-        self.assertIn(
-            '- Count a pre-start hook refusal as zero runs only with verified per-row evidence.\n'
-            '- After that denial, the writer may retry once in a compliant form; the driver re-dispatches it.',
-            brief,
-        )
-        self.assertIn(
-            '- The decision-defect rule requires a CoC decision defect as the sole stated cause, with zero bytes written and zero commits.\n'
-            '- After the writer verifies the frozen corrected decision under that rule, the refused attempt counts as zero runs.\n'
-            '- The writer gets one new attempt under the corrected decision.\n'
-            '- The driver re-dispatches it with a fresh admission record.',
-            brief,
-        )
+                for requirement in (
+                    'owner-decisions.md#per-row-re-anchor-attempt-accounting',
+                    scope,
+                    separate,
+                    'Count a proven pre-start hook refusal or pre-write tool refusal as zero per-row runs.',
+                    'Count the attempt if any proof is missing, ambiguous, or mismatched.',
+                    'Counting grants zero retry, edit, or route authority.',
+                ):
+                    with self.subTest(requirement=requirement):
+                        self.assertTrue(requirement in before_defect, requirement)
 
     def test_decision_defect_count_and_retry_follow_the_corrected_decision(self):
         for name, heading, start, end in (
