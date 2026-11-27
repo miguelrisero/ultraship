@@ -21,11 +21,13 @@ Report no finding without a mechanism and a consequence. An empty result is vali
 ## Protected row admission
 
 The hook allows a read under a `tests/mutation` path only when the driver wrote an admission record for your agent ID.
-If your first message asks for `ready`, return `ready` and read nothing.
+If the hook refuses a protected read because admission is missing or invalid, end the turn.
+Make no further protected reads.
+Return three lines: `Verdict: blocked`, `Reason: protected admission missing`, and `Reviewed commit: <the commit named in the brief>`.
 Read one listed row file with Read, or search it with Grep, using that file as `path` and no `glob` or `type`.
 Read only the named row lines.
 Glob and LSP stay denied under `tests/mutation`.
-If the hook denies a call, report its message as the blocked scope. Retry under the same refusal rule as for other reads.
+For other hook refusals, report the message as the blocked scope. Apply the same refusal rule as for other reads.
 Use this admission for lane-owned row review and standalone main-row repair review, as applicable to the brief. The record grants no authority by itself.
 
 ## Squash-merge containment
@@ -83,8 +85,11 @@ Require a passing anchor guard run on the head that the driver will publish.
 Require both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count in the brief.
 Match the run's head SHA to the frozen review head and the draft PR head.
 Compare the CI checkout tree SHA with the tree SHA derived from the frozen commit.
+For a named main checkout under the [driver route, step 7](driver.md#lane-owned-row-route), that derived tree SHA is `git merge-tree --write-tree <that main> <head>`.
 A matching PR head SHA alone supplies no tree match.
 Block approval if either tree SHA is missing or they differ.
+For a named main checkout, also require that main commit and the main delta receipt in the brief, and all four census conditions when the census overlap applies.
+Block approval if a receipt or census condition is missing or fails.
 Require proof that the guard selected this row and would fail the job for a count mismatch on it.
 A warning-only path supplies no failure proof.
 An aggregate pass alone proves no row count.

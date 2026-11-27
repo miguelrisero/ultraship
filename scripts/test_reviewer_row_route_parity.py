@@ -52,8 +52,32 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
         self.assertEqual(fields['tools'], 'Read, Grep, Glob, LSP, WebFetch, WebSearch')
         self.assertEqual(fields['effort'], 'xhigh')
 
+    def test_protected_reviewer_stops_only_on_the_hook_admission_refusal(self):
+        policy = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        admission = policy.split('## Reviewer admission record for protected row reads\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('Launch the reviewer in the background.', admission)
+        self.assertIn('Continue the same reviewer with SendMessage after the record exists.', admission)
+        for text in [admission, *(split_body((AGENTS / f'reviewer--{seat}.md').read_text())[1][ADMISSION]
+                                  for seat in ('sol', 'opus', 'astra'))]:
+            with self.subTest(text=text):
+                self.assertIn('If the hook refuses a protected read because admission is missing or invalid', text)
+                self.assertIn('Make no further protected reads.', text)
+                self.assertIn('`Verdict: blocked`', text)
+                self.assertIn('`Reason: protected admission missing`', text)
+                self.assertIn('`Reviewed commit: <the commit named in the brief>`', text)
+                self.assertNotIn('first step', text)
+                self.assertNotIn('Check the admission record', text)
+                self.assertNotIn('Wait for the driver', text)
+
     def test_dispatch_selects_a_reviewer_with_the_loaded_route(self):
         text = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
         admission = text.split('## Reviewer admission record for protected row reads\n', 1)[1].split('\n## ', 1)[0]
         self.assertIn('Dispatch `ship:reviewer--sol`, `ship:reviewer--opus`, or, for lane-owned row review only, `ship:reviewer--astra`.', admission)
-        self.assertIn('Ask the reviewer to return `ready` and read nothing.', admission)
+        self.assertIn('Send the full reviewer brief at dispatch.', admission)
+        self.assertNotIn('`ready`', admission)
+        for path in AGENTS.glob('reviewer--*.md'):
+            with self.subTest(seat=path.stem):
+                text = path.read_text()
+                self.assertNotIn('return `ready`', text.casefold())
+                if ADMISSION in text:
+                    self.assertIn('If the hook refuses a protected read because admission is missing or invalid', text)
