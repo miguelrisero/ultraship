@@ -1,14 +1,38 @@
 """Required review and verifier seats use Opus with their explicit effort."""
+from contextlib import contextmanager
 import importlib.util
+import os
 from pathlib import Path
 import re
+import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('check_plugins', ROOT / 'scripts/check-plugins.py')
 checks = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checks)
+
+
+@contextmanager
+def packaging_git_context():
+    if (ROOT / '.git').exists():
+        yield
+        return
+
+    scratch = ROOT / '.scratch'
+    scratch.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=scratch, prefix='packaging-git-') as tmp:
+        env = {'PATH': os.environ.get('PATH', os.defpath), 'HOME': tmp,
+               'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_ATTR_NOSYSTEM': '1'}
+        subprocess.run(['git', 'init', '-q', '--template=', tmp], env=env, check=True)
+        env.update(GIT_DIR=str(Path(tmp) / '.git'), GIT_WORK_TREE=str(ROOT))
+        subprocess.run(['git', 'add', '-f', '--', 'plugins'], cwd=ROOT, env=env, check=True)
+        subprocess.run(['git', '-c', 'user.name=Archive Fixture', '-c', 'user.email=archive@example.invalid',
+                        'commit', '-qm', 'Archive plugin snapshot'], cwd=ROOT, env=env, check=True)
+        with patch.dict(os.environ, env, clear=True):
+            yield
 
 
 class ImportantPlanningContractTests(unittest.TestCase):
@@ -222,7 +246,8 @@ class ModelRoutingTests(unittest.TestCase):
         self.assertIn('low', low['description'])
         for path in (ROOT / 'plugins/ship/agents').glob('*.md'):
             self.assertNotEqual(checks.frontmatter(path.read_text()).get('model', 'inherit'), 'inherit', path.name)
-        self.assertEqual(checks.check('HEAD'), [])
+        with packaging_git_context():
+            self.assertEqual(checks.check('HEAD'), [])
 
     def test_panel_routes_keep_three_seats_and_count_astra_once_on_fallback(self):
         panel_dir = ROOT / 'plugins/ship/skills/panel'
