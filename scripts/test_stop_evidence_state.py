@@ -73,6 +73,11 @@ class StopEvidenceStateTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), pending)
         self.assertIsNone(self.stop())
 
+    def test_stop_names_void_accounting_for_a_stopped_agent_without_review_evidence(self):
+        reason = self.assert_blocked()['reason']
+        self.assertIn(f'account-void {shlex.quote(str(self.path))} <result-id>', reason)
+        self.assertIn('zero tool calls and no review labels', reason)
+
     def test_same_state_passes_and_still_attempts_accounting(self):
         pending = self.path.read_bytes()
         self.assert_blocked()

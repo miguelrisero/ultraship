@@ -1256,14 +1256,19 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(json.loads(self.bound()[result['id']])['step'], 'review')
         self.assertEqual(self.hook('stop'), '')
 
-    def auto_owed(self, entries):
+    def auto_owed(self, entries, *, agent_id='reviewer', legacy=False):
         owed = self.base / 'state/ultraship/owed/s1.tsv'
-        transcript = self.base / 's1/subagents/agent-reviewer.jsonl'
+        transcript = self.base / f's1/subagents/agent-{agent_id}.jsonl'
         transcript.parent.mkdir(parents=True, exist_ok=True)
-        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='reviewer',
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id=agent_id,
                   **({'agent_transcript_path': str(transcript)} if entries is not None else {}))
         epoch, _, _, raw = owed.read_text().splitlines()[-1].split('\t')
         result = json.loads(raw)
+        if legacy:
+            result.pop('stopped_at_ns', None)
+            notices = owed.read_text().splitlines()
+            notices[-1] = notices[-1].rsplit('\t', 1)[0] + '\t' + json.dumps(result)
+            owed.write_text('\n'.join(notices) + '\n')
         if entries is not None:
             lines = []
             for offset, role, content in entries:
@@ -1271,9 +1276,146 @@ class LedgerDirTests(unittest.TestCase):
                 if isinstance(content, str) and role == 'assistant':
                     content = [{'type': 'text', 'text': content}]
                 lines.append(json.dumps({'timestamp': timestamp, 'type': role,
+                                         'agentId': agent_id, 'sessionId': 's1',
                                          'message': {'content': content}}))
             transcript.write_text(''.join(line + '\n' for line in lines))
         return owed, transcript, result, int(epoch)
+
+    def test_account_void_closes_its_stopped_result_without_credit(self):
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Return the single word `ready`.'), (-1, 'assistant', 'ready')])
+        home = self.resolve()
+        head = self.git(self.checkout, 'rev-parse', 'HEAD')
+        gaps = ledger.gaps(ledger.open_run(home), head, self.checkout)
+        args = ('account-void', str(owed), result['id'])
+        accounted = self.cli(*args)
+        self.assertEqual(accounted.returncode, 0, accounted.stderr)
+        self.assertEqual(ledger.rows(home)[-1][1:5],
+                         ['account-result', 'ship:reviewer--sol@reviewer', 'void', 'void'])
+        self.assertEqual(ledger.gaps(ledger.open_run(home), head, self.checkout), gaps)
+        saved = home.read_bytes()
+        self.assertEqual(self.cli(*args).returncode, 0)
+        self.assertEqual(home.read_bytes(), saved)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+        self.assertEqual(set(self.bound()), {result['id']})
+
+    def test_account_void_refuses_uncertain_or_nonempty_review_evidence(self):
+        prompt = (-4, 'user', 'Return the single word `ready`.')
+        ready = (-1, 'assistant', 'ready')
+        home = self.resolve()
+        for case, entries, reason in (
+            ('earlier tool', [prompt, (-3, 'assistant', [{'type': 'tool_use'}]), ready], 'tool call'),
+            ('server tool', [prompt, (-3, 'assistant', [{'type': 'server_tool_use'}]), ready], 'tool call'),
+            ('MCP tool', [prompt, (-3, 'assistant', [{'type': 'mcp_tool_use'}]), ready], 'tool call'),
+            ('earlier verdict', [prompt, (-3, 'assistant', '**Verdict:**'), ready], 'review label'),
+            ('overall', [prompt, (-3, 'assistant', '> oVeRaLl: pass'), ready], 'review label'),
+            ('subject', [prompt, (-3, 'assistant', '_Reviewed commit_:'), ready], 'review label'),
+            ('foreign session', [prompt, ready], 'recorded agent and session'),
+            ('later activity', [prompt, ready, (3, 'user', 'Review the diff.')], 'after the stop notice'),
+            ('same-second prompt', [prompt, ready, (0.5, 'user', 'Review the diff.')], 'after the stop notice'),
+            ('missing transcript', None, 'no transcript'),
+            ('missing stop notice', [prompt, ready], 'exactly one notification'),
+            ('invalid JSON', [prompt, ready], 'transcript parse error'),
+        ):
+            with self.subTest(case=case):
+                owed, transcript, result, epoch = self.auto_owed(entries)
+                if case == 'foreign session':
+                    foreign = self.base / 's2/subagents' / transcript.name
+                    foreign.parent.mkdir(parents=True)
+                    transcript.rename(foreign)
+                    result['agent_transcript_path'] = str(foreign)
+                    owed.write_text(f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(result)}\n')
+                elif case == 'same-second prompt':
+                    result.pop('stopped_at_ns', None)
+                    owed.write_text(f'{epoch}\tship:reviewer--sol\t{self.checkout}\t{json.dumps(result)}\n')
+                elif case == 'missing stop notice':
+                    owed.write_text('')
+                elif case == 'invalid JSON':
+                    with transcript.open('a') as source:
+                        source.write('{broken\n')
+                before = (owed.read_bytes(), home.read_bytes())
+                refused = self.cli('account-void', str(owed), result['id'])
+                self.assertEqual(refused.returncode, 1, refused)
+                self.assertIn(reason, refused.stderr)
+                self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+                owed.unlink()
+
+    def test_void_refuses_prose_and_multiple_text_replies(self):
+        prompt = (-3, 'user', 'Review this inline diff.')
+        for replies in ([(-1, 'assistant', 'This diff loses data on retry.')],
+                        [(-2, 'assistant', 'This diff loses data on retry.'), (-1, 'assistant', 'ready')],
+                        [(-2, 'user', 'Please continue.'), (-1, 'assistant', 'ready')]):
+            with self.subTest(replies=replies):
+                owed, _, result, _ = self.auto_owed([prompt, *replies])
+                home = self.resolve()
+                before = (owed.read_bytes(), home.read_bytes())
+                attempt = self.cli('account-void', str(owed), result['id'])
+                self.assertEqual(attempt.returncode, 1, attempt)
+                self.assertIn('one prompt and one ready reply', attempt.stderr)
+                self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+                owed.unlink()
+
+    def test_void_refuses_a_siblings_copied_transcript(self):
+        entries = [(-2, 'user', 'Return ready.'), (-1, 'assistant', 'ready')]
+        owed, sibling, _, _ = self.auto_owed(entries, agent_id='sibling')
+        _, transcript, result, _ = self.auto_owed(entries)
+        shutil.copyfile(sibling, transcript)
+        before = owed.read_bytes()
+        attempt = self.cli('account-void', str(owed), result['id'])
+        self.assertEqual(attempt.returncode, 1, attempt)
+        self.assertIn('transcript agent identity differs', attempt.stderr)
+        self.assertEqual(owed.read_bytes(), before)
+
+    def test_void_refuses_prompts_with_review_material(self):
+        handshake = 'Return the single word `ready`'
+        for prompt in (
+            'Review this inline change.',
+            handshake + '\n@@ -1 +1 @@\n-old\n+new',
+            handshake + '\nPaths:\n- ledger.py\n- ultraship.py',
+            handshake + '\nReviewed commit: abcdef1',
+            handshake + ' ' * (200 - len(handshake)) + '.',
+            [{'type': 'text', 'text': handshake}, {'type': 'document'}],
+        ):
+            with self.subTest(prompt=prompt):
+                owed, _, result, _ = self.auto_owed([(-2, 'user', prompt), (-1, 'assistant', 'ready')])
+                home = self.resolve()
+                before = (owed.read_bytes(), home.read_bytes())
+                attempt = self.cli('account-void', str(owed), result['id'])
+                self.assertEqual(attempt.returncode, 1, attempt)
+                self.assertIn('expected a handshake-only prompt', attempt.stderr)
+                self.assertEqual((owed.read_bytes(), home.read_bytes()), before)
+                owed.unlink()
+
+    def test_resumed_agent_stop_records_a_new_result(self):
+        owed, transcript, first, _ = self.auto_owed([(-2, 'user', 'Return ready.'), (-1, 'assistant', 'ready')])
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id='reviewer',
+                  agent_transcript_path=str(transcript))
+        first_notice, second_notice = (json.loads(line.split('\t')[3]) for line in owed.read_text().splitlines())
+        self.assertEqual(first_notice['id'], first['id'])
+        self.assertNotEqual(second_notice['id'], first['id'])
+        self.assertEqual(second_notice['agent_id'], first['agent_id'])
+        self.assertEqual(second_notice['agent_transcript_path'], first['agent_transcript_path'])
+
+    def test_void_accepts_a_prompt_reply_and_stop_in_one_second(self):
+        owed, transcript, result, epoch = self.auto_owed([
+            (0.1, 'user', ' Return the single word `ready` and nothing else. '), (0.2, 'assistant', ' ReAdY ')])
+        owed.unlink()
+        hook_spec = importlib.util.spec_from_file_location('void_stop_hook', HOOK)
+        stop_hook = importlib.util.module_from_spec(hook_spec)
+        hook_spec.loader.exec_module(stop_hook)
+        stop_instant = epoch * 1_000_000_000 + 300_000_000
+        with mock.patch.dict(os.environ, self.env, clear=True), \
+                mock.patch.object(stop_hook, 'STATE', owed.parent.parent), \
+                mock.patch.object(stop_hook.time, 'time_ns', return_value=stop_instant):
+            stop_hook.subagent_stop({'session_id': 's1', 'cwd': str(self.checkout),
+                                     'agent_type': 'ship:reviewer--sol', 'agent_id': result['agent_id'],
+                                     'agent_transcript_path': str(transcript)})
+        notice = json.loads(owed.read_text().split('\t')[3])
+        self.assertEqual(notice.get('stopped_at_ns'), stop_instant)
+        attempt = self.cli('account-void', str(owed), notice['id'])
+        self.assertEqual(attempt.returncode, 0, attempt.stderr)
+        self.assertEqual(self.hook('stop'), '')
 
     def frozen_patch(self, data=b'diff --git a/x b/x\n+frozen\n'):
         patch = self.base / 'frozen.patch'
@@ -1904,6 +2046,103 @@ class LedgerDirTests(unittest.TestCase):
         receipts = json.loads((owed.parent.parent / 'accounted.json').read_bytes())
         self.assertEqual([json.loads(key)[2] for key in receipts], [bound['id']])
 
+    def test_account_auto_accounts_one_result_per_transcript_turn(self):
+        sha = 'ab' * 20
+        owed, transcript, first, _ = self.auto_owed([
+            (-2, 'user', 'Review the commit.'), (-1, 'assistant', f'Verdict: pass\nReviewed commit: {sha}')])
+        payload = {'agent_type': 'ship:reviewer--sol', 'agent_id': first['agent_id'],
+                   'agent_transcript_path': str(transcript)}
+        self.hook('subagent-stop', **payload)
+        second = json.loads(owed.read_text().splitlines()[-1].split('\t')[3])
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertIn(f"pending {second['id']} transcript turn already accounted", auto.stdout)
+        self.assertIn('1 accounted, 1 pending', auto.stdout)
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(set(self.bound()), {first['id']})
+        self.assertIn('0 accounted, 1 pending', self.cli('account-auto', str(owed)).stdout)
+        self.assertEqual(sum(row[1] == 'account-result' for row in ledger.rows(self.resolve())), 1)
+
+    def test_account_auto_keeps_turn_binding_after_stop_clears_the_notice(self):
+        sha = 'ab' * 20
+        owed, transcript, first, _ = self.auto_owed([
+            (-2, 'user', 'Review the commit.'), (-1, 'assistant', f'Verdict: pass\nReviewed commit: {sha}')])
+        self.assertIn('1 accounted, 0 pending', self.cli('account-auto', str(owed)).stdout)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+        self.hook('subagent-stop', agent_type='ship:reviewer--sol', agent_id=first['agent_id'],
+                  agent_transcript_path=str(transcript))
+        self.assertIn('transcript turn already accounted', self.cli('account-auto', str(owed)).stdout)
+        self.assertEqual(json.loads(self.hook('stop'))['decision'], 'block')
+        self.assertEqual(set(self.bound()), {first['id']})
+
+    def test_account_auto_keeps_findings_when_publication_is_blocked(self):
+        sha = 'ab' * 20
+        owed, _, _, _ = self.auto_owed([
+            (-2, 'user', 'Review the commit.'),
+            (-1, 'assistant', f'Verdict: findings — publication is blocked\nReviewed commit: {sha}')])
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertIn('1 accounted, 0 pending', auto.stdout)
+        row = ledger.rows(self.resolve())[-1]
+        self.assertEqual(row[3:5], [sha, 'findings'])
+        self.assertEqual(json.loads(row[5])['step'], 'review')
+
+    def test_account_auto_records_blocked_admission_without_review_credit(self):
+        sha = 'ab' * 20
+        reason = 'protected admission missing'
+        owed, _, result, _ = self.auto_owed([
+            (-4, 'user', 'Review the protected rows.'),
+            (-3, 'assistant', [{'type': 'tool_use', 'name': 'Read'}]),
+            (-2, 'user', [{'type': 'tool_result', 'is_error': True, 'content': reason}]),
+            (-1, 'assistant', f'Verdict: blocked\nReason: {reason}\nReviewed commit: {sha}')])
+        home = self.resolve()
+        head = self.git(self.checkout, 'rev-parse', 'HEAD')
+        gaps = ledger.gaps(ledger.open_run(home), head, self.checkout)
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertIn('1 accounted, 0 pending', auto.stdout)
+        row = ledger.rows(home)[-1]
+        self.assertEqual(row[1:5], ['account-result', 'ship:reviewer--sol@reviewer', 'blocked', 'blocked'])
+        note = json.loads(row[5])
+        self.assertEqual(note['step'], 'blocked')
+        self.assertIn(reason, note['evidence'])
+        self.assertIn(sha, note['evidence'])
+        self.assertEqual(ledger.gaps(ledger.open_run(home), head, self.checkout), gaps)
+        self.assertEqual(self.hook('stop'), '')
+        self.assertEqual(owed.read_bytes(), b'')
+        self.assertEqual(set(self.bound()), {result['id']})
+
+    def test_account_auto_keeps_a_malformed_blocked_result_pending_with_legacy_opt_in(self):
+        sha = 'ab' * 20
+        owed, _, result, _ = self.auto_owed([
+            (-2, 'user', 'Review the protected rows.'),
+            (-1, 'assistant', f'Verdict: blocked\nReviewed commit: {sha}')])
+        home = self.resolve()
+        before = home.read_bytes()
+        auto = self.cli('account-auto', '--fail-unparsed', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertIn(f"pending {result['id']} expected one blocked reason", auto.stdout)
+        self.assertEqual(home.read_bytes(), before)
+
+    def test_account_auto_binds_continued_review_within_the_same_second(self):
+        sha = 'ab' * 20
+        owed, _, first, epoch = self.auto_owed([
+            (-0.8, 'user', 'Review the protected rows.'),
+            (0.1, 'assistant', f'Verdict: blocked\nReason: protected admission missing\nReviewed commit: {sha}'),
+            (0.3, 'user', 'The admission record is present. Continue the review.'),
+            (0.5, 'assistant', f'Verdict: pass\nReviewed commit: {sha}')])
+        first_line = owed.read_text().split('\t')
+        first['stopped_at_ns'] = epoch * 1_000_000_000 + 200_000_000
+        second = {**first, 'id': 'continued-review', 'stopped_at_ns': epoch * 1_000_000_000 + 600_000_000}
+        owed.write_text(''.join('\t'.join([*first_line[:3], json.dumps(result)]) + '\n' for result in (first, second)))
+        auto = self.cli('account-auto', str(owed))
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertIn('2 accounted, 0 pending', auto.stdout)
+        self.assertEqual(self.hook('stop'), '')
+        bound = {identifier: json.loads(note)['step'] for identifier, note in self.bound().items()}
+        self.assertEqual(bound, {first['id']: 'blocked', second['id']: 'review'})
+
     def test_account_auto_uses_own_final_text_and_skips_existing_accounting(self):
         sha = 'ab' * 20
         owed, transcript, result, epoch = self.auto_owed([
@@ -1915,7 +2154,7 @@ class LedgerDirTests(unittest.TestCase):
             (1, 'assistant', '**OVERALL:** PASS ' + sha.upper()),
             (2, 'user', [{'type': 'text', 'text': 'Review another commit.'}]),
             (3, 'assistant', 'Verdict: FAIL ' + 'ef' * 20),
-        ])
+        ], legacy=True)
         expected = f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} pass\n1 accounted, 0 pending\n"
         home = self.resolve()
         auto = self.cli('account-auto', str(owed))
@@ -2014,7 +2253,7 @@ class LedgerDirTests(unittest.TestCase):
         owed, _, result, _ = self.auto_owed([
             (-2, 'user', 'Review.'), (-1, 'assistant', 'No result yet.'),
             (0.5, 'user', [{'type': 'image'}]), (1, 'assistant', f'Verdict: PASS {sha}'),
-        ])
+        ], legacy=True)
         auto = self.cli('account-auto', str(owed))
         self.assertEqual(auto.returncode, 0, auto.stderr)
         self.assertEqual(auto.stdout.splitlines(), [f"pending {result['id']} no final turn text",
@@ -2040,7 +2279,7 @@ class LedgerDirTests(unittest.TestCase):
         ):
             with self.subTest(label=label):
                 owed, _, result, _ = self.auto_owed([
-                    (-2, 'user', 'Review.'), (-1, 'assistant', f'{label} {sha}')])
+                    (-2, 'user', f'Review case: {label}'), (-1, 'assistant', f'{label} {sha}')])
                 auto = self.cli('account-auto', str(owed))
                 owed.write_text('')
                 self.assertEqual(auto.returncode, 0, auto.stderr)
@@ -2066,7 +2305,8 @@ class LedgerDirTests(unittest.TestCase):
             ('  > - **Verdict:** FAIL and Findings', 'findings'),
         ):
             with self.subTest(label=label):
-                owed, _, result, _ = self.auto_owed([(-2, 'user', 'Review.'), (-1, 'assistant', f'{label} {sha}')])
+                owed, _, result, _ = self.auto_owed([(-2, 'user', f'Review case: {label}'),
+                                                    (-1, 'assistant', f'{label} {sha}')])
                 auto = self.cli('account-auto', str(owed))
                 self.assertEqual(auto.returncode, 0, auto.stderr)
                 self.assertEqual(auto.stdout, f"accounted {result['id']} ship:reviewer--sol@reviewer {sha} {verdict}\n"
@@ -2107,7 +2347,7 @@ class LedgerDirTests(unittest.TestCase):
             ('parse error', [prompt], 'transcript parse error'),
         ):
             with self.subTest(case=case):
-                owed, transcript, result, _ = self.auto_owed(entries)
+                owed, transcript, result, _ = self.auto_owed(entries, legacy=case == 'later turn in grace second')
                 if case == 'missing file':
                     transcript.unlink()
                 if case == 'parse error':
@@ -2175,7 +2415,7 @@ class LedgerDirTests(unittest.TestCase):
         self.assertEqual(self.resolve().read_bytes(), before)
 
     def test_fail_unparsed_keeps_an_account_refusal_pending(self):
-        owed, transcript, result, _ = self.auto_owed([(-2, 'user', 'Review.')])
+        owed, transcript, result, _ = self.auto_owed([(-2, 'user', 'Review.')], legacy=True)
         transcript.write_text('{bad json\n')
         _, rest = owed.read_text().split('\t', 1)
         owed.write_text('0\t' + rest)
