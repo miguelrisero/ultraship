@@ -326,6 +326,7 @@ Use the CoC's CI, testing and tooling standing grant. Keep the local commit gran
    Preserve every protected path from the second parent. Stop if the index already omits one before a removal.
    Run one literal command per file from the repository root. Use `git -C <absolute-root>` to name the root explicitly.
 3. Compare `git hash-object <path>` and the staged blob ID with the blob ID of `origin/main:<path>`.
+   Match the staged mode to the mode at the same path in `origin/main`.
    For a removal, confirm the path is absent from the worktree and the index.
    Stop on a mismatch. Do not read or print row contents under this route.
 4. Verify that the staged resolution preserves all protected paths from the second parent. Use Git metadata with rename detection off.
@@ -344,6 +345,11 @@ Use only the driver's content-free Git evidence. This review grants zero protect
 
 - Require the second parent to match the verified remote main commit used for the merge.
 - Match the before-resolution record and writer brief to the merge commit's two parents.
+- Reconcile the before-resolution index with both parent inventories by exact path.
+  Block on an omitted parent path unless the metadata establishes a clean deletion before resolution.
+  For that proof, require the merge base to contain the exact path. Require one parent to retain its base mode and object ID and the other parent to omit it.
+  Treat a rename as a loss at the old path and an addition at the new path. Block release on ambiguous evidence.
+  Require a separate review for every deletion outside this merge route, including clean deletions before resolution.
 - Compare the complete before-resolution index with the merge commit tree by exact path.
 - Account for every added, removed, modified or resolved protected entry with a named action or a separately reviewed route.
   Compare mode and object ID for stage 0 entries. Treat each unmerged path as a resolution, even if its final blob matches a recorded stage.
@@ -353,7 +359,7 @@ Use only the driver's content-free Git evidence. This review grants zero protect
   Treat an entry missing from one of those trees as a difference. Include the path, parent and base IDs, and disposition in the evidence.
   Record who approved the disposition under existing authority. Block release until every flagged checkout has an explicit disposition.
 - Confirm that every protected path in the second parent exists at the same path in the merge commit.
-- Match each checked-out path's blob ID at the merge commit to its blob ID in the second parent.
+- Match each checked-out path's mode and blob ID at the merge commit to the second parent.
 - For a merge-base checkout, confirm the same blob ID at that path in the merge base.
 - For a removal, confirm the path exists in the first parent and is absent at the merge base, second parent and merge commit.
 - Block on missing or conflicting evidence. Return the verdict for the merge commit.
@@ -362,6 +368,11 @@ Synthetic acceptance case: The brief names only a checkout of `tests/mutation/na
 The merge commit changes the blob ID of `tests/mutation/extra.toml` from its stage 0 entry.
 The brief and the separate review records do not cover `tests/mutation/extra.toml`.
 Return `Verdict: blocked` for the unapproved change to `tests/mutation/extra.toml`.
+
+Synthetic acceptance case: Only the first parent contains `backend/Tests/Mutation/lane-only.toml`.
+The before-resolution index and merge commit both omit that path.
+The evidence establishes no clean deletion.
+Return `Verdict: blocked` for the unexplained loss of `backend/Tests/Mutation/lane-only.toml`.
 
 ### Same-strength adaptations
 

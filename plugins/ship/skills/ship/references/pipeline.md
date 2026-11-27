@@ -213,17 +213,21 @@ Apply existing push holds, protected-row receipts, and preflight requirements ev
    After the fetch, record the `refs/heads/main` SHA from `git ls-remote --exit-code origin refs/heads/main` before starting the merge.
    Match that SHA to `origin/main`. Match it to the sole `MERGE_HEAD` during resolution.
    Require an empty `refs/replace` namespace when collecting evidence.
-   Immediately after the merge starts and before any resolution, capture the complete protected index entries with `git ls-files --stage -z`.
-   Keep the path, mode, object ID and stage for every protected entry, including stage 0 and all unmerged stages.
+   Immediately after the merge starts and before any resolution, capture the complete protected index entries with `git ls-files --stage -z` from the repository root.
+   Apply the same protected-path filter to the complete Git index and tree metadata.
+   Match adjacent `tests` and `mutation` path components at the root or any depth, without regard to case.
+   Preserve each entry's exact path spelling for comparison. Keep the mode, object ID and stage, including stage 0 and all unmerged stages.
    Record `HEAD` and `MERGE_HEAD` as the first and second parents. Keep resolution pending if the capture is missing or incomplete.
    Bind the index record and the exact paths and actions in the writer brief to both merge parents.
    Name the source commit for each checkout. Use the recorded index stages to identify conflicts.
    Give one independent Sol reviewer the [merge review checklist](../SKILL.md#protected-row-merge-review) in the brief.
    Include the remote evidence, the merge commit, both parents and their merge base.
+   Collect complete protected tree entries from both parents, their merge base and the merge commit.
+   Use recursive `git ls-tree -rz` metadata from the repository root for each tree.
    Give the reviewer the before-resolution index record, the writer brief and the complete protected tree entries at the merge commit.
-   Include the complete protected tree entries at the second parent. Use recursive `git ls-tree -rz` metadata only for both trees.
-   Include the exact-path entries or absence at the first parent and merge base for each named checkout or removal.
-   Include any separate review records that cover protected resolution changes.
+   Include the complete protected entries from both parents and their merge base.
+   Pass only protected index and tree entries to the reviewer.
+   Include any separate review records that cover protected changes, including deletions outside the merge route.
    Keep row text and protected read grants out of this review.
    Require the passing CI anchor guard at the exact pushed head.
 2. Run the full lint and test suite locally when the brief admits it. When the brief bars local tests, use authorized CI or the coordinator's gated run for that proof. Keep any check that the repository requires before push.
