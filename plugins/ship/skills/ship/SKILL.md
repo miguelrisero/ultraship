@@ -349,7 +349,8 @@ Use only the driver's content-free Git evidence. This review grants zero protect
   Block on an omitted parent path unless the metadata establishes a clean deletion before resolution.
   For that proof, require the merge base to contain the exact path. Require one parent to retain its base mode and object ID and the other parent to omit it.
   Treat a rename as a loss at the old path and an addition at the new path. Block release on ambiguous evidence.
-  Require a separate review for every deletion outside this merge route, including clean deletions before resolution.
+  Require a separate review for every deletion outside this merge route.
+  Include clean deletions before resolution in that requirement.
 - Compare the complete before-resolution index with the merge commit tree by exact path.
 - Account for every added, removed, modified or resolved protected entry with a named action or a separately reviewed route.
   Compare mode and object ID for stage 0 entries. Treat each unmerged path as a resolution, even if its final blob matches a recorded stage.
