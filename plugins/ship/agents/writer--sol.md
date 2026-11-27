@@ -106,6 +106,7 @@ Run ordinary touched-file pytest or vitest without a per-run CoC GO or GO launch
 Admit every run through the installed, checksum-pinned `slot_gate.sh` implementation and its recognized `battery*.sh` child.
 Preserve load, capacity, RAM, disk, runtime caps, timing exclusion, isolated stacks, and cleanup requirements.
 Require GO for mutation batteries, timing runs, and shared-database runs; retain paid-run GOs and spending caps.
+Removing a guard to prove a test fails is a mutant cycle and needs a GO.
 Honor a no-run brief and every effective permission denial.
 Run each check as its own plain command, with no inline interpreter code.
 Run `make api-migrations-check` only when the diff adds a migration, never as a heredoc, and without the slot gate. Run `make api-test`, `make api-test-all`, `make app-test` and `make e2e` only through the installed slot gate.
