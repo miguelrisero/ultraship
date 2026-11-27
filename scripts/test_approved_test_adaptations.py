@@ -467,17 +467,33 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     with self.subTest(requirement=requirement):
                         self.assertTrue(requirement in ci, requirement)
 
-    def test_native_exact_pair_attempt_accounting_requires_same_invocation_proof(self):
+    def test_pre_write_proof_applies_to_all_per_row_counts(self):
         reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
-        rule = section(reference, '## Native exact-pair tool attempt accounting')
+        shared = section(reference, '## Per-row re-anchor attempt accounting')
         for requirement in (
-            'Count a prior invocation as zero runs only when all checks below pass.',
-            'Bind the proof to the exact invocation, row ID, row file, worktree, frozen head and tool version.',
+            'Bind the receipt and proof to the same invocation, row ID, row file, worktree, frozen head, and tool version.',
+            'For a pre-write tool refusal, require the same-invocation pre-write proof below.',
             "Verify the exact refusal against the named tool version's pre-write checks.",
             'Require a nonzero exit and zero generated authorization records from that invocation.',
             'Require identical row-file blob IDs immediately before and after that same invocation.',
             'Confirm that the tool refused before any write to the row file.',
             'Equal blob IDs alone prove no write order.',
+            'Use only evidence from a producer with existing read authority.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, shared)
+        self.assertNotIn('#native-exact-pair-tool-attempt-accounting', shared)
+        self.assertNotIn('`prior_tool_refusal`', shared)
+        self.assertNotIn('removed that admission before the native edit', shared)
+
+    def test_native_exact_pair_accounting_adds_native_receipt_checks(self):
+        reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        rule = section(reference, '## Native exact-pair tool attempt accounting')
+        for requirement in (
+            'Apply [per-row re-anchor attempt accounting](#per-row-re-anchor-attempt-accounting) to any prior refusal.',
+            'For a pre-start hook refusal, require the pre-start proof above and zero generated authorization records.',
+            'Keep the prior admission and removal checks for both types of refusal.',
+            'Record the full head SHA frozen for the invocation. Verify its link to the native edit under review.',
             'Reference the proof in `prior_tool_refusal` in the lane-owned row evidence record.',
             'Keep the record content-free.',
         ):
@@ -635,6 +651,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Use this review when the brief names the lane-owned row route.',
                 'Authority: the owner\'s global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.',
                 "Read rows only under the driver's reviewer admission record. Read only the named row lines at the named commits.",
+                'Match every identity field to the scope in the brief.',
+                'Block approval if the record or any identity field is missing or mismatched.',
+                'The evidence record grants zero protected access. Verify the referenced evidence under its own route.',
                 'You differ from the PR author and the writer.',
                 'For each re-anchored row, confirm the same test, the same claim and the same mutant intent at the base and the frozen head.',
                 'Confirm that the paired `old` and `new` fields are the only changed fields of that row.',
@@ -847,6 +866,132 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 phrase = 'Drivers prepare same-strength evidence; writers verify it before any separately permitted exact edit.'
             with self.subTest(path=name, phrase=phrase):
                 self.assertIn(phrase, text)
+
+    def test_writers_keep_exact_run_bounds_separate_from_same_guarantee_adaptations(self):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
+            with self.subTest(writer=name):
+                text = (SHIP / 'agents' / name).read_text()
+                decision = section(text, '### Task-specific owner decision')
+                for requirement in (
+                    'authority for an exact same-guarantee adaptation.',
+                    'Use the existing product-limit exception and its boundary tests for product-limit changes.',
+                    'Require full Input/workspace UUIDs, current version, event id/hash, choice, actual owner answer, exact files/edit, verifier name, and verification time.',
+                    'Require `event_type=answer_submitted`, `actor_kind=owner_ui`, and `payload.no_answer_yet=false`, bound to that Input and current version.',
+                ):
+                    self.assertIn(requirement, decision)
+                self.assertNotIn('#exact-run-resource-bounds', decision)
+                rule = section(text, '### Exact-run resource bounds')
+                for requirement in (
+                    'Use this separate route only for an exact resource-bound edit under a verified owner grant.',
+                    'Require the brief to name the unique run ID and the CoC-frozen verifier record by absolute path and SHA256.',
+                    'Reuse the owner-event provenance checks in [Task-specific owner decision](#task-specific-owner-decision).',
+                    'Use only the CoC-frozen record for verifier fallback.',
+                    'Keep an authoritative mismatch blocked without fallback.',
+                    'Follow [Exact-run resource bounds](../skills/ship/SKILL.md#exact-run-resource-bounds)',
+                ):
+                    self.assertIn(requirement, rule)
+
+    def test_driver_requires_a_coc_record_for_the_unique_run_and_exact_edit(self):
+        reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        rule = section(reference, '## Exact-run resource bounds')
+        for requirement in (
+            'Use the [owner answer checks](#consume-and-finish)',
+            'Reuse only the owner-event provenance checks from [Task-specific test adaptations](#task-specific-test-adaptations).',
+            'Require the CoC to verify the answer and freeze the verifier record before dispatch.',
+            'Bind the record to the verified answer, unique run ID, authorized scope, exact bounds, and exact files and edits.',
+            'Verify the record digest and match every binding before dispatch.',
+            'Recheck the current version, status, and answer provenance before dispatch or retry.',
+            'Name the record by absolute path and SHA256 in the writer brief.',
+            'Select the exact-run subsection in the loaded writer definition.',
+            'Keep execution admission separate.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, rule)
+
+    def test_resource_bound_guidance_requires_a_verified_grant_for_one_run(self):
+        guidance = section((SHIP / 'skills/ship/SKILL.md').read_text(), '### Exact-run resource bounds')
+        for requirement in (
+            'Require an already verified `owner_ui` answer that names one run by its unique ID.',
+            'Match each exact bound and its authorized scope to that answer.',
+            'Keep the existing owner-event provenance checks.',
+            'Require a CoC-frozen verifier record by absolute path and SHA256.',
+            'Before editing, verify the digest and match the answer, exact bounds, exact files and edits, and unique run ID.',
+            'Stop if the verifier record is missing, stale, or mismatched.',
+            'Require a test that proves the named run stops at each approved bound.',
+            'Require tests that show other runs keep the repository defaults.',
+            'One grant covers one named run.',
+            'Apply each approved bound only on an exact match to the approved run ID and within the verified scope.',
+            'Keep repository defaults and all unrelated limits unchanged.',
+            'Cover a different run ID and an absent run ID.',
+            'Keep separate execution admission and every effective denial in force.',
+            'This guidance grants zero authority.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertTrue(requirement in guidance, requirement)
+
+    def test_per_row_accounting_requires_proven_refusals_and_grants_no_authority(self):
+        reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        rule = section(reference, '## Per-row re-anchor attempt accounting')
+        separate = 'Apply the decision-defect rule with its own count and retry conditions.'
+        for requirement in (
+            separate,
+            'Require the verbatim refusal receipt and proof of zero writes by the refused action.',
+            'Require proof that the hook refused the exact invocation before the tool started.',
+            'Count a proven pre-start hook refusal or pre-write tool refusal as zero per-row runs.',
+            'Count the attempt if any proof is missing, ambiguous, or mismatched.',
+            'Keep the refusal effective.',
+            'Counting grants zero retry, edit, or route authority.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, rule)
+        for name in ('writer--sol.md', 'writer--fable52.md'):
+            with self.subTest(writer=name):
+                text = (SHIP / 'agents' / name).read_text()
+                refusals = section(text, '### Loaded instructions and refusals')
+                before_defect = refusals.split('This [decision-defect rule]', 1)[0]
+                self.assertIn('owner-decisions.md#per-row-re-anchor-attempt-accounting', before_defect)
+                self.assertIn(separate, before_defect)
+                self.assertIn('Counting grants zero retry, edit, or route authority.', before_defect)
+
+    def test_row_tool_brief_conditions_hook_zero_count_on_verified_per_row_evidence(self):
+        reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        brief = section(reference, '## Row re-anchor tool brief')
+        self.assertIn('Use the [per-row re-anchor attempt accounting](#per-row-re-anchor-attempt-accounting) rule to verify refusal evidence.', brief)
+        self.assertNotIn('A hook denial before the tool starts counts as zero runs.', brief)
+        self.assertIn(
+            '- Count a pre-start hook refusal as zero runs only with verified per-row evidence.\n'
+            '- After that denial, the writer may retry once in a compliant form; the driver re-dispatches it.',
+            brief,
+        )
+        self.assertIn(
+            '- The decision-defect rule requires a CoC decision defect as the sole stated cause, with zero bytes written and zero commits.\n'
+            '- After the writer verifies the frozen corrected decision under that rule, the refused attempt counts as zero runs.\n'
+            '- The writer gets one new attempt under the corrected decision.\n'
+            '- The driver re-dispatches it with a fresh admission record.',
+            brief,
+        )
+
+    def test_decision_defect_count_and_retry_follow_the_corrected_decision(self):
+        for name, heading, start, end in (
+            ('agents/writer--sol.md', '### Loaded instructions and refusals', 'This [decision-defect rule]', 'This [scope-refusal rule]'),
+            ('agents/writer--fable52.md', '### Loaded instructions and refusals', 'This [decision-defect rule]', 'This [scope-refusal rule]'),
+            ('skills/ship/references/owner-decisions.md', '## Loaded instructions and refusals', 'Decision-defect rule:', 'Scope-refusal rule:'),
+        ):
+            with self.subTest(path=name):
+                refusals = section((SHIP / name).read_text(), heading)
+                defect = refusals.split(start, 1)[1].split(end, 1)[0]
+                conditions = (
+                    'The sole stated cause must be a defect in a CoC decision.',
+                    'with zero bytes written and zero commits.',
+                    'Only a corrected CoC decision with a new SHA256 can resolve that refusal for that cause.',
+                    "compare its actor, action, target and scope with the defective decision's grant.",
+                    'Keep the refusal pending when that comparison is inconclusive or shows a wider grant.',
+                    'Then the refused row-tool attempt counts as zero runs, and the writer gets one new attempt under the corrected decision.',
+                    'The driver re-dispatches that attempt with a fresh admission record.',
+                )
+                positions = [defect.find(clause) for clause in conditions]
+                self.assertNotIn(-1, positions)
+                self.assertEqual(positions, sorted(positions))
 
     def test_skill_cites_owner_rule(self):
         text = (ROOT / 'plugins/ship/skills/ship/SKILL.md').read_text()

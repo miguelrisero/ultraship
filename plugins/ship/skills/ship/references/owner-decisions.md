@@ -126,6 +126,22 @@ Retain that record for the fallback when the writer lacks the tool or its call f
 Preserve a direct authoritative mismatch as blocked; the fallback supplies verified provenance, never a substitute owner approval.
 Record the accepted evidence and exact scope in the brief and PR body.
 
+## Exact-run resource bounds
+
+Use this separate route only when a current owner answer authorizes the exact scope for one run.
+Use the [owner answer checks](#consume-and-finish) to verify the current `owner_ui` answer.
+Reuse only the owner-event provenance checks from [Task-specific test adaptations](#task-specific-test-adaptations).
+Require the CoC to verify the answer and freeze the verifier record before dispatch.
+Bind the record to the verified answer, unique run ID, authorized scope, exact bounds, and exact files and edits.
+Verify the record digest and match every binding before dispatch.
+Keep missing, stale, or mismatched evidence pending.
+Recheck the current version, status, and answer provenance before dispatch or retry.
+Name the record by absolute path and SHA256 in the writer brief.
+List the record under `Readable files`.
+Select the exact-run subsection in the loaded writer definition.
+Keep execution admission separate.
+The verifier record supplies evidence only. The verified owner answer supplies the scoped grant.
+
 ## Scoped owner event verification
 
 Apply this exception only to future briefs after verified runtime adoption.
@@ -301,27 +317,46 @@ The record grants zero authority.
 Apply the [existing refusal rules](#loaded-instructions-and-refusals) to the referenced refusal.
 The record authorizes zero retries and gives zero retry credit.
 
+## Per-row re-anchor attempt accounting
+
+Use this rule only to count attempts under the existing row re-anchor limits.
+Apply the decision-defect rule with its own count and retry conditions.
+Use the checks below for other refusals and for the separate native review proof.
+Require the verbatim refusal receipt and proof of zero writes by the refused action.
+Bind the receipt and proof to the same invocation, row ID, row file, worktree, frozen head, and tool version.
+Identify the exact tool version by a commit SHA or file digest.
+Use only evidence from a producer with existing read authority.
+
+For a hook refusal, use the pre-start check.
+Require proof that the hook refused the exact invocation before the tool started.
+For a pre-write tool refusal, require the same-invocation pre-write proof below.
+
+- Verify the exact refusal against the named tool version's pre-write checks.
+- Require a nonzero exit and zero generated authorization records from that invocation.
+- Require identical row-file blob IDs immediately before and after that same invocation.
+- Confirm that the tool refused before any write to the row file. Equal blob IDs alone prove no write order.
+
+Count a proven pre-start hook refusal or pre-write tool refusal as zero per-row runs.
+Count the attempt if any proof is missing, ambiguous, or mismatched.
+Keep the verbatim receipt in authorized evidence and reference it without copying raw output into the row record.
+Keep the refusal effective.
+Counting grants zero retry, edit, or route authority.
+
 ## Native exact-pair tool attempt accounting
 
 Use this rule only to count earlier row re-anchor tool invocations for a lane-owned CoC-approved native exact-pair edit.
+Apply [per-row re-anchor attempt accounting](#per-row-re-anchor-attempt-accounting) to any prior refusal.
+Require the shared refusal proof for native review even when the decision-defect rule controls a corrected-decision retry.
 Keep any prior tool admission with the earlier tool route and its refusal.
 Bind any prior tool admission to the invocation through the historical evidence referenced by `prior_tool_refusal`.
 Verify that the driver removed that admission before the native edit.
 Apply the removal step in the [row re-anchor tool admission record](#row-re-anchor-tool-admission-record).
 Use historical evidence only. Read no live admission store.
 The native route admits and runs no row re-anchor tool.
-
-Count a prior invocation as zero runs only when all checks below pass.
-
-- Bind the proof to the exact invocation, row ID, row file, worktree, frozen head and tool version.
-- Verify the exact refusal against the named tool version's pre-write checks.
-- Require a nonzero exit and zero generated authorization records from that invocation.
-- Require identical row-file blob IDs immediately before and after that same invocation.
-
+For a pre-start hook refusal, require the pre-start proof above and zero generated authorization records.
+Keep the prior admission and removal checks for both types of refusal.
 Use content-free evidence from a producer with existing read authority.
-Confirm that the tool refused before any write to the row file. Equal blob IDs alone prove no write order.
 Record the full head SHA frozen for the invocation. Verify its link to the native edit under review.
-Identify the exact tool version by a commit SHA or file digest.
 Count every successful invocation and every invocation that writes, even if a later action restores the file.
 Count the invocation if evidence is missing, ambiguous, or belongs to a different invocation.
 Count the invocation if any other check fails, including an identity mismatch.
@@ -407,6 +442,7 @@ Apply the [helper standing request](#helper-standing-request) and the brief's ro
 Include the global grant and this reference in `Readable files`.
 Keep each sentence at most 25 words.
 Keep all row TOML text and pair bytes out of the brief.
+Use the [per-row re-anchor attempt accounting](#per-row-re-anchor-attempt-accounting) rule to verify refusal evidence.
 
 ```text
 Re-anchor row `<row ID>` of `<PR URL>` under the lane-owned row route.
@@ -424,7 +460,7 @@ Decision:
 - Read the standing grant directly.
 - Verify each binding before running the tool.
 - Run once, alone: `<tool command>`.
-- A hook denial before the tool starts counts as zero runs.
+- Count a pre-start hook refusal as zero runs only with verified per-row evidence.
 - After that denial, the writer may retry once in a compliant form; the driver re-dispatches it.
 - The decision-defect rule requires a CoC decision defect as the sole stated cause, with zero bytes written and zero commits.
 - After the writer verifies the frozen corrected decision under that rule, the refused attempt counts as zero runs.

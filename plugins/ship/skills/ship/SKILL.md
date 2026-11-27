@@ -284,6 +284,25 @@ Never widen, raise, or relax a limit, cap, timeout, budget, bound, or guard cons
 
 Approved test adaptations follow the writer contract (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d2379`, workspace `b8fed386-cf11-40fe-b14f-425e6331ee41`): five standing test adaptations cover register classification, a census re-pin from CI output after a reviewed body PASS, a race-helper timeout replacement, a setup-only fixture change, and the [lane-owned row route](#lane-owned-row-route) below. For categories 1–4, the driver puts the Input ID and workspace ID in the writer brief. In those four categories, if the writer lacks `get_input`, the driver or the CoC runs `get_input` and the brief also records the full Input UUID, workspace UUID, event id, event hash, `actor_kind`, choice id, and verifier name; the writer stops on any mismatch with its definition. Loosened assertions, widened bounds, and deleted checks stay forbidden.
 
+### Exact-run resource bounds
+
+This guidance grants zero authority.
+Use the [driver reference for exact-run bounds](references/owner-decisions.md#exact-run-resource-bounds) before dispatch.
+Require an already verified `owner_ui` answer that names one run by its unique ID.
+Match each exact bound and its authorized scope to that answer.
+Keep the existing owner-event provenance checks.
+Require a CoC-frozen verifier record by absolute path and SHA256.
+Before editing, verify the digest and match the answer, exact bounds, exact files and edits, and unique run ID.
+Stop if the verifier record is missing, stale, or mismatched.
+One grant covers one named run.
+Apply each approved bound only on an exact match to the approved run ID and within the verified scope.
+Keep repository defaults and all unrelated limits unchanged.
+Require a test that proves the named run stops at each approved bound.
+Require tests that show other runs keep the repository defaults.
+Cover a different run ID and an absent run ID.
+Keep separate execution admission and every effective denial in force.
+Preserve all existing holds, refusals, and product-limit rules.
+
 ### Squash-merge containment
 
 Apply this rule to every requirement in this file that a commit contain the author head or a commit that the author head contains.

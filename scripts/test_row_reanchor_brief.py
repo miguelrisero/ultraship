@@ -139,7 +139,7 @@ class BriefTests(unittest.TestCase):
             'Admission record: `<admission record path>`, expires at `<expiry time>`.',
             'Read the standing grant directly.',
             'Verify each binding before running the tool.',
-            'A hook denial before the tool starts counts as zero runs.',
+            'Count a pre-start hook refusal as zero runs only with verified per-row evidence.',
             'After that denial, the writer may retry once in a compliant form; the driver re-dispatches it.',
             'The decision-defect rule requires a CoC decision defect as the sole stated cause, with zero bytes written and zero commits.',
             'After the writer verifies the frozen corrected decision under that rule, the refused attempt counts as zero runs.',
