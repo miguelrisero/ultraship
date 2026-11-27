@@ -85,8 +85,11 @@ Require a passing anchor guard run on the head that the driver will publish.
 Require both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count in the brief.
 Match the run's head SHA to the frozen review head and the draft PR head.
 Compare the CI checkout tree SHA with the tree SHA derived from the frozen commit.
+For a named main checkout under the [driver route, step 7](driver.md#lane-owned-row-route), that derived tree SHA is `git merge-tree --write-tree <that main> <head>`.
 A matching PR head SHA alone supplies no tree match.
 Block approval if either tree SHA is missing or they differ.
+For a named main checkout, also require that main commit and the main delta receipt in the brief, and all four census conditions when the census overlap applies.
+Block approval if a receipt or census condition is missing or fails.
 Require proof that the guard selected this row and would fail the job for a count mismatch on it.
 A warning-only path supplies no failure proof.
 An aggregate pass alone proves no row count.
