@@ -98,6 +98,7 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The script appends one `[[retired]]` table per row with the row ID, the reason and the `replacement` row ID.
    The replacement row guards the new code. The anchor guard fails a removed row without a `[[retired]]` entry.
 4. Add: the writer adds rows for the PR's own new code, each with a claim, a designated test, a subject and a mutant.
+   To create an absent rows file, require the frozen CoC decision to name its path and apply the [writer rule](writer--sol.md#native-creation-of-an-absent-rows-file).
    A test-only follow-up PR may also add rows for code that a named earlier merged PR added or changed, when the CoC grants it.
    Its diff changes no subject code, and the parent's merge commit is an ancestor of the recorded base.
    Its PR body names the parent PR URL, the parent's full merge commit SHA and the CoC decision file by absolute path and SHA256.
@@ -133,7 +134,7 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    Before any protected insertion, the writer verifies the frozen CoC decision by absolute path and SHA256.
    Bind it to the writer, repository, lane, draft URL, row base, parent PR URL and full squash SHA.
    Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.
-   The writer uses native Edit with `replace_all=false` for the authorized insertion.
+   For an existing rows file, the writer uses native Edit with `replace_all=false` for the authorized insertion.
    Preserve all existing protected read and edit restrictions.
    Admit no row re-anchor tool and run none.
    At the frozen head, the driver verifies the decision digest and bindings again against the applied rows.
@@ -195,6 +196,15 @@ Scope: each existing row that the PR's failing anchor CI names, when the recorde
    The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.
    For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
    From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.
+   For a created rows file, the driver verifies the complete file at the pushed head.
+   Require exactly the rows the frozen CoC decision names and nothing else.
+   Use content-free evidence from a producer with existing read authority.
+   Record the full-file match in the reviewer brief.
+   Include the decision file's absolute path and SHA256.
+   List the decision under `Readable files`.
+   Include the rows file's blob ID at the pushed head.
+   The reviewer confirms the full-file match and its bindings before the not-weaker review.
+   Hold the review if the match or its evidence is missing or mismatched.
    The driver then admits only the head copy.
    For each added row, the driver supplies the [added row ID proof](../skills/ship/references/owner-decisions.md#added-row-id-proof) and admits its exact head extent.
    At the base and the frozen head, the driver records the test runner's fixture listing, such as `pytest --fixtures-per-test`.

@@ -9,18 +9,11 @@ WORKSPACE_ID = 'b8fed386-cf11-40fe-b14f-425e6331ee41'
 EVENT_ID = '1c2e4bf5-10c2-4cb2-9abc-ab86ba945fc8'
 
 SHIP = ROOT / 'plugins/ship'
-ROUTE_CARRIERS = (
-    'skills/ship/SKILL.md', 'agents/driver.md', 'agents/driver--sol.md',
-    'agents/writer--sol.md', 'agents/writer--fable52.md',
-)
+ROUTE_CARRIERS = ('agents/driver.md',)
 REVIEWERS = ('reviewer--sol.md', 'reviewer--opus.md', 'reviewer--astra.md')
 
 
 def section(text, heading):
-    if heading == '### Lane-owned row route' and text.startswith('---\nname: driver--sol\n'):
-        if 'Apply the [lane-owned row route](../skills/ship/SKILL.md#lane-owned-row-route).' not in text:
-            raise AssertionError('Sol driver must apply the shared lane-owned row route')
-        text = (SHIP / 'skills/ship/SKILL.md').read_text()
     marker = heading + '\n'
     if text.splitlines().count(heading) != 1:
         raise AssertionError(heading)
@@ -28,6 +21,114 @@ def section(text, heading):
 
 
 class ApprovedTestAdaptationsTests(unittest.TestCase):
+    def test_only_driver_defines_the_lane_owned_row_route(self):
+        heading = '### Lane-owned row route'
+        route = section((SHIP / 'agents/driver.md').read_text(), heading)
+        steps = re.findall(r'^[1-9]\. .+', route, flags=re.M)
+        self.assertEqual([step[0] for step in steps], list('123456789'))
+        for name, link in (
+            ('skills/ship/SKILL.md', '../../agents/driver.md#lane-owned-row-route'),
+            ('agents/writer--sol.md', 'driver.md#lane-owned-row-route'),
+            ('agents/writer--fable52.md', 'driver.md#lane-owned-row-route'),
+        ):
+            with self.subTest(path=name):
+                text = (SHIP / name).read_text()
+                self.assertEqual(
+                    section(text, heading).strip(),
+                    f'Follow the [lane-owned row route]({link}) for protected mutation rows.',
+                )
+        for path in SHIP.rglob('*.md'):
+            if path != SHIP / 'agents/driver.md':
+                with self.subTest(path=path.relative_to(SHIP)):
+                    text = path.read_text()
+                    for step in steps:
+                        self.assertNotIn(step, text)
+        self.assertIn(
+            'Apply the [lane-owned row route](../skills/ship/SKILL.md#lane-owned-row-route).',
+            (SHIP / 'agents/driver--sol.md').read_text(),
+        )
+
+    def test_writers_can_create_only_the_absent_rows_file_named_by_the_decision(self):
+        rules = []
+        for name in ('writer--sol.md', 'writer--fable52.md'):
+            with self.subTest(writer=name):
+                text = (SHIP / 'agents' / name).read_text()
+                rule = section(text, '### Native creation of an absent rows file').strip()
+                rules.append(rule)
+                checks, marker, limits = rule.partition('Use native `Write`')
+                for requirement in (
+                    '[lane-owned row route](driver.md#lane-owned-row-route)',
+                    'A frozen CoC decision must name exactly one absent rows file',
+                    '`backend/api/tests/mutation/`',
+                    'Verify the SHA256 and bindings before the Write',
+                    'Verify the exact absolute path.',
+                    'Match the target path to the decision.',
+                    'Match all rows to the decision.',
+                    'Require `git ls-tree` to exit 0 with empty output for the exact path at the recorded base.',
+                    'Verify that the target is absent in the worktree.',
+                    'Verify that no path component is a symlink.',
+                ):
+                    with self.subTest(check=requirement):
+                        self.assertTrue(requirement in checks, requirement)
+                with self.subTest(limit='one Write per decision'):
+                    self.assertTrue(marker and limits.startswith(' exactly once per decision.'))
+                for requirement in (
+                    'Write only to the verified path and include only the rows the decision names.',
+                    'Refuse a second `Write` to any path under the same decision.',
+                    'Refuse `Write` to any path that no decision names.',
+                    'Use the native `Edit` rule for every later change once the file exists.',
+                    'the anchor guard',
+                    'the full-file proof in step 8',
+                    'one independent not-weaker review at the pushed head',
+                ):
+                    with self.subTest(limit=requirement):
+                        self.assertTrue(requirement in limits, requirement)
+        if len(rules) == 2:
+            self.assertEqual(*rules)
+
+    def test_existing_protected_rows_files_keep_unique_native_edit(self):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
+            with self.subTest(writer=name):
+                text = (SHIP / 'agents' / name).read_text()
+                rule = ('For every other native change to protected rows, use `Edit` with '
+                        'an absolute path, `replace_all=false` and one unique exact match.')
+                self.assertTrue(rule in text, rule)
+        route = section((SHIP / 'agents/driver.md').read_text(), '### Lane-owned row route')
+        parent = route.split('   Earlier test-only parent:', 1)[1].split('\n5. Restore:', 1)[0]
+        rule = 'For an existing rows file, the writer uses native Edit with `replace_all=false` for the authorized insertion.'
+        self.assertTrue(rule in parent, rule)
+
+    def test_driver_step_four_points_to_the_writer_create_rule(self):
+        route = section((SHIP / 'agents/driver.md').read_text(), '### Lane-owned row route')
+        add = route.split('\n4. Add:', 1)[1].split('\n5. Restore:', 1)[0]
+        self.assertIn('require the frozen CoC decision to name its path', add)
+        self.assertIn('writer--sol.md#native-creation-of-an-absent-rows-file', add)
+
+    def test_created_rows_file_requires_a_full_match_before_not_weaker_review(self):
+        route = section((SHIP / 'agents/driver.md').read_text(), '### Lane-owned row route')
+        review = route.split('\n8. Review:', 1)[1].split('\n9.', 1)[0]
+        for requirement in (
+            'For a created rows file, the driver verifies the complete file at the pushed head.',
+            'Require exactly the rows the frozen CoC decision names and nothing else.',
+            'Use content-free evidence from a producer with existing read authority.',
+            'Record the full-file match in the reviewer brief.',
+            "Include the decision file's absolute path and SHA256.",
+            'List the decision under `Readable files`.',
+            "Include the rows file's blob ID at the pushed head.",
+            'The reviewer confirms the full-file match and its bindings before the not-weaker review.',
+            'Hold the review if the match or its evidence is missing or mismatched.',
+        ):
+            with self.subTest(check=requirement):
+                self.assertTrue(requirement in review, requirement)
+
+    def test_writer_briefs_admit_the_canonical_route_document(self):
+        policy = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        self.assertIn(
+            'List the absolute path to `${CLAUDE_PLUGIN_ROOT}/agents/driver.md` under `Readable files` '
+            'in the writer brief for lane-owned row work.',
+            section(policy, '## Helper standing request'),
+        )
+
     def test_lane_owned_scope_evidence_and_proof(self):
         for name in ROUTE_CARRIERS:
             route = section((SHIP / name).read_text(), '### Lane-owned row route')
@@ -192,7 +293,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     'Before any protected insertion, the writer verifies the frozen CoC decision by absolute path and SHA256.',
                     'Bind it to the writer, repository, lane, draft URL, row base, parent PR URL and full squash SHA.',
                     'Match the approved row file, new ID, claim, designated test, subject, expected anchor count and exact mutant edit.',
-                    'The writer uses native Edit with `replace_all=false` for the authorized insertion.',
+                    'For an existing rows file, the writer uses native Edit with `replace_all=false` for the authorized insertion.',
                     'At the frozen head, the driver verifies the decision digest and bindings again against the applied rows.',
                 )
                 for rule in approval:
@@ -238,16 +339,13 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     with self.subTest(requirement=requirement):
                         self.assertTrue(requirement in parent, requirement)
 
-    def test_lane_owned_route_and_review_copies_match(self):
-        for names, heading in ((ROUTE_CARRIERS, '### Lane-owned row route'),
-                               ([f'agents/{name}' for name in REVIEWERS], '## Lane-owned row review')):
-            canonical = section((SHIP / names[0]).read_text(), heading).rstrip('\n')
-            for name in names[1:]:
-                with self.subTest(path=name):
-                    copy = section((SHIP / name).read_text(), heading).rstrip('\n')
-                    if heading == '### Lane-owned row route':
-                        copy = copy.replace('](../skills/ship/references/', '](references/')
-                    self.assertEqual(canonical, copy)
+    def test_lane_owned_review_copies_match(self):
+        heading = '## Lane-owned row review'
+        canonical = section((SHIP / 'agents' / REVIEWERS[0]).read_text(), heading).rstrip('\n')
+        for name in REVIEWERS[1:]:
+            with self.subTest(path=name):
+                copy = section((SHIP / 'agents' / name).read_text(), heading).rstrip('\n')
+                self.assertEqual(canonical, copy)
 
     def test_lane_owned_route_selection_precedes_tool_admission_and_run(self):
         for name in ROUTE_CARRIERS:

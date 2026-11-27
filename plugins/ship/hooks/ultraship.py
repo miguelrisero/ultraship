@@ -7,6 +7,7 @@ import fcntl
 import fnmatch
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import posixpath
@@ -22,6 +23,7 @@ import unicodedata
 import urllib.parse
 import uuid
 from collections import Counter
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -3444,13 +3446,19 @@ def quoted_variable(command, token):
             and re.search(rf'\$(?:{name}\b|\{{{name}\b)', rest) is None)
 
 
-def git_read_words(words):
-    """Whether shell words after `git` are `-C <path>`, then `ls-files`, `ls-tree` or `grep` with only listed options."""
-    while words[:1] == ['-C'] and len(words) > 1 and re.fullmatch(r'[\w./-]+', words[1]):
-        words = words[2:]
-    return bool(words) and words[0] in {'ls-files', 'ls-tree', 'grep'} and all(
-        # A word after the subcommand is a pattern or path, whatever it holds, unless it is an option.
-        re.fullmatch(r'-[nilwEFvz]+|-[ABC][0-9]*|--|(?!-).*', word, re.S) for word in words[1:])
+def git_read_words(words, *, exact_grep=False):
+    """Recognize Git search and listing argv with only literal options."""
+    if exact_grep:
+        # The exact form has a quoted pattern and explicit pathspecs. Only it takes these single-letter flags.
+        options = r'-[niwFElc]|-e'
+        commands = {'grep'}
+    else:
+        while words[:1] == ['-C'] and len(words) > 1 and re.fullmatch(r'[\w./-]+', words[1]):
+            words = words[2:]
+        options = r'-[nilwEFvz]+|-[ABC][0-9]*'
+        commands = {'ls-files', 'ls-tree', 'grep'}
+    return bool(words) and words[0] in commands and all(
+        re.fullmatch(rf'{options}|--|(?!-).*', word, re.S) for word in words[1:])
 
 
 SAFE_GREP_LETTERS = 'nilwEFvcoqhHsxrRL'
@@ -5281,6 +5289,14 @@ def own_account_call(data, raw):
                 and re.fullmatch(r'[1-9][0-9]*', words[5]) and words[6].strip()):
             return words
         return False
+    if words[2] == 'account-patch':
+        # ledger.py hashes the patch and reads the subject and verdict itself; only the file path is caller data.
+        if (len(words) == 6 and words[3] == pending
+                and re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', words[4])
+                and words[5].startswith('/') and os.path.realpath(words[5]) == words[5]
+                and link_free_path(words[5])):
+            return words
+        return False
     if len(words) != 10 or words[2] != 'account' or words[3] != pending:
         return False
     result, step, agent, sha, verdict, evidence = words[4:]
@@ -5319,7 +5335,81 @@ def issue_account_grant(data):
             deny('The ship hook could not issue a fresh accounting grant. Run the exact command again.')
 
 
-def receipt_custody(data, read_search=False):
+CUSTODY_LITERAL_PATH = r'(?!-)[A-Za-z0-9_./-]+'
+CUSTODY_GIT_GREP = (r"git[ \t]+grep(?:[ \t]+-(?!e)[A-Za-z])*[ \t]+(?:-e[ \t]+)?"
+                    r"'(?!-)[^'\x00-\x1f\x7f$`;|<>&]+'[ \t]+--"
+                    rf"(?:[ \t]+{CUSTODY_LITERAL_PATH})+")
+CUSTODY_LINT = re.compile(rf'[ \t]*python3[ \t]+({CUSTODY_LITERAL_PATH}/text_lint\.py)'
+                          rf'[ \t]+(?:peer|decision|result)[ \t]+<[ \t]+({CUSTODY_LITERAL_PATH})[ \t]*')
+
+
+def custody_grep_paths(command):
+    paths = []
+    for part in command.split('&&'):
+        if not re.fullmatch(CUSTODY_GIT_GREP, part.strip(' \t')):
+            return ()
+        words = shlex.split(part)
+        if not git_read_words(words[1:], exact_grep=True):
+            return ()
+        paths.extend(words[words.index('--') + 1:])
+    return tuple(paths)
+
+
+def custody_bound_command(command):
+    """Expand a whole path word only in a verified straight-line command list."""
+    # shortcut: cover the two CoC setup lists and a standalone binding; use a shell parser for other lists.
+    path = CUSTODY_LITERAL_PATH
+    absolute = r'/[A-Za-z0-9_./-]+'
+    word = r'''(?:(?!=)[A-Za-z0-9_./@%+=:-]+|'[^'\x00-\x1f\x7f$`]*'|"[^"$`\\!\x00-\x1f\x7f]*")'''
+    gap, space = r'[ \t]+', r'[ \t]*'
+    cd = rf'cd{gap}(?P<directory>{absolute}){gap}&&{gap}'
+    bind = rf'(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>{absolute})'
+    config = rf'COC_CONFIG={absolute}'
+    use = r'(?:\$(?P=name)|"\$(?P=name)")'
+    operands = rf'(?:{gap}(?:{word}|{use}))*'
+    for lead, middle, programs in (
+            ('', rf'{space};{space}', r'(?:python3|cat|head|tail|wc|stat)'),
+            (rf'{cd}python3{gap}{path}(?:{gap}{word})*{space};{space}',
+             rf'{space};{space}export{gap}{config}{space};{space}', 'python3'),
+            (rf"{cd}printf{gap}'%s\\n'{gap}{word}{gap}>{space}{path}{gap}&&{gap}",
+             rf'{gap}&&{gap}{config}{gap}', 'python3')):
+        match = re.fullmatch(rf'{space}{lead}{bind}{middle}{programs}{gap}{use}{operands}'
+                             rf'(?:{gap}\|{gap}(?:grep|tail)(?:{gap}{word})+)?{space}', command)
+        if not match:
+            continue
+        name, value = match['name'], match['value']
+        directory = match.groupdict().get('directory')
+        # Logical cd removes symlink/.. pairs before the filesystem resolves them.
+        if directory is not None and '..' in Path(directory).parts:
+            return None
+        if (name in SHELL_SPECIAL_NAMES or name in os.environ
+                or name.startswith(('BASH', 'EPOCH', 'ZSH', 'PYTHON', 'LD_', 'DYLD_', 'GIT_'))):
+            return None
+        # The grammar excludes all other expansions. Count bare mentions to exclude another assignment.
+        prefix, rest = command[:match.end('value')], command[match.end('value'):]
+        expanded, uses = re.subn(rf'\${name}\b', lambda _: value, rest)
+        if len(re.findall(rf'\b{name}\b', command)) == uses + 1:
+            return prefix + expanded, value, directory
+    return None
+
+
+def clean_custody_rescan(data, directory):
+    # A speculative scan must not emit a decision or leave an advisory on the original call.
+    warnings = WARNINGS[:]
+    WARNINGS.clear()
+    try:
+        with redirect_stdout(io.StringIO()) as output:
+            verdict = receipt_custody(data, exact_forms=False, verified_cd=directory)
+        return (verdict is None or verdict is False) and not WARNINGS and not output.getvalue()
+    except SystemExit as error:
+        if error.code != 0:
+            raise
+        return False
+    finally:
+        WARNINGS[:] = warnings
+
+
+def receipt_custody(data, read_search=False, *, exact_forms=True, verified_cd=None):
     tool, tin = data.get('tool_name', ''), data.get('tool_input') or {}
     if read_search and tool not in ('Read', 'Grep', 'Glob', 'LSP') and not tool.startswith('mcp__fff__'):
         return
@@ -5328,8 +5418,8 @@ def receipt_custody(data, read_search=False):
 
     normalized = custody_normalized
 
-    # Folders that a `cd` or `pushd` in the command can enter; a relative word resolves against each of them too.
-    cd_bases = []
+    # Check relative words from each possible directory, including the verified cd if inference skips it.
+    cd_bases = [verified_cd] if verified_cd is not None else []
     cwd_path = os.path.abspath(data.get('cwd') or os.getcwd())
 
     def resolved(value):
@@ -5399,6 +5489,23 @@ def receipt_custody(data, read_search=False):
     # shortcut: shell text checks cannot isolate same-user code; upgrade to isolated state access.
     if tool == 'Bash':
         raw = str(tin.get('command', ''))
+        if exact_forms and not receipt_text(raw) and not receipt_path(cwd_path, ancestors=True):
+            grep_paths = custody_grep_paths(raw)
+            if grep_paths and not any(receipt_path(path, ancestors=True) for path in grep_paths):
+                return
+            lint = CUSTODY_LINT.fullmatch(raw)
+            if (lint and not any(receipt_path(path, ancestors=True) for path in lint.groups())
+                    and Path(cwd_path, lint[1]).resolve() == Path(__file__).resolve().with_name('text_lint.py')):
+                return
+            binding = custody_bound_command(raw)
+            if binding:
+                expanded, path, directory = binding
+                target = Path(path).resolve()
+                if (not receipt_path(path, ancestors=True) and not receipt_path(directory, ancestors=True)
+                        and target.is_file()
+                        and target.name.casefold() not in {'text_lint.py', 'ultraship.py', 'ledger.py'}
+                        and clean_custody_rescan({**data, 'tool_input': {**tin, 'command': expanded}}, directory)):
+                    return
         joined = raw.replace('\\\n', '')
         account_command = normalized(joined)
         # A leading literal search pattern is data. Keep the full command for path and executable checks.
@@ -6370,15 +6477,15 @@ def receipt_custody(data, read_search=False):
             return False
 
         if receipt_text(path_command):
-            deny(RECEIPT_CUSTODY)
+            deny(RECEIPT_CUSTODY + '\nRule: store-text.')
         if ('ledger.py' in search_account_command and 'account-auto' in search_account_command
                 and not own_account_call(data, raw) and not plain_reader(raw)):
             # The first line stays the receipt message; the next line names what differs from the Stop command.
-            deny(RECEIPT_CUSTODY + '\n' + account_auto_difference(data))
+            deny(RECEIPT_CUSTODY + '\n' + account_auto_difference(data) + '\nRule: account-auto.')
         if (any(receipt_path(word) for word in words)
                 or ancestor_operand()
                 or any(glob_prefix(word) for word in words if any(char in word for char in '*?['))):
-            deny(RECEIPT_CUSTODY)
+            deny(RECEIPT_CUSTODY + '\nRule: store-operand.')
         # A longer search word is inert in a single literal grep call. Keep its path under every custody check.
         grep_word = re.fullmatch(r"[ \t]*grep[ \t]+-n[ \t]+([A-Za-z0-9]+|'[A-Za-z0-9]+')[ \t]+"
                                  r"(?:~/)?(?!-)[A-Za-z0-9_./-]+[ \t]*\n?", raw)
@@ -6759,11 +6866,11 @@ def checks(data):
                  + (' If the brief names no superior, report it here.' if superior == 'the superior named in your brief' else '')
                  + ' Continue independent work within your authority.')
         if grant_custody_denied == 'hard':
-            deny(RECEIPT_CUSTODY)
+            deny(RECEIPT_CUSTODY + '\nRule: custody-scope.')
         if grant_custody_denied:
             # An unresolved word proceeds with a warning only when no hidden program can hide behind it.
             if obfuscated_shell(str(tin.get('command', ''))):
-                deny(OBFUSCATED_COMMAND)
+                deny(OBFUSCATED_COMMAND + '\nRule: obfuscated-command.')
             warn('S2', CUSTODY_ADVISORY)
     if role(data, 'researcher') and DISCOVERY.match(tool):
         counter = STATE / 'budget' / re.sub(r'[^\w.-]', '_', data.get('agent_id') or 'unknown')
@@ -7513,7 +7620,10 @@ def stop(data):
               'this appends bookkeeping without reopening the run. '
               'Run this command alone on one line with the evidence in single quotes. Never invent review evidence. '
               'Use only the reviewed commit. A base SHA or patch digest gives zero review credit. '
-              'Keep results without a verified reviewed commit pending. '
+              'For a result on a frozen, uncommitted patch, use '
+              f'`python3 {shlex.quote(str(ledger_script()))} account-patch {shlex.quote(str(path))} '
+              '<result-id> <absolute-patch-file>`. '
+              'Keep other results without a verified reviewed commit pending. '
               'Link a later review on the run board. Keep the original subject and verdict. '
               'The link gives zero accounting or review credit.'}))
 
@@ -7523,19 +7633,22 @@ def compact(data):
              'git diff --stat, re-read the active plan and run board, and never guess dropped state.']
     try:
         ledger = load_ledger()
-        path = ledger.ledger_path(data.get('cwd') or '.')
+        cwd = data.get('cwd') or '.'
+        path = ledger.ledger_path(cwd)
         run = ledger.open_run(path)
         pending = owed_file(data)
         if pending.exists() and pending.stat().st_size:
             lines.append(f'Pending review evidence remains at {pending}. '
                          'Account each result with ledger.py before declaring the run complete.')
+        if run:
+            missing, notice = ledger.gaps(run, ledger.git(cwd, 'rev-parse', 'HEAD'), cwd)
+            if notice:
+                lines.append(notice)
+            lines.append(f'Open ship run: {run[0][5]} (mode {run[0][2]}). Ledger: {path}. '
+                         f'Gaps: {" ".join(missing) or "none"}. The run note names the board path.')
     except Exception as exc:
         lines.append(f'Ledger resolution failed: {exc}. Pending review evidence remains at {owed_file(data)}. '
                      'Restore ledger access or set SHIP_LEDGER_DIR to an absolute permitted directory before continuing.')
-        run = None
-    if run:
-        lines.append(f'Open ship run: {run[0][5]} (mode {run[0][2]}). Ledger: {path}. '
-                     f'Gaps: {" ".join(ledger.gaps(run)) or "none"}. The run note names the board path.')
     print('\n'.join(lines))
 
 

@@ -19,6 +19,7 @@ import tempfile
 import time
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
+from functools import cache
 from pathlib import Path
 
 REQUIRED = {
@@ -26,14 +27,16 @@ REQUIRED = {
              'fix-read', 'panel-final', 'pr', 'babysit', 'closing', 'gate'],
     'light': ['slices', 'simplify', 'deep-review', 'fix-read', 'pr', 'babysit', 'gate'],
 }
-USAGE = """usage: ledger.py path | status | gaps | run-end
+REVIEW_STEPS = {'panel-high', 'simplify', 'deep-review', 'select', 'fix-read', 'panel-final', 'closing'}
+USAGE = """usage: ledger.py path | status | gaps | run-anchor | run-end
        ledger.py run-start <full|light> <run-id> [board-path]
        ledger.py append <step> <agent>[@<agent-id>] <sha> <verdict> [note]
        ledger.py account <pending.tsv> <result-id> <step> <agent> <sha> <verdict> <evidence>
        ledger.py account-auto [--fail-unparsed] <pending.tsv>
+       ledger.py account-patch <pending.tsv> <result-id> <patch-file>
        ledger.py correct-binding <pending.tsv> <result-id> <ledger-line> <reason>"""
-MARKS = ('run-start', 'run-end', 'account-result', 'correct-binding')
-ACCOUNT_COMMANDS = ('account', 'account-auto', 'correct-binding')
+MARKS = ('run-start', 'run-anchor', 'run-end', 'account-result', 'correct-binding')
+ACCOUNT_COMMANDS = ('account', 'account-auto', 'account-patch', 'correct-binding')
 GRANT_LIFETIME_NS = 900_000_000_000
 GRANT_REFUSAL = 'Accounting requires a fresh grant from the ship hook. Run the exact command again.'
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -49,7 +52,7 @@ def account_pending_arg(argv):
             return args[1]
         if len(args) == 1:
             return args[0]
-    if (cmd, len(args)) in (('account', 7), ('correct-binding', 4)):
+    if (cmd, len(args)) in (('account', 7), ('account-patch', 3), ('correct-binding', 4)):
         return args[0]
     return None
 
@@ -102,6 +105,21 @@ def file_identity(info):
 
 # Stop guidance shares this label rule so both parsers count the same verdict lines.
 VERDICT_LABEL = re.compile(r'^[\s*>#_-]*(?:verdict|overall)[*_]*:(.*)', re.I)
+# A commit label anywhere in a line, including after a list marker or quote, makes the subject mixed.
+REVIEWED_COMMIT = re.compile(r'(?<![A-Za-z0-9_])_*Reviewed commit[*_\s]*:.*(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])',
+                             re.I | re.M)
+PATCH_DIGEST = re.compile(r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])', re.I)
+PATCH_LABEL = re.compile(r'[\s*#_-]*(?:reviewed\s+)?patch\s+sha-?256[*_]*\s*:[*_]*\s*`?([0-9a-f]{64})`?[*_]*\s*',
+                         re.I)
+PATCH_BYTE_LIMIT = 64 * 1024 * 1024
+VERDICT_RECORD = re.compile(r'[*_]*verdict[*_]*\s*:[*_]*\s*(pass|findings)[*_]*\s*', re.I)
+# Any verdict-shaped label, in any container, counts toward the one-verdict rule.
+VERDICT_ANY = re.compile(r'(?<![A-Za-z0-9_])_*(?:verdict|overall)[*_\s]*:', re.I)
+# Fences and these HTML blocks can run across blank lines and hold the closing record; without them, Markdown
+# ends every quote, list and indented block before an unindented record that follows a blank line.
+CODE_FENCE = re.compile(r'```|~~~')
+HTML_BLOCK = re.compile(r'^ {0,3}<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:pre|script|style|textarea)(?=[\s>]|$))',
+                        re.I | re.M)
 
 
 def grant_request(script, argv):
@@ -392,15 +410,20 @@ def ledger_path(cwd='.'):
     return path
 
 
+def parse_rows(text):
+    return [line.split('\t') for line in text.splitlines() if line]
+
+
 def rows(path):
-    if not path.exists():
-        return []
-    return [line.split('\t') for line in path.read_text().splitlines() if line]
+    return parse_rows(path.read_text()) if path.exists() else []
 
 
 def open_run(path):
+    return find_open_run(rows(path))
+
+
+def find_open_run(all_rows):
     """Return (start_row, rows_after_start) for the open run, or None."""
-    all_rows = rows(path)
     for i in range(len(all_rows) - 1, -1, -1):
         step = all_rows[i][1]
         if step == 'run-end':
@@ -410,23 +433,119 @@ def open_run(path):
     return None
 
 
-def gaps(run):
+def gaps(run, head, cwd='.'):
     start, after = run
-    done = {r[1] for r in after if r[4] != 'owed'}
-    return [s for s in REQUIRED[start[2]] if s not in done]
+    agents = Path(__file__).resolve().parents[3] / 'agents'
+    seats = {p.stem for p in agents.glob('reviewer--*.md') if p.is_file()}
+
+    def reviewer(field):
+        kind, ident = agent_key(field)
+        return (kind.removeprefix('ship:') in seats
+                and ('@' not in field or re.fullmatch(r'[^\s@]+', ident or '')))
+
+    @cache
+    def commit(sha):
+        if re.fullmatch('[0-9a-fA-F]{4,64}', sha):
+            sha = sha.lower()
+            try:
+                resolved = git(cwd, '--no-replace-objects', 'rev-parse', '--verify', f'{sha}^{{commit}}')
+            except subprocess.CalledProcessError:
+                return None
+            if resolved.startswith(sha):
+                return resolved
+        return None
+
+    @cache
+    def ancestor(older, newer):
+        try:
+            git(cwd, '--no-replace-objects', 'merge-base', '--is-ancestor', older, newer)
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode == 1:
+                return False
+            raise
+        return True
+
+    anchor_index = next((i for i in range(len(after) - 1, -1, -1)
+                         if after[i][1] == 'run-anchor'), -1)
+    anchor = after[anchor_index] if anchor_index >= 0 else start
+    label = 'run anchor' if anchor_index >= 0 else 'run start'
+    base = commit(anchor[3])
+    base_issue = notice = None
+    if base is None:
+        base_issue = f'{label} {anchor[3]!r} is an unknown commit'
+    elif not ancestor(base, head):
+        base_issue = f'{label} {base} is not in HEAD history'
+    if base_issue:
+        notice = (f'{label} {base or anchor[3]} is not in HEAD history; '
+                  'run ledger.py run-anchor and repeat the reviews')
+
+    def commit_issues(sha, closing):
+        resolved = commit(sha)
+        if resolved is None:
+            return ['unknown commit']
+        if closing:
+            return [] if resolved == head else [f'differs from HEAD {head}']
+        issues = []
+        if not ancestor(resolved, head):
+            issues.append(f'is not an ancestor of HEAD {head}')
+        if base_issue:
+            issues.append(base_issue)
+        if base is not None and not ancestor(base, resolved):
+            issues.append(f'does not descend from {label} {base}')
+        return issues
+
+    done = {}
+    for index, row in enumerate(after):
+        step = row[1]
+        if row[4] != 'owed' and (index > anchor_index or step not in REVIEW_STEPS or step == 'closing'):
+            done.setdefault(step, []).append(row)
+    missing = []
+    for step in REQUIRED[start[2]]:
+        candidates = done.get(step, [])
+        if step not in REVIEW_STEPS:
+            if not candidates:
+                missing.append(step)
+            continue
+        closing = step == 'closing'
+        reviews = [row for row in candidates if reviewer(row[2])]
+        if any(not commit_issues(row[3], closing) for row in reversed(reviews)):
+            continue
+        requirement = 'at HEAD' if closing else "on this run's history"
+        details = []
+        if reviews:
+            sha = reviews[-1][3]
+            details = [f'newest reviewer row {sha!r}', *commit_issues(sha, closing)]
+        wrong = next((row for row in reversed(candidates) if not reviewer(row[2])), None)
+        if wrong:
+            details.extend([f'wrong role {wrong[2]!r} at {wrong[3]!r}',
+                            *commit_issues(wrong[3], closing),
+                            'declared seats: ' + ', '.join(sorted(seats))])
+        missing.append(f'{step} (needs a declared reviewer seat {requirement}; '
+                       + '; '.join(details or ['no completed row']) + ')')
+    return missing, notice
+
+
+@contextmanager
+def locked_ledger(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a+b') as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield fh
+
+
+def append_locked(fh, *fields):
+    clean = [f.replace('\t', ' ').replace('\n', ' ') for f in fields]
+    fh.seek(0, os.SEEK_END)
+    if fh.tell():
+        fh.seek(-1, os.SEEK_END)
+        if fh.read(1) != b'\n':
+            fh.write(b'\n')
+    fh.write(('\t'.join([str(int(time.time())), *clean]) + '\n').encode('utf-8'))
 
 
 def append(path, *fields):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    clean = [f.replace('\t', ' ').replace('\n', ' ') for f in fields]
-    with path.open('a+b') as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        fh.seek(0, os.SEEK_END)
-        if fh.tell():
-            fh.seek(-1, os.SEEK_END)
-            if fh.read(1) != b'\n':
-                fh.write(b'\n')
-        fh.write(('\t'.join([str(int(time.time())), *clean]) + '\n').encode('utf-8'))
+    with locked_ledger(path) as fh:
+        append_locked(fh, *fields)
 
 
 
@@ -621,6 +740,88 @@ def recorded_transcript(pending, result):
     return path
 
 
+def review_verdict(text):
+    labels = (match[1] for line in text.splitlines() if (match := VERDICT_LABEL.match(line)))
+    label = next(labels, None)
+    if label is None or next(labels, None) is not None:
+        raise ValueError('expected one verdict')
+    words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower()) if (word := token.strip('_'))]
+    verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
+    if not words or words[0] not in verdict_words:
+        raise ValueError('expected one verdict')
+    if 'pass' in words and (words[0] != 'pass' or any(
+            word in verdict_words or word in ('not', 'no', 'never', 'without')
+            or word.endswith(("n't", 'n’t')) for word in words[1:])):
+        raise ValueError('expected one verdict')
+    return 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
+
+
+def account_patch(pending, identifier, patch, *, entries):
+    """Account a result whose sole review turn names one patch digest that the frozen file still matches."""
+    matches = [fields for fields in (line.split('\t') for line in entries)
+               if len(fields) == 4 and json.loads(fields[3]).get('id') == identifier]
+    if len(matches) != 1:
+        raise ValueError('pending result ID must match exactly one notification')
+    epoch, agent, _, raw = matches[0]
+    result = json.loads(raw)
+    transcript = recorded_transcript(pending, result)
+    # A later turn or a resumed prompt leaves turn ownership ambiguous.
+    text = final_turn_text(transcript, int(epoch), {}, sole_turn=True)
+    if not text:
+        raise ValueError('no final turn text')
+    text = re.sub(r'\r\n?', '\n', text)  # Markdown line endings, so every check sees the same lines
+    if REVIEWED_COMMIT.search(text):
+        raise ValueError('mixed review subject')
+    if HTML_BLOCK.search(text):
+        raise ValueError('html block in review')
+    if CODE_FENCE.search(text):
+        raise ValueError('code fence in review')
+    # The review ends with a blank line and an unindented two-line record, which no quotation, fence,
+    # list or indented block can hold. The first line is never the record, because the reader strips its indent.
+    lines = text.split('\n')
+    record = lines[-2:]
+    subject = next((m for line in record if line == line.lstrip() and (m := PATCH_LABEL.fullmatch(line))), None)
+    stated = next((m for line in record if line == line.lstrip() and (m := VERDICT_RECORD.fullmatch(line))), None)
+    # Markdown counts only spaces and tabs as a blank line.
+    if len(lines) < 4 or lines[-3].strip(' \t') or not subject or not stated:
+        raise ValueError('expected a closing review record')
+    digest = subject.group(1).lower()
+    if {d.lower() for d in PATCH_DIGEST.findall(text)} != {digest}:
+        raise ValueError('expected one patch digest')
+    if sum(1 for line in lines if VERDICT_ANY.search(line)) != 1:
+        raise ValueError('expected one verdict')
+    verdict = stated.group(1).lower()
+    try:
+        if not os.path.isabs(patch) or os.path.realpath(patch) != patch:
+            raise OSError
+        # Every path component opens without following a symlink, so a swapped parent fails here.
+        with directory_descriptor(Path(patch).parent) as parent, \
+                os.fdopen(os.open(Path(patch).name, READ_FLAGS, dir_fd=parent), 'rb') as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise OSError
+            if info.st_size > PATCH_BYTE_LIMIT:
+                raise ValueError('patch file exceeds its byte limit')
+            data = source.read(PATCH_BYTE_LIMIT + 1)
+            if len(data) > PATCH_BYTE_LIMIT:
+                raise ValueError('patch file exceeds its byte limit')
+            measured = hashlib.sha256(data).hexdigest()
+    except ValueError as exc:
+        if str(exc) == 'patch file exceeds its byte limit':
+            raise
+        raise ValueError('patch file unavailable') from None
+    except OSError:
+        raise ValueError('patch file unavailable') from None
+    if measured != digest:
+        raise ValueError('patch digest differs')
+    when = datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()
+    sha = f'patch:{digest}'
+    account(pending, identifier, 'review', agent, sha, verdict, f'{transcript} at {when}: {verdict} on {patch}',
+            entries=entries)
+    named = f'{agent}@{result["agent_id"]}' if result.get('agent_id') else agent
+    return f'accounted {identifier} {named} {sha} {verdict}'
+
+
 def account_auto(pending, entries, receipts, *, fail_unparsed=False):
     budgets = {}
     accounted = remaining = already = awaiting = 0
@@ -688,20 +889,7 @@ def account_auto(pending, entries, receipts, *, fail_unparsed=False):
                     if first is None or any(commit[0].lower() != first[0].lower() for commit in commits):
                         raise ValueError('expected one commit')
                     sha = first[0].lower()
-                    labels = (match[1] for line in text.splitlines() if (match := VERDICT_LABEL.match(line)))
-                    label = next(labels, None)
-                    if label is None or next(labels, None) is not None:
-                        raise ValueError('expected one verdict')
-                    words = [word for token in re.findall(r"\w+(?:['’]\w+)*", label.lower())
-                             if (word := token.strip('_'))]
-                    verdict_words = {'pass', 'fail', 'failed', 'fails', 'failing', 'failure', 'findings'}
-                    if not words or words[0] not in verdict_words:
-                        raise ValueError('expected one verdict')
-                    if 'pass' in words and (words[0] != 'pass' or any(
-                            word in verdict_words or word in ('not', 'no', 'never', 'without')
-                            or word.endswith(("n't", 'n’t')) for word in words[1:])):
-                        raise ValueError('expected one verdict')
-                    verdict = 'pass' if words[0] == 'pass' else 'findings' if 'findings' in words else 'fail'
+                    verdict = review_verdict(text)
                 except ValueError as exc:
                     reason = str(exc)
                     if not fail_unparsed or reason not in (
@@ -836,6 +1024,8 @@ def main(argv):
                     print(correct_binding(pending, root, root_fd, *args[1:]))
                 elif cmd == 'account':
                     print(account(pending, *args[1:], entries=source.read().splitlines()))
+                elif cmd == 'account-patch':
+                    print(account_patch(pending, *args[1:], entries=source.read().splitlines()))
                 else:
                     with locked_receipts(root_fd):
                         account_auto(pending, source.read().splitlines(),
@@ -847,43 +1037,58 @@ def main(argv):
             sys.exit(str(exc))
         return
     path = ledger_path()
+    if cmd in ('run-start', 'append', 'run-anchor', 'run-end'):
+        if ((cmd == 'run-start' and (len(args) not in (2, 3) or args[0] not in REQUIRED))
+                or (cmd == 'append' and len(args) not in (4, 5))
+                or (cmd == 'run-anchor' and args)):
+            sys.exit(USAGE)
+        no_run = 'no open run' if cmd == 'run-end' else 'no open run; start one with run-start'
+        if cmd != 'run-start' and not path.exists():
+            sys.exit(no_run)
+        with locked_ledger(path) as fh:
+            fh.seek(0)
+            run = find_open_run(parse_rows(fh.read().decode('utf-8')))
+            if cmd == 'run-start':
+                if run:
+                    sys.exit(f'run {run[0][5]} is still open; finish it with run-end first')
+                append_locked(fh, 'run-start', args[0], git('.', 'rev-parse', 'HEAD'), 'open', ' '.join(args[1:]))
+            elif not run:
+                sys.exit(no_run)
+            elif cmd == 'append':
+                if args[0] in MARKS:
+                    sys.exit(f'{args[0]} rows come only from their own command')
+                append_locked(fh, *args, *([''] * (5 - len(args))))
+            else:
+                head = git('.', '--no-replace-objects', 'rev-parse', '--verify', 'HEAD^{commit}')
+                if cmd == 'run-anchor':
+                    append_locked(fh, 'run-anchor', '', head, 'open', run[0][5])
+                else:
+                    missing, notice = gaps(run, head)
+                    if notice:
+                        print(notice)
+                    if missing:
+                        sys.exit('refusing run-end; gaps: ' + ' '.join(missing))
+                    append_locked(fh, 'run-end', '', head, 'closed', run[0][5])
+        if cmd == 'run-start':
+            print(path)
+        return
     run = open_run(path)
     if cmd == 'path':
         print(path)
-    elif cmd == 'run-start':
-        if len(args) not in (2, 3) or args[0] not in REQUIRED:
-            sys.exit(USAGE)
-        if run:
-            sys.exit(f'run {run[0][5]} is still open; finish it with run-end first')
-        append(path, 'run-start', args[0], git('.', 'rev-parse', 'HEAD'), 'open', ' '.join(args[1:]))
-        print(path)
-    elif cmd == 'append':
-        if len(args) not in (4, 5):
-            sys.exit(USAGE)
-        if not run:
-            sys.exit('no open run; start one with run-start')
-        if args[0] in MARKS:
-            sys.exit(f'{args[0]} rows come only from their own command')
-        append(path, *args, *([''] * (5 - len(args))))
     elif cmd in ('gaps', 'status'):
         if not run:
             print('no open run')
             return
-        missing = gaps(run)
+        missing, notice = gaps(run, git('.', 'rev-parse', 'HEAD'))
         if cmd == 'status':
             print(f'run: {run[0][5]} mode={run[0][2]} ledger={path}')
             for r in run[1]:
                 print('  ' + ' '.join(r[1:5]) + (f' — {r[5]}' if len(r) > 5 and r[5] else ''))
+        if notice:
+            print(notice)
         print('gaps: ' + (' '.join(missing) or 'none'))
         if cmd == 'gaps' and missing:
             sys.exit(1)
-    elif cmd == 'run-end':
-        if not run:
-            sys.exit('no open run')
-        missing = gaps(run)
-        if missing:
-            sys.exit('refusing run-end; gaps: ' + ' '.join(missing))
-        append(path, 'run-end', '', git('.', 'rev-parse', 'HEAD'), 'closed', run[0][5])
     else:
         sys.exit(USAGE)
 

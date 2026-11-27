@@ -309,6 +309,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     git = lambda *a: subprocess.run(['git', '-C', str(repo), *a], check=True, capture_output=True)
     git('init', '-q', '-b', 'feat/x')
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init')
+    head = git('rev-parse', 'HEAD').stdout.decode().strip()
     ledger = lambda *a: run([sys.executable, str(LEDGER), *a], cwd=repo)
 
     assert 'ship/ledger/feat__x.tsv' in ledger('path').stdout
@@ -345,7 +346,7 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
     assert blocked['decision'] == 'block' and 'reviewer--sol' in blocked['reason']
     assert 'ship:reviewer--sol@reviewer-terminal-1' in blocked['reason']
     assert hook('stop', session, env) == ''
-    assert ledger('append', 'deep-review', 'ship:reviewer--sol@reviewer-terminal-1', 'sha', 'pass').returncode == 0
+    assert ledger('append', 'deep-review', 'ship:reviewer--sol@reviewer-terminal-1', head, 'pass').returncode == 0
     assert hook('stop', session, env) == ''
 
     metadata_cases = [({}, {}), *[({key: value}, {key: value}) for key, value in provenance.items()]]
@@ -359,12 +360,12 @@ with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=HOOK.
         assert result['run'] is not None
         assert hook('stop', session, env)['decision'] == 'block'
         named = 'ship:reviewer--sol' + (f"@{expected['agent_id']}" if 'agent_id' in expected else '')
-        assert ledger('append', 'deep-review', named, 'sha', 'pass').returncode == 0
+        assert ledger('append', 'deep-review', named, head, 'pass').returncode == 0
         assert hook('stop', session, env) == ''
 
     hook('subagent-stop', {**session, 'agent_type': 'ship:reviewer--opus'}, env)
     for step in ['slices', 'simplify', 'deep-review', 'fix-read', 'pr', 'babysit', 'gate']:
-        assert ledger('append', step, 'ship:reviewer--opus', 'sha', 'pass').returncode == 0
+        assert ledger('append', step, 'ship:reviewer--opus', head, 'pass').returncode == 0
     assert hook('stop', session, env) == ''
     assert ledger('gaps').returncode == 0
     assert ledger('run-end').returncode == 0
@@ -483,6 +484,8 @@ class LiteralCustodyTests(unittest.TestCase):
         self.state = self.home / 'state'
         self.enterContext(patch.dict(os.environ, {'HOME': str(self.home), 'XDG_STATE_HOME': str(self.state),
                                                    'CLAUDE_CONFIG_DIR': str(self.cwd / '.claude')}))
+        for name in ('P', 'COC_CONFIG', 'CHILD'):
+            os.environ.pop(name, None)
         self.enterContext(patch.object(ultraship.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(self.home))))
         self.enterContext(patch.object(ultraship, 'STATE', self.state / 'ultraship'))
         self.enterContext(patch.object(ultraship.subprocess, 'run', side_effect=AssertionError('fixture ran a process')))
@@ -558,6 +561,126 @@ class LiteralCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_denied(command, ultraship.RECEIPT_CUSTODY)
         self.assert_denied('node --unknown-option example.mjs', 'inline interpreter code rule')
+
+    def test_exact_custody_forms_allow_both_callers(self):
+        repo = str(self.cwd)
+        writer = HOOK.with_name('text_lint.py')
+        for name in ('promises.py', 'slack_post.py'):
+            (self.cwd / name).touch()
+        commands = (
+            "git grep -n 'text_lint hook' -- plugins/ship/hooks/ultraship.py"
+            " && git grep -i -w -F -l -e 'example' -- README.md docs/",
+            f'cd {repo} && python3 tools/ledger_answers.py "00000000-0000-4000-8000-000000000001=x"; '
+            f'P={repo}/promises.py; export COC_CONFIG={repo}/config.json; '
+            'python3 $P add --promise "x" --due 2026-11-27T10:00Z --driver "y" | grep \'"id"\'',
+            f'cd {repo} && printf \'%s\\n\' "x" > slack-x.txt && P={repo}/slack_post.py '
+            f'&& COC_CONFIG={repo}/config.json python3 $P --channel D0 --text-file {repo}/slack-x.txt | tail -c 120',
+            f'P={repo}/promises.py; python3 "$P" "$P"',
+            *(f'python3 {writer} {kind} < draft.txt' for kind in ('peer', 'decision', 'result')),
+        )
+        for caller in ('', 'ship:driver--sol'):
+            for command in commands:
+                with self.subTest(caller=caller, command=command):
+                    decision = self.pre(command, caller)
+                    self.assertNotEqual(decision.get('permissionDecision'), 'deny', decision)
+
+    def test_exact_custody_forms_check_public_paths_and_keep_main_denials(self):
+        store = self.home / '.local/state/ultraship/account-grants'
+        store.mkdir(parents=True)
+        (store / 'fixture.py').touch()
+        (self.cwd / 'fixture-alias').symlink_to(store, target_is_directory=True)
+        writer = HOOK.with_name('text_lint.py')
+        search = "git grep -n 'text_lint hook' -- README.md"
+        for caller in ('', 'ship:driver--sol'):
+            for command in (
+                    search.replace('-n', '-O'), search.replace('-n', '--open-files-in-pager'),
+                    search.replace('-n', '--output=out.txt'), search + ' > out.txt', search + '; true',
+                    search + ' | cat', search + '\ntrue', search.replace('hook', 'hook $X'),
+                    search.replace('hook', 'hook `pwd`'), search.replace('README.md', 'fixture-alias/fixture.py'),
+                    f'python3 {writer} hook < draft.txt', f'python3 {writer} peer < fixture-alias/fixture.py',
+                    f'P={self.cwd}/fixture-alias/fixture.py; python3 $P',
+                    f'P={self.cwd}/$CHILD; python3 $P', 'python3 $P', "python3 -c 'import text_lint'"):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_denied(command, ultraship.RECEIPT_CUSTODY, caller)
+        for command in (
+                f'P={self.cwd}/a.py; P={self.cwd}/b.py; python3 $P',
+                f'P={self.cwd}/a.py; python3 ${{P}}', f'P={self.cwd}/a.py; python3 $P:h',
+                f'P={self.cwd}/a.py; python3 "$(cat $P)"', f'P={self.cwd}/a.py; python3 "$P" `pwd`',
+                f'P={self.cwd}/$CHILD; python3 $P', f'P={self.cwd}/a.py; python3 $P > out.txt'):
+            with self.subTest(command=command):
+                self.assertIsNone(ultraship.custody_bound_command(command))
+
+    def test_bound_command_refuses_relative_and_parent_directory_operands(self):
+        grant = self.home / '.local/state/ultraship/account-grants/fixture.json'
+        grant.parent.mkdir(parents=True)
+        grant.touch()
+        logical = self.cwd / 'logical'
+        logical.mkdir()
+        physical = self.scratch / 'physical/child'
+        physical.mkdir(parents=True)
+        (logical / 'link').symlink_to(physical, target_is_directory=True)
+        (logical / 'draft.txt').symlink_to(grant)
+        script = self.cwd / 'helper.py'
+        script.touch()
+        tail = (f"printf '%s\\n' x > draft.txt && P={script} "
+                f'&& COC_CONFIG={self.cwd}/config.json python3 $P | tail -c 120')
+        for directory in (logical / 'link/..', 'logical'):
+            command = f'cd {directory} && {tail}'
+            with self.subTest(directory=directory):
+                self.assertIsNone(ultraship.custody_bound_command(command))
+                for caller in ('', 'ship:driver--sol'):
+                    self.assert_denied(command, ultraship.RECEIPT_CUSTODY, caller)
+
+    def test_bound_command_with_literal_cdpath_keeps_the_original_custody_verdict(self):
+        grant = self.home / '.local/state/ultraship/account-grants/fixture.json'
+        grant.parent.mkdir(parents=True)
+        grant.touch()
+        directory = self.cwd / 'entered'
+        directory.mkdir()
+        (directory / 'draft.txt').symlink_to(grant)
+        script = self.cwd / 'helper.py'
+        script.touch()
+        for draft in ('ordinary.txt', 'draft.txt'):
+            command = (f'cd {directory} && printf \'%s\\n\' "cdpath" > {draft} && P={script} '
+                       f'&& COC_CONFIG={self.cwd}/config.json python3 $P | tail -c 120')
+            expanded, _, _ = ultraship.custody_bound_command(command)
+            event = {'cwd': str(self.cwd), 'tool_name': 'Bash', 'tool_input': {'command': expanded}}
+            with self.subTest(draft=draft):
+                if draft == 'draft.txt':
+                    with redirect_stdout(io.StringIO()) as output, self.assertRaises(SystemExit):
+                        ultraship.receipt_custody(event, exact_forms=False, verified_cd=str(directory))
+                    self.assertIn('Rule: store-operand.', output.getvalue())
+                else:
+                    self.assertEqual(ultraship.receipt_custody(event, exact_forms=False, verified_cd=str(directory)), 'soft')
+                for caller in ('', 'ship:driver--sol'):
+                    self.assert_denied(command, 'Rule: custody-scope.', caller)
+
+    def test_clean_custody_rescan_discards_warning_and_emitted_decision(self):
+        def warning(*args, **kwargs):
+            ultraship.warn('S2', 'fixture warning')
+
+        def ask(*args, **kwargs):
+            print('{"hookSpecificOutput": {"permissionDecision": "ask"}}')
+
+        with patch.object(ultraship, 'WARNINGS', ['existing warning']), redirect_stdout(io.StringIO()) as output:
+            for scan in (warning, ask):
+                with self.subTest(scan=scan.__name__), patch.object(ultraship, 'receipt_custody', side_effect=scan):
+                    self.assertFalse(ultraship.clean_custody_rescan({'tool_name': 'Bash'}, None))
+                    self.assertEqual(ultraship.WARNINGS, ['existing warning'])
+            self.assertEqual(output.getvalue(), '')
+
+    def test_main_custody_gaps_receive_no_allowance(self):
+        writer = HOOK.with_name('text_lint.py')
+        commands = (
+            f"git grep -n 'text_lint hook' -- README.md && git diff --output={writer} -- README.md",
+            f"sed --in-pl -e 's/a/b/' {writer}", f'cat {writer} | python3 -',
+            'd=/fixture; ((\n  1 << 2\n)); cat "$d/fixture.json"\n2\n',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFalse(ultraship.custody_grep_paths(command))
+                self.assertIsNone(ultraship.custody_bound_command(command))
+                self.assertIsNone(ultraship.CUSTODY_LINT.fullmatch(command))
 
     def test_literal_node_keeps_custody_checks(self):
         store = self.state / 'ultraship/text-lint'
@@ -1559,6 +1682,27 @@ class ReceiptCustodyTests(unittest.TestCase):
             words[index] = value
             with self.subTest(index=index, value=value):
                 self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(words)}})
+
+    def test_own_account_call_admits_patch_accounting_with_an_absolute_patch(self):
+        event = self.own_account_event()
+        words = ['python3', str(LEDGER), 'account-patch', self.account_words[3], self.account_words[4],
+                 str(self.cwd / 'frozen.patch')]
+        self.assert_account_command_allowed(shlex.join(words), session_id=event['session_id'])
+        self.consume(words)
+        linked = self.cwd / 'linked'
+        linked.symlink_to(self.cwd)
+        loop = self.cwd / 'loop.patch'
+        loop.symlink_to(loop)
+        for index, value in ((4, 'invalid'), (5, 'frozen.patch'), (5, str(self.cwd / '../frozen.patch')),
+                             (5, str(self.cwd) + '//frozen.patch'), (5, '/' + str(self.cwd / 'frozen.patch')),
+                             (5, str(linked / 'frozen.patch')), (5, str(loop)), (5, '')):
+            invalid = words.copy()
+            invalid[index] = value
+            with self.subTest(index=index, value=value):
+                self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(invalid)}})
+        for invalid in (words[:-1], [*words, 'extra']):
+            with self.subTest(words=invalid):
+                self.assert_custody_denial({**event, 'tool_input': {'command': shlex.join(invalid)}})
 
     def test_own_account_call_preserves_other_custody_checks(self):
         event = self.own_account_event()
