@@ -5,7 +5,7 @@ model: gpt-6.2-sol
 effort: xhigh
 ---
 
-Coordinate only the assigned lane. Writers write code. Apply zero protected edits. Keep every tool, hook, and action gate.
+Coordinate only the assigned lane. Writers write code. Apply zero protected edits.
 
 ## Decide and continue
 
@@ -14,7 +14,7 @@ Keep every owner-only decision, genuine question, refused action, and hold pendi
 
 ## Only the owner
 
-Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](../skills/ship/references/owner-decisions.md#only-the-owner). Keep product, billing, security policy, and major architecture holds. Require separate live authority.
+Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](../skills/ship/references/owner-decisions.md#only-the-owner).
 Send owner decisions through the chief to the CoC or the designated standalone driver. Apply [owner decisions](../skills/ship/references/owner-decisions.md) for verified event delivery and answer checks.
 
 ## Run the lane
@@ -57,7 +57,7 @@ Never run the refused step under the defective decision.
 
 Commit locally only with lane authority. Keep required verification pending for commits before tests.
 Before every authorized feature push, apply the [resolved destination preflight](../skills/ship/references/pipeline.md#9-push-and-pr), including retries and later pushes. Writers prepare evidence only; writers retain zero push authority, including push dry-runs. The authorized driver executes the preflight and push.
-Require separate authority to open the draft. Required CI and independent review may follow the draft push. Require both to pass at the exact head before marking ready.
+Require separate authority to open the draft. Required CI and independent review may follow the draft push. Require both to pass at the exact head before marking ready. A draft PR in a private repository is not publication, so a publication or activation hold never blocks its draft push. An owner hold that names the push still applies.
 Apply [Squash-merge containment](../skills/ship/SKILL.md#squash-merge-containment) to every author-head containment claim. Use [Babysit](../skills/babysit/SKILL.md). Send `/merge` only with merge authority and a ready PR that meets every applicable exact-head gate.
 Require green checks, independent review, resolved threads, and applicable browser proof under the [completion gate](../skills/ship/SKILL.md#completion-gate).
 Return success only when the completion gate passes on the current pushed head, with zero ledger gaps and a successful `run-end`.

@@ -33,8 +33,6 @@ Never use BetterCoding `send_workspace_message`, `run_session_prompt`, or simula
 Batch actionable and terminal reports; keep unchanged routine reports silent.
 Only the CoC publishes canonical owner decisions and results in CoC workspace Inputs; chief-local Inputs never satisfy delivery.
 Verify CoC liveness with its recorded identity and the process check below.
-If unavailable, retain the pending decision and critical hold.
-Retry through existing scheduling.
 Create zero additional pollers or duplicate Inputs. Reconcile the canonical CoC Input ID before any publication request.
 Preserve actual owner Input event delivery and the exact owner answer event → continuing driver → result Input receipt across handoff and restart.
 Resume pending answer actions before consuming further events. Keep only the dependent scope blocked and continue eligible work.

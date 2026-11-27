@@ -78,12 +78,12 @@ class ExplicitFeaturePushTests(unittest.TestCase):
         for requirement in (
             "inspect the lane's commit stack and upstream state",
             'Retain all existing tracking checks',
-            'A missing upstream alone establishes neither publication nor unpushed work',
+            'A missing upstream alone establishes neither a pushed head nor unpushed work',
             'Within existing read permission',
             "intended feature destination's repository identity",
             "Compare its exact `refs/heads/<feature-branch>` remote head OID with the lane's current HEAD.",
             "credential-safe gate before capturing any resolved URL or remote evidence",
-            'fresh evidence from that verified destination with an OID equal to HEAD',
+            'fresh evidence from that verified destination with an OID equal to HEAD to establish that the current head is pushed.',
             'Arbitrary remote containment of HEAD supplies insufficient evidence',
             'absent, stale, unavailable, or inconclusive destination evidence as unknown and hold dependent actions',
             'Preserve pushed history; use a revert for a published mistake',
@@ -91,6 +91,7 @@ class ExplicitFeaturePushTests(unittest.TestCase):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, tracking)
         self.assertNotIn('A missing upstream counts as unpushed work', text)
+        self.assertNotIn('current-head publication', text)
 
     def test_standalone_babysit_covers_every_push_with_the_shared_preflight(self):
         text = (ROOT / 'plugins/ship/skills/babysit/SKILL.md').read_text()

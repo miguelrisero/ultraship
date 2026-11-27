@@ -38,7 +38,7 @@ Keep authorized lifecycle commands separate from peer reports. Preserve actual p
 Apply the same output contract to every model. Separate words with spaces and use full sentences of at most 25 words.
 Prohibit glued-word shorthand in peer and owner text. Lead peer bodies with the outcome and its meaning.
 Follow with `Facts`, `Decision`, and `Next` sections. Name the accountable owner and dated UTC time in `Next`.
-Decision Inputs contain `What is wrong`, `Why now`, `Options` A–C with effects, `Recommendation`, and `If no answer`.
+Decision Inputs contain `What is wrong`, `Why now`, `Options` A–D with effects (three only with the line "Only three real paths exist. A fourth would be padding."), `Recommendation`, and `If no answer`.
 State one recommendation with its reason and the default when the owner gives no answer.
 Preserve informational result Inputs without artificial choices. Preserve existing published choice IDs and exact owner answer contracts during retries.
 Classify every prepared Input HTML explicitly with `<meta name="output-kind" content="decision">` or `<meta name="output-kind" content="result">`.
@@ -64,10 +64,10 @@ D6575, 2026-10-29: CoC coordination direction, separate from actual owner receip
 
 ```text
 ## You may always
-Use only the authority below. Keep all action gates, tool denials, and hooks.
-1. Commit locally on the assigned lane branch when the brief grants commits, including before tests. Keep the required verification pending.
-2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Require separate PR authority to open the draft. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
-3. Run isolated local tests under this brief and Ship's execution admission. Keep special-run GO requirements.
+Use only the authority below.
+1. Commit locally on the assigned lane branch when the brief grants commits, including before tests.
+2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Require separate PR authority to open the draft. Required CI and independent review may follow the draft push. Require both before marking ready or merging. A draft PR in a private repository is not publication, so a publication or activation hold never blocks its draft push. An owner hold that names the push still applies.
+3. Run isolated local tests under this brief and Ship's execution admission.
 4. Rerun permitted CI for the lane's current head under Ship's babysit rules. Verify the new attempt.
 5. Dispatch the admitted writer to re-anchor named rows the lane's own diff breaks. Keep the identical mutant. Require one independent Sol review at the frozen head.
 6. Send `/merge` with merge authority when the ready PR has green required CI and independent review on the exact head. Complete the thread, browser, and other merge gates.
@@ -105,7 +105,7 @@ Board: <absolute board path>   Run ID: <run id>
 Mode: /ship:ship light
 Routing: <copy the Native peer routing contract above verbatim into this brief and every timer, recovery, driver, writer, reviewer, and child brief, including retries and replacements>
 Output: <copy the Model-independent output contract above verbatim; preserve it in every inherited brief>
-Owner custody: canonical CoC Input ID/version, exact owner answer event, continuing driver and acceptance, result Input receipt; preserve pending handoff and critical holds when CoC is unavailable.
+Owner custody: canonical CoC Input ID/version, exact owner answer event, continuing driver and acceptance, result Input receipt.
 Report on a transition or at a deadline. Report a blocked lane once with evidence and again only when the blocker changes.
 Return: agent ID, head SHA, PR URL, ledger gaps, CI and review state, next action, blockers with evidence
 Guard: <the guard constraint block, verbatim>

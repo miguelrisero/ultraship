@@ -285,7 +285,7 @@ A script file, another interpreter, a module flag or a wrapper command is anothe
 Keep the work pending after a hook refusal.
 Ask the driver for permission to run the refused command at any time.
 The driver may grant it or run the command within its authority.
-Keep every action gate under the shared refusal rule. A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
+A compliant retry never bypasses a hook, uses a different credential, or edits a guard.
 Checks that the brief names stay permitted when the hook admits them.
 
 Return the changed files, the test commands with their results or `tests not run (brief)`, the head SHA, and any blocker with evidence. Search in this order: LSP for definitions and references, `mcp__fff__multi_grep` to batch related patterns in one call, then `mcp__fff__find_files` or `mcp__fff__grep`. Use Grep and Glob when fff is not loaded.

@@ -9,7 +9,7 @@ Chief reports on transitions and deadlines. Chief tracks each ticket until the c
 ```
 
 Chief runs at the session model and needs the `ship` plugin.
-Upgrade Chief to `1.8.9` and Ship to `1.15.58` together before using these routes.
+Upgrade Chief to `1.8.10` and Ship to `1.15.62` together before using these routes.
 Start a fresh session with both plugins loaded.
 
 | Work | Agent |
@@ -21,7 +21,7 @@ Start a fresh session with both plugins loaded.
 | Research | `ship:researcher--luna` |
 | Billing and authorization verification | `ship:verifier--opus` |
 
-- Lanes: no cap; when cap risk is flagged, the recovery rules apply ([`skills/run/SKILL.md`](skills/run/SKILL.md)).
+- Lanes: no cap in the Green and Amber quota tiers; the CoC emergency limits apply in Red and Critical; when cap risk is flagged, the recovery rules apply ([`skills/run/SKILL.md`](skills/run/SKILL.md)).
 - Board and recovery: [`skills/run/references/state.md`](skills/run/references/state.md).
 - Dispatch check and brief template: [`skills/run/references/dispatch.md`](skills/run/references/dispatch.md).
 - Landing and live verification: [`skills/run/references/landing.md`](skills/run/references/landing.md).

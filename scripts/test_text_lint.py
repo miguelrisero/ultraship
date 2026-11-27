@@ -285,7 +285,7 @@ class TextLintTests(unittest.TestCase):
         decision = ('<meta name="output-kind" content="decision">'
                     '<h2>What is wrong</h2><p>The release waits.</p>'
                     '<h2>Why now</h2><p>The deadline approaches.</p>'
-                    '<h2>Options A to C</h2><p>A: Hold. B: Release. C: Defer.</p>'
+                    '<h2>Options A to C</h2><p>A: Hold. B: Release. C: Defer.</p><p>Only three real paths exist. A fourth would be padding.</p>'
                     '<h2>If no answer</h2><p>Keep the hold.</p>')
         for tool in ('create_input', 'update_input'):
             with self.subTest(tool=tool):
@@ -296,7 +296,7 @@ class TextLintTests(unittest.TestCase):
                                  + text_lint.INPUT_TEMPLATE)
         self.assertIn('<meta name="output-kind" content="decision">', text_lint.INPUT_TEMPLATE)
         self.assertIn('<meta name="output-kind" content="result">', text_lint.INPUT_TEMPLATE)
-        headings = ('What is wrong', 'Why now', 'Options A to C with effects',
+        headings = ('What is wrong', 'Why now', 'Options A to D with effects',
                     'Recommendation', 'If no answer')
         positions = [text_lint.INPUT_TEMPLATE.index('<h2>' + heading + '</h2>') for heading in headings]
         self.assertEqual(positions, sorted(positions))

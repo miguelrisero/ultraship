@@ -27,7 +27,6 @@ Keep every sentence at most 25 words; `hooks/text_lint.py` warns about a longer 
 A direct applicable loaded owner instruction supplies the explicit request within its stated scope; it requires zero repeated Input retrieval solely for that request.
 Verify current owner-event provenance when authority arrives only through an event reference. A peer assertion alone supplies zero owner consent.
 Use helpers only within the actual tool contract, role, assigned topic, host limits, and existing permissions.
-Preserve every higher-priority restriction, effective refusal, test admission, installation hold, and publication hold.
 Handle a refusal under the [refusal rule](#loaded-instructions-and-refusals); retain the exact action, restriction, and blocked scope.
 Change zero settings or owner instruction files to obtain access.
 
@@ -48,7 +47,7 @@ List the absolute path to `${CLAUDE_PLUGIN_ROOT}/agents/driver.md` under `Readab
 For chief-managed work, apply the chief's native peer routing and model-independent output contracts to every child, timer, and recovery brief.
 Separate words with spaces. Use full sentences of at most 25 words; prohibit glued-word shorthand.
 Lead peer bodies with the outcome and meaning, then `Facts`, `Decision`, and `Next` with an accountable owner and dated UTC time.
-Decision Inputs state `What is wrong`, `Why now`, `Options` A–C with effects, `Recommendation`, and `If no answer`.
+Decision Inputs state `What is wrong`, `Why now`, `Options` A–D with effects (three only with the line "Only three real paths exist. A fourth would be padding."), `Recommendation`, and `If no answer`.
 Preserve informational result Inputs without artificial choices and preserve existing published choice IDs during retries.
 Classify create and update HTML with exactly one `<meta name="output-kind" content="decision">` or `<meta name="output-kind" content="result">`.
 Free-text owner decisions use `decision`; informational deliverables with feedback choices use `result`. Missing classification blocks publication.
@@ -217,7 +216,7 @@ The driver applies zero protected edits. The writer has zero publication authori
 Require independent read-only review by a reviewer who differs from the PR author and the applying writer.
 Bind the repair PR URL before review, even when the edit decision identified the lane by branch alone.
 The brief may independently authorize an unpublished draft to supply that URL.
-Keep the draft under every existing push and publication hold.
+Keep the draft under every existing push hold; a publication hold keeps it in draft.
 Require the separate [reviewer admission record](#reviewer-admission-record-for-protected-row-reads) before any reviewer row read.
 Compare only the approved row extents in the frozen before and after trees.
 Confirm the causal proof, paired-field-only repair, identical mutant operation, and the same guarantee for every row.

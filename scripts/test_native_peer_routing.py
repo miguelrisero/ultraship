@@ -55,7 +55,7 @@ class NativePeerRoutingTests(unittest.TestCase):
             self.assertTrue(any(re.fullmatch(h['matcher'], tool) and any('text_lint.py' in c['command'] for c in h['hooks']) for h in hooks))
         dispatch = (ROOT / 'plugins/chief/skills/run/references/dispatch.md').read_text()
         for requirement in ('full sentences of at most 25 words', 'Prohibit glued-word shorthand',
-                            '`Facts`, `Decision`, and `Next`', '`Options` A–C with effects',
+                            '`Facts`, `Decision`, and `Next`', '`Options` A–D with effects (three only with the line "Only three real paths exist. A fourth would be padding.")',
                             'informational result Inputs without artificial choices',
                             'Future targets over 48 Sol hours', '5% or less', '85% or more'):
             self.assertIn(requirement, dispatch)
@@ -140,11 +140,17 @@ class NativePeerRoutingTests(unittest.TestCase):
                 self.assertNotIn('six thresholds', section)
 
     def test_owner_policy_lookup_requires_current_heading_and_preserves_holds(self):
-        for name in ('plugins/ship/skills/ship/references/owner-decisions.md',
-                     'plugins/chief/skills/run/SKILL.md',
-                     'plugins/chief/skills/run/references/dispatch.md'):
-            with self.subTest(path=name):
-                section = (ROOT / name).read_text().split('## Only the owner\n', 1)[1].split('\n## ', 1)[0]
+        target = 'skills/ship/references/owner-decisions.md'
+        chief = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text()
+        section = chief.split('## Only the owner\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn(f'`{target}#only-the-owner`', section)
+        self.assertIn('`owner-decisions:owner-decisions`', section)
+        self.assertIn("Only the owner's own words approve a critical item.", section)
+        fallback = ROOT / 'plugins/ship' / target
+        self.assertTrue(fallback.is_file())
+        for path in (fallback, ROOT / 'plugins/chief/skills/run/references/dispatch.md'):
+            with self.subTest(path=path):
+                section = path.read_text().split('## Only the owner\n', 1)[1].split('\n## ', 1)[0]
                 for requirement in (
                     '`Only the owner`',
                     'Treat the older `Escalate only a critical item` heading as a reason to look up the current policy.',
@@ -199,12 +205,56 @@ class NativePeerRoutingTests(unittest.TestCase):
         self.assertIn('result Input receipt with ID/version/owner URL', state)
 
 
+DRAFT_PUSH = ('A draft PR in a private repository is not publication, so a publication or activation hold never blocks its draft push. '
+              'An owner hold that names the push still applies.')
+
+
 class BriefSafetyTests(unittest.TestCase):
     def setUp(self):
         environment = patch.dict(os.environ)
         environment.start()
         self.addCleanup(environment.stop)
         os.environ.pop('SHIP_LINT_OFF', None)
+
+    def test_draft_push_is_never_blocked_by_a_publication_hold(self):
+        # A Sol lane held its draft push on a brief's "publication holds" wording (CoC replay, 26 Nov).
+        for name in ('plugins/ship/skills/ship/SKILL.md', 'plugins/chief/skills/run/SKILL.md',
+                     'plugins/chief/skills/run/references/dispatch.md', 'plugins/ship/agents/driver.md'):
+            item = next(line for line in (ROOT / name).read_text().splitlines() if line.startswith('2. ') and 'draft CI' in line)
+            with self.subTest(path=name):
+                self.assertTrue(item.endswith(DRAFT_PUSH))
+                self.assertEqual(item.count('is not publication'), 1)
+        self.assertIn('before marking ready. ' + DRAFT_PUSH, (ROOT / 'plugins/ship/agents/driver--sol.md').read_text())
+        for doc in sorted((ROOT / 'plugins').rglob('*.md')):
+            with self.subTest(broad_rule=str(doc.relative_to(ROOT))):
+                text = doc.read_text()
+                self.assertNotIn('A draft PR is not publication', text)
+                self.assertNotIn('blocks a draft push', text)
+        self.assertIn('Record the destination repository visibility in the preflight. '
+                      'A publication or activation hold blocks a push to a public repository or one of unknown visibility.',
+                      (ROOT / 'plugins/ship/skills/ship/references/pipeline.md').read_text())
+
+    def test_hold_report_names_pr_sha_and_next_step(self):
+        for name in ('plugins/ship/skills/ship/SKILL.md', 'plugins/chief/skills/run/SKILL.md'):
+            text = (ROOT / name).read_text()
+            with self.subTest(path=name):
+                self.assertIn('In a peer hold or wait report, give `Facts` (direct PR URL, or `no PR:` with the reason, and the 40-hex '
+                              'head SHA), `Decision` (blocked step, release condition), and `Next` (accountable owner, exact permitted '
+                              'action, UTC deadline).', text)
+                self.assertIn('The chief refuses an incomplete hold or wait report and asks the sender for all required fields.', text)
+
+    def test_lane_cap_follows_the_quota_tier(self):
+        skill = (ROOT / 'plugins/chief/skills/run/SKILL.md').read_text()
+        self.assertIn('There is no lane cap in the Green and Amber quota tiers', skill)
+        self.assertIn('In the Red and Critical tiers, apply the CoC emergency lane limits', skill)
+        self.assertIn('- Lanes: no cap in the Green and Amber quota tiers; the CoC emergency limits apply in Red and Critical;',
+                      (ROOT / 'plugins/chief/README.md').read_text())
+
+    def test_decision_options_run_a_to_d_with_the_three_option_line(self):
+        line = '`Options` A–D with effects (three only with the line "Only three real paths exist. A fourth would be padding.")'
+        self.assertIn(line, (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text())
+        self.assertIn('<p>With three real options, add: Only three real paths exist. A fourth would be padding.</p>',
+                      (ROOT / 'plugins/ship/hooks/text_lint.py').read_text())
 
     def test_each_template_requires_read_scope_and_safety_sentences(self):
         for name, heading in (

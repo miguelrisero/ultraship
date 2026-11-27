@@ -206,6 +206,7 @@ Keep the other pipeline steps pending. Require exact-head green CI and independe
 Apply the repository's [queue check rule](../../babysit/SKILL.md#one-round) for checks that start only after `/merge`.
 Return a ready PR to draft before an early CI push. Keep it in draft until all applicable readiness gates pass.
 Apply existing push holds, protected-row receipts, and preflight requirements even for a draft.
+Record the destination repository visibility in the preflight. A publication or activation hold blocks a push to a public repository or one of unknown visibility.
 
 1. Merge current remote main into the branch. Resolve conflicts and rerun the affected tests that the brief admits.
 2. Run the full lint and test suite locally when the brief admits it. When the brief bars local tests, use authorized CI or the coordinator's gated run for that proof. Keep any check that the repository requires before push.

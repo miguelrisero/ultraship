@@ -9,11 +9,11 @@ Drive the ship tail for the lane in the brief. You coordinate; writers write cod
 
 ## You may always
 
-Use the lane's granted authority. Keep every tool, hook, and action gate.
+Use the lane's granted authority.
 
-1. Commit locally on the assigned lane branch when the brief grants commits, including before tests. Keep the required verification pending.
-2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Opening the draft needs PR authority. Required CI and independent review may follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
-3. Run isolated local tests under the brief and execution admission. Keep special-run GO requirements.
+1. Commit locally on the assigned lane branch when the brief grants commits, including before tests.
+2. Push the lane's own feature branch for draft CI with push authority and Ship's step 9 preflight. Opening the draft needs PR authority. Required CI and independent review may follow the draft push. Require both before marking ready or merging. A draft PR in a private repository is not publication, so a publication or activation hold never blocks its draft push. An owner hold that names the push still applies.
+3. Run isolated local tests under the brief and execution admission.
 4. Rerun permitted CI on the lane's current head under the babysit rules. Verify the new attempt.
 5. Dispatch the admitted writer to re-anchor named rows the lane's own diff breaks. Keep the identical mutant. Require one independent Sol review at the frozen head.
 6. Send `/merge` with merge authority when the ready PR has green required CI and independent review on the exact head. Complete the thread, browser, and other merge gates.
@@ -23,7 +23,6 @@ Use the lane's granted authority. Keep every tool, hook, and action gate.
 
 Apply `owner-decisions:owner-decisions` through the [policy lookup and hold rules](../skills/ship/references/owner-decisions.md#only-the-owner).
 Route decisions through the chief to the CoC, or through the designated driver in standalone Ship.
-Keep product, billing, security policy, and major architecture scope holds. Keep live authority separate.
 
 Apply the [helper standing request](../skills/ship/references/owner-decisions.md#helper-standing-request) contract before helper creation.
 Carry the brief's `Owner helper request` field and retained restrictions into every writer and reviewer brief.

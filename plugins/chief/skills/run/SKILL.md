@@ -10,28 +10,21 @@ Coordinate the task in `$ARGUMENTS` from the main session, at the session model.
 
 ## You may always
 
-Use authority within the lane brief and your role. Route lane actions through the assigned writer or driver. Keep every hook and action gate.
+Act within the brief, your role, and the applicable gates. Route lane actions through the assigned writer or driver.
 
-1. Allow local commits before tests when the brief grants commits on the assigned lane branch. Keep the required verification pending.
-2. Have the authorized driver push the lane's own feature branch for draft CI after Ship's step 9 preflight. Grant draft creation separately. Allow required CI and independent review to follow the draft push. Require both before marking ready or merging. Keep separate protected-row receipt requirements.
-3. Have the assigned agent run isolated local tests under the brief and Ship's execution admission. Keep special-run GO requirements.
-4. Have the authorized driver rerun permitted CI on the lane's current head under Ship's babysit rules. Verify the new attempt.
-5. Route re-anchors of named rows the lane's own diff breaks through the admitted writer. Keep the identical mutant. Require one independent Sol review at the frozen head.
-6. Send `/merge` with merge authority when the PR is ready, required CI is green, and independent review covers the exact head. Complete the thread, browser, and other [merge gates](references/landing.md#ready-and-merge-authority).
-7. Ask the CoC for permission at any time. Retry a refused command only in a form that meets the named rule or fixes its cause. Continue independent work.
+1. Allow local commits on the assigned branch with commit authority, including before tests.
+2. Have the authorized driver push the lane's feature branch for draft CI after Ship's step 9 preflight. A draft PR in a private repository is not publication, so a publication or activation hold never blocks its draft push. An owner hold that names the push still applies.
+3. Have the assigned agent run isolated local tests under Ship's execution admission.
+4. Have the authorized driver rerun permitted CI on the current head under Ship's babysit rules and verify the new attempt.
+5. Have the admitted writer re-anchor named rows the lane's diff breaks with the identical mutant. Require one independent Sol review at the frozen head.
+6. Send `/merge` with authority for a ready PR with green required CI, independent review on the exact head, and all other [merge gates](references/landing.md#ready-and-merge-authority) met.
+7. Ask the CoC for permission at any time.
 
 ## Only the owner
 
-Load `owner-decisions:owner-decisions` and apply its current `Only the owner` section.
-Treat the older `Escalate only a critical item` heading as a reason to look up the current policy.
-If the installed skill or `Only the owner` is missing or incomplete, read the [canonical Better Plugin source](https://github.com/bettergroupinc/better-plugin/blob/main/plugins/owner-decisions/skills/owner-decisions/SKILL.md#only-the-owner).
-Use an authorized local copy of `plugins/owner-decisions/skills/owner-decisions/SKILL.md` in the Better Plugin checkout if web access is unavailable.
-If the canonical policy remains unavailable, refuse a sensitive action whose approval requirement is unclear.
-Keep the action pending and report the missing policy through your usual decision route. Continue independent work.
-Keep existing permission denials and holds.
+Apply the reserved decisions and triggers in the `Only the owner` section of `owner-decisions:owner-decisions` through Ship's `skills/ship/references/owner-decisions.md#only-the-owner`.
 Only the owner's own words approve a critical item.
 Route decisions through the CoC, or the designated driver in a standalone run.
-Keep product, billing, security policy, and major architecture scope holds. Keep live authority separate.
 
 Chief needs the `ship` plugin. Check that `ship:driver` and `ship:writer--sol` are available before the first dispatch.
 
@@ -46,7 +39,7 @@ Batch actionable and terminal reports; keep unchanged routine reports silent and
 Copy the routing and model-independent output contracts into every timer, recovery, driver, writer, reviewer, and child brief, including retries and replacements.
 Act by default: use the authority the owner and the CoC already granted in the same turn, and never ask for it again.
 Stop a step only for a hook denial, a failed check, a hard rule, an owner refusal, a missing special-run GO, or an owner-only item.
-Apply Ship's `Loaded instructions and refusals` to the refused step. Keep that step pending and continue independent work.
+Apply Ship's `Loaded instructions and refusals` to the refused step. Keep that step pending. Continue independent work.
 Grant a lane request or run the refused command only within your authority and tool permissions. Record the grant or run in the lane state file.
 Relay the lane's quoted refusal and defect to the CoC and the corrected decision to the lane under ship's decision-defect rule.
 An unverified detail that no rule names is not a stop: name it in one line and continue. A rule that names a missing receipt or evidence still stops its step.
@@ -56,7 +49,8 @@ Report status only on a transition or at a deadline.
 Report lane state changes, PR openings, CI turning red or green, merges, and verified deploys.
 Omit standing holds from routine status reports.
 State what changed, what it means, and the next action.
-Keep every required restriction in the brief.
+In a peer hold or wait report, give `Facts` (direct PR URL, or `no PR:` with the reason, and the 40-hex head SHA), `Decision` (blocked step, release condition), and `Next` (accountable owner, exact permitted action, UTC deadline).
+The chief refuses an incomplete hold or wait report and asks the sender for all required fields.
 Verify CoC liveness using its existing recorded identity and the [process check](references/state.md#continuation-and-waits).
 Retry through existing scheduling with zero additional pollers or duplicate Inputs.
 Preserve actual owner Input event delivery and the canonical CoC Input ID → exact owner answer event → continuing driver → result Input receipt.
@@ -173,13 +167,13 @@ blocker everywhere"). Record that check in the PR body.
 
 The driver dispatches `ship:writer--sol` for code and keeps every fix inside its lane.
 
-There is no lane cap (owner, 2026-10-22, until new notice). Run as many lanes as the work needs. When cap risk is flagged, follow [state and recovery](references/state.md). Surface lanes queued over four hours with an ETA or a priority decision.
+There is no lane cap in the Green and Amber quota tiers (owner, 2026-10-22, until new notice). Run as many lanes as the work needs. In the Red and Critical tiers, apply the CoC emergency lane limits in [operating-policy.md#lane-budget-by-quota-runway](https://github.com/bettergroupinc/better-plugin/blob/main/plugins/chief-of-chiefs/skills/run/references/operating-policy.md#lane-budget-by-quota-runway); the CoC enforces them at its sweep. The CoC names the current tier in its brief or status. Use an authorized local copy of that file in the Better Plugin checkout if web access is unavailable. When cap risk is flagged, follow [state and recovery](references/state.md). Surface lanes queued over four hours with an ETA or a priority decision.
 
 Give every person a realistic ETA, and keep it (owner, 2026-10-28: "please REALISTIC TIMELINE, stop scamming people with your timelines, always super optimistic, learn as a rule that you cannot fail on your promises"). Build each ETA from the real path: CI, review rounds, the gate wait, the merge-queue depth, the deploy, and the live check. Quote the time you are sure of. Say "earlier if it goes well" as a separate sentence. When a promise is at risk, tell the person before it passes, with the new realistic time and the cause.
 
 Use native completion notifications. Persist the awaited run identity and next action for external CI and deploy waits. Check the board and the agent's process state before you resume a lane. Continue other eligible work during a model outage or an owner blocker.
 
-Before you advance a lane or report its status, inspect the lane's commit stack and upstream state. Retain all existing tracking checks. A missing upstream alone establishes neither publication nor unpushed work. Within existing read permission, verify the intended feature destination's repository identity. Compare its exact `refs/heads/<feature-branch>` remote head OID with the lane's current HEAD. Apply the ship pipeline's credential-safe gate before capturing any resolved URL or remote evidence. Require fresh evidence from that verified destination with an OID equal to HEAD to establish current-head publication. Arbitrary remote containment of HEAD supplies insufficient evidence. Treat absent, stale, unavailable, or inconclusive destination evidence as unknown and hold dependent actions. Preserve pushed history; use a revert for a published mistake.
+Before you advance a lane or report its status, inspect the lane's commit stack and upstream state. Retain all existing tracking checks. A missing upstream alone establishes neither a pushed head nor unpushed work. Within existing read permission, verify the intended feature destination's repository identity. Compare its exact `refs/heads/<feature-branch>` remote head OID with the lane's current HEAD. Apply the ship pipeline's credential-safe gate before capturing any resolved URL or remote evidence. Require fresh evidence from that verified destination with an OID equal to HEAD to establish that the current head is pushed. Arbitrary remote containment of HEAD supplies insufficient evidence. Treat absent, stale, unavailable, or inconclusive destination evidence as unknown and hold dependent actions. Preserve pushed history; use a revert for a published mistake.
 
 ## Execution and publication safeguards
 
@@ -187,7 +181,7 @@ Apply the installed ship plugin's `agents/writer--sol.md` execution admission an
 Ordinary touched-file pytest and vitest use automatic slot admission without a per-run CoC GO.
 Keep mutation, timing, shared-database, and paid-run GOs, spending caps, host safeguards, and caller-owned TERM-grace cleanup.
 The CoC can always issue a GO within existing authority when a lane or chief is stuck.
-Follow [canonical push and contact safeguards](references/landing.md#canonical-push-and-contact-safeguards) for each authorized publication.
+Follow [canonical push and contact safeguards](references/landing.md#canonical-push-and-contact-safeguards) for each authorized push.
 
 ## Verify and finish
 
