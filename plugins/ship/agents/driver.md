@@ -26,6 +26,7 @@ Route decisions through the chief to the CoC, or through the designated driver i
 
 Apply the [helper standing request](../skills/ship/references/owner-decisions.md#helper-standing-request) contract before helper creation.
 Carry the brief's `Owner helper request` field and retained restrictions into every writer and reviewer brief.
+Send the full reviewer brief in the first message. Never ask for a readiness word first.
 
 Invoke `ship:ship` inline with the lane contract as the current task, in the mode the brief names (`light` by default). Dispatch writers with `ship:writer--sol` and reviewers with their scoped `ship:*` names. Leave the Agent `model` field unset; a hook denies overrides.
 

@@ -78,6 +78,7 @@ Preserve every other Input ban, reviewer MCP denial, and independent hook and to
 - Apply the [important planning gate](references/pipeline.md#important-planning) only to important plans, in either mode.
 - Send broad research to `ship:researcher--luna`.
 - Freeze one subject SHA per review step. Give every seat the same brief and keep sibling verdicts out of it.
+- Send the full reviewer brief in the first message. Never ask for a readiness word first.
 
 ## Execution admission
 
@@ -133,11 +134,13 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-patch <pending.tsv> <res
 ```
 
 The command reads the subject and verdict from the reviewer's transcript and hashes the patch file itself. The transcript must hold one prompt and no later turn. The review turn must end with a blank line and an unindented two-line record: `Patch SHA-256: <digest>` (or `Reviewed patch SHA-256:`) and `Verdict: pass` or `Verdict: findings`. Emphasis and backticks around the label and digest are allowed. The record cannot be the first line of the turn. The turn must name no other SHA-256 digest and no other line with a `Verdict:` or `Overall:` label, in any container. A blank line holds only spaces or tabs. A `Reviewed commit:` label with a full or abbreviated commit SHA anywhere in a line, any code fence (three backticks or tildes), or an HTML comment, `<pre>`, `<script>`, `<style>` or `<textarea>` block leaves the result pending. The digest must equal the file's digest. The patch path must be absolute and canonical, and no path component may be a symlink. The file must be a regular file of at most 64 MiB. The command records `patch:<digest>` as the subject; a base commit gets no row. The result also needs its recorded agent, ledger and run.
+Use `account-void <pending.tsv> <result-id>` for a stopped agent whose transcript has only the readiness prompt and one `ready` reply. The prompt is ``Return the single word `ready` `` with an optional `and nothing else` and final period. The command checks the session, the agent ID, and the absence of tool calls and review labels. A void row gives zero review or completion credit.
+
 Record a later independent review separately on the run board. Link the pending result ID, original subject and verdict, and later reviewed commit and result. The link grants zero accounting, review, or publication credit.
 
 When Stop reports a missing original ledger or run binding, end the turn with a blocker report. Keep run completion on hold. Restore the original binding through an approved recovery route before crediting that result.
 
-Use `account-auto` only after verifying the reviewed commit and verdict for every result in the pending file:
+Use `account-auto` only after verifying the commit and verdict for every result in the pending file:
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/ledger.py" account-auto "<pending.tsv>"
@@ -149,9 +152,11 @@ Run the command alone on one line. Start exactly one line in the review result w
 
 The command reads the transcript at an absolute path without symlinks, ending in `<session>/subagents/agent-<agent-id>.jsonl`. The recorded path must match its normalized and resolved forms. A path with `.` or `..` segments or repeated slashes leaves the result pending. The session matches the pending file's stem. The agent ID matches the recorded result.
 
-The review turn must contain exactly one distinct 40-digit hexadecimal commit SHA. The command counts SHAs between Markdown underscores or backticks. A SHA has no adjacent hexadecimal digits.
+The review turn must contain exactly one distinct 40-digit hexadecimal commit SHA. The command counts SHAs between Markdown underscores or backticks. A SHA has no adjacent hexadecimal digits. The ledger binds each parsed turn to one result. A second notice for the same turn stays pending.
 
 The command strips Markdown markers and whitespace from the value on the label line. The first word must be a verdict word. The command recognizes `pass` as positive and `fail`, `failed`, `fails`, `failing`, `failure`, and `findings` as negative. A `pass` value permits only one verdict word and excludes negations: `not`, `no`, `never`, `without`, and words ending in `n't`. The command records `findings` for a negative value that contains `findings`, or `fail` for other negative values.
+
+For `Verdict: blocked`, give one `Reason: <reason>` line and the commit named in the brief. The command records a blocked accounting row with the reason and commit in its evidence. The row gives zero review, pipeline, or completion credit. Account for a continued turn under its own result ID while the run stays open.
 
 The command requires exactly one `run-start` row that matches the recorded run before it accepts a receipt or an `account-result` row. The receipt must name the same ledger and run. The receipt row must follow the recorded `run-start`. The first `run-end` or next `run-start`, if present, ends the range. The result's own `account-result` row can also satisfy the receipt outside that range. The plain `account-auto <pending.tsv>` form leaves the result pending if any required evidence is missing or differs. The plain form also leaves it pending if the verdict label repeats or the verdict value mixes positive and negative words.
 

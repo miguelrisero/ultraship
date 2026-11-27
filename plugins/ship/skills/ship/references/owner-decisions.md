@@ -236,8 +236,12 @@ The pre hook denies every reviewer read under a `tests/mutation` path unless the
 Use this record for lane-owned row review and standalone main-row repair review.
 
 1. Dispatch `ship:reviewer--sol`, `ship:reviewer--opus`, or, for lane-owned row review only, `ship:reviewer--astra`.
-   Ask the reviewer to return `ready` and read nothing.
-2. Take the agent ID from the Agent tool result.
+   Launch the reviewer in the background.
+   Send the full reviewer brief at dispatch. Give the full 40-digit commit SHA.
+   If the hook refuses a protected read because admission is missing or invalid, end the turn.
+   Make no further protected reads.
+   Return three lines: `Verdict: blocked`, `Reason: protected admission missing`, and `Reviewed commit: <the commit named in the brief>`.
+2. Take the agent ID as soon as the Agent tool returns it.
 3. Write the full record with native Write to `<workspace>/.scratch/ultraship/row-review/<agent ID>.json` or `${XDG_STATE_HOME:-~/.local/state}/ultraship/row-review/<agent ID>.json`.
    Start at the real path of the reviewer's working directory.
    Use the first directory with a `.scratch` folder as `<workspace>`, checking that path and then its parents.
@@ -247,8 +251,10 @@ Use this record for lane-owned row review and standalone main-row repair review.
    In the file name, replace each character outside letters, digits, `_`, `.` and `-` with `_`.
 4. The record has four fields: `pr` (the PR URL), `agent_id` (the agent ID), `row_files` (the exact canonical absolute row-file paths) and `expires_at` (`YYYY-MM-DDTHH:MM:SSZ`, UTC, at most 4 hours ahead).
 5. Run `chmod 600` on the file. The hook refuses a file that the group or others can write.
-6. Send the review brief to the reviewer with SendMessage.
-7. Delete the file when the review returns.
+6. Account for a result blocked by missing admission with `account-auto`. Keep the run open for the continued review.
+   Continue the same reviewer with SendMessage after the record exists.
+   Account for the continued turn under its own result ID. Use its actual verdict.
+7. Delete the file when the review ends.
 
 In Bash, name the record by its literal absolute path for `chmod 600` and the final delete.
 The hook refuses a Bash command that names the state folder together with any of these triggers:
