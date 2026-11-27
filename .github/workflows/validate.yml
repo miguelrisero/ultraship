@@ -33,8 +33,14 @@ jobs:
             shift
             (
               export TMPDIR="$scratch/$name"
-              mkdir "$TMPDIR" && "$@"
-            ) >"$scratch/$name.log" 2>&1 &
+              status=0
+              { mkdir "$TMPDIR" && "$@"; } >"$scratch/$name.log" 2>&1 || status=$?
+              {
+                flock 9 || exit 1
+                printf '%s: exit %s\n' "$name" "$status" && cat "$scratch/$name.log" && printf '\n'
+              } 9>>"$scratch/output.lock" || exit 1
+              exit "$status"
+            ) &
             pids[$name]=$!
           }
           run_suite rules env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py' -v
@@ -44,16 +50,10 @@ jobs:
           failed=0
           for name in rules ledger teardown shell; do
             if [[ -n ${pids[$name]:-} ]]; then
-              status=0
-              wait "${pids[$name]}" || status=$?
-              printf '%s: exit %s\n' "$name" "$status"
-              if (( status != 0 )); then
-                failed=1
-              fi
+              wait "${pids[$name]}" || failed=1
             else
               printf '%s: missing result\n' "$name"
               failed=1
             fi
-            cat "$scratch/$name.log" || failed=1
           done
           exit "$failed"

@@ -14,7 +14,10 @@ SUITES = ('rules', 'ledger', 'teardown', 'shell')
 SHELL_FIXTURE = 'plugins/ship/skills/test/scripts/check.sh'
 SUITE = """import os
 from pathlib import Path
-Path('{name}.tmpdir').write_text(os.environ['TMPDIR'])
+tmpdir = Path(os.environ['TMPDIR']).resolve(strict=True)
+if not tmpdir.is_dir():
+    raise NotADirectoryError(tmpdir)
+Path('{name}.tmpdir').write_text(str(tmpdir))
 """
 FIXTURES = {
     'scripts/check-plugins.py': 'pass\n',
@@ -40,7 +43,7 @@ if os.environ['SYNTHETIC_FAIL'] in ('ledger', 'both'):
     raise SystemExit('synthetic ledger failure')
 """,
     'plugins/chief/skills/run/scripts/lane-teardown.test.sh': '''
-printf '%s\\n' "$TMPDIR" > teardown.tmpdir
+(cd -- "$TMPDIR" && pwd -P) > teardown.tmpdir || exit 1
 if [ "$SYNTHETIC_FAIL" = teardown ]; then
     echo 'synthetic teardown failure' >&2
     exit 7
@@ -49,7 +52,7 @@ fi
     SHELL_FIXTURE: ':\n',
     'bin/bash': '''#!/bin/sh
 if [ "$1" = -n ]; then
-    printf '%s\\n' "$TMPDIR" > shell.tmpdir
+    (cd -- "$TMPDIR" && pwd -P) > shell.tmpdir || exit 1
 fi
 exec "$REAL_BASH" "$@"
 ''',
@@ -90,10 +93,10 @@ class ValidateWorkflowTests(unittest.TestCase):
             code, output = self.run_workflow(root)
             self.assertEqual(code, 0, output)
             dirs = set()
+            scratch = (root / '.scratch').resolve(strict=True)
             for suite in SUITES:
                 self.assertIn(f'{suite}: exit 0', output.splitlines())
                 directory = Path((root / f'{suite}.tmpdir').read_text().strip())
-                scratch = root / '.scratch'
                 self.assertTrue(directory.is_relative_to(scratch), directory)
                 self.assertNotEqual(directory, scratch)
                 dirs.add(directory)
