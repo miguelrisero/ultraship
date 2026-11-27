@@ -64,6 +64,9 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Use the recorded index stages to identify conflicts.',
                 'Flag a named checkout for explicit disposition when the first-parent blob differs from the merge-base blob.',
                 'Block release until every flagged checkout has an explicit disposition.',
+                'The merge commit changes the blob ID of `tests/mutation/extra.toml` from its stage 0 entry.',
+                'The brief and the separate review records do not cover `tests/mutation/extra.toml`.',
+                'Return `Verdict: blocked` for the unapproved change to `tests/mutation/extra.toml`.',
             )),
         ):
             for clause in clauses:
