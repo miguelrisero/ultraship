@@ -6614,8 +6614,9 @@ def writer_row_merge_denial(command, cwd):
     def tree_entry(ref):
         return git('ls-tree', '-z', ref, '--', path)
 
-    def file_entry(entry):
-        return re.fullmatch(r'100(?:644|755) blob (?:[0-9a-f]{40}|[0-9a-f]{64})\t' + re.escape(path) + '\x00', entry)
+    def file_blob(entry):
+        match = re.fullmatch(r'100(?:644|755) blob ([0-9a-f]{40}|[0-9a-f]{64})\t' + re.escape(path) + '\x00', entry)
+        return match[1] if match else None
 
     try:
         if (git('rev-parse', '--show-toplevel').rstrip('\n') != cwd
@@ -6633,15 +6634,17 @@ def writer_row_merge_denial(command, cwd):
                 return 'MERGE_HEAD differs from origin/main or does not name a single commit. Stop and report the conflict to your driver.'
         base = git('merge-base', 'HEAD', main).strip()
         if source is None:
-            if not tree_entry(main) and not tree_entry(base) and file_entry(tree_entry('HEAD')):
+            if not tree_entry(main) and not tree_entry(base) and file_blob(tree_entry('HEAD')):
                 deleted = git('diff', '--cached', '--no-renames', '--no-ext-diff', '--no-textconv',
                               '--diff-filter=D', '--name-only', '-z', '--ignore-submodules=none', main, '--')
                 if any(re.search(PROTECTED_ROW, path, re.I) for path in deleted.split('\x00')):
                     return 'The index omits a protected path from origin/main. Stop and report the conflict to your driver.'
                 return None
-        elif (source in ('origin/main', base) and file_entry(tree_entry(main if source == 'origin/main' else base))
-              and git('ls-files', '-u', '-z', '--', path)):
-            return None
+        elif source in ('origin/main', base):
+            main_blob = file_blob(tree_entry(main))
+            if (main_blob and (source == 'origin/main' or file_blob(tree_entry(base)) == main_blob)
+                    and git('ls-files', '-u', '-z', '--', path)):
+                return None
     except (OSError, subprocess.SubprocessError, UnicodeError):
         pass
     return reason

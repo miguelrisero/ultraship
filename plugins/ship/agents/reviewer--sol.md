@@ -64,7 +64,8 @@ This route grants zero edit, execution, or publication authority.
 Apply [protected row merge resolution](../skills/ship/SKILL.md#protected-row-merge-resolution) when the brief names it.
 Use the driver's content-free Git evidence. Require the second parent to match the verified remote main commit used for the merge.
 Confirm that every protected path in the second parent exists at the same path in the merge commit.
-Match each resolved blob at the merge commit to its named source.
+Match each checked-out path's blob ID at the merge commit to the blob ID at the same path in the second parent.
+For a checkout from the merge base, confirm the same blob ID at that path in the merge base.
 For a removal, confirm the path exists in the first parent and is absent at the merge base, second parent and merge commit.
 Block on missing or conflicting evidence. Return the verdict for the merge commit.
 Send later protected edits through the applicable row route. This review grants zero protected reads or tool permissions.

@@ -318,12 +318,12 @@ Use the CoC's CI, testing and tooling standing grant. Keep the local commit gran
 
 1. Name each exact repository-relative path under `tests/mutation/` in the writer brief.
 2. For a conflicted file, run `git checkout origin/main -- <path>` to take `origin/main:<path>`.
-   To restore the file to its pre-merge base, resolve `git merge-base HEAD origin/main` first.
-   Run `git checkout <full-merge-base-sha> -- <path>` to take that commit's blob.
+   Use `git checkout <full-merge-base-sha> -- <path>` only when that exact path has the same blob ID at the merge base and `origin/main`.
+   Resolve the full SHA with `git merge-base HEAD origin/main`. Send every other base restore through the existing lane-owned row route.
    For a file the PR added, run `git rm -- <path>` only if main and the merge base both lack the path.
    Preserve every protected path from the second parent. Stop if the index already omits one before a removal.
    Run one literal command per file from the repository root. Use `git -C <absolute-root>` to name the root explicitly.
-3. Compare `git hash-object <path>` and the staged blob ID with the named blob ID.
+3. Compare `git hash-object <path>` and the staged blob ID with the blob ID of `origin/main:<path>`.
    For a removal, confirm the path is absent from the worktree and the index.
    Stop on a mismatch. Do not read or print row contents under this route.
 4. Verify that the staged resolution preserves all protected paths from the second parent. Use Git metadata with rename detection off.
