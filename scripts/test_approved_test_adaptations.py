@@ -415,7 +415,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 selection = '1. Select the route for each row before any tool admission or tool run.'
                 self.assertTrue(selection in route, 'Each row needs a route before tool admission or execution.')
                 admission = 'For tool re-anchor or restoration only: Admit the writer with the [row re-anchor tool admission record]'
-                native = 'For a CoC-approved native exact-pair edit, use zero row re-anchor tool admissions and zero row re-anchor tool runs.'
+                native = 'For a CoC-approved native exact-pair edit, use zero row re-anchor tool admissions and run no row re-anchor tool.'
                 tool_run = '2. Tool re-anchor: the writer runs the sanctioned re-anchor tool once per row'
                 self.assertEqual(route.count('[row re-anchor tool admission record]'), 1)
                 self.assertLess(route.index(selection), route.index(admission))
@@ -466,6 +466,42 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                     with self.subTest(requirement=requirement):
                         self.assertTrue(requirement in ci, requirement)
 
+    def test_native_exact_pair_attempt_accounting_requires_same_invocation_proof(self):
+        reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        rule = section(reference, '## Native exact-pair tool attempt accounting')
+        for requirement in (
+            'Count a prior invocation as zero runs only when all checks below pass.',
+            'Bind the proof to the exact invocation, row ID, row file, worktree, frozen head and tool version.',
+            "Verify the exact refusal against the named tool version's pre-write checks.",
+            'Require a nonzero exit and zero generated authorization records from that invocation.',
+            'Require identical row-file blob IDs immediately before and after that same invocation.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, rule)
+
+    def test_native_exact_pair_attempt_accounting_counts_writes_and_uncertain_refusals(self):
+        reference = (SHIP / 'skills/ship/references/owner-decisions.md').read_text()
+        rule = section(reference, '## Native exact-pair tool attempt accounting')
+        for requirement in (
+            'Count every successful invocation and every invocation that writes, even if a later action restores the file.',
+            'Count the invocation if evidence is missing, ambiguous, or belongs to a different invocation.',
+            'Keep every existing admission, refusal, retry, decision and review gate in force.',
+            'This rule grants zero retry or write authority.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, rule)
+
+    def test_native_exact_pair_attempt_proof_reaches_independent_review(self):
+        link = '[native exact-pair tool attempt accounting](../skills/ship/references/owner-decisions.md#native-exact-pair-tool-attempt-accounting)'
+        route = section((SHIP / 'agents/driver.md').read_text(), '### Lane-owned row route')
+        self.assertIn(f'Apply the {link} rule.', route)
+        self.assertIn('Include the verified proof in the reviewer brief when a prior refusal is necessary to establish zero counted runs.', route)
+        for name in REVIEWERS:
+            with self.subTest(reviewer=name):
+                review = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
+                native = review.split('For a CoC-approved native exact-pair edit,', 1)[1].split('\n\n', 1)[0]
+                self.assertIn(f'Verify any prior refusal proof in the brief under the {link} rule.', native)
+
     def test_native_exact_pair_review_uses_decision_and_exact_head_ci(self):
         for name in REVIEWERS:
             with self.subTest(reviewer=name):
@@ -476,7 +512,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertIn('require the generated record fields that the brief copies from the tool output.', tool)
                 self.assertIn('Confirm that those fields name the frozen head, the row ID, the expected count, an unchanged mutant and zero changed statements.', tool)
                 for requirement in (
-                    'For a CoC-approved native exact-pair edit, require zero row re-anchor tool runs and no generated record.',
+                    'For a CoC-approved native exact-pair edit, require zero counted tool runs and no generated authorization record.',
                     'Require the frozen CoC decision by absolute path and SHA256.',
                     "Require the driver's digest and binding verification at the frozen head.",
                     'Match the decision to the applying writer, repository, lane, PR, row file, row ID and source commit.',
