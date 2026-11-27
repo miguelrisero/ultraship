@@ -82,6 +82,9 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
 
 ### Lane-owned row route
 
+Use [protected row merge resolution](../skills/ship/SKILL.md#protected-row-merge-resolution) for qualifying whole-file actions during an `origin/main` merge.
+The steps below govern the PR's own row edits.
+
 A lane re-anchors, retires or adds the protected mutation rows that its own diff breaks or needs. Only a row action that needs CoC approval needs a CoC decision file. A step 4 follow-up row needs one.
 Authority: the owner's global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.
 Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.
