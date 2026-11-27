@@ -3126,6 +3126,7 @@ class WriterRowMergeTests(unittest.TestCase):
     conflict = 'tests/mutation/conflict.toml'
     pr_only = 'tests/mutation/pr-only.toml'
     inherited = 'tests/mutation/inherited.toml'
+    kept = 'backend/api/tests/mutation/kept.toml'
 
     def setUp(self):
         home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
@@ -3136,8 +3137,9 @@ class WriterRowMergeTests(unittest.TestCase):
         self.git('init', '-b', 'main')
         self.git('config', 'user.name', 'Fixture')
         self.git('config', 'user.email', 'fixture@example.invalid')
-        (self.repo / self.conflict).parent.mkdir(parents=True)
-        self.commit_rows('base', self.conflict, self.inherited)
+        for path in (self.conflict, self.kept):
+            (self.repo / path).parent.mkdir(parents=True)
+        self.commit_rows('base', self.conflict, self.inherited, self.kept)
         self.base = self.git('rev-parse', 'HEAD').stdout.strip()
         self.git('branch', 'lane')
         self.git('rm', '--', self.inherited)
@@ -3176,6 +3178,48 @@ class WriterRowMergeTests(unittest.TestCase):
         self.merge()
         self.assertFalse(denied(self.pre(f'rm {self.pr_only}')))
         self.assertFalse(denied(self.pre(f'rm -- {self.pr_only}')))
+
+    def test_writer_cannot_remove_rows_if_the_index_omits_a_protected_main_path(self):
+        renamed = 'backend/api/tests/mutation/renamed.toml'
+        self.git('mv', '--', self.kept, renamed)
+        self.git('commit', '-m', 'rename protected fixture')
+        self.merge()
+
+        self.git('config', 'diff.renames', 'true')
+        self.assertIn(f'R100\t{self.kept}\t{renamed}',
+                      self.git('diff', '--cached', '--name-status', 'origin/main').stdout)
+        for path in (renamed, self.pr_only):
+            with self.subTest(path=path):
+                self.assertTrue(denied(self.pre(f'rm -- {path}')))
+
+        self.git('checkout', 'origin/main', '--', self.kept)
+        self.assertFalse(denied(self.pre(f'rm -- {self.pr_only}')))
+
+    def test_writer_cannot_resolve_rows_with_replacement_refs(self):
+        self.merge()
+        self.git('replace', self.base, 'HEAD')
+        for args in (f'checkout origin/main -- {self.conflict}', f'rm -- {self.pr_only}'):
+            with self.subTest(args=args):
+                self.assertTrue(denied(self.pre(args)))
+
+    def test_writer_stops_when_origin_main_advances_during_the_merge(self):
+        self.merge()
+        advanced = self.git('commit-tree', 'origin/main^{tree}', '-p', 'origin/main', '-m', 'advance main')
+        self.git('update-ref', 'refs/remotes/origin/main', advanced.stdout.strip())
+        for args in (f'-C {self.repo} checkout origin/main -- {self.conflict}', f'rm -- {self.pr_only}'):
+            with self.subTest(args=args):
+                result = self.pre(args)
+                self.assertTrue(denied(result))
+                self.assertIn('MERGE_HEAD differs from origin/main',
+                              result['hookSpecificOutput']['permissionDecisionReason'])
+
+    def test_writer_cannot_resolve_rows_with_multiple_merge_heads(self):
+        self.merge()
+        merge_head = self.git('rev-parse', '--git-path', 'MERGE_HEAD').stdout.strip()
+        with (self.repo / merge_head).open('a') as handle:
+            handle.write(self.base + '\n')
+        self.assertTrue(denied(self.pre(f'checkout origin/main -- {self.conflict}')))
+        self.assertTrue(denied(self.pre(f'rm -- {self.pr_only}')))
 
     def test_writer_cannot_check_out_another_branch_or_an_unconflicted_file(self):
         self.merge()
