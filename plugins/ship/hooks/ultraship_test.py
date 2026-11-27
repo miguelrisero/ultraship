@@ -3167,12 +3167,21 @@ class WriterRowMergeTests(unittest.TestCase):
         return hook('pre', {'cwd': str(self.repo), 'agent_type': 'ship:writer--sol', 'agent_id': 'w1',
                             'tool_name': 'Bash', 'tool_input': {'command': f'git {args}'}}, self.env)
 
-    def test_writer_can_resolve_a_conflict_to_main_or_merge_base(self):
+    def test_writer_can_resolve_a_conflict_to_main(self):
         self.merge()
-        for source in ('origin/main', self.base):
-            with self.subTest(source=source):
-                self.assertFalse(denied(self.pre(f'checkout {source} -- {self.conflict}')))
+        self.assertFalse(denied(self.pre(f'checkout origin/main -- {self.conflict}')))
         self.assertFalse(denied(self.pre(f'-C {self.repo} checkout origin/main -- {self.conflict}')))
+
+    def test_writer_cannot_restore_a_base_blob_that_drops_a_main_row(self):
+        self.git('switch', 'main')
+        with (self.repo / self.conflict).open('a') as handle:
+            handle.write('\n[[rows]]\nid = "main-added"\n')
+        self.git('add', '--', self.conflict)
+        self.git('commit', '-m', 'add synthetic main row')
+        self.git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+        self.git('switch', 'lane')
+        self.merge()
+        self.assertTrue(denied(self.pre(f'checkout {self.base} -- {self.conflict}')))
 
     def test_writer_can_remove_a_pr_added_file_absent_on_main(self):
         self.merge()
