@@ -3271,6 +3271,142 @@ class WriterGitHubGuardTests(unittest.TestCase):
         self.assertIsNone(ultraship.writer_git_file_denial('echo {a,b}/c', str(self.repo)))
 
 
+class WriterRowMergeTests(unittest.TestCase):
+    conflict = 'tests/mutation/conflict.toml'
+    pr_only = 'tests/mutation/pr-only.toml'
+    inherited = 'tests/mutation/inherited.toml'
+    kept = 'backend/api/tests/mutation/kept.toml'
+
+    def setUp(self):
+        home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.repo = home / 'repo'
+        self.repo.mkdir()
+        self.env = {**os.environ, 'HOME': str(home), 'XDG_STATE_HOME': str(home / 'state'),
+                    'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull}
+        self.git('init', '-b', 'main')
+        self.git('config', 'user.name', 'Fixture')
+        self.git('config', 'user.email', 'fixture@example.invalid')
+        for path in (self.conflict, self.kept):
+            (self.repo / path).parent.mkdir(parents=True)
+        self.commit_rows('base', self.conflict, self.inherited, self.kept)
+        self.base = self.git('rev-parse', 'HEAD').stdout.strip()
+        self.git('branch', 'lane')
+        self.git('rm', '--', self.inherited)
+        self.commit_rows('main', self.conflict)
+        self.git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+        self.git('branch', 'other')  # Even a branch at the same commit is not a named source.
+        self.git('switch', 'lane')
+        self.commit_rows('lane', self.conflict, self.pr_only, self.inherited)
+
+    def git(self, *args, check=True):
+        return run(['git', *args], cwd=self.repo, env=self.env, check=check)
+
+    def commit_rows(self, value, *paths):
+        for path in paths:
+            (self.repo / path).write_text(f'name = "{value}"\n')
+        self.git('add', '--', *paths)
+        self.git('commit', '-m', value)
+
+    def merge(self, ref='origin/main'):
+        result = self.git('merge', '--no-edit', ref, check=False)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertTrue(self.git('ls-files', '-u', '--', self.conflict).stdout)
+
+    def pre(self, args):
+        return hook('pre', {'cwd': str(self.repo), 'agent_type': 'ship:writer--sol', 'agent_id': 'w1',
+                            'tool_name': 'Bash', 'tool_input': {'command': f'git {args}'}}, self.env)
+
+    def test_writer_can_resolve_a_conflict_to_main(self):
+        self.merge()
+        self.assertFalse(denied(self.pre(f'checkout origin/main -- {self.conflict}')))
+        self.assertFalse(denied(self.pre(f'-C {self.repo} checkout origin/main -- {self.conflict}')))
+
+    def test_writer_cannot_restore_a_base_blob_that_drops_a_main_row(self):
+        self.git('switch', 'main')
+        with (self.repo / self.conflict).open('a') as handle:
+            handle.write('\n[[rows]]\nid = "main-added"\n')
+        self.git('add', '--', self.conflict)
+        self.git('commit', '-m', 'add synthetic main row')
+        self.git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+        self.git('switch', 'lane')
+        self.merge()
+        self.assertTrue(denied(self.pre(f'checkout {self.base} -- {self.conflict}')))
+
+    def test_writer_can_remove_a_pr_added_file_absent_on_main(self):
+        self.merge()
+        self.assertFalse(denied(self.pre(f'rm {self.pr_only}')))
+        self.assertFalse(denied(self.pre(f'rm -- {self.pr_only}')))
+
+    def test_writer_cannot_remove_rows_if_the_index_omits_a_protected_main_path(self):
+        renamed = 'backend/api/tests/mutation/renamed.toml'
+        self.git('mv', '--', self.kept, renamed)
+        self.git('commit', '-m', 'rename protected fixture')
+        self.merge()
+
+        self.git('config', 'diff.renames', 'true')
+        self.assertIn(f'R100\t{self.kept}\t{renamed}',
+                      self.git('diff', '--cached', '--name-status', 'origin/main').stdout)
+        for path in (renamed, self.pr_only):
+            with self.subTest(path=path):
+                self.assertTrue(denied(self.pre(f'rm -- {path}')))
+
+        self.git('checkout', 'origin/main', '--', self.kept)
+        self.assertFalse(denied(self.pre(f'rm -- {self.pr_only}')))
+
+    def test_writer_cannot_resolve_rows_with_replacement_refs(self):
+        self.merge()
+        self.git('replace', self.base, 'HEAD')
+        for args in (f'checkout origin/main -- {self.conflict}', f'rm -- {self.pr_only}'):
+            with self.subTest(args=args):
+                self.assertTrue(denied(self.pre(args)))
+
+    def test_writer_stops_when_origin_main_advances_during_the_merge(self):
+        self.merge()
+        advanced = self.git('commit-tree', 'origin/main^{tree}', '-p', 'origin/main', '-m', 'advance main')
+        self.git('update-ref', 'refs/remotes/origin/main', advanced.stdout.strip())
+        for args in (f'-C {self.repo} checkout origin/main -- {self.conflict}', f'rm -- {self.pr_only}'):
+            with self.subTest(args=args):
+                result = self.pre(args)
+                self.assertTrue(denied(result))
+                self.assertIn('MERGE_HEAD differs from origin/main',
+                              result['hookSpecificOutput']['permissionDecisionReason'])
+
+    def test_writer_cannot_resolve_rows_with_multiple_merge_heads(self):
+        self.merge()
+        merge_head = self.git('rev-parse', '--git-path', 'MERGE_HEAD').stdout.strip()
+        with (self.repo / merge_head).open('a') as handle:
+            handle.write(self.base + '\n')
+        self.assertTrue(denied(self.pre(f'checkout origin/main -- {self.conflict}')))
+        self.assertTrue(denied(self.pre(f'rm -- {self.pr_only}')))
+
+    def test_writer_cannot_check_out_another_branch_or_an_unconflicted_file(self):
+        self.merge()
+        for args in (f'checkout other -- {self.conflict}', f'checkout {self.base} -- {self.pr_only}',
+                     f'checkout origin/main -- {self.conflict} {self.pr_only}'):
+            with self.subTest(args=args):
+                self.assertTrue(denied(self.pre(args)))
+
+    def test_writer_cannot_remove_a_file_in_main_or_the_merge_base(self):
+        self.merge()
+        for path in (self.conflict, self.inherited):
+            with self.subTest(path=path):
+                self.assertTrue(denied(self.pre(f'rm -- {path}')))
+
+    def test_writer_cannot_resolve_rows_without_a_merge(self):
+        for args in (f'checkout origin/main -- {self.conflict}', f'checkout {self.base} -- {self.conflict}',
+                     f'rm -- {self.pr_only}'):
+            with self.subTest(args=args):
+                self.assertTrue(denied(self.pre(args)))
+
+    def test_writer_cannot_resolve_rows_in_a_merge_with_a_different_commit(self):
+        self.git('switch', 'other')
+        self.commit_rows('other', self.conflict)
+        self.git('switch', 'lane')
+        self.merge('other')
+        self.assertTrue(denied(self.pre(f'checkout origin/main -- {self.conflict}')))
+        self.assertTrue(denied(self.pre(f'rm -- {self.pr_only}')))
+
+
 class ReviewThreadReadTests(unittest.TestCase):
     def test_literal_graphql_reads_with_pagination_and_variables(self):
         # These shell commands are classifier inputs only.

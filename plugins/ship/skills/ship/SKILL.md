@@ -307,6 +307,82 @@ Every other commit keeps the containment requirement unchanged.
 
 Follow the [lane-owned row route](../../agents/driver.md#lane-owned-row-route) for protected mutation rows.
 
+### Protected row merge resolution
+
+Use this route only in the assigned PR worktree during a merge of `origin/main`.
+It covers whole-file conflict resolution and removal of PR-added rows files, as in [Patricia PR 8707](https://github.com/bettergroupinc/patricia-monorepo/pull/8707).
+Require `MERGE_HEAD` to name the single commit at `origin/main`.
+Stop and report the conflict to the driver if `origin/main` advances during the merge.
+Refuse this route in a repository with Git replacement refs.
+Use the CoC's CI, testing and tooling standing grant. Keep the local commit grant and all refusal and publication rules.
+
+1. Require the driver's complete before-resolution index record for this merge.
+   Bind the writer brief to both merge parents.
+   Limit the writer brief to paths that match the [protected-path filter](references/pipeline.md#protected-path-filter).
+   Name each exact repository-relative path and its approved action.
+   Name the source commit for each checkout. Keep resolution pending if the record or brief is missing or mismatched.
+2. For a conflicted file, run `git checkout origin/main -- <path>` to take `origin/main:<path>`.
+   Use `git checkout <full-merge-base-sha> -- <path>` only when that exact path has the same blob ID at the merge base and `origin/main`.
+   Resolve the full SHA with `git merge-base HEAD origin/main`. Send every other base restore through the existing lane-owned row route.
+   For a file the PR added, run `git rm -- <path>` only if main and the merge base both lack the path.
+   Preserve every protected path from the second parent. Stop if the index already omits one before a removal.
+   Run one literal command per file from the repository root. Use `git -C <absolute-root>` to name the root explicitly.
+3. Compare `git hash-object <path>` and the staged blob ID with the blob ID of `origin/main:<path>`.
+   Match the staged mode to the mode at the same path in `origin/main`.
+   For a removal, confirm the path is absent from the worktree and the index.
+   Stop on a mismatch. Do not read or print row contents under this route.
+4. Verify that the staged resolution preserves all protected paths from the second parent. Use Git metadata with rename detection off.
+   Commit the resolution in the merge commit. Give the driver the merge SHA, both parent SHAs, and the path and ID or absence evidence.
+5. Follow the [driver evidence requirements](references/pipeline.md#9-push-and-pr) for one independent Sol review of the merge commit.
+   Give the reviewer the [checklist below](#protected-row-merge-review) in the brief.
+   Require a passing CI anchor guard at the exact pushed head. Use the existing draft and publication gates.
+
+This route needs zero per-row anchor CI failures, replacement row IDs, field bindings, or row-tool runs.
+Apply the lane-owned row routes to all other protected row edits, including edits after the merge commit.
+
+### Protected row merge review
+
+Dispatch only an independent `ship:reviewer--sol` for this review. Choose a reviewer who differs from the PR author and writer.
+Use only the driver's content-free Git evidence. This review grants zero protected reads or tool permissions.
+
+- Require the second parent to match the verified remote main commit used for the merge.
+- Match the before-resolution record and writer brief to the merge commit's two parents.
+- Check the capture and filter commands against the [protected-path filter](references/pipeline.md#protected-path-filter).
+  Match each protected count to the number of supplied entries. Require nonnegative integer counts and a total at least as large as the protected count.
+  Block if any capture uses the wrong filter or has inconsistent counts. Block if commands or counts are missing.
+- Reconcile the before-resolution index with both parent inventories by exact path.
+  Block on an omitted parent path unless the metadata establishes a clean deletion before resolution.
+  For that exception, require the merge base to contain the exact path.
+  Require the first parent to retain the exact path with its merge-base mode and object ID.
+  Require the second parent to omit that exact path.
+  Treat a rename as a loss at the old path and an addition at the new path. Block release on ambiguous evidence.
+  Require a separate review for every deletion outside this merge route.
+  Include clean deletions before resolution in that requirement.
+- Compare the complete before-resolution index with the merge commit tree by exact path.
+- Account for every added, removed, modified or resolved protected entry with a named action or a separately reviewed route.
+  Compare mode and object ID for stage 0 entries. Treat each unmerged path as a resolution, even if its final blob matches a recorded stage.
+  Match the exact path, action and expected result. Block any change that neither route covers.
+- Use the recorded index stages to identify conflicts. Parent blob differences alone supply no conflict evidence.
+- Flag a named checkout for explicit disposition when the first-parent blob differs from the merge-base blob.
+  Treat an entry missing from one of those trees as a difference. Include the path, parent and base IDs, and disposition in the evidence.
+  Record who approved the disposition under existing authority. Block release until every flagged checkout has an explicit disposition.
+- Confirm that every protected path in the second parent exists at the same path in the merge commit.
+  Keep lane-side deletions of second-parent protected paths outside this route.
+- Match each checked-out path's mode and blob ID at the merge commit to the second parent.
+- For a merge-base checkout, confirm the same blob ID at that path in the merge base.
+- For a removal, confirm the path exists in the first parent and is absent at the merge base, second parent and merge commit.
+- Block on missing or conflicting evidence. Return the verdict for the merge commit.
+
+Synthetic acceptance case: The brief names only a checkout of `tests/mutation/named.toml`.
+The merge commit changes the blob ID of `tests/mutation/extra.toml` from its stage 0 entry.
+The brief and the separate review records do not cover `tests/mutation/extra.toml`.
+Return `Verdict: blocked` for the unapproved change to `tests/mutation/extra.toml`.
+
+Synthetic acceptance case: Only the first parent contains `backend/Tests/Mutation/lane-only.toml`.
+The before-resolution index and merge commit both omit that path.
+The evidence establishes no clean deletion.
+Return `Verdict: blocked` for the unexplained loss of `backend/Tests/Mutation/lane-only.toml`.
+
 ### Same-strength adaptations
 
 Categories 1–4 retain their existing CoC-or-Chief approval routes and owner-event verification requirements.

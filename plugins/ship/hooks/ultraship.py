@@ -6696,6 +6696,72 @@ def row_reanchor_gate(data, command):
              'every protected row path and the ship state folder.')
 
 
+def writer_row_merge_denial(command, cwd):
+    """Check Git metadata for a whole-file resolution without exposing row text."""
+    # shortcut: the trigger sees literal paths in shell text; upgrade to argv enforcement for computed paths.
+    trigger = writer_trigger_text(command.replace('\\\n', ''))
+    if not re.search(PROTECTED_ROW, trigger, re.I) or not re.search(
+            r'(?:^|[;&|(`\s])(?:[\w./-]+/)?git(?:-|[ \t]+(?:-[^\s;&|]+[ \t]+'
+            r'(?:[^-\s;&|][^\s;&|]*[ \t]+)?)*)(?:checkout|rm)\b', trigger):
+        return None
+    reason = ('Protected rows checkout or removal requires the in-progress origin/main merge route. '
+              'Use one literal `git checkout <source> -- <path>` or `git rm -- <path>` from the repository root. '
+              'You may use `git -C <absolute-root>` in either form. Report the blocked scope to your driver.')
+    match = re.fullmatch(
+        r'git(?: -C (/[A-Za-z0-9_./-]+))? (?:checkout (origin/main|[0-9a-f]{40}|[0-9a-f]{64}) -- |rm (?:-- )?)'
+        r'((?!-)[A-Za-z0-9_./-]+)', command.strip(' \t\n'))
+    if not match:
+        return reason
+    folder, source, path = match.groups()
+    cwd = folder or os.path.realpath(cwd or os.getcwd())
+    target = os.path.join(cwd, path)
+    if (path.startswith('/') or not re.search(PROTECTED_ROW, path, re.I) or not protected_row_path(target)
+            or not link_free_path(target) or os.path.lexists(target) and not regular_file(target)):
+        return reason
+
+    def git(*args):
+        return subprocess.run(['git', '--no-replace-objects', '--literal-pathspecs', '-c', 'core.fsmonitor=false',
+                               *args], cwd=cwd, text=True, capture_output=True, timeout=5, check=True).stdout
+
+    def tree_entry(ref):
+        return git('ls-tree', '-z', ref, '--', path)
+
+    def file_blob(entry):
+        match = re.fullmatch(r'100(?:644|755) blob ([0-9a-f]{40}|[0-9a-f]{64})\t' + re.escape(path) + '\x00', entry)
+        return match[1] if match else None
+
+    try:
+        if (git('rev-parse', '--show-toplevel').rstrip('\n') != cwd
+                or git('symbolic-ref', 'HEAD').strip() == 'refs/heads/main'
+                or git('rev-parse', '--symbolic-full-name', 'origin/main').strip() != 'refs/remotes/origin/main'):
+            return reason
+        if git('for-each-ref', '--count=1', '--format=%(refname)', 'refs/replace'):
+            return 'Protected row merge resolution refuses Git replacement refs. Report the blocked scope to your driver.'
+        main = git('rev-parse', '--verify', 'refs/remotes/origin/main^{commit}').strip()
+        merge_head = git('rev-parse', '--path-format=absolute', '--git-path', 'MERGE_HEAD').rstrip('\n')
+        if not regular_file(merge_head):
+            return reason
+        with open(merge_head, 'rb') as handle:
+            if handle.read(66) != (main + '\n').encode():
+                return 'MERGE_HEAD differs from origin/main or does not name a single commit. Stop and report the conflict to your driver.'
+        base = git('merge-base', 'HEAD', main).strip()
+        if source is None:
+            if not tree_entry(main) and not tree_entry(base) and file_blob(tree_entry('HEAD')):
+                deleted = git('diff', '--cached', '--no-renames', '--no-ext-diff', '--no-textconv',
+                              '--diff-filter=D', '--name-only', '-z', '--ignore-submodules=none', main, '--')
+                if any(re.search(PROTECTED_ROW, path, re.I) for path in deleted.split('\x00')):
+                    return 'The index omits a protected path from origin/main. Stop and report the conflict to your driver.'
+                return None
+        elif source in ('origin/main', base):
+            main_blob = file_blob(tree_entry(main))
+            if (main_blob and (source == 'origin/main' or file_blob(tree_entry(base)) == main_blob)
+                    and git('ls-files', '-u', '-z', '--', path)):
+                return None
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        pass
+    return reason
+
+
 def pre_output(data):
     """Run the checks and return the hook output; a refusal exits inside the checks."""
     WARNINGS.clear()
@@ -6818,6 +6884,9 @@ def checks(data):
                 reason = writer_git_file_denial(command, data.get('cwd'))
                 if reason:
                     deny(publication_reason + ' Rule: ' + reason)
+                reason = writer_row_merge_denial(command, data.get('cwd'))
+                if reason:
+                    deny(reason)
                 if not names_gh and github_reason:
                     deny(publication_reason + ' Rule: writer GitHub read-only rule: ' + github_reason)
             except Exception:
