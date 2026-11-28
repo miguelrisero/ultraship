@@ -5356,7 +5356,7 @@ def issue_account_grant(data):
 
 CUSTODY_LITERAL_PATH = r'(?!-)[A-Za-z0-9_./-]+'
 CUSTODY_GIT_GREP = (r"git[ \t]+grep(?:[ \t]+-(?!e)[A-Za-z])*[ \t]+(?:-e[ \t]+)?"
-                    r"'(?!-)[^'\x00-\x1f\x7f$`;|<>&]+'[ \t]+--"
+                    r"'(?!-)[^'\x00-\x1f\x7f$`;|<>&]+'(?:[ \t]+origin/main)?[ \t]+--"
                     rf"(?:[ \t]+{CUSTODY_LITERAL_PATH})+")
 CUSTODY_LINT = re.compile(rf'[ \t]*python3[ \t]+({CUSTODY_LITERAL_PATH}/text_lint\.py)'
                           rf'[ \t]+(?:peer|decision|result)[ \t]+<[ \t]+({CUSTODY_LITERAL_PATH})[ \t]*')
