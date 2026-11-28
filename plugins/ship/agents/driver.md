@@ -85,9 +85,11 @@ Approved test adaptations (owner rule, Input `32c223a4-6bd9-43d1-b049-19a3990d23
 Use [protected row merge resolution](../skills/ship/SKILL.md#protected-row-merge-resolution) for qualifying whole-file actions during an `origin/main` merge.
 The steps below govern the PR's own row edits.
 
-A lane re-anchors, retires, restores, adds or repairs the designated test of a protected mutation row under its applicable route. Require a CoC decision file for each action that needs CoC approval, including a step 4 follow-up row.
+A lane re-anchors, retires, restores, adds or repairs the designated test of a protected mutation row under its applicable route.
+Only a row action that needs CoC approval needs a CoC decision file. A step 4 follow-up row needs one.
 Authority: the owner's global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.
-Scope: each existing row that the PR's failing anchor CI names and its own diff breaks, each new row that step 4 admits, each row that step 5 restores, and each qualifying selector repair.
+Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.
+The scope also includes each qualifying selector repair under step 1.
 
 1. Select the route for each row before any tool admission or tool run.
    Use the [receipt-only row ID lookup](../skills/ship/references/owner-decisions.md#receipt-only-row-id-lookup) for verified CI evidence. Keep lookup and protected access separate.
@@ -191,7 +193,8 @@ Scope: each existing row that the PR's failing anchor CI names and its own diff 
    Reuse the existing authorized draft for CI and reviewer admission.
    If the route has no PR, the driver opens a draft only with separate authority before CI and reviewer admission.
    Use separate draft authority for CI. Preserve the publication gates for marking ready, pushing to a ready PR, and merging.
-   For a CoC-approved native exact-pair edit, an earlier test-only parent row, or a designated test repair, use the shared anchor proof below.
+   For a CoC-approved native exact-pair edit or an earlier test-only parent row, use the shared anchor proof below.
+   Use the same anchor proof for a designated test repair.
    The driver supplies content-free evidence from the anchor guard at the authorized draft head.
    The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.
    The reviewer brief names both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count.
@@ -214,8 +217,9 @@ Scope: each existing row that the PR's failing anchor CI names and its own diff 
 8. Review: one independent reviewer confirms that every changed, retired, restored or added row is not weaker.
    Include the [lane-owned row evidence record](../skills/ship/references/owner-decisions.md#lane-owned-row-evidence-record) in the reviewer brief for each changed, added, retired or restored row.
    The driver marks the draft ready only after the review in step 8 passes at the exact head.
-   For re-anchors and claim changes, require the same test and mutant intent, and the same claim or a CoC-approved narrowed claim.
-   Require each replacement to guard as tightly as the row it replaces.
+   Not weaker means the same test and the same mutant intent with the same claim or a CoC-approved narrowed claim, or a replacement that guards as tightly.
+   Apply the same-test rule to re-anchors and claim changes.
+   Compare each replacement with the row it replaces.
    For a designated test repair, require the same guarantee, identical claim and mutant, and an independent `ship:reviewer--sol` verdict.
    The reviewer differs from the PR author and the writer, and reads rows only under its [reviewer admission record](../skills/ship/references/owner-decisions.md#reviewer-admission-record-for-protected-row-reads).
    Verify the producer and receipt under the [metadata-only receipt binding](../skills/ship/references/owner-decisions.md#metadata-only-receipt-binding) before dispatch. Keep the source outside content admission.
@@ -223,7 +227,7 @@ Scope: each existing row that the PR's failing anchor CI names and its own diff 
    The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.
    For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.
    Require the verified producer's successful empty literal base lookup for CI receipts.
-   For exact-line proof, record exit 0 and empty output from `git --literal-pathspecs ls-tree --name-only <base SHA> -- <repository-relative path>`.
+   For exact-line proof, record exit 0 and empty output from `git --literal-pathspecs ls-tree --name-only <base SHA> -- <repository-relative path>` at the repository root.
    For a created rows file, the driver verifies the complete file at the pushed head.
    Require exactly the rows the frozen CoC decision names and nothing else.
    Use content-free evidence from a producer with existing read authority.
@@ -252,8 +256,8 @@ Scope: each existing row that the PR's failing anchor CI names and its own diff 
    Mark it ready again only after the new review passes.
 9. The mutation proof runs after merge, under its execution admission.
 
-Send changed designated tests to the CoC. Apply the [designated test repair](../skills/ship/references/owner-decisions.md#designated-test-repair) only when its exact frozen decision applies.
-Send new or changed mutants on existing rows, retirements without replacements, and rows outside the PR's own causality to the CoC.
+Send these rows to the CoC: a new or changed mutant on an existing row, a changed designated test, a retirement without a replacement, and a row that the PR's own diff does not break.
+Apply the [designated test repair](../skills/ship/references/owner-decisions.md#designated-test-repair) only when its exact frozen decision applies.
 A lane may narrow the claim of a row that its own PR breaks, under a CoC approval.
 A narrowed claim keeps the same designated test and the same mutant. It claims less than the old claim and nothing that the test does not prove.
 Send a widened or otherwise changed claim to the CoC. The CoC approves it only with a current task-specific owner event.
