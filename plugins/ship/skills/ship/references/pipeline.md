@@ -300,8 +300,9 @@ Marketing retains its existing Vercel preview route.
    Create an owned synthetic sample dashboard or record only when the changed screen needs one and seed authority permits it.
 5. Open the changed screen and exercise the changed interaction in the matching preview.
 
-**Conditional local route.** Use this route only when preview sign-in requires secret handling.
-This route applies only to non-marketing UI.
+**Conditional local route.** For non-marketing UI, use this route only when preview sign-in requires secret handling or when you verify from trusted repository evidence that no preview environment exists.
+An inaccessible, failing, or unverified preview does not qualify as absent.
+Keep every repository-specific preview requirement binding.
 For this route, only behavior faithfully reproduced by the local stack qualifies.
 Preview/deployment/config-dependent behavior still requires appropriate preview proof.
 Keep that scope held if preview proof is unavailable.
@@ -309,13 +310,13 @@ Keep that scope held if preview proof is unavailable.
 - Refuse unsafe data isolation before local setup, login, seed, interaction, or capture.
 - Require a clean checkout at the exact current pushed head, with pushed-head evidence.
   Build and start the local server from that head, with build provenance and server identity bound to that checkout.
-- Use only the existing authorized local e2e authentication and seed path with own synthetic data.
+- If the interaction needs authentication or seeded data, use only the existing authorized local e2e path with owned synthetic data.
   Patricia's local harness uses a passwordless synthetic INTERNAL persona, database-bound refresh injection, and an isolated synthetic stack.
   Local tokens belong to that local database and origin; they provide zero preview authentication evidence.
   Never use local tokens to authenticate to a preview or print their values.
 - Use real Chromium through agent-browser or the existing e2e harness.
   Open the same changed screen and exercise the changed interaction on the local origin.
-- Record the reason preview sign-in requires secret handling, without secret values.
+- Record the qualifying reason and its evidence. Omit secret values.
   Record the local origin, build/server command and result, browser command and result, checked head, interaction result, and screenshot route.
   Keep commands and results free of secrets.
 

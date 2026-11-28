@@ -105,6 +105,9 @@ The `owner_ui` answer event is `2adecd1d-fa79-4c29-9baa-2837ba17395c`, dated 202
 
 Run ordinary touched-file pytest or vitest without a per-run CoC GO or GO launcher-hash packet.
 Admit every run through the installed, checksum-pinned `slot_gate.sh` implementation and its recognized `battery*.sh` child.
+For a Node suite outside ordinary admission, require CoC admission for the exact candidate and reviewed repository test command.
+Use a recognized child of the pinned slot launcher. Keep local execution held if either admission is missing.
+A change to the candidate, test command, scripts it invokes, or launcher invalidates that admission.
 Preserve load, capacity, RAM, disk, runtime caps, timing exclusion, isolated stacks, and cleanup requirements.
 Require GO for mutation batteries, timing runs, and shared-database runs; retain paid-run GOs and spending caps.
 Removing a guard to prove a test fails is a mutant cycle and needs a GO.
