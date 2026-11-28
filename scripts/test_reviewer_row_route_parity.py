@@ -84,6 +84,26 @@ class ReviewerRowRouteParityTests(unittest.TestCase):
                 self.assertIn(f'Include the {EVIDENCE_LINK} in the reviewer brief for each changed, added, retired or restored row.',
                               (AGENTS / name).read_text())
 
+    def test_designated_test_repair_uses_the_shared_frozen_coc_decision(self):
+        policy = (ROOT / 'plugins/ship/skills/ship/references/owner-decisions.md').read_text()
+        repair = policy.partition('## Designated test repair\n')[2].split('\n## ', 1)[0]
+        for requirement in (
+            "Require proof that the PR's own diff made the stored selector unusable.",
+            'Require the anchors to pass.',
+            'Require a frozen CoC decision under the standing grant.',
+            'Bind the causal diff and both selectors to the decision.',
+            'Change only the designated test selector.',
+            'Keep the claim and mutant identical.',
+            'Keep the applicable follow-up requirement.',
+            'Require an independent not-weaker Sol review at the frozen head.',
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, repair)
+        link = '../skills/ship/references/owner-decisions.md#designated-test-repair'
+        for driver in ('driver.md', 'driver--sol.md'):
+            with self.subTest(driver=driver):
+                self.assertIn(link, (AGENTS / driver).read_text())
+
     def test_lane_owned_review_checks_identity_and_keeps_separate_admission(self):
         review = self.sections[REVIEW]
         self.assertIn(f'Require exactly one {EVIDENCE_LINK} in the brief for each changed, added, retired or restored row.',

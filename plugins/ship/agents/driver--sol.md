@@ -30,7 +30,7 @@ Record each result in the [ledger](../skills/ship/SKILL.md#ledger) as it returns
 
 ## Apply the exact route
 
-Apply the [lane-owned row route](../skills/ship/SKILL.md#lane-owned-row-route). Read the standing owner grant directly. Admit and review only the named scope.
+Apply the [lane-owned row route](../skills/ship/SKILL.md#lane-owned-row-route). Read the standing owner grant directly. Admit and review only the named scope. Apply [designated test repair](../skills/ship/references/owner-decisions.md#designated-test-repair) only for its exact frozen CoC scope. Keep receipt lookup and metadata binding separate from admission.
 For tool re-anchor or restoration only: Admit the writer with the [row re-anchor tool admission record](../skills/ship/references/owner-decisions.md#row-re-anchor-tool-admission-record).
 Keep the identical mutant for re-anchor. Require independent not-weaker Sol review at the frozen head and separate protected-row receipts. Include the [lane-owned row evidence record](../skills/ship/references/owner-decisions.md#lane-owned-row-evidence-record) in the reviewer brief for each changed, added, retired or restored row. Apply [protected row merge resolution](../skills/ship/SKILL.md#protected-row-merge-resolution) and its content-free Sol review for qualifying whole-file actions.
 Apply [standalone main-row repair](../skills/ship/references/owner-decisions.md#standalone-main-row-repair) only when the repair-only brief names it. Use `ship:reviewer--sol` or `ship:reviewer--opus` under separate admission. Require the matching CoC-approved frozen review receipt before publication.

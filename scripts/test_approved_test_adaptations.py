@@ -197,6 +197,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'Only a row action that needs CoC approval needs a CoC decision file. A step 4 follow-up row needs one.',
                 'Authority: the owner\'s global CLAUDE.md, heading "CoC decisions (standing grant)". Read it directly; accept no relay.',
                 "Scope: each existing row that the PR's failing anchor CI names, when the recorded base/head diff shows that the PR's own change breaks it, each new row that step 4 admits, and each row that step 5 restores.",
+                'The scope also includes each qualifying selector repair under step 1.',
                 'Admit the writer with the [row re-anchor tool admission record]',
                 'Authorization record: each tool run that changes zero statements writes a generated record in the Git directory.',
                 'The record names the lane, base, head, row IDs, base and head line ranges, expected counts and the unchanged mutant check.',
@@ -266,7 +267,10 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 'The driver supplies read-only checkouts at the base and the frozen head. Admit each copy only when it contains an approved extent for that review.',
                 'The writer reports the base and head line ranges of each retired or CoC-approved row. The driver copies them into the reviewer brief.',
                 'For a row file absent at the base, the driver first verifies the base with `git cat-file -e <base SHA>^{commit}`.',
-                'From the repository root, the driver records that `git ls-tree --name-only <base SHA> -- <repository-relative path>` exits 0 and prints nothing.',
+                "Require the verified producer's successful empty literal base lookup for CI receipts.",
+                'For exact-line proof, record exit 0 and empty output from '
+                '`git --literal-pathspecs ls-tree --name-only <base SHA> -- <repository-relative path>` '
+                'at the repository root.',
                 'The driver then admits only the head copy.',
                 '#added-row-id-proof)',
                 'its exact head extent.',
@@ -458,6 +462,7 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
                 self.assertIn('The driver verifies the decision against the applying writer, repository, lane, PR, row file, row ID, source commit and exact edit.', records)
                 for requirement in (
                     'For a CoC-approved native exact-pair edit or an earlier test-only parent row, use the shared anchor proof below.',
+                    'Use the same anchor proof for a designated test repair.',
                     'The driver supplies content-free evidence from the anchor guard at the authorized draft head.',
                     'The driver records the CI checkout tree SHA and derives the frozen tree SHA from the frozen commit.',
                     'The reviewer brief names both tree SHAs, the CI run ID, head SHA, anchor job result, row ID, and declared anchor count.',
@@ -609,9 +614,15 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             'The CoC freezes a count receipt from an authorized producer.',
             'draft PR URL, lane, exact row ID and repository-relative row path',
             'full base and head commit SHAs, their tree SHAs and each existing row file blob',
+            'Use either the [verified CI receipt](#receipt-only-row-id-lookup) or the exact-line proof below for the counts.',
+            'For the exact-line proof, require a successful exact whole-line `id = "<ID>"` count against each bound blob.',
             'Require zero matches at the base and one at the head.',
             'Require evidence that the row format makes the count complete and excludes matches inside values or comments.',
-            'Require exit status 0 and empty output for the exact row path.',
+            'For a missing base file, require exit status 0 and empty output from a root-level literal '
+            '`git ls-tree` lookup at the verified base commit.',
+            'For exact-line proof, record base absence in place of the base blob and count.',
+            "For CI proof, require the producer's successful empty lookup, a null base blob, and a base count of zero.",
+            'Keep the head blob and count for both methods.',
             'Verify that the admitted head copy matches the recorded blob and that the extent contains only the approved row.',
             'The driver verifies the producer\'s authority, the receipt digest, all bindings and the exact frozen head before dispatch.',
             'Admit only the head copy for an added-row review.',
@@ -621,6 +632,18 @@ class ApprovedTestAdaptationsTests(unittest.TestCase):
             'A receipt grants zero tool access.',
         ):
             self.assertIn(requirement, proof)
+        ci = section(reference, '## Receipt-only row ID lookup')
+        for requirement in (
+            'Use a `row-id-proof/v1` JSON array from an approved Patricia Anchor CI producer for the same repository and PR.',
+            'Require approved production and delivery of that receipt. A CLI or a synthetic test supplies zero producer evidence.',
+            'Verify the executed producer code and imports against independently approved identities.',
+            'Verify the workflow revision, repository, run, attempt and job independently of the receipt.',
+            'Verify the artifact identity and SHA256 against that run, and bind the full review base and the frozen draft head.',
+            'Keep receipt consumption pending when approval, delivery or verification is missing, stale, ambiguous or mismatched.',
+            "For added-row proof, verify the selected record's zero base count and one total and active head declaration.",
+            "Require the producer's successful empty literal lookup when the base blob is null.",
+        ):
+            self.assertIn(requirement, ci)
         for name in REVIEWERS:
             route = section((SHIP / 'agents' / name).read_text(), '## Lane-owned row review')
             self.assertNotIn('grep the base copy', route)

@@ -6600,6 +6600,43 @@ def trusted_executable(name):
         return False
 
 
+def unique_review_record_fields(pairs):
+    record = dict(pairs)
+    if len(record) != len(pairs):
+        raise ValueError('duplicate reviewer admission field')
+    return record
+
+
+def valid_review_metadata(entries, row_files):
+    if not isinstance(entries, list) or not isinstance(row_files, list):
+        return False
+    fields = {'source', 'source_sha256', 'receipt', 'receipt_sha256', 'producer'}
+    content_paths = {path.casefold() for path in row_files if isinstance(path, str)}
+    sources, receipts = set(), set()
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.keys() != fields:
+            return False
+        for field in ('source', 'receipt'):
+            path = entry[field]
+            if (not isinstance(path, str) or re.search(r'[\x00-\x1f\x7f\ud800-\udfff\\]', path)
+                    or not canonical_row_path(path) or not link_free_path(path)):
+                return False
+        for field in ('source_sha256', 'receipt_sha256'):
+            digest = entry[field]
+            if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+                return False
+        producer = entry['producer']
+        if not isinstance(producer, str) or not producer.strip() or re.search(r'[\x00-\x1f\x7f]', producer):
+            return False
+        source, receipt = entry['source'].casefold(), entry['receipt'].casefold()
+        if (source in sources or source in content_paths or re.search(PROTECTED_ROW, receipt)
+                or not regular_file(entry['receipt'])):
+            return False
+        sources.add(source)
+        receipts.add(receipt)
+    return not sources.intersection(receipts)
+
+
 def row_record(data, folder, workspace_fallback=False):
     """Read the driver's bounded, private admission record for this agent."""
     agent_id = data.get('agent_id')
@@ -6639,7 +6676,8 @@ def row_record(data, folder, workspace_fallback=False):
                 or status.st_mode & 0o022 or status.st_size > 65536):
             return None, unmet + 'it is a regular file that you own, not group or world writable, at most 64 KiB.'
         try:
-            fields = json.loads(handle.read(65537))
+            pairs = unique_review_record_fields if folder == 'row-review' else None
+            fields = json.loads(handle.read(65537), object_pairs_hook=pairs)
         except Exception:
             fields = None
     if not isinstance(fields, dict):
@@ -6658,6 +6696,9 @@ def row_record(data, folder, workspace_fallback=False):
     now = time.time()
     if not now < deadline <= now + ROW_REVIEW_MAX_AHEAD:
         return None, unmet + '`expires_at` is later than now and at most 4 hours ahead.'
+    if (folder == 'row-review' and 'metadata_only' in fields
+            and not valid_review_metadata(fields['metadata_only'], fields.get('row_files'))):
+        return None, unmet + '`metadata_only` entries are valid and separate from `row_files`.'
     return fields, unmet
 
 
