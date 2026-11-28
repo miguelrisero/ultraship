@@ -306,6 +306,8 @@ Every other commit keeps the containment requirement unchanged.
 ### Lane-owned row route
 
 Follow the [lane-owned row route](../../agents/driver.md#lane-owned-row-route) for protected mutation rows.
+Use the [designated test repair](references/owner-decisions.md#designated-test-repair) contract for a qualifying selector repair.
+Apply the [receipt-only row ID lookup](references/owner-decisions.md#receipt-only-row-id-lookup) and [metadata-only receipt binding](references/owner-decisions.md#metadata-only-receipt-binding) under their separate gates.
 
 ### Protected row merge resolution
 

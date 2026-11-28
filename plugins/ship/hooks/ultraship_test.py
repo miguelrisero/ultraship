@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Self-check for hooks/ultraship.py and skills/ship/scripts/ledger.py. Run with a workspace-local TMPDIR."""
 from contextlib import redirect_stderr, redirect_stdout
+import hashlib
 import importlib.util
 import io
 import json
@@ -2514,6 +2515,39 @@ class WorkspaceRowAdmissionTests(unittest.TestCase):
         self.record.unlink()
         self.write_record(self.root / 'state/ultraship/row-review/r1.json')
         self.assertFalse(denied(hook('pre', self.payload, self.env)))
+
+    def metadata_entry(self):
+        content = b'{"length": 0}'
+        receipt = self.workspace / '.scratch/metadata-receipt.json'
+        receipt.write_bytes(content)
+        return {'source': str(self.row), 'source_sha256': hashlib.sha256(b'').hexdigest(),
+                'receipt': str(receipt), 'receipt_sha256': hashlib.sha256(content).hexdigest(),
+                'producer': 'fixture-ci'}
+
+    def test_metadata_receipt_grants_no_source_read(self):
+        entry = self.metadata_entry()
+        self.write_record(row_files=[], metadata_only=[entry])
+        receipt_read = {**self.payload, 'tool_input': {'file_path': entry['receipt']}}
+        self.assertFalse(denied(hook('pre', receipt_read, self.env)))
+        self.assertTrue(denied(hook('pre', self.payload, self.env)))
+        source_grep = {**self.payload, 'tool_name': 'Grep',
+                       'tool_input': {'path': entry['source'], 'pattern': 'id'}}
+        self.assertTrue(denied(hook('pre', source_grep, self.env)))
+
+    def test_metadata_source_cannot_overlap_content_admission(self):
+        self.write_record(metadata_only=[self.metadata_entry()])
+        self.assertTrue(denied(hook('pre', self.payload, self.env)))
+
+    def test_invalid_metadata_binding_denies_content_admission(self):
+        entry = self.metadata_entry()
+        admitted_row = self.row.with_name('admitted.toml')
+        admitted_row.touch()
+        read = {**self.payload, 'tool_input': {'file_path': str(admitted_row)}}
+        self.write_record(row_files=[str(admitted_row)], metadata_only=[entry])
+        self.assertFalse(denied(hook('pre', read, self.env)))
+        entry['receipt_sha256'] = 'invalid'
+        self.write_record(row_files=[str(admitted_row)], metadata_only=[entry])
+        self.assertTrue(denied(hook('pre', read, self.env)))
 
     def test_workspace_record_symlink_is_denied(self):
         target = self.root / 'record.json'

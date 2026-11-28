@@ -250,7 +250,7 @@ Use this record for lane-owned row review and standalone main-row repair review.
    The hook checks the workspace path only when the shared path is absent.
    If the record is missing, the refusal names each path the hook checked.
    In the file name, replace each character outside letters, digits, `_`, `.` and `-` with `_`.
-4. The record has four fields: `pr` (the PR URL), `agent_id` (the agent ID), `row_files` (the exact canonical absolute row-file paths) and `expires_at` (`YYYY-MM-DDTHH:MM:SSZ`, UTC, at most 4 hours ahead).
+4. The record requires `pr` (the PR URL), `agent_id` (the agent ID), `row_files` (the exact canonical absolute row-file paths) and `expires_at` (`YYYY-MM-DDTHH:MM:SSZ`, UTC, at most 4 hours ahead). Use `metadata_only` only under the [metadata-only receipt binding](#metadata-only-receipt-binding).
 5. Run `chmod 600` on the file. The hook refuses a file that the group or others can write.
 6. Account for a result blocked by missing admission with `account-auto`. Keep the run open for the continued review.
    Continue the same reviewer with SendMessage after the record exists.
@@ -270,6 +270,28 @@ The hook admits Read of one listed file, and Grep with one listed file as `path`
 Glob, LSP, and every other read under `tests/mutation` stay denied.
 The reviewer reads only the named row lines.
 The hook denies Write, Edit, and NotebookEdit to both record folders for every agent except the driver and the main session. For Bash it only checks the command text.
+
+## Metadata-only receipt binding
+
+Use `metadata_only` as a list of entries with exactly these fields:
+
+- `source`: the canonical absolute source path.
+- `source_sha256`: the full lowercase SHA256 approved for that source.
+- `receipt`: the canonical absolute path to a separate, content-free receipt outside protected row paths.
+- `receipt_sha256`: the full lowercase SHA256 of the receipt.
+- `producer`: the exact identity of the approved producer.
+
+Use a producer with existing authority to read the source. Require that producer to verify the approved source digest before issuing evidence.
+Verify the producer against the CoC-approved identity independently of the receipt's claims.
+Verify the receipt digest and its binding to that producer, the exact source path and approved digest, and the frozen scope before dispatch.
+Keep the review pending if any approval, verification or binding is missing, stale or mismatched.
+Use this binding only when the reviewer can complete the check from the receipt alone.
+Keep the review pending if it requires source content and that content lacks separate admission.
+For designated test repair, require the readable frozen decision itself. Its digest alone cannot prove the approved selectors.
+List only the receipt under `Readable files` for this binding. Keep the source outside `Readable files` and `row_files`.
+Reject an overlap with `row_files`, duplicate source paths, or reuse of a source path as a receipt path.
+Require existing permission to read the receipt. This field grants zero reads, tool permission, credentials, or execution authority.
+The hook checks the field's structure and conflicts for protected admission. The driver verifies provenance and digests.
 
 ## Lane-owned row evidence record
 
@@ -338,13 +360,15 @@ The CoC freezes a count receipt from an authorized producer. Record the producer
 Bind the receipt to the repository, draft PR URL, lane, exact row ID and repository-relative row path.
 Record the full base and head commit SHAs, their tree SHAs and each existing row file blob.
 Record the canonical path of the frozen head copy and the approved first and last lines for the added row.
-Require a successful exact whole-line `id = "<ID>"` count against each bound blob.
+Use either the [verified CI receipt](#receipt-only-row-id-lookup) or the exact-line proof below for the counts.
+For the exact-line proof, require a successful exact whole-line `id = "<ID>"` count against each bound blob.
 Require evidence that the row format makes the count complete and excludes matches inside values or comments.
 Keep the proof pending if the producer cannot verify that condition within its existing read authority.
 Require zero matches at the base and one at the head.
-For a missing base file, use the verified base commit and a root-level `git ls-tree` result.
-Require exit status 0 and empty output for the exact row path.
-Record base file absence in place of the base blob and count. Keep the head blob and count.
+For a missing base file, require exit status 0 and empty output from a root-level literal `git ls-tree` lookup at the verified base commit.
+For exact-line proof, record base absence in place of the base blob and count.
+For CI proof, require the producer's successful empty lookup, a null base blob, and a base count of zero.
+Keep the head blob and count for both methods.
 
 The driver verifies the producer's authority, the receipt digest, all bindings and the exact frozen head before dispatch.
 Verify that the admitted head copy matches the recorded blob and that the extent contains only the approved row.
@@ -354,6 +378,55 @@ The reviewer checks the receipt against the brief and reads only the approved he
 The reviewer uses the receipt for base absence and head uniqueness. Use no reviewer Grep for those counts.
 A receipt grants zero tool access. Keep the protected read restrictions and all other review evidence requirements.
 Block approval if any proof, binding, extent or admission is missing, stale, ambiguous or mismatched.
+
+## Receipt-only row ID lookup
+
+Use a `row-id-proof/v1` JSON array from an approved Patricia Anchor CI producer for the same repository and PR.
+Require approved production and delivery of that receipt. A CLI or a synthetic test supplies zero producer evidence.
+Verify the executed producer code and imports against independently approved identities.
+Verify the workflow revision, repository, run, attempt and job independently of the receipt.
+Verify the artifact identity and SHA256 against that run, and bind the full review base and the frozen draft head.
+Keep receipt consumption pending when approval, delivery or verification is missing, stale, ambiguous or mismatched.
+
+Run only under separate tool and execution admission, with the verified inputs:
+
+```sh
+python3 -I <plugin root>/skills/ship/scripts/row-id-proof.py --receipt <absolute path> --sha256 <SHA256> --repository <owner/name> --pr-url <draft PR URL> --base <full base SHA> --head <full head SHA> --row-id <ID>
+```
+
+Accept only the exact `row_file` and `subject` from the unique matching record.
+The lookup binds the receipt bytes to the supplied digest and scope. It does not verify producer provenance.
+For added-row proof, verify the selected record's zero base count and one total and active head declaration.
+Bind the commit, tree and blob identities for both endpoints. Require the producer's successful empty literal lookup when the base blob is null.
+Match the frozen head copy to the receipt's blob ID. Verify the approved extent independently of the receipt.
+Use the lookup with the receipt alone. Keep source reads, row tool admission, edits and execution under their separate routes.
+
+## Designated test repair
+
+Require proof that the PR's own diff made the stored selector unusable.
+Require the anchors to pass.
+Require a frozen CoC decision under the standing grant.
+Bind the causal diff and both selectors to the decision.
+Bind the exact writer, repository, lane, authorized draft URL, source, row file, row ID and approved extent.
+Bind the review base and pre-edit head. Verify the decision's absolute path, SHA256 and bindings before any protected access.
+Change only the designated test selector.
+Keep the claim and mutant identical.
+Keep the applicable follow-up requirement.
+Use an admitted writer whose loaded definition implements this route. Keep the repair pending until that route is available.
+Apply one native Edit to the exact approved extent with `replace_all=false`.
+Use zero row re-anchor admissions and zero row re-anchor runs for this repair.
+At the frozen draft head, verify the decision and match the edit to its only approved field.
+Supply the decision, its binding verification, the causal diff proof and separate reviewer admission for the approved base and head extents.
+List the decision and each approved evidence path under `Readable files`. Keep row text and mutant bytes out of the brief.
+Require an independent not-weaker Sol review at the frozen head.
+Name this route and include this reference in the Sol brief. Apply the existing CoC-approved row review checks.
+The reviewer verifies the decision and causal diff before reading the admitted extents.
+The reviewer confirms the base and head selectors and the selector-only edit. The reviewer confirms that the claim and mutant match exactly.
+Require proof that the new selector checks the same guarantee and distinguishes the original result from the identical mutant.
+Use a source trace or separately admitted test evidence. Keep applicable execution GOs.
+Use the existing exact-head anchor proof: require matching trees, row selection and failure on count mismatch.
+Keep separate test execution admission, required CI and mutation proof after merge.
+Hold the repair if evidence is missing, stale or mismatched. Send unrelated designated-test changes through their existing CoC route.
 
 ## Row re-anchor tool admission record
 
