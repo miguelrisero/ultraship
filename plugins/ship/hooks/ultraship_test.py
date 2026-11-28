@@ -612,6 +612,37 @@ class LiteralCustodyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIsNone(ultraship.custody_bound_command(command))
 
+    def test_tracked_git_fixed_string_search_treats_hook_name_as_data(self):
+        store = self.state / 'ultraship/text-lint'
+        store.mkdir(parents=True)
+        (self.cwd / 'fixture-link').symlink_to(store, target_is_directory=True)
+        prefix = "git grep -n -F 'fixture: text_lint.py hook'"
+        paths = 'docs/example.txt tests/example.txt'
+        search = f'{prefix} origin/main -- {paths}'
+        for caller in ('', 'ship:driver--sol'):
+            for command, reason in (
+                    (f'{search} {shlex.quote(str(store / "fixture.txt"))}', 'Rule: store-text.'),
+                    (f'{search} fixture-link/fixture.txt', 'Rule: store-operand.'),
+                    (search.replace('-n -F', '-n -F --open-files-in-pager=fixture-pager'), ultraship.RECEIPT_CUSTODY),
+                    (f'{search}; touch fixture-output.txt', ultraship.RECEIPT_CUSTODY)):
+                with self.subTest(caller=caller, command=command):
+                    self.assert_denied(command, reason, caller)
+            with self.subTest(caller=caller):
+                self.assert_allowed(f'{prefix} -- {paths}', caller)
+                self.assert_allowed(search, caller)
+
+    def test_recursive_fixed_string_search_with_include_keeps_custody_denial(self):
+        store = self.state / 'ultraship/text-lint'
+        store.mkdir(parents=True)
+        (self.cwd / 'fixtures/public').mkdir(parents=True)
+        (self.cwd / 'fixtures/nested').mkdir()
+        (self.cwd / 'fixtures/nested/linked').symlink_to(store, target_is_directory=True)
+        search = "grep -RnlF '--include=*.txt' 'fixture: text_lint.py hook' fixtures/public"
+        for caller in ('', 'ship:driver--sol'):
+            for root in ('fixtures/nested', 'fixtures/nested/linked', shlex.quote(str(store))):
+                with self.subTest(caller=caller, root=root):
+                    self.assert_denied(f'{search} {root}', ultraship.RECEIPT_CUSTODY, caller)
+
     def test_bound_command_refuses_relative_and_parent_directory_operands(self):
         grant = self.home / '.local/state/ultraship/account-grants/fixture.json'
         grant.parent.mkdir(parents=True)
