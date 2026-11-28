@@ -47,7 +47,7 @@ class UIBrowserGateTests(unittest.TestCase):
         pipeline = (SHIP / 'references/pipeline.md').read_text()
         gate = pipeline.split('### UI browser gate', 1)[1].split('## 11. Closing pass', 1)[0]
         local = gate.split('**Conditional local route.**', 1)[1].split('**Shared requirements', 1)[0]
-        for phrase in ('Use this route only when preview sign-in requires secret handling',
+        for phrase in ('For non-marketing UI, use this route only when preview sign-in requires secret handling',
                        'only behavior faithfully reproduced by the local stack qualifies',
                        'Preview/deployment/config-dependent behavior still requires appropriate preview proof',
                        'Keep that scope held if preview proof is unavailable',
@@ -59,7 +59,7 @@ class UIBrowserGateTests(unittest.TestCase):
                        'Never use local tokens to authenticate to a preview or print their values',
                        'real Chromium through agent-browser or the existing e2e harness',
                        'same changed screen and exercise the changed interaction',
-                       'reason preview sign-in requires secret handling, without secret values',
+                       'Record the qualifying reason and its evidence. Omit secret values.',
                        'local origin, build/server command and result, browser command and result, checked head',
                        'interaction result, and screenshot route'):
             with self.subTest(phrase=phrase):
@@ -75,12 +75,19 @@ class UIBrowserGateTests(unittest.TestCase):
         self.assertIn('**Default preview route (steps 1–5).**', gate)
         self.assertIn('Never request, read, copy, or print preview credentials or session tokens to unblock this gate', gate)
 
+    def test_no_preview_route_keeps_exact_head_browser_gate(self):
+        pipeline = (SHIP / 'references/pipeline.md').read_text()
+        local = pipeline.split('**Conditional local route.**', 1)[1].split('**Shared requirements', 1)[0]
+        self.assertIn('verify from trusted repository evidence that no preview environment exists', local)
+        self.assertIn('An inaccessible, failing, or unverified preview does not qualify', local)
+        self.assertIn('Require a clean checkout at the exact current pushed head', local)
+        self.assertIn('Preview/deployment/config-dependent behavior still requires appropriate preview proof', local)
+
     def test_completion_admits_only_the_conditional_local_route(self):
         skill = (SHIP / 'SKILL.md').read_text()
         gate = skill.split('## Completion gate', 1)[1].split('## Proof after merge', 1)[0]
         for phrase in ('default route requires the current pushed head and matching preview',
-                       'Only when preview sign-in requires secret handling',
-                       'qualified local real-browser evidence',
+                       'qualified local real-browser evidence only under the pipeline\'s conditional local route',
                        'same exact pushed head, Chromium interaction, synthetic isolation, safe screenshot evidence, and post-check head equality',
                        'Preview/deployment/config-dependent behavior retains its preview-proof hold'):
             with self.subTest(phrase=phrase):

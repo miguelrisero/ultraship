@@ -207,7 +207,7 @@ All conditions must hold:
    Require both [important planning](references/pipeline.md#important-planning) results only for important plans, including in light mode.
 7. Every UI PR passes the [real-browser premerge gate](references/pipeline.md#ui-browser-gate); the default route requires the current pushed head and matching preview.
    This includes dashboard `frontend/app/**`, UI-affecting frontend design-package changes, and marketing UI through its existing Vercel preview route.
-   Only when preview sign-in requires secret handling, accept qualified local real-browser evidence under the pipeline's conditional local route.
+   Accept qualified local real-browser evidence only under the pipeline's conditional local route.
    Require the same exact pushed head, Chromium interaction, synthetic isolation, safe screenshot evidence, and post-check head equality on that route.
    Local evidence qualifies only for behavior faithfully reproduced by the local stack.
    Preview/deployment/config-dependent behavior retains its preview-proof hold when appropriate preview proof is unavailable.
@@ -259,7 +259,8 @@ Both the job and workflow must complete successfully; skipped and neutral conclu
 Before success, it rechecks protection, the latest run and attempt, and the PR head.
 A push or rerun invalidates the receipt.
 Exit 1 means unsuccessful evidence; exits 2 and 3 retain the start and overall timeout meanings.
-Exit 4 means uncertainty and blocks completion.
+Exit 4 means uncertainty and blocks readiness and merge.
+If GitHub reports a plan restriction on protection reads, the approved checker may report exact-head CI evidence with exit 4. Protection stays unknown.
 Keep the 600-second start, 5400-second overall and 300-second polling defaults.
 Select this route explicitly; an ordinary checker failure grants zero opt-in authority.
 Source delivery grants zero installation, runtime adoption, historical PASS or affected-retry authority.

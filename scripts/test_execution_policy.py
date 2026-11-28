@@ -1126,6 +1126,13 @@ class ExecutionPolicyTests(unittest.TestCase):
                     self.assertIn(requirement, admission)
             self.assertNotIn('wait for a GO permitted by the brief', text)
 
+    def test_unrecognized_node_suite_keeps_command_and_launcher_admission(self):
+        for name in ('writer--sol.md', 'writer--fable52.md'):
+            admission = read('plugins/ship/agents/' + name).partition('### Execution admission and cleanup\n')[2].split('\n### ', 1)[0]
+            with self.subTest(path=name):
+                self.assertIn('For a Node suite outside ordinary admission, require CoC admission for the exact candidate and reviewed repository test command.', admission)
+                self.assertIn('Use a recognized child of the pinned slot launcher. Keep local execution held if either admission is missing.', admission)
+
     def test_each_writer_limits_escalation_to_owned_groups_after_term_grace(self):
         for name in ('writer--sol.md', 'writer--fable52.md'):
             text = read('plugins/ship/agents/' + name)

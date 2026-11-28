@@ -14,6 +14,10 @@ class Uncertain(Exception):
     pass
 
 
+class ProtectionUnreadable(Uncertain):
+    """A GitHub plan blocks the protection read."""
+
+
 def require(condition, reason):
     if not condition:
         raise Uncertain(reason)
@@ -39,7 +43,7 @@ def command(args):
     return subprocess.run(args, capture_output=True, text=True)
 
 
-def api(endpoint, absent=False):
+def api(endpoint, absent=False, protection_read=False):
     result = command(['gh', 'api', '--include', endpoint])
     header, separator, body = result.stdout.replace('\r\n', '\n').partition('\n\n')
     require(separator, 'API response lacks structured headers')
@@ -53,6 +57,11 @@ def api(endpoint, absent=False):
         require(colon and key.lower() not in headers, 'ambiguous API headers')
         headers[key.lower()] = value.strip()
     payload = decode(body)
+    if ((absent or protection_read) and status == 403 and result.returncode != 0
+            and 'link' not in headers and isinstance(payload, dict)
+            and payload.get('message') ==
+            'Upgrade to GitHub Pro or make this repository public to enable this feature.'):
+        raise ProtectionUnreadable
     if absent:
         require(status == 404 and result.returncode != 0 and isinstance(payload, dict)
                 and payload.get('message') == 'Branch not protected'
@@ -72,7 +81,7 @@ def one(endpoint, absent=False):
     return payload
 
 
-def collection(endpoint, repository_id, field=None):
+def collection(endpoint, repository_id, field=None, *, protection_read=False):
     require(positive(repository_id), 'verified numeric repository identity required')
     initial = urlsplit('https://api.github.com/' + endpoint)
     repository_path = re.fullmatch(r'/repos/[^/]+/[^/]+(/.*)', initial.path)
@@ -90,7 +99,7 @@ def collection(endpoint, repository_id, field=None):
         identity = urlsplit(current if current.startswith('https://') else 'https://api.github.com/' + current)
         require(identity.geturl() not in seen, 'cyclic pagination')
         seen.add(identity.geturl())
-        payload, headers = api(current)
+        payload, headers = api(current, protection_read=protection_read and current == endpoint)
         if field:
             require(isinstance(payload, dict) and type(payload.get('total_count')) is int
                     and payload['total_count'] >= 0 and isinstance(payload.get(field), list),
@@ -220,10 +229,18 @@ def protection(repo, policy):
     value = one(branch)
     require(value.get('name') == policy['base'] and value.get('protected') is False,
             'branch must explicitly report protected=false')
-    one(branch + '/protection', absent=True)
-    require(collection(repo + '/rules/branches/' + quote(policy['base'], safe='') + '?per_page=100',
-                       policy['repository_id']) == [],
-            'branch rules must be completely empty')
+    readable = True
+    try:
+        one(branch + '/protection', absent=True)
+    except ProtectionUnreadable:
+        readable = False
+    try:
+        rules = collection(repo + '/rules/branches/' + quote(policy['base'], safe='') + '?per_page=100',
+                           policy['repository_id'], protection_read=True)
+        require(rules == [], 'branch rules must be completely empty')
+    except ProtectionUnreadable:
+        readable = False
+    return readable
 
 
 def run_matches(run, item, policy):
@@ -346,7 +363,7 @@ def evidence(repo, item, policy, run):
 def main():
     pr, policy, digest, start_timeout, timeout = policy_input(sys.argv[1:])
     repo = pr_identity(pr, policy)
-    protection(repo, policy)
+    protection_readable = protection(repo, policy)
     for item in policy['checks']:
         workflow = one(f'{repo}/actions/workflows/{item["workflow_id"]}')
         require(positive(workflow.get('id')) and workflow['id'] == item['workflow_id']
@@ -367,16 +384,18 @@ def main():
             print('named-checks: selected evidence concluded unsuccessfully')
             return 1
         if all(outcome == 0 for outcome in outcomes):
-            protection(repo, policy)
+            final_protection_readable = protection(repo, policy)
             for item, run in zip(policy['checks'], observations):
                 current = latest(repo, item, policy)
                 require(current is not None and (current['id'], current['run_attempt']) ==
                         (run['id'], run['run_attempt']) and state(current) == 0,
                         'selected latest run or attempt changed before success')
             pr_identity(pr, policy, repo.removeprefix('repos/'))
-            print(f'named-checks: success head={policy["head"]} policy_sha256={digest} '
+            merge_gate_passed = protection_readable and final_protection_readable
+            outcome = 'success' if merge_gate_passed else 'CI evidence only: protection unreadable; merge held;'
+            print(f'named-checks: {outcome} head={policy["head"]} policy_sha256={digest} '
                   + ' '.join(f'run={run["id"]} attempt={run["run_attempt"]}' for run in observations))
-            return 0
+            return 0 if merge_gate_passed else 4
         if all(outcome == 2 for outcome in outcomes) and waited >= start_timeout:
             print(f'named-checks: approved evidence has not started after {waited}s')
             return 2

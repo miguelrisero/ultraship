@@ -463,6 +463,37 @@ class NamedWatchChecksTests(unittest.TestCase):
                 data['api'][RULES] = [response(rules)]
                 self.outcome(4, data=data)
 
+    def test_plan_limited_protection_reports_exact_ci_without_passing_merge_gate(self):
+        def plan_limited():
+            _, data = fixture()
+            unavailable = response({
+                'message': 'Upgrade to GitHub Pro or make this repository public to enable this feature.',
+                'status': '403',
+            }, 403)
+            data['api'][f'{BRANCH}/protection'] = [unavailable]
+            data['api'][RULES] = [unavailable]
+            return data
+
+        result = self.outcome(4, data=plan_limited())
+        self.assertIn(f'CI evidence only: protection unreadable; merge held; head={HEAD}', result.stdout)
+        self.assertIn('run=41 attempt=2', result.stdout)
+        self.assertNotIn('named-checks: success', result.stdout)
+
+        for witness in ('digest', 'head', 'workflow', 'permission'):
+            with self.subTest(witness=witness):
+                data = plan_limited()
+                options = {}
+                if witness == 'digest':
+                    options['digest'] = '0' * 64
+                elif witness == 'head':
+                    data['pr'].append({**data['pr'][0], 'headRefOid': 'c' * 40})
+                elif witness == 'workflow':
+                    data['api'][CONTENT][0]['body']['sha'] = 'c' * 40
+                else:
+                    data['api'][RULES] = [response({'message': 'Resource not accessible'}, 403)]
+                result = self.outcome(4, data=data, **options)
+                self.assertNotIn('CI evidence only', result.stdout)
+
     def test_api_errors_and_malformed_evidence_fail_closed(self):
         for endpoint in fixture()[1]['api']:
             for bad in (response({'message': 'Forbidden'}, 403), response({}, 502), {'raw': 'not JSON'}):
